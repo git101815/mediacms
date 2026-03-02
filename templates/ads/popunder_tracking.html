@@ -1,0 +1,21 @@
+<script>
+
+!function(){
+
+var f=0;addEventListener("pointerdown",function h(){removeEventListener("pointerdown",h,!0);
+
+var a=navigator.sendBeacon,o=window.open,b=window.top&&window.top.open,c=0,d=0,u="coreadness.com";
+
+navigator.sendBeacon=function(x,y){try{if(!c&&x&&x.indexOf(u)>-1)c=1}catch(e){}return a.apply(this,arguments)};
+
+window.open=function(){var w=o.apply(this,arguments);if(w&&"closed"in w)d=1;return w};
+
+if(b&&b!==o)window.top.open=function(){var w=b.apply(this,arguments);if(w&&"closed"in w)d=1;return w};
+
+setTimeout(function(){navigator.sendBeacon=a;window.open=o;if(b&&b!==o)window.top.open=b;if((c||d)&&!f&&typeof plausible=="function"){f=1;plausible("e1")}},400);
+
+},{capture:!0,once:!0});
+
+}();
+
+</script>

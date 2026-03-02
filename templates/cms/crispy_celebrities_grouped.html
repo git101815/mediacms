@@ -1,0 +1,107 @@
+{% load crispy_forms_field %}
+
+
+<style>
+
+  .celebrity-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; }
+
+  .celebrity-group { border:1px solid rgba(255,255,255,.15); border-radius:10px; padding:12px; }
+
+  .celebrity-group legend { font-weight:600; margin-bottom:8px; font-size:.95rem; }
+
+  .celebrity-list { list-style:none; padding:0; margin:0; display:grid; grid-template-columns:1fr; gap:6px;
+
+                    max-height:240px; overflow:auto; }
+
+  .celebrity-list li label { display:flex; align-items:center; gap:8px; }
+
+</style>
+
+
+<div class="form-group{% if field.errors %} has-error{% endif %}">
+
+  <div class="control-label-container">
+
+    <label for="{{ field.id_for_label }}" class="control-label">
+
+      Celebrities
+
+      {% if field.help_text %}<span class="help-text-inline">- {{ field.help_text|safe }}</span>{% endif %}
+
+    </label>
+
+  </div>
+
+
+  <div class="controls">
+
+    {% regroup field.field.queryset by group as groups %}
+
+    <div class="celebrity-groups">
+
+      {% for g in groups %}
+
+        <fieldset class="celebrity-group">
+
+          <legend>{{ g.grouper.title|default:"Autres" }}</legend>
+
+          <ul class="celebrity-list">
+
+            {% for celeb in g.list %}
+
+              {% with cid=celeb.id|stringformat:"s" %}
+
+              <li>
+
+                <label for="id_{{ field.html_name }}_{{ cid }}">
+
+                  <input type="checkbox"
+
+                         id="id_{{ field.html_name }}_{{ cid }}"
+
+                         name="{{ field.html_name }}"
+
+                         value="{{ cid }}"
+
+                         {% if field.value %}
+
+                           {% if cid in field.value or celeb in field.value or celeb.pk in field.value %}checked{% endif %}
+
+                         {% else %}
+
+                           {% if celeb in field.form.instance.celebrities.all %}checked{% endif %}
+
+                         {% endif %}>
+
+                  {{ celeb.title }}
+
+                </label>
+
+              </li>
+
+              {% endwith %}
+
+            {% endfor %}
+
+          </ul>
+
+        </fieldset>
+
+      {% endfor %}
+
+    </div>
+
+
+    {% if field.errors %}
+
+      <div class="error-container">
+
+        {% for error in field.errors %}<p class="invalid-feedback">{{ error }}</p>{% endfor %}
+
+      </div>
+
+    {% endif %}
+
+  </div>
+
+</div>

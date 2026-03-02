@@ -1,0 +1,248 @@
+<!-- Age verification popup -->
+<script src="/static/js/cdn-gate-hold.js"></script>
+
+<div id="agePopup" class="modal" role="dialog" aria-modal="true" aria-labelledby="age-title" aria-describedby="age-desc">
+
+  <div class="modal-content" role="document">
+
+    <h1 id="age-title" class="title">This is an adult website</h1>
+
+
+    <p id="age-desc" class="disclaimer">
+
+      This website contains age-restricted materials including nudity and explicit depictions of sexual activity.
+
+      By entering, you affirm that you are at least 18 years of age (or the age of majority in your jurisdiction)
+
+      and you consent to viewing sexually explicit content.
+
+    </p>
+
+
+    <div class="btn-group">
+
+      <button id="btnYes" class="btn yes" type="button">I am 18 or over — Enter</button>
+
+      <a id="btnNo" class="btn no" href="https://www.google.com" rel="nofollow noopener">I am under 18 — Exit</a>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<style>
+
+  :root {
+
+    --bg-overlay: rgba(0, 0, 0, 0.96);
+
+    --bg-panel: #000;
+
+    --text: #f5f5f5;
+
+    --accent: #ffa31a;
+
+    --btn-grey: #555;
+
+  }
+
+
+  .modal {
+
+    display: none;
+
+    position: fixed;
+
+    inset: 0;
+
+    z-index: 10000;
+
+    background: var(--bg-overlay);
+
+    align-items: center;
+
+    justify-content: center;
+
+  }
+
+
+  html.age-lock #agePopup { display: flex !important; }
+
+
+  html.age-lock body { overflow: hidden; }
+
+
+  .modal-content {
+
+    background: var(--bg-panel);
+
+    color: var(--text);
+
+    width: 90%;
+
+    max-width: 640px;
+
+    padding: 2rem 2.5rem;
+
+    border-radius: 10px;
+
+    text-align: center;
+
+    box-shadow: 0 0 25px rgba(0,0,0,.6);
+
+  }
+
+
+  .modal-content .title {
+
+    margin: 0 0 1.5rem;
+
+    font-size: 2rem;
+
+    font-weight: 700;
+
+  }
+
+
+  .modal-content .disclaimer {
+
+    font-size: 1rem;
+
+    line-height: 1.5;
+
+    margin-bottom: 2rem;
+
+  }
+
+
+  .btn-group {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 1rem;
+
+  }
+
+  @media (min-width: 500px) { .btn-group { flex-direction: row; } }
+
+
+  .btn {
+
+    flex: 1;
+
+    cursor: pointer;
+
+    border: none;
+
+    padding: 0.75rem 1.25rem;
+
+    font-size: 1.1rem;
+
+    font-weight: 600;
+
+    border-radius: 6px;
+
+    transition: opacity 0.2s ease;
+
+    text-align: center;
+
+    text-decoration: none;
+
+    display: inline-block;
+
+  }
+
+  .btn:hover { opacity: .85; }
+
+
+  .btn.yes { background: var(--accent); color: #000; }
+
+  .btn.no  { background: var(--btn-grey); color: #fff; }
+
+</style>
+
+
+<script>
+
+  (function () {
+
+    var modal = document.getElementById('agePopup');
+    var yes   = document.getElementById('btnYes');
+    var no    = document.getElementById('btnNo');
+    var GATE_COOKIE_NAME = 'mc_gate';
+    var GATE_COOKIE_TTL_SECONDS = 24 * 60 * 60;
+    
+    function getCookie(name) {
+      var m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[$()*+./?[\\\]^{|}-]/g, '\\$&') + '=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+
+    function setCookie(name, value, ttlSeconds) {
+      document.cookie = [
+        name + '=' + encodeURIComponent(value),
+        'Path=/',
+        'Domain=.celebfakes.ru',
+        'Max-Age=' + String(ttlSeconds),
+        'Secure',
+        'SameSite=Lax'
+        ].join('; ');
+    }
+
+    function newToken() {
+      var a = new Uint8Array(16);
+      crypto.getRandomValues(a);
+      return Array.from(a).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+    }
+
+    function showModal() {
+      try { document.documentElement.classList.add('age-lock'); } catch (e) {}
+      try { document.documentElement.classList.remove('age-ok'); } catch (e) {}
+      try { modal && modal.style.setProperty('display', 'flex', 'important'); } catch (e) {}
+      try { document.body.style.overflow = 'hidden'; } catch (e) {}
+      try { yes && yes.focus(); } catch (e) {}
+    }
+
+    function hideModal() {
+      try { document.documentElement.classList.remove('age-lock'); } catch (e) {}
+      try { document.documentElement.classList.add('age-ok'); } catch (e) {}
+      try { modal && modal.style.setProperty('display', 'none', 'important'); } catch (e) {}
+      try { document.body.style.overflow = ''; } catch (e) {}
+    }
+
+    // Afficher le popup si le cookie mc_gate n'est pas présent.
+    // Cela évite le cas: ageVerified=true (localStorage) mais cookie absent => médias bloqués côté CDN.
+    var existingToken = getCookie(GATE_COOKIE_NAME);
+    if (!existingToken) {
+      showModal();
+    } else {
+      hideModal();
+      if (window.mcGateRelease) window.mcGateRelease();
+    }
+
+
+    yes && yes.addEventListener('click', function (e) {
+
+      e.preventDefault();
+
+      try { localStorage.setItem('ageVerified', 'true'); } catch(e) {}
+
+      var token = getCookie(GATE_COOKIE_NAME) || newToken();
+      setCookie(GATE_COOKIE_NAME, token, GATE_COOKIE_TTL_SECONDS);
+      hideModal();
+      if (window.mcGateRelease) window.mcGateRelease();
+
+    });
+
+
+    no && no.addEventListener('click', function () {
+
+
+    });
+
+  })();
+
+</script>

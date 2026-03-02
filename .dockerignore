@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+media_files/
+media/
+mediafiles/
+hls/
+encoded/
+original/
+uploads/
+chunks/
+logs/

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% load static %}
+
+
+{% block headtitle %}Celebrities - {{PORTAL_NAME}}{% endblock headtitle %}
+
+
+{% block headermeta %}
+
+
+<meta property="og:title" content="Celebrities - {{PORTAL_NAME}}">
+
+<meta property="og:type" content="website">
+
+<meta property="og:description" content="">
+
+
+<meta name="twitter:card" content="summary">
+
+<style> .item-content a.item-thumb{padding-bottom: 100%;} </style>
+<script type="application/ld+json">
+
+{
+
+  "@context": "https://schema.org",
+
+  "@type": "BreadcrumbList",
+
+  "itemListElement": [{
+
+    "@type": "ListItem",
+
+    "position": 1,
+
+    "name": "{{PORTAL_NAME}}",
+
+    "item": { "@type": "WebPage", "@id": "{{FRONTEND_HOST}}" }
+
+  },{
+
+    "@type": "ListItem",
+
+    "position": 2,
+
+    "name": "Celebrities",
+
+    "item": { "@type": "WebPage", "@id": "{{FRONTEND_HOST}}/celebrities" }
+
+  }]
+
+}
+
+</script>
+
+
+{% endblock headermeta %}
+
+
+{% block content %}<div id="page-celebrities"></div>{% endblock %}
+
+
+{% block bottomimports %}
+
+<script src="{% static "js/celebrities.js" %}"></script>
+
+{% endblock bottomimports %}
