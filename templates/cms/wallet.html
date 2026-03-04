@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block headtitle %}Terms & Privacy - {{PORTAL_NAME}}{% endblock headtitle %}
+
+{% block headermeta %}
+<meta property="og:title" content="Terms & Privacy - {{PORTAL_NAME}}">
+<meta property="og:type" content="website">
+<meta property="og:description" content="">
+<meta name="twitter:card" content="summary">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [{
+    "@type": "ListItem",
+    "position": 1,
+    "name": "{{PORTAL_NAME}}",
+    "item": {"@type":"WebPage","@id":"{{FRONTEND_HOST}}"}
+  },{
+    "@type": "ListItem",
+    "position": 2,
+    "name": "Terms & Privacy",
+    "item": {"@type":"WebPage","@id":"{{FRONTEND_HOST}}/terms"}
+  }]
+}
+</script>
+{% endblock headermeta %}
+
+{% block innercontent %}
+<div class="custom-page-wrapper">
+  <h2>Terms of Service</h2>
+  <hr/>
+  <h3>Site Usage</h3>
+  <ul>
+    <li>This service is intended for adults only. Do not use the service if you are under the age of majority in your jurisdiction.</li>
+    <li>Reposting or scraping other creators’ content is prohibited and may lead to removal and account ban.</li>
+    <li>You may perform non-destructive security testing and disclose findings to us at <strong>admin@celebfakes.ru</strong>. Do not access data, escalate, or disrupt service. Rewards (if any) are at our discretion.</li>
+  </ul>
+
+  <h3>Comment Section</h3>
+  <ul>
+    <li>Trolling, harassment, or insults toward creators, users, or persons featured in videos is not tolerated.</li>
+    <li>Advertising or linking to other tube/adult/subscription sites without moderator consent may result in suspension or ban.</li>
+    <li>Users must verify their email to comment on or download videos.</li>
+  </ul>
+
+  <h3>Videos</h3>
+  <ul>
+    <li>Any content involving minors leads to permanent ban and removal.</li>
+    <li>The subject of each video must be a well-known public figure (e.g., 1,000,000+ followers or equivalent notoriety). Proof may be requested.</li>
+    <li>Only manually verified creators may publish. Every upload is reviewed by a moderator before publication.</li>
+    <li>No content featuring political figures or subjects from jurisdictions we exclude for regulatory risk (including the Russian Federation).</li>
+    <li>Reposting another creator’s work is forbidden.</li>
+    <li>We only allow creator-made DeepFake content of acceptable quality; low-effort automated face-swap uploads are not allowed.</li>
+  </ul>
+
+  <h3>Data Deletion & Content Removal</h3>
+  <ul>
+    <li><strong>Account deletion</strong>: contact us via the contact form or <strong>support@celebfakes.ru</strong> to delete your account and associated data.</li>
+    <li><strong>Media deletion</strong>: if a media violates these Terms, use the “Report” button or email <strong>admin@celabfakes.ru</strong> with the exact URL and reason.</li>
+  </ul>
+
+  <br/>
+  <h2>Privacy</h2>
+  <hr/>
+
+  <h3>What data we process</h3>
+  <ul>
+    <li><strong>Access handling without retained logs</strong>: we do not retain full web server access logs on our origin. Our infrastructure and protection providers may transiently process IP addresses and HTTP metadata to serve and secure traffic. We view aggregated dashboards (e.g., CDN/anti-DDoS, privacy-friendly analytics) rather than storing raw logs ourselves.</li>
+    <li><strong>Account & user content</strong> (if you register/upload): username, email, profile data you provide, uploads and related metadata, and communications sent to us.</li>
+    <li><strong>Forms</strong>: messages you submit via contact/report (content URL, reason, evidence, contact details).</li>
+    <li><strong>Payments</strong>: handled by third-party processors; we do not store full payment instrument details on our servers.</li>
+    <li><strong>Analytics</strong>: privacy-friendly, cookie-less page analytics with no cross-site tracking.</li>
+    <li><strong>Advertising delivery</strong>: we may display non-personalized ads such as popunders or pre-rolls. No behavioral targeting by us.</li>
+  </ul>
+
+  <h3>Local storage & cookies</h3>
+  <p>We do not use tracking cookies. Limited local storage may be used for functional purposes (e.g., age-gate confirmation).</p>
+
+  <h3>How and why we use data</h3>
+  <ul>
+    <li>Provide and protect the platform; prevent abuse and fraud.</li>
+    <li>Moderate content and enforce these Terms.</li>
+    <li>Handle support and media deletion requests.</li>
+    <li>Measure basic usage with privacy-friendly analytics.</li>
+  </ul>
+
+  <h3>Retention</h3>
+  <ul>
+    <li>No full access logs retained on our origin. Aggregated metrics are kept as provided by our processors.</li>
+    <li>Accounts/uploads: retained while the account is active; you can delete your content or account.</li>
+    <li>Reports/abuse records: retained as needed to document moderation decisions.</li>
+  </ul>
+
+  <h3>Sharing & processors</h3>
+  <p>We use service providers strictly to operate and protect this platform (e.g., hosting/CDN/DDoS protection, video delivery, payment processing). They process data under our instructions.</p>
+
+  <p><em>Last updated: November 4th 2025 </em></p>
+</div>
+
+{% endblock %}

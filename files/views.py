@@ -145,6 +145,10 @@ def add_subtitle(request):
     context = {"media": media, "form": form, "subtitles": subtitles}
     return render(request, "cms/add_subtitle.html", context)
 
+@login_required
+def wallet(request):
+    context = {}
+    return render(request, "cms/wallet.html", context)
 
 @login_required
 def edit_subtitle(request):

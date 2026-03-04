@@ -5,6 +5,7 @@ export function init(user, features) {
     name: null,
     username: null,
     thumbnail: null,
+    balance: 0,
     is: {
       admin: false,
       anonymous: true,
@@ -56,6 +57,8 @@ export function init(user, features) {
 
       MEMBER.thumbnail = 'string' === typeof user.thumbnail ? user.thumbnail.trim() : '';
       MEMBER.thumbnail = '' === MEMBER.thumbnail ? null : MEMBER.thumbnail;
+
+      MEMBER.balance = Number.isFinite(user.balance) ? user.balance : 0;
 
       MEMBER.can.changePassword = false === user.can.changePassword ? false : MEMBER.can.changePassword;
 

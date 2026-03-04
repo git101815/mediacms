@@ -10,7 +10,13 @@ function headerPopupPages(user, popupNavItems, hasHeaderThemeSwitcher) {
   const pages = {
     main: null,
   };
-
+  const walletUrl = '/wallet';
+  const walletItem = {
+    itemType: 'link',
+    text: translateString('My tokens'),
+    link: walletUrl,
+    icon: 'toll',
+  };
   if (user.is.anonymous) {
     pages.main = (
       <div>
@@ -23,7 +29,7 @@ function headerPopupPages(user, popupNavItems, hasHeaderThemeSwitcher) {
     const NavMenus = [];
 
     function insertNavMenus(id, arr) {
-      if (arr.length) {
+      if (Array.isArray(arr) && arr.length) {
         if (NavMenus.length) {
           NavMenus.push(<hr key={id + '-nav-seperator'} />);
         }
@@ -31,10 +37,14 @@ function headerPopupPages(user, popupNavItems, hasHeaderThemeSwitcher) {
         NavMenus.push(<NavigationMenuList key={id + '-nav'} items={arr} />);
       }
     }
+    const top = Array.isArray(popupNavItems?.top) ? popupNavItems.top : [];
+    const middle = Array.isArray(popupNavItems?.middle) ? popupNavItems.middle : [];
+    const bottom = Array.isArray(popupNavItems?.bottom) ? popupNavItems.bottom : []
+    const middleWithWallet = middle.some((i) => i && i.link === walletUrl) ? middle : [walletItem, ...middle];
 
-    insertNavMenus('top', popupNavItems.top);
-    insertNavMenus('middle', popupNavItems.middle);
-    insertNavMenus('bottom', popupNavItems.bottom);
+    insertNavMenus('top', top);
+    insertNavMenus('middle', middleWithWallet);
+    insertNavMenus('bottom', bottom);
 
     pages.main = (
       <div>
@@ -124,7 +134,7 @@ function RegisterButton({ user, link, hasHeaderThemeSwitcher }) {
 export function HeaderRight(props) {
   const { toggleMobileSearch } = useLayout();
   const [popupContentRef, PopupContent, PopupTrigger] = usePopup();
-
+  const walletUrl = '/wallet';
   return (
     <HeaderConsumer>
       {(header) => (
@@ -141,7 +151,17 @@ export function HeaderRight(props) {
                     </div>
 
                     <UploadMediaButton user={user} links={links} />
-
+                    {!user.is.anonymous ? (
+                      <a
+                        className="token-balance"
+                        href={walletUrl}
+                        title={translateString('Token balance')}
+                        aria-label={translateString('Token balance')}
+                      >
+                        <MaterialIcon type="toll" />
+                        <span className="amount">{Number(user.balance || 0).toLocaleString()}</span>
+                      </a>
+                    ) : null}
                     <div
                       className={
                         (user.is.anonymous ? 'user-options' : 'user-thumb') +

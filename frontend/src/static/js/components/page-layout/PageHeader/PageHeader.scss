@@ -337,3 +337,21 @@ a.user-menu-top-link {
     padding-right: 4px;
   }
 }
+
+.page-header-right {
+  .token-balance {
+    white-space: nowrap;
+    font-weight: 500;
+    padding-right: 6px;
+
+    .material-icons {
+      font-size: 1.15em;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+
+    .amount {
+      vertical-align: middle;
+    }
+  }
+}

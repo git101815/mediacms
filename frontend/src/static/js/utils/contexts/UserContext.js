@@ -10,6 +10,7 @@ export const UserProvider = ({ children }) => {
     isAnonymous: member.is.anonymous,
     username: member.username,
     thumbnail: member.thumbnail,
+    balance: member.balance,
     userCan: member.can,
     pages: member.pages,
   };
