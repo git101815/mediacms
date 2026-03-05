@@ -16,7 +16,7 @@ class TokenWallet(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(
-                check=models.Q(balance__gte=0),
+                condition=models.Q(balance__gte=0),
                 name="tokenwallet_balance_non_negative",
             ),
         ]
@@ -57,5 +57,5 @@ class LedgerEntry(models.Model):
             models.Index(fields=["txn"]),
         ]
         constraints = [
-            models.CheckConstraint(check=~models.Q(delta=0), name="ledgerentry_delta_non_zero"),
+            models.CheckConstraint(condition=~models.Q(delta=0), name="ledgerentry_delta_non_zero"),
         ]
