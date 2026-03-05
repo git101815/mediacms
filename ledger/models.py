@@ -16,6 +16,16 @@ class ImmutableLedgerRow(models.Model):
     def delete(self, *args, **kwargs):
         raise ValidationError("Ledger rows are immutable (no delete).")
 
+class LedgerImmutableQuerySet(models.QuerySet):
+  def update(self, **kwargs):
+    raise ValidationError("Ledger rows are immutable (no update).")
+
+  def delete(self):
+    raise ValidationError("Ledger rows are immutable (no delete).")
+
+class LedgerImmutableManager(models.Manager.from_queryset(LedgerImmutableQuerySet)):
+  def bulk_update(self, objs, fields, batch_size=None):
+    raise ValidationError("Ledger rows are immutable (no bulk_update).")
 
 class TokenWallet(models.Model):
     user = models.OneToOneField(
@@ -41,9 +51,11 @@ class TokenWallet(models.Model):
 
 
 class LedgerTransaction(ImmutableLedgerRow):
+    objects = LedgerImmutableManager()
     # Examples: mint, burn, transfer, purchase, refund, adjustment
     kind = models.CharField(max_length=32, db_index=True)
     external_id = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    request_hash = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -58,6 +70,13 @@ class LedgerTransaction(ImmutableLedgerRow):
     def __str__(self):
         return f"{self.kind} #{self.id}"
 
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(models.Q(external_id__isnull=True) | models.Q(request_hash__isnull=False)),
+                name="ledgertransaction_request_hash_if_external_id",
+            ),
+        ]
 
 class LedgerEntry(ImmutableLedgerRow):
     txn = models.ForeignKey(

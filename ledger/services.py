@@ -1,6 +1,9 @@
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from .models import LedgerEntry, LedgerTransaction, TokenWallet
+import hashlib
+import json
+
 @transaction.atomic
 def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, external_id=None, memo="", metadata=None):
     """
@@ -12,24 +15,46 @@ def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, exter
     if not entries:
         raise ValidationError("No entries")
 
+    # Idempotency fingerprint (stable)
+    normalized_entries = []
+    for (wallet, delta) in entries:
+        if wallet.id is None:
+            raise ValidationError("Unsaved wallet in entries")
+        normalized_entries.append([int(wallet.id), int(delta)])
+    normalized_entries.sort(key=lambda x: (x[0], x[1]))
+
+    payload = {
+        "kind": kind,
+        "memo": memo,
+        "entries": normalized_entries,
+        "metadata": metadata,
+    }
+    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    request_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+
     # Idempotence (exactly-once)
     if external_id:
         try:
             txn = LedgerTransaction.objects.create(
                 kind=kind,
                 external_id=external_id,
+                request_hash=request_hash,
                 created_by=created_by,
                 memo=memo,
                 metadata=metadata,
             )
         except IntegrityError:
-            return LedgerTransaction.objects.get(external_id=external_id)
+            existing = LedgerTransaction.objects.get(external_id=external_id)
+            if existing.request_hash and existing.request_hash != request_hash:
+                raise ValidationError("Idempotency key reused with different payload")
+            return existing
     else:
         txn = LedgerTransaction.objects.create(
             kind=kind,
             external_id=None,
             created_by=created_by,
             memo=memo,
+            request_hash=None,
             metadata=metadata,
         )
     # Lock wallets (stable order, unique request)
