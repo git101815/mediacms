@@ -1,6 +1,21 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+
+
+class ImmutableLedgerRow(models.Model):
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Ledger rows are immutable (use reversal/compensation).")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Ledger rows are immutable (no delete).")
+
 
 class TokenWallet(models.Model):
     user = models.OneToOneField(
@@ -16,7 +31,7 @@ class TokenWallet(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(balance__gte=0),
+                check=models.Q(balance__gte=0),
                 name="tokenwallet_balance_non_negative",
             ),
         ]
@@ -25,8 +40,8 @@ class TokenWallet(models.Model):
         return f"{self.user.username} ({self.balance})"
 
 
-class LedgerTransaction(models.Model):
-    # Exemples: mint, burn, transfer, purchase, refund, adjustment
+class LedgerTransaction(ImmutableLedgerRow):
+    # Examples: mint, burn, transfer, purchase, refund, adjustment
     kind = models.CharField(max_length=32, db_index=True)
     external_id = models.CharField(max_length=64, null=True, blank=True, unique=True)
     created_by = models.ForeignKey(
@@ -44,9 +59,19 @@ class LedgerTransaction(models.Model):
         return f"{self.kind} #{self.id}"
 
 
-class LedgerEntry(models.Model):
-    txn = models.ForeignKey(LedgerTransaction, on_delete=models.CASCADE, related_name="entries")
-    wallet = models.ForeignKey(TokenWallet, on_delete=models.CASCADE, related_name="entries", db_index=True)
+class LedgerEntry(ImmutableLedgerRow):
+    txn = models.ForeignKey(
+        "ledger.LedgerTransaction",
+        on_delete=models.PROTECT,
+        related_name="entries",
+        db_index=True,
+    )
+    wallet = models.ForeignKey(
+        "ledger.TokenWallet",
+        on_delete=models.PROTECT,
+        related_name="entries",
+        db_index=True,
+    )
     delta = models.BigIntegerField()
     balance_after = models.BigIntegerField()
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
@@ -57,5 +82,8 @@ class LedgerEntry(models.Model):
             models.Index(fields=["txn"]),
         ]
         constraints = [
-            models.CheckConstraint(condition=~models.Q(delta=0), name="ledgerentry_delta_non_zero"),
+            models.CheckConstraint(
+                check=~models.Q(delta=0),
+                name="ledgerentry_delta_non_zero",
+            ),
         ]
