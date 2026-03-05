@@ -17,6 +17,7 @@ static/rest_framework/
 static/drf-yasg
 cms/local_settings.py
 deploy/docker/local_settings.py
+deploy/docker/local_settings.py.save
 yt.readme.md
 /frontend-tools/video-editor/node_modules
 /frontend-tools/video-editor/client/node_modules
@@ -32,3 +33,4 @@ static/video_editor/videos/sample-video-10s.mp4
 celerybeat-schedule-shm
 celerybeat-schedule-wal
 /static/
+/.env
