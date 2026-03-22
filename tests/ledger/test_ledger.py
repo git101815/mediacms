@@ -135,3 +135,73 @@ class TestLedger(TestCase):
 
         with self.assertRaises(ValidationError):
             LedgerTransaction.objects.filter(id=txn.id).delete()
+
+    def test_reject_unbalanced_transaction(self):
+        with self.assertRaises(ValidationError):
+            apply_ledger_transaction(
+                kind="bad_unbalanced",
+                entries=[(self.w1, 10), (self.w2, -9)],
+                external_id="bad-unbalanced-1",
+            )
+
+    def test_reject_single_entry_transaction(self):
+        with self.assertRaises(ValidationError):
+            apply_ledger_transaction(
+                kind="bad_single",
+                entries=[(self.w1, 10)],
+                external_id="bad-single-1",
+            )
+
+    def test_system_issuance_wallet_can_go_negative(self):
+        issuance = TokenWallet.objects.create(
+            wallet_type=TokenWallet.TYPE_SYSTEM,
+            system_key=TokenWallet.SYSTEM_ISSUANCE,
+            allow_negative=True,
+        )
+
+        apply_ledger_transaction(
+            kind="deposit_mint",
+            entries=[(issuance, -100), (self.w1, 100)],
+            external_id="mint-double-1",
+        )
+
+        issuance.refresh_from_db()
+        self.w1.refresh_from_db()
+
+        self.assertEqual(issuance.balance, -100)
+        self.assertEqual(self.w1.balance, 100)
+
+    def test_purchase_with_platform_fee_is_balanced(self):
+        fees = TokenWallet.objects.create(
+            wallet_type=TokenWallet.TYPE_SYSTEM,
+            system_key=TokenWallet.SYSTEM_PLATFORM_FEES,
+            allow_negative=False,
+        )
+        issuance = TokenWallet.objects.create(
+            wallet_type=TokenWallet.TYPE_SYSTEM,
+            system_key=TokenWallet.SYSTEM_ISSUANCE,
+            allow_negative=True,
+        )
+
+        apply_ledger_transaction(
+            kind="deposit_mint",
+            entries=[(issuance, -100), (self.w1, 100)],
+            external_id="mint-before-purchase",
+        )
+
+        txn = apply_ledger_transaction(
+            kind="video_purchase",
+            entries=[(self.w1, -100), (self.w2, 80), (fees, 20)],
+            external_id="purchase-1",
+        )
+
+        self.w1.refresh_from_db()
+        self.w2.refresh_from_db()
+        fees.refresh_from_db()
+
+        self.assertEqual(self.w1.balance, 0)
+        self.assertEqual(self.w2.balance, 80)
+        self.assertEqual(fees.balance, 20)
+
+        entries = list(LedgerEntry.objects.filter(txn=txn))
+        self.assertEqual(sum(e.delta for e in entries), 0)

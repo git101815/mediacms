@@ -4,6 +4,17 @@ from .models import LedgerEntry, LedgerTransaction, TokenWallet
 import hashlib
 import json
 
+def get_system_wallet(system_key: str, *, allow_negative: bool) -> TokenWallet:
+    wallet, _ = TokenWallet.objects.get_or_create(
+        wallet_type=TokenWallet.TYPE_SYSTEM,
+        system_key=system_key,
+        defaults={
+            "allow_negative": allow_negative,
+        },
+    )
+    return wallet
+
+
 @transaction.atomic
 def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, external_id=None, memo="", metadata=None):
     """
@@ -15,13 +26,21 @@ def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, exter
     if not entries:
         raise ValidationError("No entries")
 
-    # Idempotency fingerprint (stable)
-    normalized_entries = []
-    for (wallet, delta) in entries:
+    # agrégation par wallet
+    aggregated = {}
+    for wallet, delta in entries:
         if wallet.id is None:
             raise ValidationError("Unsaved wallet in entries")
-        normalized_entries.append([int(wallet.id), int(delta)])
+        aggregated[wallet.id] = aggregated.get(wallet.id, 0) + int(delta)
+
+    normalized_entries = [[wallet_id, delta] for wallet_id, delta in aggregated.items() if delta != 0]
     normalized_entries.sort(key=lambda x: (x[0], x[1]))
+
+    if len(normalized_entries) < 2:
+        raise ValidationError("A ledger transaction must have at least two balanced entries")
+
+    if sum(delta for _, delta in normalized_entries) != 0:
+        raise ValidationError("Ledger transaction is not balanced")
 
     payload = {
         "kind": kind,
@@ -59,7 +78,7 @@ def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, exter
             metadata=metadata,
         )
     # Lock wallets (stable order, unique request)
-    wallet_ids = sorted({wallet.id for (wallet, _) in entries})
+    wallet_ids = [wallet_id for wallet_id, _ in normalized_entries]
     if any(wid is None for wid in wallet_ids):
         raise ValidationError("Unsaved wallet in entries")
 
@@ -72,11 +91,11 @@ def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, exter
     if len(locked) != len(wallet_ids):
         raise ValidationError("Unknown wallet in entries")
 
-    for (wallet, delta) in entries:
-        w = locked[wallet.id]
-        delta = int(delta)
+    for wallet_id, delta in normalized_entries:
+        w = locked[wallet_id]
         new_balance = w.balance + delta
-        if new_balance < 0:
+
+        if not w.allow_negative and new_balance < 0:
             raise ValidationError("Insufficient funds")
 
         w.balance = new_balance

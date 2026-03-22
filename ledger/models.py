@@ -4,6 +4,10 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+USER_WALLET_TYPE = "user"
+SYSTEM_WALLET_TYPE = "system"
+SYSTEM_WALLET_ISSUANCE = "issuance"
+SYSTEM_WALLET_PLATFORM_FEES = "platform_fees"
 
 class ImmutableLedgerRow(models.Model):
     class Meta:
@@ -29,35 +33,69 @@ class LedgerImmutableManager(models.Manager.from_queryset(LedgerImmutableQuerySe
         raise ValidationError("Ledger rows are immutable (no bulk_update).")
 
 class TokenWallet(models.Model):
+    TYPE_USER = USER_WALLET_TYPE
+    TYPE_SYSTEM = SYSTEM_WALLET_TYPE
+    TYPE_CHOICES = (
+        (TYPE_USER, "User"),
+        (TYPE_SYSTEM, "System"),
+    )
+
+    SYSTEM_ISSUANCE = SYSTEM_WALLET_ISSUANCE
+    SYSTEM_PLATFORM_FEES = SYSTEM_WALLET_PLATFORM_FEES
+    SYSTEM_CHOICES = (
+        (SYSTEM_ISSUANCE, "Issuance"),
+        (SYSTEM_PLATFORM_FEES, "Platform fees"),
+    )
+
+    wallet_type = models.CharField(max_length=16, choices=TYPE_CHOICES, default=TYPE_USER, db_index=True)
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="token_wallet",
+        null=True,
+        blank=True,
         db_index=True,
     )
+
+    system_key = models.CharField(max_length=32, choices=SYSTEM_CHOICES, null=True, blank=True, unique=True)
+
     balance = models.BigIntegerField(default=0)
+    allow_negative = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(balance__gte=0),
-                name="tokenwallet_balance_non_negative",
+                condition=(
+                    (
+                        models.Q(wallet_type=USER_WALLET_TYPE)
+                        & models.Q(user__isnull=False)
+                        & models.Q(system_key__isnull=True)
+                    )
+                    | (
+                        models.Q(wallet_type=SYSTEM_WALLET_TYPE)
+                        & models.Q(user__isnull=True)
+                        & models.Q(system_key__isnull=False)
+                    )
+                ),
+                name="tokenwallet_valid_owner_shape",
+            ),
+            models.CheckConstraint(
+                condition=(models.Q(allow_negative=True) | models.Q(balance__gte=0)),
+                name="tokenwallet_balance_non_negative_unless_allowed",
             ),
         ]
 
     def __str__(self):
+        if self.wallet_type == self.TYPE_SYSTEM:
+            return f"[system:{self.system_key}] ({self.balance})"
         return f"{self.user.username} ({self.balance})"
 
 
 class LedgerTransaction(models.Model):
-    """
-    Transaction (enveloppe) d'un groupe d'écritures.
-    Pour l’instant, on la traite comme append-only au niveau ORM en bloquant
-    les update/delete “en masse” (QuerySet), mais elle n'hérite pas d'ImmutableLedgerRow
-    afin de ne pas se bloquer pour l'ajout futur d'un champ de statut (pending/posted/etc.).
-    """
     objects = LedgerImmutableManager()
 
     kind = models.CharField(max_length=32, db_index=True)
