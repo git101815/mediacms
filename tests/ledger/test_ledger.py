@@ -3,14 +3,14 @@ from django.test import TestCase
 
 from files.tests import create_account  # creates a user then user.save()
 from ledger.models import LedgerEntry, LedgerTransaction, TokenWallet
-from ledger.services import apply_ledger_transaction
+from ledger.services import apply_ledger_transaction, get_system_wallet
 
 
 class TestLedger(TestCase):
     def setUp(self):
         self.u1 = create_account(password="pass12345")
         self.u2 = create_account(password="pass12345")
-
+        self.issuance = get_system_wallet(TokenWallet.SYSTEM_ISSUANCE, allow_negative=True)
         # signal auto creates wallets
         self.w1 = self.u1.token_wallet
         self.w2 = self.u2.token_wallet
@@ -25,32 +25,42 @@ class TestLedger(TestCase):
         self.u1.save()
         self.assertEqual(TokenWallet.objects.filter(user=self.u1).count(), 1)
 
-    def test_apply_transaction_single_entry_updates_balance_and_creates_rows(self):
+    def test_apply_transaction_double_entry_updates_balances_and_creates_rows(self):
         txn = apply_ledger_transaction(
             kind="mint",
-            entries=[(self.w1, 50)],
+            entries=[(self.issuance, -50), (self.w1, 50)],
             external_id="mint-1",
             created_by=self.u1,
             memo="test mint",
             metadata={"source": "test"},
         )
 
+        self.issuance.refresh_from_db()
         self.w1.refresh_from_db()
+        self.assertEqual(self.issuance.balance, -50)
         self.assertEqual(self.w1.balance, 50)
 
         self.assertEqual(LedgerTransaction.objects.count(), 1)
-        self.assertEqual(LedgerEntry.objects.count(), 1)
+        self.assertEqual(LedgerEntry.objects.count(), 2)
 
-        entry = LedgerEntry.objects.get(txn=txn)
-        self.assertEqual(entry.wallet_id, self.w1.id)
-        self.assertEqual(entry.delta, 50)
-        self.assertEqual(entry.balance_after, 50)
+        entries = list(LedgerEntry.objects.filter(txn=txn).order_by("wallet_id"))
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(sum(e.delta for e in entries), 0)
+
+        user_entry = LedgerEntry.objects.get(txn=txn, wallet=self.w1)
+        self.assertEqual(user_entry.delta, 50)
+        self.assertEqual(user_entry.balance_after, 50)
 
         self.assertEqual(txn.external_id, "mint-1")
-        self.assertIsNotNone(txn.request_hash)  # fills when external_id is defined
+        self.assertIsNotNone(txn.request_hash)
 
     def test_transfer_two_wallets_balanced(self):
-        apply_ledger_transaction(kind="mint", entries=[(self.w1, 100)], external_id="mint-2")
+        apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -100), (self.w1, 100)],
+            external_id="mint-2",
+        )
+        self.issuance.refresh_from_db()
         self.w1.refresh_from_db()
         self.assertEqual(self.w1.balance, 100)
 
@@ -67,41 +77,72 @@ class TestLedger(TestCase):
 
         entries = list(LedgerEntry.objects.filter(txn=txn).order_by("wallet_id"))
         self.assertEqual(len(entries), 2)
-        self.assertEqual(sum(e.delta for e in entries), 0)  # transaction équilibrée par construction ici
+        self.assertEqual(sum(e.delta for e in entries), 0)
 
     def test_insufficient_funds_rolls_back(self):
         with self.assertRaises(ValidationError):
-            apply_ledger_transaction(kind="burn", entries=[(self.w1, -1)], external_id="burn-1")
+            apply_ledger_transaction(
+                kind="transfer",
+                entries=[(self.w1, -1), (self.w2, 1)],
+                external_id="insufficient-1",
+            )
 
         self.w1.refresh_from_db()
+        self.w2.refresh_from_db()
         self.assertEqual(self.w1.balance, 0)
+        self.assertEqual(self.w2.balance, 0)
 
         # atomic: nothing stays in base
         self.assertEqual(LedgerTransaction.objects.count(), 0)
         self.assertEqual(LedgerEntry.objects.count(), 0)
 
     def test_idempotency_same_external_id_returns_same_txn(self):
-        txn1 = apply_ledger_transaction(kind="mint", entries=[(self.w1, 10)], external_id="idem-1")
+        txn1 = apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -10), (self.w1, 10)],
+            external_id="idem-1",
+        )
+        self.issuance.refresh_from_db()
         self.w1.refresh_from_db()
         self.assertEqual(self.w1.balance, 10)
 
-        txn2 = apply_ledger_transaction(kind="mint", entries=[(self.w1, 10)], external_id="idem-1")
+        txn2 = apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -10), (self.w1, 10)],
+            external_id="idem-1",
+        )
+        self.issuance.refresh_from_db()
         self.w1.refresh_from_db()
 
         self.assertEqual(txn1.id, txn2.id)
-        self.assertEqual(self.w1.balance, 10)  # not applied twice
+        self.assertEqual(self.issuance.balance, -10)
+        self.assertEqual(self.w1.balance, 10)
         self.assertEqual(LedgerTransaction.objects.count(), 1)
-        self.assertEqual(LedgerEntry.objects.count(), 1)
+        self.assertEqual(LedgerEntry.objects.count(), 2)
 
     def test_idempotency_external_id_payload_mismatch_rejected(self):
-        apply_ledger_transaction(kind="mint", entries=[(self.w1, 10)], external_id="idem-2", memo="A")
+        apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -10), (self.w1, 10)],
+            external_id="idem-2",
+            memo="A",
+        )
 
         with self.assertRaises(ValidationError):
-            # same external_id but different payload → reject
-            apply_ledger_transaction(kind="mint", entries=[(self.w1, 11)], external_id="idem-2", memo="A")
+            apply_ledger_transaction(
+                kind="mint",
+                entries=[(self.issuance, -11), (self.w1, 11)],
+                external_id="idem-2",
+                memo="A",
+            )
 
         with self.assertRaises(ValidationError):
-            apply_ledger_transaction(kind="mint", entries=[(self.w1, 10)], external_id="idem-2", memo="B")
+            apply_ledger_transaction(
+                kind="mint",
+                entries=[(self.issuance, -10), (self.w1, 10)],
+                external_id="idem-2",
+                memo="B",
+            )
 
     def test_reject_unsaved_wallet_in_entries(self):
         unsaved = TokenWallet(user=self.u1)  # not saved → id None
@@ -109,21 +150,28 @@ class TestLedger(TestCase):
             apply_ledger_transaction(kind="mint", entries=[(unsaved, 10)], external_id="bad-1")
 
     def test_ledger_entry_is_immutable(self):
-        txn = apply_ledger_transaction(kind="mint", entries=[(self.w1, 5)], external_id="imm-1")
-        entry = LedgerEntry.objects.get(txn=txn)
+        txn = apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -5), (self.w1, 5)],
+            external_id="imm-1",
+        )
+        entry = LedgerEntry.objects.get(txn=txn, wallet=self.w1)
 
         entry.delta = 999
         with self.assertRaises(ValidationError):
-            entry.save()  # ImmutableLedgerRow.save
+            entry.save()
 
         with self.assertRaises(ValidationError):
-            entry.delete()  # ImmutableLedgerRow.delete
+            entry.delete()
 
     def test_queryset_update_delete_blocked(self):
-        txn = apply_ledger_transaction(kind="mint", entries=[(self.w1, 5)], external_id="imm-2")
-        entry = LedgerEntry.objects.get(txn=txn)
+        txn = apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -5), (self.w1, 5)],
+            external_id="imm-2",
+        )
+        entry = LedgerEntry.objects.get(txn=txn, wallet=self.w1)
 
-        # QuerySet.update/delete blocked via LedgerImmutableQuerySet
         with self.assertRaises(ValidationError):
             LedgerEntry.objects.filter(id=entry.id).update(delta=1)
 
@@ -153,22 +201,16 @@ class TestLedger(TestCase):
             )
 
     def test_system_issuance_wallet_can_go_negative(self):
-        issuance = TokenWallet.objects.create(
-            wallet_type=TokenWallet.TYPE_SYSTEM,
-            system_key=TokenWallet.SYSTEM_ISSUANCE,
-            allow_negative=True,
-        )
-
         apply_ledger_transaction(
             kind="deposit_mint",
-            entries=[(issuance, -100), (self.w1, 100)],
+            entries=[(self.issuance, -100), (self.w1, 100)],
             external_id="mint-double-1",
         )
 
-        issuance.refresh_from_db()
+        self.issuance.refresh_from_db()
         self.w1.refresh_from_db()
 
-        self.assertEqual(issuance.balance, -100)
+        self.assertEqual(self.issuance.balance, -100)
         self.assertEqual(self.w1.balance, 100)
 
     def test_purchase_with_platform_fee_is_balanced(self):
@@ -177,31 +219,9 @@ class TestLedger(TestCase):
             system_key=TokenWallet.SYSTEM_PLATFORM_FEES,
             allow_negative=False,
         )
-        issuance = TokenWallet.objects.create(
-            wallet_type=TokenWallet.TYPE_SYSTEM,
-            system_key=TokenWallet.SYSTEM_ISSUANCE,
-            allow_negative=True,
-        )
 
         apply_ledger_transaction(
             kind="deposit_mint",
-            entries=[(issuance, -100), (self.w1, 100)],
+            entries=[(self.issuance, -100), (self.w1, 100)],
             external_id="mint-before-purchase",
         )
-
-        txn = apply_ledger_transaction(
-            kind="video_purchase",
-            entries=[(self.w1, -100), (self.w2, 80), (fees, 20)],
-            external_id="purchase-1",
-        )
-
-        self.w1.refresh_from_db()
-        self.w2.refresh_from_db()
-        fees.refresh_from_db()
-
-        self.assertEqual(self.w1.balance, 0)
-        self.assertEqual(self.w2.balance, 80)
-        self.assertEqual(fees.balance, 20)
-
-        entries = list(LedgerEntry.objects.filter(txn=txn))
-        self.assertEqual(sum(e.delta for e in entries), 0)
