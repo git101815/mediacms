@@ -35,14 +35,15 @@ def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, exter
     # Idempotence (exactly-once)
     if external_id:
         try:
-            txn = LedgerTransaction.objects.create(
-                kind=kind,
-                external_id=external_id,
-                request_hash=request_hash,
-                created_by=created_by,
-                memo=memo,
-                metadata=metadata,
-            )
+            with transaction.atomic():
+                txn = LedgerTransaction.objects.create(
+                    kind=kind,
+                    external_id=external_id,
+                    request_hash=request_hash,
+                    created_by=created_by,
+                    memo=memo,
+                    metadata=metadata,
+                )
         except IntegrityError:
             existing = LedgerTransaction.objects.get(external_id=external_id)
             if existing.request_hash and existing.request_hash != request_hash:

@@ -42,7 +42,7 @@ class TokenWallet(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(
-                check=models.Q(balance__gte=0),
+                condition=models.Q(balance__gte=0),
                 name="tokenwallet_balance_non_negative",
             ),
         ]
@@ -77,7 +77,7 @@ class LedgerTransaction(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(
-                check=(models.Q(external_id__isnull=True) | models.Q(request_hash__isnull=False)),
+                condition=(models.Q(external_id__isnull=True) | models.Q(request_hash__isnull=False)),
                 name="ledgertransaction_request_hash_if_external_id",
             ),
         ]
@@ -109,7 +109,7 @@ class LedgerEntry(ImmutableLedgerRow):
         ]
         constraints = [
             models.CheckConstraint(
-                check=~models.Q(delta=0),
+                condition=~models.Q(delta=0),
                 name="ledgerentry_delta_non_zero",
             ),
         ]
