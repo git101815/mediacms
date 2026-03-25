@@ -259,7 +259,7 @@ class TestLedger(TestCase):
         entries = list(LedgerEntry.objects.filter(txn=txn))
         self.assertEqual(sum(entry.delta for entry in entries), 0)
 
-    def test_get_system_wallet_rejects_allow_negative_mismatch():
+    def test_get_system_wallet_rejects_allow_negative_mismatch(self):
         get_system_wallet(TokenWallet.SYSTEM_ISSUANCE, allow_negative=True)
 
         with pytest.raises(ValidationError, match="expected False"):
