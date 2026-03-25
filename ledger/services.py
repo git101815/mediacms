@@ -4,14 +4,20 @@ from .models import LedgerEntry, LedgerTransaction, TokenWallet
 import hashlib
 import json
 
+
 def get_system_wallet(system_key: str, *, allow_negative: bool) -> TokenWallet:
-    wallet, _ = TokenWallet.objects.get_or_create(
+    wallet, created = TokenWallet.objects.get_or_create(
         wallet_type=TokenWallet.TYPE_SYSTEM,
         system_key=system_key,
         defaults={
             "allow_negative": allow_negative,
         },
     )
+    if not created and wallet.allow_negative != allow_negative:
+        raise ValidationError(
+            f"System wallet '{system_key}' has allow_negative={wallet.allow_negative}, "
+            f"expected {allow_negative}"
+        )
     return wallet
 
 
