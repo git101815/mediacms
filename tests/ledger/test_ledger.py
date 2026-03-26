@@ -2,11 +2,21 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from files.tests import create_account
-from ledger.models import LEDGER_METADATA_VERSION, LedgerEntry, LedgerTransaction, TokenWallet, LedgerOutbox
+from ledger.models import (
+    LEDGER_METADATA_VERSION,
+    LEDGER_OUTBOX_MAX_RETRIES,
+    LedgerEntry,
+    LedgerOutbox,
+    LedgerTransaction,
+    TokenWallet,
+)
 from ledger.services import (
     apply_ledger_transaction,
     create_pending_ledger_transaction,
+    get_dispatchable_outbox_events,
     get_system_wallet,
+    mark_outbox_event_failed,
+    move_outbox_event_to_dlq,
     reverse_ledger_transaction,
 )
 
@@ -450,3 +460,74 @@ class TestLedger(TestCase):
 
         event = LedgerOutbox.objects.get(txn=reversal)
         self.assertEqual(event.metadata_version, LEDGER_METADATA_VERSION)
+
+    def test_outbox_event_failed_before_dlq_threshold(self):
+        txn = create_pending_ledger_transaction(
+            kind="crypto_deposit",
+            external_id="dlq-fail-1",
+            metadata={"confirmations": 0},
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        mark_outbox_event_failed(event, "temporary network error")
+        event.refresh_from_db()
+
+        self.assertEqual(event.status, LedgerOutbox.STATUS_FAILED)
+        self.assertEqual(event.fail_count, 1)
+        self.assertEqual(event.dead_lettered_at, None)
+        self.assertEqual(event.dead_letter_reason, "")
+
+    def test_outbox_event_moves_to_dlq_after_max_retries(self):
+        txn = create_pending_ledger_transaction(
+            kind="crypto_deposit",
+            external_id="dlq-max-1",
+            metadata={"confirmations": 0},
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        for i in range(LEDGER_OUTBOX_MAX_RETRIES):
+            mark_outbox_event_failed(event, f"error-{i}")
+            event.refresh_from_db()
+
+        self.assertEqual(event.status, LedgerOutbox.STATUS_DEAD_LETTERED)
+        self.assertEqual(event.fail_count, LEDGER_OUTBOX_MAX_RETRIES)
+        self.assertIsNotNone(event.dead_lettered_at)
+        self.assertEqual(event.dead_letter_reason, f"error-{LEDGER_OUTBOX_MAX_RETRIES - 1}")
+
+    def test_move_outbox_event_to_dlq_sets_terminal_state(self):
+        txn = create_pending_ledger_transaction(
+            kind="crypto_withdrawal",
+            external_id="dlq-explicit-1",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        move_outbox_event_to_dlq(event, "manual dead lettering")
+        event.refresh_from_db()
+
+        self.assertEqual(event.status, LedgerOutbox.STATUS_DEAD_LETTERED)
+        self.assertIsNotNone(event.dead_lettered_at)
+        self.assertEqual(event.dead_letter_reason, "manual dead lettering")
+
+    def test_dead_lettered_events_are_not_dispatchable(self):
+        txn = create_pending_ledger_transaction(
+            kind="crypto_deposit",
+            external_id="dlq-dispatchable-1",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        move_outbox_event_to_dlq(event, "poison message")
+        ids = [e.id for e in get_dispatchable_outbox_events(limit=100)]
+
+        self.assertNotIn(event.id, ids)
+
+    def test_failed_events_remain_dispatchable_before_dlq(self):
+        txn = create_pending_ledger_transaction(
+            kind="crypto_deposit",
+            external_id="dlq-retryable-1",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        mark_outbox_event_failed(event, "temporary timeout")
+        ids = [e.id for e in get_dispatchable_outbox_events(limit=100)]
+
+        self.assertIn(event.id, ids)

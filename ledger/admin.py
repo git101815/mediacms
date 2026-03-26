@@ -34,7 +34,18 @@ class LedgerEntryAdmin(ReadOnlyAdmin):
 
 @admin.register(LedgerOutbox)
 class LedgerOutboxAdmin(ReadOnlyAdmin):
-    list_display = ("id", "topic", "status", "txn", "aggregate_id", "created_at", "dispatched_at", "fail_count", "metadata_version")
+    list_display = (
+        "id",
+        "topic",
+        "status",
+        "txn",
+        "aggregate_id",
+        "created_at",
+        "dispatched_at",
+        "fail_count",
+        "dead_lettered_at",
+        "metadata_version",
+    )
     search_fields = ("topic", "txn__id", "txn__external_id")
     readonly_fields = (
         "txn",
@@ -48,4 +59,6 @@ class LedgerOutboxAdmin(ReadOnlyAdmin):
         "fail_count",
         "last_error",
         "metadata_version",
+        "dead_lettered_at",
+        "dead_letter_reason",
     )

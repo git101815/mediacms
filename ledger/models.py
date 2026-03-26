@@ -19,13 +19,16 @@ LEDGER_TXN_STATUS_CHOICES = (
 LEDGER_OUTBOX_STATUS_PENDING = "pending"
 LEDGER_OUTBOX_STATUS_DISPATCHED = "dispatched"
 LEDGER_OUTBOX_STATUS_FAILED = "failed"
+LEDGER_OUTBOX_STATUS_DEAD_LETTERED = "dead_lettered"
 
 LEDGER_OUTBOX_STATUS_CHOICES = (
     (LEDGER_OUTBOX_STATUS_PENDING, "Pending"),
     (LEDGER_OUTBOX_STATUS_DISPATCHED, "Dispatched"),
     (LEDGER_OUTBOX_STATUS_FAILED, "Failed"),
+    (LEDGER_OUTBOX_STATUS_DEAD_LETTERED, "Dead lettered"),
 )
 LEDGER_METADATA_VERSION = 1
+LEDGER_OUTBOX_MAX_RETRIES = 5
 
 class ImmutableLedgerRow(models.Model):
     class Meta:
@@ -208,6 +211,7 @@ class LedgerOutbox(models.Model):
     STATUS_DISPATCHED = LEDGER_OUTBOX_STATUS_DISPATCHED
     STATUS_FAILED = LEDGER_OUTBOX_STATUS_FAILED
     STATUS_CHOICES = LEDGER_OUTBOX_STATUS_CHOICES
+    STATUS_DEAD_LETTERED = LEDGER_OUTBOX_STATUS_DEAD_LETTERED
 
     txn = models.ForeignKey(
         LedgerTransaction,
@@ -232,6 +236,8 @@ class LedgerOutbox(models.Model):
     dispatched_at = models.DateTimeField(null=True, blank=True, db_index=True)
     fail_count = models.PositiveIntegerField(default=0)
     last_error = models.TextField(blank=True, default="")
+    dead_lettered_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    dead_letter_reason = models.TextField(blank=True, default="")
 
     class Meta:
         indexes = [

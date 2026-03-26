@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from .models import (
     LEDGER_METADATA_VERSION,
+    LEDGER_OUTBOX_MAX_RETRIES,
     LedgerEntry,
     LedgerOutbox,
     LedgerTransaction,
@@ -327,8 +328,47 @@ def mark_outbox_event_dispatched(event: LedgerOutbox) -> LedgerOutbox:
 
 
 def mark_outbox_event_failed(event: LedgerOutbox, error_message: str) -> LedgerOutbox:
-    event.status = LedgerOutbox.STATUS_FAILED
     event.fail_count += 1
     event.last_error = error_message[:2000]
+
+    if event.fail_count >= LEDGER_OUTBOX_MAX_RETRIES:
+        event.status = LedgerOutbox.STATUS_DEAD_LETTERED
+        event.dead_lettered_at = timezone.now()
+        event.dead_letter_reason = error_message[:2000]
+        event.save(
+            update_fields=[
+                "status",
+                "fail_count",
+                "last_error",
+                "dead_lettered_at",
+                "dead_letter_reason",
+            ]
+        )
+        return event
+
+    event.status = LedgerOutbox.STATUS_FAILED
     event.save(update_fields=["status", "fail_count", "last_error"])
     return event
+
+def move_outbox_event_to_dlq(event: LedgerOutbox, reason: str) -> LedgerOutbox:
+    event.status = LedgerOutbox.STATUS_DEAD_LETTERED
+    event.dead_lettered_at = timezone.now()
+    event.dead_letter_reason = reason[:2000]
+    event.last_error = reason[:2000]
+    event.save(
+        update_fields=[
+            "status",
+            "dead_lettered_at",
+            "dead_letter_reason",
+            "last_error",
+        ]
+    )
+    return event
+
+def get_dispatchable_outbox_events(limit: int = 100):
+    return LedgerOutbox.objects.filter(
+        status__in=[
+            LedgerOutbox.STATUS_PENDING,
+            LedgerOutbox.STATUS_FAILED,
+        ]
+    ).order_by("created_at")[:limit]
