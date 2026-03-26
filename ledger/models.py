@@ -25,6 +25,8 @@ LEDGER_OUTBOX_STATUS_CHOICES = (
     (LEDGER_OUTBOX_STATUS_DISPATCHED, "Dispatched"),
     (LEDGER_OUTBOX_STATUS_FAILED, "Failed"),
 )
+LEDGER_METADATA_VERSION = 1
+
 class ImmutableLedgerRow(models.Model):
     class Meta:
         abstract = True
@@ -131,6 +133,9 @@ class LedgerTransaction(models.Model):
     )
     memo = models.TextField(blank=True, default="")
     metadata = models.JSONField(blank=True, default=dict)
+    metadata_version = models.PositiveSmallIntegerField(
+        default=LEDGER_METADATA_VERSION,
+    )
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
 
     status = models.CharField(
@@ -220,6 +225,9 @@ class LedgerOutbox(models.Model):
         db_index=True,
     )
     payload = models.JSONField(default=dict, blank=True)
+    metadata_version = models.PositiveSmallIntegerField(
+        default=LEDGER_METADATA_VERSION,
+    )
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     dispatched_at = models.DateTimeField(null=True, blank=True, db_index=True)
     fail_count = models.PositiveIntegerField(default=0)

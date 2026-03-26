@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from files.tests import create_account
-from ledger.models import LedgerEntry, LedgerTransaction, TokenWallet, LedgerOutbox
+from ledger.models import LEDGER_METADATA_VERSION, LedgerEntry, LedgerTransaction, TokenWallet, LedgerOutbox
 from ledger.services import (
     apply_ledger_transaction,
     create_pending_ledger_transaction,
@@ -411,3 +411,42 @@ class TestLedger(TestCase):
         self.assertEqual(LedgerTransaction.objects.count(), 0)
         self.assertEqual(LedgerEntry.objects.count(), 0)
         self.assertEqual(LedgerOutbox.objects.count(), 0)
+
+    def test_posted_transaction_sets_metadata_version(self):
+        txn = apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -10), (self.w1, 10)],
+            external_id="meta-posted-1",
+            metadata={"source": "test"},
+        )
+        self.assertEqual(txn.metadata_version, LEDGER_METADATA_VERSION)
+
+        event = LedgerOutbox.objects.get(txn=txn)
+        self.assertEqual(event.metadata_version, LEDGER_METADATA_VERSION)
+
+    def test_pending_transaction_sets_metadata_version(self):
+        txn = create_pending_ledger_transaction(
+            kind="crypto_deposit",
+            external_id="meta-pending-1",
+            metadata={"confirmations": 0},
+        )
+        self.assertEqual(txn.metadata_version, LEDGER_METADATA_VERSION)
+
+        event = LedgerOutbox.objects.get(txn=txn)
+        self.assertEqual(event.metadata_version, LEDGER_METADATA_VERSION)
+
+    def test_reversed_transaction_sets_metadata_version(self):
+        original = apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -14), (self.w1, 14)],
+            external_id="meta-rev-src-1",
+        )
+        reversal = reverse_ledger_transaction(
+            original_txn=original,
+            external_id="meta-rev-1",
+        )
+
+        self.assertEqual(reversal.metadata_version, LEDGER_METADATA_VERSION)
+
+        event = LedgerOutbox.objects.get(txn=reversal)
+        self.assertEqual(event.metadata_version, LEDGER_METADATA_VERSION)

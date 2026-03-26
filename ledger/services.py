@@ -1,17 +1,24 @@
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from .models import LedgerEntry, LedgerOutbox, LedgerTransaction, TokenWallet
+from .models import (
+    LEDGER_METADATA_VERSION,
+    LedgerEntry,
+    LedgerOutbox,
+    LedgerTransaction,
+    TokenWallet,
+)
 import hashlib
 import json
 from django.utils import timezone
 
-def _create_outbox_event(*, txn: LedgerTransaction, topic: str, payload: dict) -> LedgerOutbox:
+def _create_outbox_event(*, txn: LedgerTransaction, topic: str, payload: dict, metadata_version: int) -> LedgerOutbox:
     return LedgerOutbox.objects.create(
         txn=txn,
         topic=topic,
         aggregate_type="ledger_transaction",
         aggregate_id=txn.id,
         payload=payload,
+        metadata_version=metadata_version,
     )
 
 def get_system_wallet(system_key: str, *, allow_negative: bool) -> TokenWallet:
@@ -57,6 +64,7 @@ def create_pending_ledger_transaction(*, kind: str, created_by=None, external_id
                     created_by=created_by,
                     memo=memo,
                     metadata=metadata,
+                    metadata_version=LEDGER_METADATA_VERSION,
                 )
         except IntegrityError:
             existing = LedgerTransaction.objects.get(external_id=external_id)
@@ -72,6 +80,7 @@ def create_pending_ledger_transaction(*, kind: str, created_by=None, external_id
             memo=memo,
             request_hash=None,
             metadata=metadata,
+            metadata_version=LEDGER_METADATA_VERSION,
         )
 
     _create_outbox_event(
@@ -85,6 +94,7 @@ def create_pending_ledger_transaction(*, kind: str, created_by=None, external_id
             "created_by_id": txn.created_by_id,
             "metadata": txn.metadata,
         },
+        metadata_version=txn.metadata_version,
     )
     return txn
 
@@ -137,6 +147,7 @@ def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, exter
                     memo=memo,
                     metadata=metadata,
                     status=LedgerTransaction.STATUS_POSTED,
+                    metadata_version=LEDGER_METADATA_VERSION,
                 )
         except IntegrityError:
             existing = LedgerTransaction.objects.get(external_id=external_id)
@@ -152,6 +163,7 @@ def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, exter
             request_hash=None,
             metadata=metadata,
             status=LedgerTransaction.STATUS_POSTED,
+            metadata_version=LEDGER_METADATA_VERSION,
         )
     # Lock wallets (stable order, unique request)
     wallet_ids = [wallet_id for wallet_id, _ in normalized_entries]
@@ -195,6 +207,7 @@ def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, exter
             "entry_count": len(normalized_entries),
             "metadata": txn.metadata,
         },
+        metadata_version=txn.metadata_version,
     )
     return txn
 
@@ -244,6 +257,7 @@ def reverse_ledger_transaction(*, original_txn: LedgerTransaction, created_by=No
                     created_by=created_by,
                     memo=memo,
                     metadata=payload_metadata,
+                    metadata_version=LEDGER_METADATA_VERSION
                 )
         except IntegrityError:
             existing = LedgerTransaction.objects.get(external_id=external_id)
@@ -260,6 +274,7 @@ def reverse_ledger_transaction(*, original_txn: LedgerTransaction, created_by=No
             memo=memo,
             request_hash=None,
             metadata=payload_metadata,
+            metadata_version=LEDGER_METADATA_VERSION
         )
 
     wallet_ids = [entry.wallet_id for entry in original_entries]
@@ -301,6 +316,7 @@ def reverse_ledger_transaction(*, original_txn: LedgerTransaction, created_by=No
             "reversal_of_id": txn.reversal_of_id,
             "metadata": txn.metadata,
         },
+        metadata_version=txn.metadata_version,
     )
     return txn
 def mark_outbox_event_dispatched(event: LedgerOutbox) -> LedgerOutbox:

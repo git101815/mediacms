@@ -22,9 +22,9 @@ class TokenWalletAdmin(ReadOnlyAdmin):
 
 @admin.register(LedgerTransaction)
 class LedgerTransactionAdmin(ReadOnlyAdmin):
-    list_display = ("id", "kind", "status", "external_id", "reversal_of", "created_by", "created_at")
+    list_display = ("id", "kind", "status", "external_id", "reversal_of", "created_by", "created_at", "metadata_version",)
     search_fields = ("external_id", "kind", "created_by__username")
-    readonly_fields = ("kind", "external_id", "created_by", "memo", "metadata", "created_at", "status", "reversal_of",)
+    readonly_fields = ("kind", "external_id", "created_by", "memo", "metadata", "created_at", "status", "reversal_of", "metadata_version")
 
 @admin.register(LedgerEntry)
 class LedgerEntryAdmin(ReadOnlyAdmin):
@@ -34,7 +34,7 @@ class LedgerEntryAdmin(ReadOnlyAdmin):
 
 @admin.register(LedgerOutbox)
 class LedgerOutboxAdmin(ReadOnlyAdmin):
-    list_display = ("id", "topic", "status", "txn", "aggregate_id", "created_at", "dispatched_at", "fail_count")
+    list_display = ("id", "topic", "status", "txn", "aggregate_id", "created_at", "dispatched_at", "fail_count", "metadata_version")
     search_fields = ("topic", "txn__id", "txn__external_id")
     readonly_fields = (
         "txn",
@@ -47,4 +47,5 @@ class LedgerOutboxAdmin(ReadOnlyAdmin):
         "dispatched_at",
         "fail_count",
         "last_error",
+        "metadata_version",
     )
