@@ -1,9 +1,18 @@
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from .models import LedgerEntry, LedgerTransaction, TokenWallet
+from .models import LedgerEntry, LedgerOutbox, LedgerTransaction, TokenWallet
 import hashlib
 import json
+from django.utils import timezone
 
+def _create_outbox_event(*, txn: LedgerTransaction, topic: str, payload: dict) -> LedgerOutbox:
+    return LedgerOutbox.objects.create(
+        txn=txn,
+        topic=topic,
+        aggregate_type="ledger_transaction",
+        aggregate_id=txn.id,
+        payload=payload,
+    )
 
 def get_system_wallet(system_key: str, *, allow_negative: bool) -> TokenWallet:
     wallet, created = TokenWallet.objects.get_or_create(
@@ -20,6 +29,7 @@ def get_system_wallet(system_key: str, *, allow_negative: bool) -> TokenWallet:
         )
     return wallet
 
+@transaction.atomic
 def create_pending_ledger_transaction(*, kind: str, created_by=None, external_id=None, memo="", metadata=None):
     if metadata is None:
         metadata = {}
@@ -39,7 +49,7 @@ def create_pending_ledger_transaction(*, kind: str, created_by=None, external_id
     if external_id:
         try:
             with transaction.atomic():
-                return LedgerTransaction.objects.create(
+                txn = LedgerTransaction.objects.create(
                     kind=kind,
                     status=LedgerTransaction.STATUS_PENDING,
                     external_id=external_id,
@@ -53,16 +63,30 @@ def create_pending_ledger_transaction(*, kind: str, created_by=None, external_id
             if existing.request_hash and existing.request_hash != request_hash:
                 raise ValidationError("Idempotency key reused with different payload")
             return existing
+    else:
+        txn = LedgerTransaction.objects.create(
+            kind=kind,
+            status=LedgerTransaction.STATUS_PENDING,
+            external_id=None,
+            created_by=created_by,
+            memo=memo,
+            request_hash=None,
+            metadata=metadata,
+        )
 
-    return LedgerTransaction.objects.create(
-        kind=kind,
-        status=LedgerTransaction.STATUS_PENDING,
-        external_id=None,
-        created_by=created_by,
-        memo=memo,
-        request_hash=None,
-        metadata=metadata,
+    _create_outbox_event(
+        txn=txn,
+        topic="ledger.transaction.pending",
+        payload={
+            "txn_id": txn.id,
+            "kind": txn.kind,
+            "status": txn.status,
+            "external_id": txn.external_id,
+            "created_by_id": txn.created_by_id,
+            "metadata": txn.metadata,
+        },
     )
+    return txn
 
 @transaction.atomic
 def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, external_id=None, memo="", metadata=None):
@@ -159,7 +183,19 @@ def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, exter
             delta=delta,
             balance_after=new_balance,
         )
-
+    _create_outbox_event(
+        txn=txn,
+        topic="ledger.transaction.posted",
+        payload={
+            "txn_id": txn.id,
+            "kind": txn.kind,
+            "status": txn.status,
+            "external_id": txn.external_id,
+            "created_by_id": txn.created_by_id,
+            "entry_count": len(normalized_entries),
+            "metadata": txn.metadata,
+        },
+    )
     return txn
 
 @transaction.atomic
@@ -253,5 +289,30 @@ def reverse_ledger_transaction(*, original_txn: LedgerTransaction, created_by=No
             delta=delta,
             balance_after=new_balance,
         )
-
+    _create_outbox_event(
+        txn=txn,
+        topic="ledger.transaction.reversed",
+        payload={
+            "txn_id": txn.id,
+            "kind": txn.kind,
+            "status": txn.status,
+            "external_id": txn.external_id,
+            "created_by_id": txn.created_by_id,
+            "reversal_of_id": txn.reversal_of_id,
+            "metadata": txn.metadata,
+        },
+    )
     return txn
+def mark_outbox_event_dispatched(event: LedgerOutbox) -> LedgerOutbox:
+    event.status = LedgerOutbox.STATUS_DISPATCHED
+    event.dispatched_at = timezone.now()
+    event.save(update_fields=["status", "dispatched_at"])
+    return event
+
+
+def mark_outbox_event_failed(event: LedgerOutbox, error_message: str) -> LedgerOutbox:
+    event.status = LedgerOutbox.STATUS_FAILED
+    event.fail_count += 1
+    event.last_error = error_message[:2000]
+    event.save(update_fields=["status", "fail_count", "last_error"])
+    return event

@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from files.tests import create_account
-from ledger.models import LedgerEntry, LedgerTransaction, TokenWallet
+from ledger.models import LedgerEntry, LedgerTransaction, TokenWallet, LedgerOutbox
 from ledger.services import (
     apply_ledger_transaction,
     create_pending_ledger_transaction,
@@ -351,3 +351,63 @@ class TestLedger(TestCase):
                 original_txn=pending,
                 external_id="rev-pending-1",
             )
+
+    def test_posted_transaction_enqueues_outbox_event(self):
+        txn = apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -20), (self.w1, 20)],
+            external_id="outbox-posted-1",
+        )
+
+        event = LedgerOutbox.objects.get(txn=txn)
+        self.assertEqual(event.topic, "ledger.transaction.posted")
+        self.assertEqual(event.status, LedgerOutbox.STATUS_PENDING)
+        self.assertEqual(event.aggregate_type, "ledger_transaction")
+        self.assertEqual(event.aggregate_id, txn.id)
+        self.assertEqual(event.payload["txn_id"], txn.id)
+        self.assertEqual(event.payload["status"], txn.status)
+
+    def test_pending_transaction_enqueues_outbox_event(self):
+        txn = create_pending_ledger_transaction(
+            kind="crypto_deposit",
+            external_id="outbox-pending-1",
+            created_by=self.u1,
+            metadata={"confirmations": 0},
+        )
+
+        event = LedgerOutbox.objects.get(txn=txn)
+        self.assertEqual(event.topic, "ledger.transaction.pending")
+        self.assertEqual(event.status, LedgerOutbox.STATUS_PENDING)
+        self.assertEqual(event.payload["txn_id"], txn.id)
+        self.assertEqual(event.payload["status"], txn.status)
+
+    def test_reversed_transaction_enqueues_outbox_event(self):
+        original = apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -12), (self.w1, 12)],
+            external_id="outbox-rev-src-1",
+        )
+
+        reversal = reverse_ledger_transaction(
+            original_txn=original,
+            external_id="outbox-rev-1",
+            created_by=self.u1,
+        )
+
+        event = LedgerOutbox.objects.get(txn=reversal)
+        self.assertEqual(event.topic, "ledger.transaction.reversed")
+        self.assertEqual(event.status, LedgerOutbox.STATUS_PENDING)
+        self.assertEqual(event.payload["txn_id"], reversal.id)
+        self.assertEqual(event.payload["reversal_of_id"], original.id)
+
+    def test_outbox_is_rolled_back_with_failed_transaction(self):
+        with self.assertRaises(ValidationError):
+            apply_ledger_transaction(
+                kind="transfer",
+                entries=[(self.w1, -1), (self.w2, 1)],
+                external_id="outbox-rollback-1",
+            )
+
+        self.assertEqual(LedgerTransaction.objects.count(), 0)
+        self.assertEqual(LedgerEntry.objects.count(), 0)
+        self.assertEqual(LedgerOutbox.objects.count(), 0)

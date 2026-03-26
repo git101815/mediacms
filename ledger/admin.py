@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import TokenWallet, LedgerTransaction, LedgerEntry
+from .models import TokenWallet, LedgerTransaction, LedgerEntry,LedgerOutbox
 
 class ReadOnlyAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
@@ -31,3 +31,20 @@ class LedgerEntryAdmin(ReadOnlyAdmin):
     list_display = ("id", "txn", "wallet", "delta", "balance_after", "created_at")
     search_fields = ("wallet__user__username", "txn__id")
     readonly_fields = ("txn", "wallet", "delta", "balance_after", "created_at")
+
+@admin.register(LedgerOutbox)
+class LedgerOutboxAdmin(ReadOnlyAdmin):
+    list_display = ("id", "topic", "status", "txn", "aggregate_id", "created_at", "dispatched_at", "fail_count")
+    search_fields = ("topic", "txn__id", "txn__external_id")
+    readonly_fields = (
+        "txn",
+        "topic",
+        "aggregate_type",
+        "aggregate_id",
+        "status",
+        "payload",
+        "created_at",
+        "dispatched_at",
+        "fail_count",
+        "last_error",
+    )

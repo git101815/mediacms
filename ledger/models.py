@@ -11,13 +11,20 @@ SYSTEM_WALLET_PLATFORM_FEES = "platform_fees"
 LEDGER_TXN_STATUS_PENDING = "pending"
 LEDGER_TXN_STATUS_POSTED = "posted"
 LEDGER_TXN_STATUS_REVERSED = "reversed"
-
 LEDGER_TXN_STATUS_CHOICES = (
     (LEDGER_TXN_STATUS_PENDING, "Pending"),
     (LEDGER_TXN_STATUS_POSTED, "Posted"),
     (LEDGER_TXN_STATUS_REVERSED, "Reversed"),
 )
+LEDGER_OUTBOX_STATUS_PENDING = "pending"
+LEDGER_OUTBOX_STATUS_DISPATCHED = "dispatched"
+LEDGER_OUTBOX_STATUS_FAILED = "failed"
 
+LEDGER_OUTBOX_STATUS_CHOICES = (
+    (LEDGER_OUTBOX_STATUS_PENDING, "Pending"),
+    (LEDGER_OUTBOX_STATUS_DISPATCHED, "Dispatched"),
+    (LEDGER_OUTBOX_STATUS_FAILED, "Failed"),
+)
 class ImmutableLedgerRow(models.Model):
     class Meta:
         abstract = True
@@ -190,3 +197,40 @@ class LedgerEntry(ImmutableLedgerRow):
         ]
     def __str__(self):
         return f"Entry #{self.id} txn={self.txn_id} wallet={self.wallet_id} delta={self.delta}"
+
+class LedgerOutbox(models.Model):
+    STATUS_PENDING = LEDGER_OUTBOX_STATUS_PENDING
+    STATUS_DISPATCHED = LEDGER_OUTBOX_STATUS_DISPATCHED
+    STATUS_FAILED = LEDGER_OUTBOX_STATUS_FAILED
+    STATUS_CHOICES = LEDGER_OUTBOX_STATUS_CHOICES
+
+    txn = models.ForeignKey(
+        LedgerTransaction,
+        on_delete=models.PROTECT,
+        related_name="outbox_events",
+        db_index=True,
+    )
+    topic = models.CharField(max_length=64, db_index=True)
+    aggregate_type = models.CharField(max_length=32, default="ledger_transaction", db_index=True)
+    aggregate_id = models.BigIntegerField(db_index=True)
+    status = models.CharField(
+        max_length=16,
+        choices=LEDGER_OUTBOX_STATUS_CHOICES,
+        default=LEDGER_OUTBOX_STATUS_PENDING,
+        db_index=True,
+    )
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    dispatched_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    fail_count = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True, default="")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["topic", "status", "created_at"]),
+            models.Index(fields=["aggregate_type", "aggregate_id"]),
+        ]
+
+    def __str__(self):
+        return f"Outbox #{self.id} {self.topic} {self.status} txn={self.txn_id}"
