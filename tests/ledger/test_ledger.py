@@ -3,7 +3,12 @@ from django.test import TestCase
 
 from files.tests import create_account
 from ledger.models import LedgerEntry, LedgerTransaction, TokenWallet
-from ledger.services import apply_ledger_transaction, get_system_wallet
+from ledger.services import (
+    apply_ledger_transaction,
+    create_pending_ledger_transaction,
+    get_system_wallet,
+    reverse_ledger_transaction,
+)
 
 
 class TestLedger(TestCase):
@@ -64,6 +69,8 @@ class TestLedger(TestCase):
 
         self.assertEqual(txn.external_id, "mint-1")
         self.assertIsNotNone(txn.request_hash)
+
+        self.assertEqual(txn.status, LedgerTransaction.STATUS_POSTED)
 
     def test_transfer_two_wallets_balanced(self):
         apply_ledger_transaction(
@@ -259,8 +266,88 @@ class TestLedger(TestCase):
         entries = list(LedgerEntry.objects.filter(txn=txn))
         self.assertEqual(sum(entry.delta for entry in entries), 0)
 
+        self.assertEqual(txn.status, LedgerTransaction.STATUS_POSTED)
+
     def test_get_system_wallet_rejects_allow_negative_mismatch(self):
         get_system_wallet(TokenWallet.SYSTEM_ISSUANCE, allow_negative=True)
 
-        with pytest.raises(ValidationError, match="expected False"):
+        with self.assertRaisesRegex(ValidationError, "expected False"):
             get_system_wallet(TokenWallet.SYSTEM_ISSUANCE, allow_negative=False)
+
+    def test_can_create_pending_transaction_without_entries(self):
+        txn = create_pending_ledger_transaction(
+            kind="crypto_deposit",
+            external_id="pending-1",
+            created_by=self.u1,
+            memo="awaiting confirmations",
+            metadata={"confirmations": 0},
+        )
+        self.assertEqual(txn.status, LedgerTransaction.STATUS_PENDING)
+        self.assertEqual(txn.entries.count(), 0)
+        self.assertEqual(LedgerEntry.objects.count(), 0)
+
+    def test_pending_transaction_is_idempotent(self):
+        txn1 = create_pending_ledger_transaction(
+            kind="crypto_deposit",
+            external_id="pending-2",
+            memo="awaiting confirmations",
+            metadata={"confirmations": 0},
+        )
+        txn2 = create_pending_ledger_transaction(
+            kind="crypto_deposit",
+            external_id="pending-2",
+            memo="awaiting confirmations",
+            metadata={"confirmations": 0},
+        )
+        self.assertEqual(txn1.id, txn2.id)
+        self.assertEqual(txn2.status, LedgerTransaction.STATUS_PENDING)
+
+    def test_reverse_posted_transaction_creates_compensation_entries(self):
+        original = apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -25), (self.w1, 25)],
+            external_id="rev-src-1",
+        )
+        reversal = reverse_ledger_transaction(
+            original_txn=original,
+            external_id="rev-1",
+            created_by=self.u1,
+            memo="deposit failed",
+        )
+
+        self.issuance.refresh_from_db()
+        self.w1.refresh_from_db()
+
+        self.assertEqual(reversal.status, LedgerTransaction.STATUS_REVERSED)
+        self.assertEqual(reversal.reversal_of_id, original.id)
+        self.assertEqual(self.issuance.balance, 0)
+        self.assertEqual(self.w1.balance, 0)
+        self.assertEqual(reversal.entries.count(), 2)
+        self.assertEqual(sum(entry.delta for entry in reversal.entries.all()), 0)
+
+    def test_reverse_is_idempotent(self):
+        original = apply_ledger_transaction(
+            kind="mint",
+            entries=[(self.issuance, -15), (self.w1, 15)],
+            external_id="rev-src-2",
+        )
+        reversal1 = reverse_ledger_transaction(
+            original_txn=original,
+            external_id="rev-2",
+        )
+        reversal2 = reverse_ledger_transaction(
+            original_txn=original,
+            external_id="rev-2",
+        )
+        self.assertEqual(reversal1.id, reversal2.id)
+
+    def test_cannot_reverse_pending_transaction(self):
+        pending = create_pending_ledger_transaction(
+            kind="crypto_withdrawal",
+            external_id="pending-3",
+        )
+        with self.assertRaises(ValidationError):
+            reverse_ledger_transaction(
+                original_txn=pending,
+                external_id="rev-pending-1",
+            )

@@ -22,9 +22,9 @@ class TokenWalletAdmin(ReadOnlyAdmin):
 
 @admin.register(LedgerTransaction)
 class LedgerTransactionAdmin(ReadOnlyAdmin):
-    list_display = ("id", "kind", "external_id", "created_by", "created_at")
+    list_display = ("id", "kind", "status", "external_id", "reversal_of", "created_by", "created_at")
     search_fields = ("external_id", "kind", "created_by__username")
-    readonly_fields = ("kind", "external_id", "created_by", "memo", "metadata", "created_at")
+    readonly_fields = ("kind", "external_id", "created_by", "memo", "metadata", "created_at", "status", "reversal_of",)
 
 @admin.register(LedgerEntry)
 class LedgerEntryAdmin(ReadOnlyAdmin):

@@ -8,6 +8,15 @@ USER_WALLET_TYPE = "user"
 SYSTEM_WALLET_TYPE = "system"
 SYSTEM_WALLET_ISSUANCE = "issuance"
 SYSTEM_WALLET_PLATFORM_FEES = "platform_fees"
+LEDGER_TXN_STATUS_PENDING = "pending"
+LEDGER_TXN_STATUS_POSTED = "posted"
+LEDGER_TXN_STATUS_REVERSED = "reversed"
+
+LEDGER_TXN_STATUS_CHOICES = (
+    (LEDGER_TXN_STATUS_PENDING, "Pending"),
+    (LEDGER_TXN_STATUS_POSTED, "Posted"),
+    (LEDGER_TXN_STATUS_REVERSED, "Reversed"),
+)
 
 class ImmutableLedgerRow(models.Model):
     class Meta:
@@ -98,6 +107,11 @@ class TokenWallet(models.Model):
 class LedgerTransaction(models.Model):
     objects = LedgerImmutableManager()
 
+    STATUS_PENDING = LEDGER_TXN_STATUS_PENDING
+    STATUS_POSTED = LEDGER_TXN_STATUS_POSTED
+    STATUS_REVERSED = LEDGER_TXN_STATUS_REVERSED
+    STATUS_CHOICES = LEDGER_TXN_STATUS_CHOICES
+
     kind = models.CharField(max_length=32, db_index=True)
     external_id = models.CharField(max_length=64, null=True, blank=True, unique=True)
     request_hash = models.CharField(max_length=64, null=True, blank=True, db_index=True)
@@ -112,16 +126,39 @@ class LedgerTransaction(models.Model):
     metadata = models.JSONField(blank=True, default=dict)
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
 
+    status = models.CharField(
+        max_length=16,
+        choices=LEDGER_TXN_STATUS_CHOICES,
+        default=LEDGER_TXN_STATUS_POSTED,
+        db_index=True,
+    )
+
+    reversal_of = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="reversal_txn",
+    )
+
     class Meta:
         constraints = [
             models.CheckConstraint(
                 condition=(models.Q(external_id__isnull=True) | models.Q(request_hash__isnull=False)),
                 name="ledgertransaction_request_hash_if_external_id",
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status=LEDGER_TXN_STATUS_PENDING, reversal_of__isnull=True)
+                    | models.Q(status=LEDGER_TXN_STATUS_POSTED, reversal_of__isnull=True)
+                    | models.Q(status=LEDGER_TXN_STATUS_REVERSED, reversal_of__isnull=False)
+                ),
+                name="ledgertransaction_reversal_requires_reversal_of",
+            ),
         ]
 
     def __str__(self):
-        return f"{self.kind} #{self.id}"
+        return f"{self.kind}/{self.status} #{self.id}"
 
 class LedgerEntry(ImmutableLedgerRow):
     objects = LedgerImmutableManager()
