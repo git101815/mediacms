@@ -24,9 +24,8 @@ from tests.ledger.base import BaseLedgerTestCase
 class TestLedgerRisk(BaseLedgerTestCase):
     def setUp(self):
         super().setUp()
-        self.operator.is_superuser = True
-        self.operator.is_staff = True
-        self.operator.save(update_fields=["is_superuser", "is_staff"])
+        self.grant_perm(self.operator, "can_manage_wallet_risk")
+        self.grant_perm(self.operator, "can_manage_wallet_holds")
 
     def test_create_wallet_hold_reduces_available_balance(self):
         apply_ledger_transaction(
