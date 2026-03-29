@@ -1,5 +1,7 @@
 from django.contrib.auth.models import Permission
 from django.test import TestCase
+from django.apps import apps
+from django.contrib.auth.management import create_permissions
 
 from files.tests import create_account
 from ledger.models import TokenWallet
@@ -32,5 +34,18 @@ class BaseLedgerTestCase(TestCase):
             self.grant_perm(self.operator, codename)
 
     def grant_perm(self, user, codename):
-        perm = Permission.objects.get(codename=codename)
+        app_config = apps.get_app_config("ledger")
+        create_permissions(app_config, verbosity=0)
+
+        perm = (
+            Permission.objects.filter(
+                content_type__app_label="ledger",
+                codename=codename,
+            )
+            .order_by("id")
+            .first()
+        )
+        if perm is None:
+            raise Permission.DoesNotExist(f"ledger permission not found: {codename}")
+
         user.user_permissions.add(perm)
