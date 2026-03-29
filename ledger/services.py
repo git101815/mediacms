@@ -10,6 +10,14 @@ from .models import (
     LedgerSaga,
     LedgerSagaStep,
     LEDGER_OUTBOX_RETRY_DELAY_SECONDS,
+    LedgerHold,
+    LedgerVelocityWindow,
+    LEDGER_ACTION_DEPOSIT,
+    LEDGER_ACTION_PURCHASE,
+    LEDGER_ACTION_TRANSFER,
+    LEDGER_ACTION_WITHDRAWAL,
+    LEDGER_RISK_STATUS_BLOCKED,
+    LEDGER_RISK_STATUS_REVIEW,
 )
 import hashlib
 import json
@@ -95,6 +103,19 @@ def get_failed_sagas(*, actor, limit: int = 100):
         status=LedgerSaga.STATUS_FAILED
     ).order_by("failed_at", "created_at")[:limit]
 
+def get_wallet_available_balance(wallet: TokenWallet) -> int:
+    return int(wallet.balance) - int(wallet.held_balance)
+
+def _require_wallet_not_blocked(wallet: TokenWallet):
+    if wallet.risk_status == LEDGER_RISK_STATUS_BLOCKED:
+        raise ValidationError("Wallet is blocked")
+    if wallet.review_required or wallet.risk_status == LEDGER_RISK_STATUS_REVIEW:
+        raise ValidationError("Wallet requires review")
+
+def _floor_window_start(now, window_seconds: int):
+    ts = int(now.timestamp())
+    floored = ts - (ts % window_seconds)
+    return timezone.datetime.fromtimestamp(floored, tz=now.tzinfo)
 
 def get_stale_compensating_sagas(*, actor, older_than_seconds: int = 900, limit: int = 100):
     _require_perm(actor, "ledger.can_manage_ledger_sagas")
@@ -119,6 +140,16 @@ def get_system_wallet(system_key: str, *, allow_negative: bool) -> TokenWallet:
             f"expected {allow_negative}"
         )
     return wallet
+
+def _infer_action_from_kind(kind: str) -> str:
+    lowered = kind.lower()
+    if "withdraw" in lowered:
+        return LEDGER_ACTION_WITHDRAWAL
+    if "purchase" in lowered or "buy" in lowered:
+        return LEDGER_ACTION_PURCHASE
+    if "deposit" in lowered or "mint" in lowered:
+        return LEDGER_ACTION_DEPOSIT
+    return LEDGER_ACTION_TRANSFER
 
 @transaction.atomic
 def create_pending_ledger_transaction(*, actor, kind: str, created_by=None, external_id=None, memo="", metadata=None):
@@ -269,13 +300,25 @@ def apply_ledger_transaction(*, actor, kind: str, entries: list, created_by=None
     locked = {w.id: w for w in locked_wallets}
     if len(locked) != len(wallet_ids):
         raise ValidationError("Unknown wallet in entries")
+    action = _infer_action_from_kind(kind)
 
     for wallet_id, delta in normalized_entries:
         w = locked[wallet_id]
-        new_balance = w.balance + delta
 
-        if not w.allow_negative and new_balance < 0:
-            raise ValidationError("Insufficient funds")
+        _require_wallet_not_blocked(w)
+
+        if delta < 0:
+            enforce_wallet_velocity_limits(
+                wallet=w,
+                action=action,
+                amount=abs(delta),
+            )
+
+        new_balance = w.balance + delta
+        available_after = new_balance - int(w.held_balance)
+
+        if not w.allow_negative and available_after < 0:
+            raise ValidationError("Insufficient available funds")
 
         w.balance = new_balance
         w.save(update_fields=["balance", "updated_at"])
@@ -286,6 +329,19 @@ def apply_ledger_transaction(*, actor, kind: str, entries: list, created_by=None
             delta=delta,
             balance_after=new_balance,
         )
+
+        if delta < 0:
+            record_wallet_velocity(
+                wallet=w,
+                action=action,
+                amount=abs(delta),
+            )
+        elif delta > 0 and action == LEDGER_ACTION_DEPOSIT:
+            record_wallet_velocity(
+                wallet=w,
+                action=LEDGER_ACTION_DEPOSIT,
+                amount=abs(delta),
+            )
     _create_outbox_event(
         txn=txn,
         topic="ledger.transaction.posted",
@@ -694,3 +750,139 @@ def redrive_dead_lettered_outbox_event(*, actor, event: LedgerOutbox) -> LedgerO
         ]
     )
     return event
+
+@transaction.atomic
+def create_wallet_hold(*, actor, wallet: TokenWallet, amount: int, reason: str = "", metadata=None) -> LedgerHold:
+    _require_perm(actor, "ledger.can_manage_wallet_holds")
+
+    if metadata is None:
+        metadata = {}
+
+    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
+    if amount <= 0:
+        raise ValidationError("Hold amount must be > 0")
+
+    available_balance = get_wallet_available_balance(wallet)
+    if not wallet.allow_negative and amount > available_balance:
+        raise ValidationError("Insufficient available balance for hold")
+
+    wallet.held_balance += int(amount)
+    wallet.save(update_fields=["held_balance", "updated_at"])
+
+    return LedgerHold.objects.create(
+        wallet=wallet,
+        amount=int(amount),
+        reason=reason,
+        created_by=actor,
+        metadata=metadata,
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+@transaction.atomic
+def release_wallet_hold(*, actor, hold: LedgerHold, reason: str = "") -> LedgerHold:
+    _require_perm(actor, "ledger.can_manage_wallet_holds")
+
+    hold = LedgerHold.objects.select_for_update().select_related("wallet").get(id=hold.id)
+    if hold.released:
+        return hold
+
+    wallet = TokenWallet.objects.select_for_update().get(id=hold.wallet_id)
+    wallet.held_balance -= int(hold.amount)
+    if wallet.held_balance < 0:
+        raise ValidationError("Wallet held balance cannot be negative")
+
+    wallet.save(update_fields=["held_balance", "updated_at"])
+
+    hold.released = True
+    hold.released_by = actor
+    hold.released_at = timezone.now()
+    if reason:
+        hold.reason = reason
+    hold.save(update_fields=["released", "released_by", "released_at", "reason"])
+    return hold
+
+@transaction.atomic
+def record_wallet_velocity(*, wallet: TokenWallet, action: str, amount: int):
+    now = timezone.now()
+
+    for window_seconds in [3600, 86400]:
+        window_start = _floor_window_start(now, window_seconds)
+        obj, _ = LedgerVelocityWindow.objects.select_for_update().get_or_create(
+            wallet=wallet,
+            action=action,
+            window_seconds=window_seconds,
+            window_start=window_start,
+            defaults={"amount": 0, "count": 0},
+        )
+        obj.amount += int(amount)
+        obj.count += 1
+        obj.save(update_fields=["amount", "count", "updated_at"])
+
+def get_wallet_velocity_amount(*, wallet: TokenWallet, action: str, window_seconds: int) -> int:
+    now = timezone.now()
+    window_start = _floor_window_start(now, window_seconds)
+    obj = LedgerVelocityWindow.objects.filter(
+        wallet=wallet,
+        action=action,
+        window_seconds=window_seconds,
+        window_start=window_start,
+    ).first()
+    return int(obj.amount) if obj else 0
+
+def enforce_wallet_velocity_limits(*, wallet: TokenWallet, action: str, amount: int):
+    if amount <= 0:
+        return
+
+    hourly_current = get_wallet_velocity_amount(wallet=wallet, action=action, window_seconds=3600)
+    daily_current = get_wallet_velocity_amount(wallet=wallet, action=action, window_seconds=86400)
+
+    if action in [LEDGER_ACTION_WITHDRAWAL, LEDGER_ACTION_TRANSFER, LEDGER_ACTION_PURCHASE]:
+        if wallet.hourly_outflow_limit is not None and hourly_current + amount > wallet.hourly_outflow_limit:
+            raise ValidationError("Hourly outflow limit exceeded")
+        if wallet.daily_outflow_limit is not None and daily_current + amount > wallet.daily_outflow_limit:
+            raise ValidationError("Daily outflow limit exceeded")
+
+    if action == LEDGER_ACTION_DEPOSIT:
+        if wallet.hourly_inflow_limit is not None and hourly_current + amount > wallet.hourly_inflow_limit:
+            raise ValidationError("Hourly inflow limit exceeded")
+        if wallet.daily_inflow_limit is not None and daily_current + amount > wallet.daily_inflow_limit:
+            raise ValidationError("Daily inflow limit exceeded")
+
+@transaction.atomic
+def set_wallet_risk_status(*, actor, wallet: TokenWallet, risk_status: str, reason: str = "", review_required: bool = False) -> TokenWallet:
+    _require_perm(actor, "ledger.can_manage_wallet_risk")
+
+    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
+    wallet.risk_status = risk_status
+    wallet.risk_reason = reason
+    wallet.review_required = review_required
+    wallet.save(update_fields=["risk_status", "risk_reason", "review_required", "updated_at"])
+    return wallet
+
+@transaction.atomic
+def set_wallet_velocity_limits(
+    *,
+    actor,
+    wallet: TokenWallet,
+    hourly_outflow_limit=None,
+    daily_outflow_limit=None,
+    hourly_inflow_limit=None,
+    daily_inflow_limit=None,
+) -> TokenWallet:
+    _require_perm(actor, "ledger.can_manage_wallet_risk")
+
+    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
+    wallet.hourly_outflow_limit = hourly_outflow_limit
+    wallet.daily_outflow_limit = daily_outflow_limit
+    wallet.hourly_inflow_limit = hourly_inflow_limit
+    wallet.daily_inflow_limit = daily_inflow_limit
+    wallet.save(
+        update_fields=[
+            "hourly_outflow_limit",
+            "daily_outflow_limit",
+            "hourly_inflow_limit",
+            "daily_inflow_limit",
+            "updated_at",
+        ]
+    )
+    return wallet

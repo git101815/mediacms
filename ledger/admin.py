@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import TokenWallet, LedgerTransaction, LedgerEntry,LedgerOutbox, LedgerSaga, LedgerSagaStep
+from .models import TokenWallet, LedgerTransaction, LedgerEntry,LedgerOutbox, LedgerSaga, LedgerSagaStep, LedgerHold, LedgerVelocityWindow
 
 class ReadOnlyAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
@@ -16,7 +16,20 @@ class ReadOnlyAdmin(admin.ModelAdmin):
 
 @admin.register(TokenWallet)
 class TokenWalletAdmin(ReadOnlyAdmin):
-    list_display = ("user", "balance", "updated_at")
+    list_display = (
+        "id",
+        "user",
+        "wallet_type",
+        "system_key",
+        "balance",
+        "held_balance",
+        "risk_status",
+        "review_required",
+        "hourly_outflow_limit",
+        "daily_outflow_limit",
+        "updated_at",
+    )
+    list_filter = ("wallet_type", "risk_status", "review_required", "allow_negative")
     search_fields = ("user__username", "user__email")
     readonly_fields = ("user", "balance", "created_at", "updated_at")
 
@@ -102,32 +115,84 @@ class LedgerSagaAdmin(ReadOnlyAdmin):
         "created_at",
     )
 
-    @admin.register(LedgerSagaStep)
-    class LedgerSagaStepAdmin(ReadOnlyAdmin):
-        list_display = (
-            "id",
-            "saga",
-            "step_key",
-            "step_order",
-            "status",
-            "txn",
-            "compensation_txn",
-            "created_at",
-        )
-        search_fields = ("step_key", "saga__external_id", "txn__external_id")
-        readonly_fields = (
-            "saga",
-            "step_key",
-            "step_order",
-            "status",
-            "txn",
-            "compensation_txn",
-            "payload",
-            "metadata_version",
-            "started_at",
-            "completed_at",
-            "failed_at",
-            "compensated_at",
-            "last_error",
-            "created_at",
-        )
+@admin.register(LedgerSagaStep)
+class LedgerSagaStepAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "saga",
+        "step_key",
+        "step_order",
+        "status",
+        "txn",
+        "compensation_txn",
+        "created_at",
+    )
+    search_fields = ("step_key", "saga__external_id", "txn__external_id")
+    readonly_fields = (
+        "saga",
+        "step_key",
+        "step_order",
+        "status",
+        "txn",
+        "compensation_txn",
+        "payload",
+        "metadata_version",
+        "started_at",
+        "completed_at",
+        "failed_at",
+        "compensated_at",
+        "last_error",
+        "created_at",
+    )
+
+@admin.register(LedgerHold)
+class LedgerHoldAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "wallet",
+        "amount",
+        "released",
+        "created_by",
+        "released_by",
+        "created_at",
+        "released_at",
+    )
+    list_filter = ("released", "metadata_version")
+    search_fields = ("wallet__user__username", "reason")
+    readonly_fields = (
+        "wallet",
+        "amount",
+        "reason",
+        "released",
+        "created_by",
+        "released_by",
+        "metadata",
+        "metadata_version",
+        "created_at",
+        "released_at",
+    )
+
+@admin.register(LedgerVelocityWindow)
+class LedgerVelocityWindowAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "wallet",
+        "action",
+        "window_seconds",
+        "amount",
+        "count",
+        "window_start",
+        "updated_at",
+    )
+    list_filter = ("action", "window_seconds")
+    search_fields = ("wallet__user__username",)
+    readonly_fields = (
+        "wallet",
+        "action",
+        "window_seconds",
+        "amount",
+        "count",
+        "window_start",
+        "created_at",
+        "updated_at",
+    )

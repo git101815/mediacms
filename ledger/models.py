@@ -64,6 +64,28 @@ LEDGER_SAGA_STEP_STATUS_CHOICES = (
     (LEDGER_SAGA_STEP_STATUS_SKIPPED, "Skipped"),
 )
 
+LEDGER_RISK_STATUS_CLEAR = "clear"
+LEDGER_RISK_STATUS_REVIEW = "review"
+LEDGER_RISK_STATUS_BLOCKED = "blocked"
+
+LEDGER_RISK_STATUS_CHOICES = (
+    (LEDGER_RISK_STATUS_CLEAR, "Clear"),
+    (LEDGER_RISK_STATUS_REVIEW, "Review"),
+    (LEDGER_RISK_STATUS_BLOCKED, "Blocked"),
+)
+
+LEDGER_ACTION_DEPOSIT = "deposit"
+LEDGER_ACTION_WITHDRAWAL = "withdrawal"
+LEDGER_ACTION_TRANSFER = "transfer"
+LEDGER_ACTION_PURCHASE = "purchase"
+
+LEDGER_ACTION_CHOICES = (
+    (LEDGER_ACTION_DEPOSIT, "Deposit"),
+    (LEDGER_ACTION_WITHDRAWAL, "Withdrawal"),
+    (LEDGER_ACTION_TRANSFER, "Transfer"),
+    (LEDGER_ACTION_PURCHASE, "Purchase"),
+)
+
 class ImmutableLedgerRow(models.Model):
     class Meta:
         abstract = True
@@ -121,6 +143,20 @@ class TokenWallet(models.Model):
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    held_balance = models.BigIntegerField(default=0)
+    risk_status = models.CharField(
+        max_length=16,
+        choices=LEDGER_RISK_STATUS_CHOICES,
+        default=LEDGER_RISK_STATUS_CLEAR,
+        db_index=True,
+    )
+    risk_reason = models.TextField(blank=True, default="")
+    review_required = models.BooleanField(default=False, db_index=True)
+    daily_outflow_limit = models.BigIntegerField(null=True, blank=True)
+    hourly_outflow_limit = models.BigIntegerField(null=True, blank=True)
+    daily_inflow_limit = models.BigIntegerField(null=True, blank=True)
+    hourly_inflow_limit = models.BigIntegerField(null=True, blank=True)
+
     class Meta:
         constraints = [
             models.CheckConstraint(
@@ -142,7 +178,21 @@ class TokenWallet(models.Model):
                 condition=(models.Q(allow_negative=True) | models.Q(balance__gte=0)),
                 name="tokenwallet_balance_non_negative_unless_allowed",
             ),
+            models.CheckConstraint(
+                condition=models.Q(held_balance__gte=0),
+                name="tokenwallet_held_balance_gte_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(balance__gte=models.F("held_balance")) | models.Q(allow_negative=True),
+                name="tokenwallet_balance_gte_held_balance_if_not_negative",
+            ),
         ]
+
+    permissions = [
+        ("can_manage_wallet_risk", "Can manage wallet risk flags and limits"),
+        ("can_manage_wallet_holds", "Can manage wallet holds"),
+        ("can_view_wallet_risk", "Can view wallet risk state"),
+    ]
 
     def __str__(self):
         if self.wallet_type == self.TYPE_SYSTEM:
@@ -411,3 +461,84 @@ class LedgerSagaStep(models.Model):
 
     def __str__(self):
         return f"SagaStep #{self.id} saga={self.saga_id} {self.step_key} {self.status}"
+
+class LedgerVelocityWindow(models.Model):
+    wallet = models.ForeignKey(
+        TokenWallet,
+        on_delete=models.CASCADE,
+        related_name="velocity_windows",
+    )
+    action = models.CharField(max_length=32, choices=LEDGER_ACTION_CHOICES, db_index=True)
+    window_seconds = models.PositiveIntegerField(db_index=True)
+    amount = models.BigIntegerField(default=0)
+    count = models.PositiveIntegerField(default=0)
+    window_start = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["wallet", "action", "window_seconds", "window_start"],
+                name="ledgervelocitywindow_unique_wallet_action_window",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gte=0),
+                name="ledgervelocitywindow_amount_gte_0",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["wallet", "action", "window_seconds", "window_start"]),
+        ]
+        permissions = [
+            ("can_view_wallet_velocity", "Can view wallet velocity windows"),
+        ]
+
+    def __str__(self):
+        return f"Velocity wallet={self.wallet_id} action={self.action} {self.window_seconds}s amount={self.amount}"
+
+class LedgerHold(models.Model):
+    wallet = models.ForeignKey(
+        TokenWallet,
+        on_delete=models.PROTECT,
+        related_name="holds",
+    )
+    amount = models.BigIntegerField()
+    reason = models.CharField(max_length=128, blank=True, default="")
+    released = models.BooleanField(default=False, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ledger_holds_created",
+    )
+    released_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ledger_holds_released",
+    )
+    metadata = models.JSONField(blank=True, default=dict)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    released_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="ledgerhold_amount_gt_0",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["wallet", "released", "created_at"]),
+        ]
+        permissions = [
+            ("can_manage_wallet_holds", "Can manage wallet holds"),
+            ("can_view_wallet_holds", "Can view wallet holds"),
+        ]
+
+    def __str__(self):
+        return f"Hold #{self.id} wallet={self.wallet_id} amount={self.amount} released={self.released}"
