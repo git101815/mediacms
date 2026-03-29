@@ -1,0 +1,361 @@
+from django.core.exceptions import ValidationError
+
+from ledger.models import LedgerEntry, LedgerTransaction, TokenWallet
+from ledger.services import (
+    apply_ledger_transaction,
+    create_pending_ledger_transaction,
+    get_system_wallet,
+    reverse_ledger_transaction,
+)
+
+from tests.ledger.base import BaseLedgerTestCase
+
+
+class TestLedgerCore(BaseLedgerTestCase):
+    def test_wallet_auto_created_on_user_save(self):
+        self.assertTrue(TokenWallet.objects.filter(user=self.u1).exists())
+        self.assertTrue(TokenWallet.objects.filter(user=self.u2).exists())
+        self.assertEqual(self.w1.balance, 0)
+        self.assertEqual(self.w2.balance, 0)
+
+        self.u1.save()
+        self.assertEqual(TokenWallet.objects.filter(user=self.u1).count(), 1)
+
+    def test_apply_transaction_double_entry_updates_balances_and_creates_rows(self):
+        txn = apply_ledger_transaction(
+            actor=self.operator,
+            kind="mint",
+            entries=[(self.issuance, -50), (self.w1, 50)],
+            external_id="mint-1",
+            created_by=self.u1,
+            memo="test mint",
+            metadata={"source": "test"},
+        )
+
+        self.issuance.refresh_from_db()
+        self.w1.refresh_from_db()
+
+        self.assertEqual(self.issuance.balance, -50)
+        self.assertEqual(self.w1.balance, 50)
+
+        self.assertEqual(LedgerTransaction.objects.count(), 1)
+        self.assertEqual(LedgerEntry.objects.count(), 2)
+
+        entries = list(LedgerEntry.objects.filter(txn=txn).order_by("wallet_id"))
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(sum(entry.delta for entry in entries), 0)
+
+        user_entry = LedgerEntry.objects.get(txn=txn, wallet=self.w1)
+        self.assertEqual(user_entry.delta, 50)
+        self.assertEqual(user_entry.balance_after, 50)
+
+        issuance_entry = LedgerEntry.objects.get(txn=txn, wallet=self.issuance)
+        self.assertEqual(issuance_entry.delta, -50)
+        self.assertEqual(issuance_entry.balance_after, -50)
+
+        self.assertEqual(txn.external_id, "mint-1")
+        self.assertIsNotNone(txn.request_hash)
+        self.assertEqual(txn.status, LedgerTransaction.STATUS_POSTED)
+
+    def test_transfer_two_wallets_balanced(self):
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="mint",
+            entries=[(self.issuance, -100), (self.w1, 100)],
+            external_id="mint-2",
+        )
+        self.issuance.refresh_from_db()
+        self.w1.refresh_from_db()
+        self.assertEqual(self.issuance.balance, -100)
+        self.assertEqual(self.w1.balance, 100)
+
+        txn = apply_ledger_transaction(
+            actor=self.operator,
+            kind="transfer",
+            entries=[(self.w1, -30), (self.w2, 30)],
+            external_id="xfer-1",
+        )
+
+        self.w1.refresh_from_db()
+        self.w2.refresh_from_db()
+        self.assertEqual(self.w1.balance, 70)
+        self.assertEqual(self.w2.balance, 30)
+
+        entries = list(LedgerEntry.objects.filter(txn=txn).order_by("wallet_id"))
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(sum(entry.delta for entry in entries), 0)
+
+    def test_insufficient_funds_rolls_back(self):
+        with self.assertRaises(ValidationError):
+            apply_ledger_transaction(
+                actor=self.operator,
+                kind="transfer",
+                entries=[(self.w1, -1), (self.w2, 1)],
+                external_id="insufficient-1",
+            )
+
+        self.w1.refresh_from_db()
+        self.w2.refresh_from_db()
+        self.assertEqual(self.w1.balance, 0)
+        self.assertEqual(self.w2.balance, 0)
+        self.assertEqual(LedgerTransaction.objects.count(), 0)
+        self.assertEqual(LedgerEntry.objects.count(), 0)
+
+    def test_idempotency_same_external_id_returns_same_txn(self):
+        txn1 = apply_ledger_transaction(
+            actor=self.operator,
+            kind="mint",
+            entries=[(self.issuance, -10), (self.w1, 10)],
+            external_id="idem-1",
+        )
+        self.issuance.refresh_from_db()
+        self.w1.refresh_from_db()
+        self.assertEqual(self.issuance.balance, -10)
+        self.assertEqual(self.w1.balance, 10)
+
+        txn2 = apply_ledger_transaction(
+            actor=self.operator,
+            kind="mint",
+            entries=[(self.issuance, -10), (self.w1, 10)],
+            external_id="idem-1",
+        )
+        self.issuance.refresh_from_db()
+        self.w1.refresh_from_db()
+
+        self.assertEqual(txn1.id, txn2.id)
+        self.assertEqual(self.issuance.balance, -10)
+        self.assertEqual(self.w1.balance, 10)
+        self.assertEqual(LedgerTransaction.objects.count(), 1)
+        self.assertEqual(LedgerEntry.objects.count(), 2)
+
+    def test_idempotency_external_id_payload_mismatch_rejected(self):
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="mint",
+            entries=[(self.issuance, -10), (self.w1, 10)],
+            external_id="idem-2",
+            memo="A",
+        )
+
+        with self.assertRaises(ValidationError):
+            apply_ledger_transaction(
+                actor=self.operator,
+                kind="mint",
+                entries=[(self.issuance, -11), (self.w1, 11)],
+                external_id="idem-2",
+                memo="A",
+            )
+
+        with self.assertRaises(ValidationError):
+            apply_ledger_transaction(
+                actor=self.operator,
+                kind="mint",
+                entries=[(self.issuance, -10), (self.w1, 10)],
+                external_id="idem-2",
+                memo="B",
+            )
+
+    def test_reject_unsaved_wallet_in_entries(self):
+        unsaved = TokenWallet(user=self.u1)
+        with self.assertRaises(ValidationError):
+            apply_ledger_transaction(
+                actor=self.operator,
+                kind="mint",
+                entries=[(unsaved, 10), (self.w1, -10)],
+                external_id="bad-1",
+            )
+
+    def test_ledger_entry_is_immutable(self):
+        txn = apply_ledger_transaction(
+            actor=self.operator,
+            kind="mint",
+            entries=[(self.issuance, -5), (self.w1, 5)],
+            external_id="imm-1",
+        )
+        entry = LedgerEntry.objects.get(txn=txn, wallet=self.w1)
+
+        entry.delta = 999
+        with self.assertRaises(ValidationError):
+            entry.save()
+
+        with self.assertRaises(ValidationError):
+            entry.delete()
+
+    def test_queryset_update_delete_blocked(self):
+        txn = apply_ledger_transaction(
+            actor=self.operator,
+            kind="mint",
+            entries=[(self.issuance, -5), (self.w1, 5)],
+            external_id="imm-2",
+        )
+        entry = LedgerEntry.objects.get(txn=txn, wallet=self.w1)
+
+        with self.assertRaises(ValidationError):
+            LedgerEntry.objects.filter(id=entry.id).update(delta=1)
+
+        with self.assertRaises(ValidationError):
+            LedgerEntry.objects.filter(id=entry.id).delete()
+
+        with self.assertRaises(ValidationError):
+            LedgerTransaction.objects.filter(id=txn.id).update(kind="x")
+
+        with self.assertRaises(ValidationError):
+            LedgerTransaction.objects.filter(id=txn.id).delete()
+
+    def test_reject_unbalanced_transaction(self):
+        with self.assertRaises(ValidationError):
+            apply_ledger_transaction(
+                actor=self.operator,
+                kind="bad_unbalanced",
+                entries=[(self.w1, 10), (self.w2, -9)],
+                external_id="bad-unbalanced-1",
+            )
+
+    def test_reject_single_entry_transaction(self):
+        with self.assertRaises(ValidationError):
+            apply_ledger_transaction(
+                actor=self.operator,
+                kind="bad_single",
+                entries=[(self.w1, 10)],
+                external_id="bad-single-1",
+            )
+
+    def test_system_issuance_wallet_can_go_negative(self):
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="deposit_mint",
+            entries=[(self.issuance, -100), (self.w1, 100)],
+            external_id="mint-double-1",
+        )
+
+        self.issuance.refresh_from_db()
+        self.w1.refresh_from_db()
+
+        self.assertEqual(self.issuance.balance, -100)
+        self.assertEqual(self.w1.balance, 100)
+
+    def test_purchase_with_platform_fee_is_balanced(self):
+        fees = get_system_wallet(
+            TokenWallet.SYSTEM_PLATFORM_FEES,
+            allow_negative=False,
+        )
+
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="deposit_mint",
+            entries=[(self.issuance, -100), (self.w1, 100)],
+            external_id="mint-before-purchase",
+        )
+
+        txn = apply_ledger_transaction(
+            actor=self.operator,
+            kind="video_purchase",
+            entries=[(self.w1, -100), (self.w2, 80), (fees, 20)],
+            external_id="purchase-1",
+        )
+
+        self.w1.refresh_from_db()
+        self.w2.refresh_from_db()
+        fees.refresh_from_db()
+
+        self.assertEqual(self.w1.balance, 0)
+        self.assertEqual(self.w2.balance, 80)
+        self.assertEqual(fees.balance, 20)
+
+        entries = list(LedgerEntry.objects.filter(txn=txn))
+        self.assertEqual(sum(entry.delta for entry in entries), 0)
+        self.assertEqual(txn.status, LedgerTransaction.STATUS_POSTED)
+
+    def test_get_system_wallet_rejects_allow_negative_mismatch(self):
+        get_system_wallet(TokenWallet.SYSTEM_ISSUANCE, allow_negative=True)
+
+        with self.assertRaisesRegex(ValidationError, "expected False"):
+            get_system_wallet(TokenWallet.SYSTEM_ISSUANCE, allow_negative=False)
+
+    def test_can_create_pending_transaction_without_entries(self):
+        txn = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_deposit",
+            external_id="pending-1",
+            created_by=self.u1,
+            memo="awaiting confirmations",
+            metadata={"confirmations": 0},
+        )
+        self.assertEqual(txn.status, LedgerTransaction.STATUS_PENDING)
+        self.assertEqual(txn.entries.count(), 0)
+        self.assertEqual(LedgerEntry.objects.count(), 0)
+
+    def test_pending_transaction_is_idempotent(self):
+        txn1 = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_deposit",
+            external_id="pending-2",
+            memo="awaiting confirmations",
+            metadata={"confirmations": 0},
+        )
+        txn2 = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_deposit",
+            external_id="pending-2",
+            memo="awaiting confirmations",
+            metadata={"confirmations": 0},
+        )
+        self.assertEqual(txn1.id, txn2.id)
+        self.assertEqual(txn2.status, LedgerTransaction.STATUS_PENDING)
+
+    def test_reverse_posted_transaction_creates_compensation_entries(self):
+        original = apply_ledger_transaction(
+            actor=self.operator,
+            kind="mint",
+            entries=[(self.issuance, -25), (self.w1, 25)],
+            external_id="rev-src-1",
+        )
+        reversal = reverse_ledger_transaction(
+            actor=self.operator,
+            original_txn=original,
+            external_id="rev-1",
+            created_by=self.u1,
+            memo="deposit failed",
+        )
+
+        self.issuance.refresh_from_db()
+        self.w1.refresh_from_db()
+
+        self.assertEqual(reversal.status, LedgerTransaction.STATUS_REVERSED)
+        self.assertEqual(reversal.reversal_of_id, original.id)
+        self.assertEqual(self.issuance.balance, 0)
+        self.assertEqual(self.w1.balance, 0)
+        self.assertEqual(reversal.entries.count(), 2)
+        self.assertEqual(sum(entry.delta for entry in reversal.entries.all()), 0)
+
+    def test_reverse_is_idempotent(self):
+        original = apply_ledger_transaction(
+            actor=self.operator,
+            kind="mint",
+            entries=[(self.issuance, -15), (self.w1, 15)],
+            external_id="rev-src-2",
+        )
+        reversal1 = reverse_ledger_transaction(
+            actor=self.operator,
+            original_txn=original,
+            external_id="rev-2",
+        )
+        reversal2 = reverse_ledger_transaction(
+            actor=self.operator,
+            original_txn=original,
+            external_id="rev-2",
+        )
+        self.assertEqual(reversal1.id, reversal2.id)
+
+    def test_cannot_reverse_pending_transaction(self):
+        pending = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_withdrawal",
+            external_id="pending-3",
+        )
+        with self.assertRaises(ValidationError):
+            reverse_ledger_transaction(
+                actor=self.operator,
+                original_txn=pending,
+                external_id="rev-pending-1",
+            )
