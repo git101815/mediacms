@@ -7,17 +7,27 @@ from ledger.models import (
     LEDGER_OUTBOX_MAX_RETRIES,
     LedgerEntry,
     LedgerOutbox,
+    LedgerSaga,
+    LedgerSagaStep,
     LedgerTransaction,
     TokenWallet,
 )
 from ledger.services import (
+    add_saga_step,
     apply_ledger_transaction,
+    complete_ledger_saga,
+    complete_saga_step,
+    compensate_ledger_saga,
+    create_ledger_saga,
     create_pending_ledger_transaction,
+    fail_saga_step,
     get_dispatchable_outbox_events,
     get_system_wallet,
     mark_outbox_event_failed,
     move_outbox_event_to_dlq,
     reverse_ledger_transaction,
+    start_ledger_saga,
+    start_saga_step,
 )
 
 
@@ -561,6 +571,11 @@ class TestLedger(TestCase):
         )
         start_saga_step(step)
 
+        apply_ledger_transaction(
+            kind="test_funding",
+            entries=[(self.issuance, -10), (self.w1, 10)],
+            external_id="saga-step-fund-1",
+        )
         txn = apply_ledger_transaction(
             kind="withdrawal_reserve",
             entries=[(self.w1, -10), (self.w2, 10)],
