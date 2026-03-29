@@ -553,7 +553,10 @@ def compensate_ledger_saga(*, actor, saga: LedgerSaga, created_by=None, reason: 
     )
 
     for step in steps:
-        if step.status != LedgerSagaStep.STATUS_COMPLETED:
+        if step.status not in [
+            LedgerSagaStep.STATUS_COMPLETED,
+            LedgerSagaStep.STATUS_FAILED,
+        ]:
             continue
 
         if step.txn and step.txn.status == LedgerTransaction.STATUS_POSTED:
@@ -565,6 +568,13 @@ def compensate_ledger_saga(*, actor, saga: LedgerSaga, created_by=None, reason: 
                 memo=reason or f"Compensation for saga {saga.id} step {step.step_key}",
             )
             step.compensation_txn = compensation_txn
+            step.status = LedgerSagaStep.STATUS_COMPENSATED
+            step.compensated_at = timezone.now()
+            step.save(update_fields=["status", "compensated_at", "compensation_txn"])
+        elif step.status == LedgerSagaStep.STATUS_COMPLETED:
+            step.status = LedgerSagaStep.STATUS_COMPENSATED
+            step.compensated_at = timezone.now()
+            step.save(update_fields=["status", "compensated_at"])
 
         step.status = LedgerSagaStep.STATUS_COMPENSATED
         step.compensated_at = timezone.now()
