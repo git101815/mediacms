@@ -531,3 +531,124 @@ class TestLedger(TestCase):
         ids = [e.id for e in get_dispatchable_outbox_events(limit=100)]
 
         self.assertIn(event.id, ids)
+
+    def test_create_ledger_saga_is_idempotent(self):
+        saga1 = create_ledger_saga(
+            saga_type="crypto_withdrawal",
+            external_id="saga-1",
+            created_by=self.u1,
+        )
+        saga2 = create_ledger_saga(
+            saga_type="crypto_withdrawal",
+            external_id="saga-1",
+            created_by=self.u1,
+        )
+
+        self.assertEqual(saga1.id, saga2.id)
+        self.assertEqual(saga1.status, LedgerSaga.STATUS_PENDING)
+
+    def test_saga_steps_can_be_started_and_completed(self):
+        saga = create_ledger_saga(
+            saga_type="crypto_withdrawal",
+            external_id="saga-steps-1",
+        )
+        start_ledger_saga(saga)
+
+        step = add_saga_step(
+            saga=saga,
+            step_key="reserve_balance",
+            step_order=1,
+        )
+        start_saga_step(step)
+
+        txn = apply_ledger_transaction(
+            kind="withdrawal_reserve",
+            entries=[(self.w1, -10), (self.w2, 10)],
+            external_id="saga-step-txn-1",
+        )
+        complete_saga_step(step, txn=txn)
+        step.refresh_from_db()
+
+        self.assertEqual(step.status, LedgerSagaStep.STATUS_COMPLETED)
+        self.assertEqual(step.txn_id, txn.id)
+
+    def test_complete_ledger_saga_marks_completed(self):
+        saga = create_ledger_saga(
+            saga_type="crypto_withdrawal",
+            external_id="saga-complete-1",
+        )
+        start_ledger_saga(saga)
+
+        step = add_saga_step(saga=saga, step_key="noop", step_order=1)
+        start_saga_step(step)
+        complete_saga_step(step)
+
+        complete_ledger_saga(saga)
+        saga.refresh_from_db()
+
+        self.assertEqual(saga.status, LedgerSaga.STATUS_COMPLETED)
+        self.assertIsNotNone(saga.completed_at)
+
+        def test_fail_saga_step_marks_saga_failed(self):
+            saga = create_ledger_saga(
+                saga_type="crypto_withdrawal",
+                external_id="saga-fail-1",
+            )
+            start_ledger_saga(saga)
+
+            step = add_saga_step(saga=saga, step_key="broadcast", step_order=1)
+            start_saga_step(step)
+            fail_saga_step(step, error_message="broadcast failed")
+
+            step.refresh_from_db()
+            saga.refresh_from_db()
+
+            self.assertEqual(step.status, LedgerSagaStep.STATUS_FAILED)
+            self.assertEqual(saga.status, LedgerSaga.STATUS_FAILED)
+            self.assertEqual(saga.last_error, "broadcast failed")
+
+        def test_compensate_ledger_saga_reverses_completed_steps_in_reverse_order(self):
+            saga = create_ledger_saga(
+                saga_type="crypto_withdrawal",
+                external_id="saga-comp-1",
+            )
+            start_ledger_saga(saga)
+
+            step1 = add_saga_step(saga=saga, step_key="reserve_1", step_order=1)
+            step2 = add_saga_step(saga=saga, step_key="reserve_2", step_order=2)
+
+            txn1 = apply_ledger_transaction(
+                kind="reserve_a",
+                entries=[(self.issuance, -5), (self.w1, 5)],
+                external_id="saga-comp-txn-1",
+            )
+            txn2 = apply_ledger_transaction(
+                kind="reserve_b",
+                entries=[(self.issuance, -7), (self.w1, 7)],
+                external_id="saga-comp-txn-2",
+            )
+
+            complete_saga_step(step1, txn=txn1)
+            complete_saga_step(step2, txn=txn2)
+            fail_saga_step(step2, error_message="later external failure")
+
+            compensate_ledger_saga(
+                saga=saga,
+                created_by=self.u1,
+                reason="rollback workflow",
+            )
+
+            saga.refresh_from_db()
+            step1.refresh_from_db()
+            step2.refresh_from_db()
+            self.w1.refresh_from_db()
+            self.issuance.refresh_from_db()
+
+            self.assertEqual(saga.status, LedgerSaga.STATUS_COMPENSATED)
+            self.assertEqual(step1.status, LedgerSagaStep.STATUS_COMPENSATED)
+            self.assertEqual(step2.status, LedgerSagaStep.STATUS_COMPENSATED)
+            self.assertIsNotNone(step1.compensation_txn_id)
+            self.assertIsNotNone(step2.compensation_txn_id)
+            self.assertEqual(self.w1.balance, 0)
+            self.assertEqual(self.issuance.balance, 0)
+

@@ -30,6 +30,38 @@ LEDGER_OUTBOX_STATUS_CHOICES = (
 LEDGER_METADATA_VERSION = 1
 LEDGER_OUTBOX_MAX_RETRIES = 5
 
+LEDGER_SAGA_STATUS_PENDING = "pending"
+LEDGER_SAGA_STATUS_RUNNING = "running"
+LEDGER_SAGA_STATUS_COMPLETED = "completed"
+LEDGER_SAGA_STATUS_FAILED = "failed"
+LEDGER_SAGA_STATUS_COMPENSATING = "compensating"
+LEDGER_SAGA_STATUS_COMPENSATED = "compensated"
+
+LEDGER_SAGA_STATUS_CHOICES = (
+    (LEDGER_SAGA_STATUS_PENDING, "Pending"),
+    (LEDGER_SAGA_STATUS_RUNNING, "Running"),
+    (LEDGER_SAGA_STATUS_COMPLETED, "Completed"),
+    (LEDGER_SAGA_STATUS_FAILED, "Failed"),
+    (LEDGER_SAGA_STATUS_COMPENSATING, "Compensating"),
+    (LEDGER_SAGA_STATUS_COMPENSATED, "Compensated"),
+)
+
+LEDGER_SAGA_STEP_STATUS_PENDING = "pending"
+LEDGER_SAGA_STEP_STATUS_RUNNING = "running"
+LEDGER_SAGA_STEP_STATUS_COMPLETED = "completed"
+LEDGER_SAGA_STEP_STATUS_FAILED = "failed"
+LEDGER_SAGA_STEP_STATUS_COMPENSATED = "compensated"
+LEDGER_SAGA_STEP_STATUS_SKIPPED = "skipped"
+
+LEDGER_SAGA_STEP_STATUS_CHOICES = (
+    (LEDGER_SAGA_STEP_STATUS_PENDING, "Pending"),
+    (LEDGER_SAGA_STEP_STATUS_RUNNING, "Running"),
+    (LEDGER_SAGA_STEP_STATUS_COMPLETED, "Completed"),
+    (LEDGER_SAGA_STEP_STATUS_FAILED, "Failed"),
+    (LEDGER_SAGA_STEP_STATUS_COMPENSATED, "Compensated"),
+    (LEDGER_SAGA_STEP_STATUS_SKIPPED, "Skipped"),
+)
+
 class ImmutableLedgerRow(models.Model):
     class Meta:
         abstract = True
@@ -248,3 +280,103 @@ class LedgerOutbox(models.Model):
 
     def __str__(self):
         return f"Outbox #{self.id} {self.topic} {self.status} txn={self.txn_id}"
+
+class LedgerSaga(models.Model):
+    STATUS_PENDING = LEDGER_SAGA_STATUS_PENDING
+    STATUS_RUNNING = LEDGER_SAGA_STATUS_RUNNING
+    STATUS_COMPLETED = LEDGER_SAGA_STATUS_COMPLETED
+    STATUS_FAILED = LEDGER_SAGA_STATUS_FAILED
+    STATUS_COMPENSATING = LEDGER_SAGA_STATUS_COMPENSATING
+    STATUS_COMPENSATED = LEDGER_SAGA_STATUS_COMPENSATED
+    STATUS_CHOICES = LEDGER_SAGA_STATUS_CHOICES
+
+    saga_type = models.CharField(max_length=64, db_index=True)
+    external_id = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    status = models.CharField(
+        max_length=16,
+        choices=LEDGER_SAGA_STATUS_CHOICES,
+        default=LEDGER_SAGA_STATUS_PENDING,
+        db_index=True,
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ledger_sagas_created",
+    )
+    metadata = models.JSONField(blank=True, default=dict)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+    started_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    completed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    failed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    compensated_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    def __str__(self):
+        return f"Saga #{self.id} {self.saga_type} {self.status}"
+
+class LedgerSagaStep(models.Model):
+    STATUS_PENDING = LEDGER_SAGA_STEP_STATUS_PENDING
+    STATUS_RUNNING = LEDGER_SAGA_STEP_STATUS_RUNNING
+    STATUS_COMPLETED = LEDGER_SAGA_STEP_STATUS_COMPLETED
+    STATUS_FAILED = LEDGER_SAGA_STEP_STATUS_FAILED
+    STATUS_COMPENSATED = LEDGER_SAGA_STEP_STATUS_COMPENSATED
+    STATUS_SKIPPED = LEDGER_SAGA_STEP_STATUS_SKIPPED
+    STATUS_CHOICES = LEDGER_SAGA_STEP_STATUS_CHOICES
+
+    saga = models.ForeignKey(
+        LedgerSaga,
+        on_delete=models.CASCADE,
+        related_name="steps",
+    )
+    step_key = models.CharField(max_length=64)
+    step_order = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=16,
+        choices=LEDGER_SAGA_STEP_STATUS_CHOICES,
+        default=LEDGER_SAGA_STEP_STATUS_PENDING,
+        db_index=True,
+    )
+    txn = models.ForeignKey(
+        LedgerTransaction,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="saga_steps",
+    )
+    compensation_txn = models.ForeignKey(
+        LedgerTransaction,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="compensated_saga_steps",
+    )
+    payload = models.JSONField(blank=True, default=dict)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+    started_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    completed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    failed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    compensated_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["saga", "step_key"],
+                name="ledgersagastep_unique_step_key_per_saga",
+            ),
+            models.UniqueConstraint(
+                fields=["saga", "step_order"],
+                name="ledgersagastep_unique_step_order_per_saga",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["saga", "step_order"]),
+            models.Index(fields=["saga", "status"]),
+        ]
+
+    def __str__(self):
+        return f"SagaStep #{self.id} saga={self.saga_id} {self.step_key} {self.status}"

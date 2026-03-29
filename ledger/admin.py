@@ -62,3 +62,63 @@ class LedgerOutboxAdmin(ReadOnlyAdmin):
         "dead_lettered_at",
         "dead_letter_reason",
     )
+
+@admin.register(LedgerSaga)
+class LedgerSagaAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "saga_type",
+        "status",
+        "external_id",
+        "created_by",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "failed_at",
+        "compensated_at",
+    )
+    search_fields = ("external_id", "saga_type", "created_by__username")
+    readonly_fields = (
+        "saga_type",
+        "external_id",
+        "status",
+        "created_by",
+        "metadata",
+        "metadata_version",
+        "started_at",
+        "completed_at",
+        "failed_at",
+        "compensated_at",
+        "last_error",
+        "created_at",
+    )
+
+    @admin.register(LedgerSagaStep)
+    class LedgerSagaStepAdmin(ReadOnlyAdmin):
+        list_display = (
+            "id",
+            "saga",
+            "step_key",
+            "step_order",
+            "status",
+            "txn",
+            "compensation_txn",
+            "created_at",
+        )
+        search_fields = ("step_key", "saga__external_id", "txn__external_id")
+        readonly_fields = (
+            "saga",
+            "step_key",
+            "step_order",
+            "status",
+            "txn",
+            "compensation_txn",
+            "payload",
+            "metadata_version",
+            "started_at",
+            "completed_at",
+            "failed_at",
+            "compensated_at",
+            "last_error",
+            "created_at",
+        )

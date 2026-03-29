@@ -7,6 +7,8 @@ from .models import (
     LedgerOutbox,
     LedgerTransaction,
     TokenWallet,
+    LedgerSaga,
+    LedgerSagaStep,
 )
 import hashlib
 import json
@@ -372,3 +374,144 @@ def get_dispatchable_outbox_events(limit: int = 100):
             LedgerOutbox.STATUS_FAILED,
         ]
     ).order_by("created_at")[:limit]
+
+@transaction.atomic
+def create_ledger_saga(*, saga_type: str, created_by=None, external_id=None, metadata=None) -> LedgerSaga:
+    if metadata is None:
+        metadata = {}
+
+    if external_id:
+        try:
+            with transaction.atomic():
+                return LedgerSaga.objects.create(
+                    saga_type=saga_type,
+                    external_id=external_id,
+                    status=LedgerSaga.STATUS_PENDING,
+                    created_by=created_by,
+                    metadata=metadata,
+                    metadata_version=LEDGER_METADATA_VERSION,
+                )
+        except IntegrityError:
+            return LedgerSaga.objects.get(external_id=external_id)
+
+    return LedgerSaga.objects.create(
+        saga_type=saga_type,
+        external_id=None,
+        status=LedgerSaga.STATUS_PENDING,
+        created_by=created_by,
+        metadata=metadata,
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+@transaction.atomic
+def add_saga_step(*, saga: LedgerSaga, step_key: str, step_order: int, payload=None) -> LedgerSagaStep:
+    if payload is None:
+        payload = {}
+
+    return LedgerSagaStep.objects.create(
+        saga=saga,
+        step_key=step_key,
+        step_order=step_order,
+        status=LedgerSagaStep.STATUS_PENDING,
+        payload=payload,
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+@transaction.atomic
+def start_ledger_saga(saga: LedgerSaga) -> LedgerSaga:
+    if saga.status != LedgerSaga.STATUS_PENDING:
+        return saga
+
+    saga.status = LedgerSaga.STATUS_RUNNING
+    saga.started_at = timezone.now()
+    saga.save(update_fields=["status", "started_at"])
+    return saga
+
+@transaction.atomic
+def start_saga_step(step: LedgerSagaStep) -> LedgerSagaStep:
+    if step.status != LedgerSagaStep.STATUS_PENDING:
+        return step
+
+    step.status = LedgerSagaStep.STATUS_RUNNING
+    step.started_at = timezone.now()
+    step.save(update_fields=["status", "started_at"])
+    return step
+
+@transaction.atomic
+def complete_saga_step(step: LedgerSagaStep, *, txn: LedgerTransaction = None) -> LedgerSagaStep:
+    step.status = LedgerSagaStep.STATUS_COMPLETED
+    step.completed_at = timezone.now()
+    if txn is not None:
+        step.txn = txn
+        step.save(update_fields=["status", "completed_at", "txn"])
+    else:
+        step.save(update_fields=["status", "completed_at"])
+    return step
+
+@transaction.atomic
+def fail_saga_step(step: LedgerSagaStep, *, error_message: str) -> LedgerSagaStep:
+    step.status = LedgerSagaStep.STATUS_FAILED
+    step.failed_at = timezone.now()
+    step.last_error = error_message[:2000]
+    step.save(update_fields=["status", "failed_at", "last_error"])
+
+    saga = step.saga
+    saga.status = LedgerSaga.STATUS_FAILED
+    saga.failed_at = timezone.now()
+    saga.last_error = error_message[:2000]
+    saga.save(update_fields=["status", "failed_at", "last_error"])
+
+    return step
+
+@transaction.atomic
+def complete_ledger_saga(saga: LedgerSaga) -> LedgerSaga:
+    if saga.steps.filter(
+        status__in=[
+            LedgerSagaStep.STATUS_PENDING,
+            LedgerSagaStep.STATUS_RUNNING,
+            LedgerSagaStep.STATUS_FAILED,
+        ]
+    ).exists():
+        raise ValidationError("Cannot complete saga with unfinished or failed steps")
+
+    saga.status = LedgerSaga.STATUS_COMPLETED
+    saga.completed_at = timezone.now()
+    saga.save(update_fields=["status", "completed_at"])
+    return saga
+
+@transaction.atomic
+def compensate_ledger_saga(*, saga: LedgerSaga, created_by=None, reason: str = "") -> LedgerSaga:
+    if saga.status not in [LedgerSaga.STATUS_FAILED, LedgerSaga.STATUS_COMPENSATING]:
+        raise ValidationError("Only failed or compensating sagas can be compensated")
+
+    saga.status = LedgerSaga.STATUS_COMPENSATING
+    saga.save(update_fields=["status"])
+
+    steps = list(
+        saga.steps.select_related("txn").order_by("-step_order", "-id")
+    )
+
+    for step in steps:
+        if step.status != LedgerSagaStep.STATUS_COMPLETED:
+            continue
+
+        if step.txn and step.txn.status == LedgerTransaction.STATUS_POSTED:
+            compensation_txn = reverse_ledger_transaction(
+                original_txn=step.txn,
+                created_by=created_by,
+                external_id=f"saga-comp-{saga.id}-{step.id}",
+                memo=reason or f"Compensation for saga {saga.id} step {step.step_key}",
+            )
+            step.compensation_txn = compensation_txn
+
+        step.status = LedgerSagaStep.STATUS_COMPENSATED
+        step.compensated_at = timezone.now()
+        if step.compensation_txn_id:
+            step.save(update_fields=["status", "compensated_at", "compensation_txn"])
+        else:
+            step.save(update_fields=["status", "compensated_at"])
+
+    saga.status = LedgerSaga.STATUS_COMPENSATED
+    saga.compensated_at = timezone.now()
+    saga.save(update_fields=["status", "compensated_at"])
+    return saga
