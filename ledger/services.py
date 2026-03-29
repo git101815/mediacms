@@ -1,4 +1,4 @@
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from .models import (
     LEDGER_METADATA_VERSION,
@@ -13,6 +13,42 @@ from .models import (
 import hashlib
 import json
 from django.utils import timezone
+
+def _require_authenticated_actor(actor):
+    if actor is None:
+        raise PermissionDenied("Actor is required")
+    if not getattr(actor, "is_authenticated", False):
+        raise PermissionDenied("Authenticated actor required")
+    if not getattr(actor, "is_active", False):
+        raise PermissionDenied("Active actor required")
+    return actor
+
+
+def _require_perm(actor, perm_codename: str):
+    actor = _require_authenticated_actor(actor)
+    if getattr(actor, "is_superuser", False):
+        return actor
+    if not actor.has_perm(perm_codename):
+        raise PermissionDenied(f"Missing permission: {perm_codename}")
+    return actor
+
+
+def _resolve_created_by(*, actor, created_by):
+    actor = _require_authenticated_actor(actor)
+
+    if created_by is None:
+        return actor
+
+    if created_by.id == actor.id:
+        return created_by
+
+    if getattr(actor, "is_superuser", False):
+        return created_by
+
+    if actor.has_perm("ledger.can_impersonate_ledger_creator"):
+        return created_by
+
+    raise PermissionDenied("Cannot set created_by for another user")
 
 def _create_outbox_event(*, txn: LedgerTransaction, topic: str, payload: dict, metadata_version: int) -> LedgerOutbox:
     return LedgerOutbox.objects.create(
@@ -40,7 +76,10 @@ def get_system_wallet(system_key: str, *, allow_negative: bool) -> TokenWallet:
     return wallet
 
 @transaction.atomic
-def create_pending_ledger_transaction(*, kind: str, created_by=None, external_id=None, memo="", metadata=None):
+def create_pending_ledger_transaction(*, actor, kind: str, created_by=None, external_id=None, memo="", metadata=None):
+    _require_perm(actor, "ledger.can_create_pending_ledger_transaction")
+    created_by = _resolve_created_by(actor=actor, created_by=created_by)
+
     if metadata is None:
         metadata = {}
 
@@ -102,10 +141,14 @@ def create_pending_ledger_transaction(*, kind: str, created_by=None, external_id
     return txn
 
 @transaction.atomic
-def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, external_id=None, memo="", metadata=None):
+def apply_ledger_transaction(*, actor, kind: str, entries: list, created_by=None, external_id=None, memo="", metadata=None):
     """
     entries: list[tuple[TokenWallet, int]] signed delta.
     """
+
+    _require_perm(actor, "ledger.can_apply_raw_ledger_transaction")
+    created_by = _resolve_created_by(actor=actor, created_by=created_by)
+
     if metadata is None:
         metadata = {}
 
@@ -215,7 +258,10 @@ def apply_ledger_transaction(*, kind: str, entries: list, created_by=None, exter
     return txn
 
 @transaction.atomic
-def reverse_ledger_transaction(*, original_txn: LedgerTransaction, created_by=None, external_id=None, memo="", metadata=None):
+def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, created_by=None, external_id=None, memo="", metadata=None):
+    _require_perm(actor, "ledger.can_reverse_ledger_transaction")
+    created_by = _resolve_created_by(actor=actor, created_by=created_by)
+
     if metadata is None:
         metadata = {}
 
@@ -322,14 +368,17 @@ def reverse_ledger_transaction(*, original_txn: LedgerTransaction, created_by=No
         metadata_version=txn.metadata_version,
     )
     return txn
-def mark_outbox_event_dispatched(event: LedgerOutbox) -> LedgerOutbox:
+
+def mark_outbox_event_dispatched(*, actor, event: LedgerOutbox) -> LedgerOutbox:
+    _require_perm(actor, "ledger.can_manage_ledger_outbox")
     event.status = LedgerOutbox.STATUS_DISPATCHED
     event.dispatched_at = timezone.now()
     event.save(update_fields=["status", "dispatched_at"])
     return event
 
 
-def mark_outbox_event_failed(event: LedgerOutbox, error_message: str) -> LedgerOutbox:
+def mark_outbox_event_failed(*, actor, event: LedgerOutbox, error_message: str) -> LedgerOutbox:
+    _require_perm(actor, "ledger.can_manage_ledger_outbox")
     event.fail_count += 1
     event.last_error = error_message[:2000]
 
@@ -352,7 +401,8 @@ def mark_outbox_event_failed(event: LedgerOutbox, error_message: str) -> LedgerO
     event.save(update_fields=["status", "fail_count", "last_error"])
     return event
 
-def move_outbox_event_to_dlq(event: LedgerOutbox, reason: str) -> LedgerOutbox:
+def move_outbox_event_to_dlq(*, actor, event: LedgerOutbox, reason: str) -> LedgerOutbox:
+    _require_perm(actor, "ledger.can_manage_ledger_outbox")
     event.status = LedgerOutbox.STATUS_DEAD_LETTERED
     event.dead_lettered_at = timezone.now()
     event.dead_letter_reason = reason[:2000]
@@ -367,7 +417,8 @@ def move_outbox_event_to_dlq(event: LedgerOutbox, reason: str) -> LedgerOutbox:
     )
     return event
 
-def get_dispatchable_outbox_events(limit: int = 100):
+def get_dispatchable_outbox_events(*, actor, limit: int = 100):
+    _require_perm(actor, "ledger.can_manage_ledger_outbox")
     return LedgerOutbox.objects.filter(
         status__in=[
             LedgerOutbox.STATUS_PENDING,
@@ -376,7 +427,9 @@ def get_dispatchable_outbox_events(limit: int = 100):
     ).order_by("created_at")[:limit]
 
 @transaction.atomic
-def create_ledger_saga(*, saga_type: str, created_by=None, external_id=None, metadata=None) -> LedgerSaga:
+def create_ledger_saga(*, actor, saga_type: str, created_by=None, external_id=None, metadata=None) -> LedgerSaga:
+    _require_perm(actor, "ledger.can_manage_ledger_sagas")
+    created_by = _resolve_created_by(actor=actor, created_by=created_by)
     if metadata is None:
         metadata = {}
 
@@ -404,7 +457,8 @@ def create_ledger_saga(*, saga_type: str, created_by=None, external_id=None, met
     )
 
 @transaction.atomic
-def add_saga_step(*, saga: LedgerSaga, step_key: str, step_order: int, payload=None) -> LedgerSagaStep:
+def add_saga_step(*, actor, saga: LedgerSaga, step_key: str, step_order: int, payload=None) -> LedgerSagaStep:
+    _require_perm(actor, "ledger.can_manage_ledger_sagas")
     if payload is None:
         payload = {}
 
@@ -418,7 +472,8 @@ def add_saga_step(*, saga: LedgerSaga, step_key: str, step_order: int, payload=N
     )
 
 @transaction.atomic
-def start_ledger_saga(saga: LedgerSaga) -> LedgerSaga:
+def start_ledger_saga(*, actor, saga: LedgerSaga) -> LedgerSaga:
+    _require_perm(actor, "ledger.can_manage_ledger_sagas")
     if saga.status != LedgerSaga.STATUS_PENDING:
         return saga
 
@@ -428,7 +483,8 @@ def start_ledger_saga(saga: LedgerSaga) -> LedgerSaga:
     return saga
 
 @transaction.atomic
-def start_saga_step(step: LedgerSagaStep) -> LedgerSagaStep:
+def start_saga_step(*, actor, step: LedgerSagaStep) -> LedgerSagaStep:
+    _require_perm(actor, "ledger.can_manage_ledger_sagas")
     if step.status != LedgerSagaStep.STATUS_PENDING:
         return step
 
@@ -438,7 +494,8 @@ def start_saga_step(step: LedgerSagaStep) -> LedgerSagaStep:
     return step
 
 @transaction.atomic
-def complete_saga_step(step: LedgerSagaStep, *, txn: LedgerTransaction = None) -> LedgerSagaStep:
+def complete_saga_step(*, actor, step: LedgerSagaStep, txn: LedgerTransaction = None) -> LedgerSagaStep:
+    _require_perm(actor, "ledger.can_manage_ledger_sagas")
     step.status = LedgerSagaStep.STATUS_COMPLETED
     step.completed_at = timezone.now()
     if txn is not None:
@@ -449,7 +506,8 @@ def complete_saga_step(step: LedgerSagaStep, *, txn: LedgerTransaction = None) -
     return step
 
 @transaction.atomic
-def fail_saga_step(step: LedgerSagaStep, *, error_message: str) -> LedgerSagaStep:
+def fail_saga_step(*, actor, step: LedgerSagaStep, error_message: str) -> LedgerSagaStep:
+    _require_perm(actor, "ledger.can_manage_ledger_sagas")
     step.status = LedgerSagaStep.STATUS_FAILED
     step.failed_at = timezone.now()
     step.last_error = error_message[:2000]
@@ -464,7 +522,8 @@ def fail_saga_step(step: LedgerSagaStep, *, error_message: str) -> LedgerSagaSte
     return step
 
 @transaction.atomic
-def complete_ledger_saga(saga: LedgerSaga) -> LedgerSaga:
+def complete_ledger_saga(*, actor, saga: LedgerSaga) -> LedgerSaga:
+    _require_perm(actor, "ledger.can_manage_ledger_sagas")
     if saga.steps.filter(
         status__in=[
             LedgerSagaStep.STATUS_PENDING,
@@ -480,7 +539,9 @@ def complete_ledger_saga(saga: LedgerSaga) -> LedgerSaga:
     return saga
 
 @transaction.atomic
-def compensate_ledger_saga(*, saga: LedgerSaga, created_by=None, reason: str = "") -> LedgerSaga:
+def compensate_ledger_saga(*, actor, saga: LedgerSaga, created_by=None, reason: str = "") -> LedgerSaga:
+    _require_perm(actor, "ledger.can_compensate_ledger_sagas")
+    created_by = _resolve_created_by(actor=actor, created_by=created_by)
     if saga.status not in [LedgerSaga.STATUS_FAILED, LedgerSaga.STATUS_COMPENSATING]:
         raise ValidationError("Only failed or compensating sagas can be compensated")
 
@@ -497,6 +558,7 @@ def compensate_ledger_saga(*, saga: LedgerSaga, created_by=None, reason: str = "
 
         if step.txn and step.txn.status == LedgerTransaction.STATUS_POSTED:
             compensation_txn = reverse_ledger_transaction(
+                actor=actor,
                 original_txn=step.txn,
                 created_by=created_by,
                 external_id=f"saga-comp-{saga.id}-{step.id}",

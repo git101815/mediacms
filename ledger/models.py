@@ -203,6 +203,12 @@ class LedgerTransaction(models.Model):
                 name="ledgertransaction_reversal_requires_reversal_of",
             ),
         ]
+        permissions = [
+            ("can_apply_raw_ledger_transaction", "Can apply raw ledger transactions"),
+            ("can_create_pending_ledger_transaction", "Can create pending ledger transactions"),
+            ("can_reverse_ledger_transaction", "Can reverse ledger transactions"),
+            ("can_impersonate_ledger_creator", "Can set created_by to another user"),
+        ]
 
     def __str__(self):
         return f"{self.kind}/{self.status} #{self.id}"
@@ -234,6 +240,9 @@ class LedgerEntry(ImmutableLedgerRow):
                 condition=~models.Q(delta=0),
                 name="ledgerentry_delta_non_zero",
             ),
+        ]
+        permissions = [
+            ("can_view_ledger_entries", "Can view ledger entries"),
         ]
     def __str__(self):
         return f"Entry #{self.id} txn={self.txn_id} wallet={self.wallet_id} delta={self.delta}"
@@ -277,6 +286,9 @@ class LedgerOutbox(models.Model):
             models.Index(fields=["topic", "status", "created_at"]),
             models.Index(fields=["aggregate_type", "aggregate_id"]),
         ]
+        permissions = [
+            ("can_manage_ledger_outbox", "Can manage ledger outbox"),
+        ]
 
     def __str__(self):
         return f"Outbox #{self.id} {self.topic} {self.status} txn={self.txn_id}"
@@ -313,6 +325,13 @@ class LedgerSaga(models.Model):
     compensated_at = models.DateTimeField(null=True, blank=True, db_index=True)
     last_error = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        permissions = [
+            ("can_manage_ledger_sagas", "Can manage ledger sagas"),
+            ("can_compensate_ledger_sagas", "Can compensate ledger sagas"),
+            ("can_view_ledger_sagas", "Can view ledger sagas"),
+        ]
 
     def __str__(self):
         return f"Saga #{self.id} {self.saga_type} {self.status}"
@@ -376,6 +395,9 @@ class LedgerSagaStep(models.Model):
         indexes = [
             models.Index(fields=["saga", "step_order"]),
             models.Index(fields=["saga", "status"]),
+        ]
+        permissions = [
+            ("can_view_ledger_saga_steps", "Can view ledger saga steps"),
         ]
 
     def __str__(self):

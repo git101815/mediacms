@@ -1,5 +1,8 @@
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
+from django.core.exceptions import PermissionDenied
 
 from files.tests import create_account
 from ledger.models import (
@@ -45,6 +48,10 @@ class TestLedger(TestCase):
             TokenWallet.SYSTEM_ISSUANCE,
             allow_negative=True,
         )
+
+    def grant_perm(self, user, codename):
+        perm = Permission.objects.get(codename=codename)
+        user.user_permissions.add(perm)
 
     def test_wallet_auto_created_on_user_save(self):
         self.assertTrue(TokenWallet.objects.filter(user=self.u1).exists())
@@ -604,66 +611,173 @@ class TestLedger(TestCase):
         self.assertEqual(saga.status, LedgerSaga.STATUS_COMPLETED)
         self.assertIsNotNone(saga.completed_at)
 
-        def test_fail_saga_step_marks_saga_failed(self):
-            saga = create_ledger_saga(
+    def test_fail_saga_step_marks_saga_failed(self):
+        saga = create_ledger_saga(
+            saga_type="crypto_withdrawal",
+            external_id="saga-fail-1",
+        )
+        start_ledger_saga(saga)
+
+        step = add_saga_step(saga=saga, step_key="broadcast", step_order=1)
+        start_saga_step(step)
+        fail_saga_step(step, error_message="broadcast failed")
+
+        step.refresh_from_db()
+        saga.refresh_from_db()
+
+        self.assertEqual(step.status, LedgerSagaStep.STATUS_FAILED)
+        self.assertEqual(saga.status, LedgerSaga.STATUS_FAILED)
+        self.assertEqual(saga.last_error, "broadcast failed")
+
+    def test_compensate_ledger_saga_reverses_completed_steps_in_reverse_order(self):
+        saga = create_ledger_saga(
+            saga_type="crypto_withdrawal",
+            external_id="saga-comp-1",
+        )
+        start_ledger_saga(saga)
+
+        step1 = add_saga_step(saga=saga, step_key="reserve_1", step_order=1)
+        step2 = add_saga_step(saga=saga, step_key="reserve_2", step_order=2)
+
+        txn1 = apply_ledger_transaction(
+            kind="reserve_a",
+            entries=[(self.issuance, -5), (self.w1, 5)],
+            external_id="saga-comp-txn-1",
+        )
+        txn2 = apply_ledger_transaction(
+            kind="reserve_b",
+            entries=[(self.issuance, -7), (self.w1, 7)],
+            external_id="saga-comp-txn-2",
+        )
+
+        complete_saga_step(step1, txn=txn1)
+        complete_saga_step(step2, txn=txn2)
+        fail_saga_step(step2, error_message="later external failure")
+
+        compensate_ledger_saga(
+            saga=saga,
+            created_by=self.u1,
+            reason="rollback workflow",
+        )
+
+        saga.refresh_from_db()
+        step1.refresh_from_db()
+        step2.refresh_from_db()
+        self.w1.refresh_from_db()
+        self.issuance.refresh_from_db()
+
+        self.assertEqual(saga.status, LedgerSaga.STATUS_COMPENSATED)
+        self.assertEqual(step1.status, LedgerSagaStep.STATUS_COMPENSATED)
+        self.assertEqual(step2.status, LedgerSagaStep.STATUS_COMPENSATED)
+        self.assertIsNotNone(step1.compensation_txn_id)
+        self.assertIsNotNone(step2.compensation_txn_id)
+        self.assertEqual(self.w1.balance, 0)
+        self.assertEqual(self.issuance.balance, 0)
+
+    def test_apply_raw_ledger_transaction_requires_permission(self):
+        with self.assertRaises(PermissionDenied):
+            apply_ledger_transaction(
+                actor=self.u1,
+                kind="mint",
+                entries=[(self.issuance, -10), (self.w1, 10)],
+                external_id="perm-raw-1",
+            )
+
+    def test_apply_raw_ledger_transaction_allowed_with_permission(self):
+        self.grant_perm(self.u1, "can_apply_raw_ledger_transaction")
+
+        txn = apply_ledger_transaction(
+            actor=self.u1,
+            kind="mint",
+            entries=[(self.issuance, -10), (self.w1, 10)],
+            external_id="perm-raw-2",
+        )
+
+        self.assertEqual(txn.created_by_id, self.u1.id)
+
+    def test_cannot_impersonate_created_by_without_permission(self):
+        User = get_user_model()
+        other = User.objects.create_user(username="other_perm_test", password="x")
+
+        self.grant_perm(self.u1, "can_apply_raw_ledger_transaction")
+
+        with self.assertRaises(PermissionDenied):
+            apply_ledger_transaction(
+                actor=self.u1,
+                created_by=other,
+                kind="mint",
+                entries=[(self.issuance, -10), (self.w1, 10)],
+                external_id="perm-raw-3",
+            )
+
+    def test_can_impersonate_created_by_with_permission(self):
+        User = get_user_model()
+        other = User.objects.create_user(username="other_perm_test_2", password="x")
+
+        self.grant_perm(self.u1, "can_apply_raw_ledger_transaction")
+        self.grant_perm(self.u1, "can_impersonate_ledger_creator")
+
+        txn = apply_ledger_transaction(
+            actor=self.u1,
+            created_by=other,
+            kind="mint",
+            entries=[(self.issuance, -10), (self.w1, 10)],
+            external_id="perm-raw-4",
+        )
+
+        self.assertEqual(txn.created_by_id, other.id)
+
+    def test_manage_outbox_requires_permission(self):
+        self.grant_perm(self.u1, "can_create_pending_ledger_transaction")
+        txn = create_pending_ledger_transaction(
+            actor=self.u1,
+            kind="crypto_deposit",
+            external_id="perm-outbox-1",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        with self.assertRaises(PermissionDenied):
+            mark_outbox_event_failed(
+                actor=self.u2,
+                event=event,
+                error_message="forbidden",
+            )
+
+    def test_create_ledger_saga_requires_permission(self):
+        with self.assertRaises(PermissionDenied):
+            create_ledger_saga(
+                actor=self.u1,
                 saga_type="crypto_withdrawal",
-                external_id="saga-fail-1",
-            )
-            start_ledger_saga(saga)
-
-            step = add_saga_step(saga=saga, step_key="broadcast", step_order=1)
-            start_saga_step(step)
-            fail_saga_step(step, error_message="broadcast failed")
-
-            step.refresh_from_db()
-            saga.refresh_from_db()
-
-            self.assertEqual(step.status, LedgerSagaStep.STATUS_FAILED)
-            self.assertEqual(saga.status, LedgerSaga.STATUS_FAILED)
-            self.assertEqual(saga.last_error, "broadcast failed")
-
-        def test_compensate_ledger_saga_reverses_completed_steps_in_reverse_order(self):
-            saga = create_ledger_saga(
-                saga_type="crypto_withdrawal",
-                external_id="saga-comp-1",
-            )
-            start_ledger_saga(saga)
-
-            step1 = add_saga_step(saga=saga, step_key="reserve_1", step_order=1)
-            step2 = add_saga_step(saga=saga, step_key="reserve_2", step_order=2)
-
-            txn1 = apply_ledger_transaction(
-                kind="reserve_a",
-                entries=[(self.issuance, -5), (self.w1, 5)],
-                external_id="saga-comp-txn-1",
-            )
-            txn2 = apply_ledger_transaction(
-                kind="reserve_b",
-                entries=[(self.issuance, -7), (self.w1, 7)],
-                external_id="saga-comp-txn-2",
+                external_id="perm-saga-1",
             )
 
-            complete_saga_step(step1, txn=txn1)
-            complete_saga_step(step2, txn=txn2)
-            fail_saga_step(step2, error_message="later external failure")
+    def test_compensate_ledger_saga_requires_dedicated_permission(self):
+        self.grant_perm(self.u1, "can_manage_ledger_sagas")
+        self.grant_perm(self.u1, "can_apply_raw_ledger_transaction")
+        self.grant_perm(self.u1, "can_reverse_ledger_transaction")
 
+        saga = create_ledger_saga(
+            actor=self.u1,
+            saga_type="crypto_withdrawal",
+            external_id="perm-saga-2",
+        )
+        start_ledger_saga(actor=self.u1, saga=saga)
+
+        step = add_saga_step(actor=self.u1, saga=saga, step_key="reserve", step_order=1)
+
+        txn = apply_ledger_transaction(
+            actor=self.u1,
+            kind="reserve_test",
+            entries=[(self.issuance, -5), (self.w1, 5)],
+            external_id="perm-saga-txn-1",
+        )
+
+        complete_saga_step(actor=self.u1, step=step, txn=txn)
+        fail_saga_step(actor=self.u1, step=step, error_message="failure")
+
+        with self.assertRaises(PermissionDenied):
             compensate_ledger_saga(
+                actor=self.u1,
                 saga=saga,
-                created_by=self.u1,
-                reason="rollback workflow",
+                reason="forbidden compensation",
             )
-
-            saga.refresh_from_db()
-            step1.refresh_from_db()
-            step2.refresh_from_db()
-            self.w1.refresh_from_db()
-            self.issuance.refresh_from_db()
-
-            self.assertEqual(saga.status, LedgerSaga.STATUS_COMPENSATED)
-            self.assertEqual(step1.status, LedgerSagaStep.STATUS_COMPENSATED)
-            self.assertEqual(step2.status, LedgerSagaStep.STATUS_COMPENSATED)
-            self.assertIsNotNone(step1.compensation_txn_id)
-            self.assertIsNotNone(step2.compensation_txn_id)
-            self.assertEqual(self.w1.balance, 0)
-            self.assertEqual(self.issuance.balance, 0)
-
