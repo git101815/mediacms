@@ -9,10 +9,16 @@ from .models import (
     TokenWallet,
     LedgerSaga,
     LedgerSagaStep,
+    LEDGER_OUTBOX_RETRY_DELAY_SECONDS,
 )
 import hashlib
 import json
 from django.utils import timezone
+from datetime import timedelta
+from django.db.models import Q
+
+def _compute_next_retry_at() -> timezone.datetime:
+    return timezone.now() + timedelta(seconds=LEDGER_OUTBOX_RETRY_DELAY_SECONDS)
 
 def _require_authenticated_actor(actor):
     if actor is None:
@@ -59,6 +65,45 @@ def _create_outbox_event(*, txn: LedgerTransaction, topic: str, payload: dict, m
         payload=payload,
         metadata_version=metadata_version,
     )
+
+def get_failed_outbox_events(*, actor, limit: int = 100):
+    _require_perm(actor, "ledger.can_manage_ledger_outbox")
+    return LedgerOutbox.objects.filter(
+        status=LedgerOutbox.STATUS_FAILED
+    ).order_by("created_at")[:limit]
+
+
+def get_dead_lettered_outbox_events(*, actor, limit: int = 100):
+    _require_perm(actor, "ledger.can_manage_ledger_outbox")
+    return LedgerOutbox.objects.filter(
+        status=LedgerOutbox.STATUS_DEAD_LETTERED
+    ).order_by("dead_lettered_at", "created_at")[:limit]
+
+
+def get_stale_pending_outbox_events(*, actor, older_than_seconds: int = 900, limit: int = 100):
+    _require_perm(actor, "ledger.can_manage_ledger_outbox")
+
+    threshold = timezone.now() - timedelta(seconds=older_than_seconds)
+    return LedgerOutbox.objects.filter(
+        status=LedgerOutbox.STATUS_PENDING,
+        created_at__lte=threshold,
+    ).order_by("created_at")[:limit]
+
+def get_failed_sagas(*, actor, limit: int = 100):
+    _require_perm(actor, "ledger.can_manage_ledger_sagas")
+    return LedgerSaga.objects.filter(
+        status=LedgerSaga.STATUS_FAILED
+    ).order_by("failed_at", "created_at")[:limit]
+
+
+def get_stale_compensating_sagas(*, actor, older_than_seconds: int = 900, limit: int = 100):
+    _require_perm(actor, "ledger.can_manage_ledger_sagas")
+
+    threshold = timezone.now() - timedelta(seconds=older_than_seconds)
+    return LedgerSaga.objects.filter(
+        status=LedgerSaga.STATUS_COMPENSATING,
+        created_at__lte=threshold,
+    ).order_by("created_at")[:limit]
 
 def get_system_wallet(system_key: str, *, allow_negative: bool) -> TokenWallet:
     wallet, created = TokenWallet.objects.get_or_create(
@@ -371,59 +416,85 @@ def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, create
 
 def mark_outbox_event_dispatched(*, actor, event: LedgerOutbox) -> LedgerOutbox:
     _require_perm(actor, "ledger.can_manage_ledger_outbox")
+    now = timezone.now()
     event.status = LedgerOutbox.STATUS_DISPATCHED
-    event.dispatched_at = timezone.now()
-    event.save(update_fields=["status", "dispatched_at"])
+    event.dispatched_at = now
+    event.last_attempt_at = now
+    event.next_retry_at = None
+    event.save(update_fields=["status", "dispatched_at", "last_attempt_at", "next_retry_at"])
     return event
 
 
 def mark_outbox_event_failed(*, actor, event: LedgerOutbox, error_message: str) -> LedgerOutbox:
     _require_perm(actor, "ledger.can_manage_ledger_outbox")
+
+    now = timezone.now()
     event.fail_count += 1
     event.last_error = error_message[:2000]
+    event.last_attempt_at = now
 
     if event.fail_count >= LEDGER_OUTBOX_MAX_RETRIES:
         event.status = LedgerOutbox.STATUS_DEAD_LETTERED
-        event.dead_lettered_at = timezone.now()
+        event.dead_lettered_at = now
         event.dead_letter_reason = error_message[:2000]
+        event.next_retry_at = None
         event.save(
             update_fields=[
                 "status",
                 "fail_count",
                 "last_error",
+                "last_attempt_at",
                 "dead_lettered_at",
                 "dead_letter_reason",
+                "next_retry_at",
             ]
         )
         return event
 
     event.status = LedgerOutbox.STATUS_FAILED
-    event.save(update_fields=["status", "fail_count", "last_error"])
+    event.next_retry_at = _compute_next_retry_at()
+    event.save(
+        update_fields=[
+            "status",
+            "fail_count",
+            "last_error",
+            "last_attempt_at",
+            "next_retry_at",
+        ]
+    )
     return event
 
 def move_outbox_event_to_dlq(*, actor, event: LedgerOutbox, reason: str) -> LedgerOutbox:
     _require_perm(actor, "ledger.can_manage_ledger_outbox")
+
+    now = timezone.now()
     event.status = LedgerOutbox.STATUS_DEAD_LETTERED
-    event.dead_lettered_at = timezone.now()
+    event.dead_lettered_at = now
     event.dead_letter_reason = reason[:2000]
     event.last_error = reason[:2000]
+    event.next_retry_at = None
     event.save(
         update_fields=[
             "status",
             "dead_lettered_at",
             "dead_letter_reason",
             "last_error",
+            "next_retry_at",
         ]
     )
     return event
 
 def get_dispatchable_outbox_events(*, actor, limit: int = 100):
     _require_perm(actor, "ledger.can_manage_ledger_outbox")
+
+    now = timezone.now()
     return LedgerOutbox.objects.filter(
-        status__in=[
-            LedgerOutbox.STATUS_PENDING,
-            LedgerOutbox.STATUS_FAILED,
-        ]
+        Q(status=LedgerOutbox.STATUS_PENDING)
+        | Q(
+            status=LedgerOutbox.STATUS_FAILED,
+            next_retry_at__isnull=False,
+            next_retry_at__lte=now,
+        )
     ).order_by("created_at")[:limit]
 
 @transaction.atomic
@@ -587,3 +658,39 @@ def compensate_ledger_saga(*, actor, saga: LedgerSaga, created_by=None, reason: 
     saga.compensated_at = timezone.now()
     saga.save(update_fields=["status", "compensated_at"])
     return saga
+
+def replay_failed_outbox_event(*, actor, event: LedgerOutbox) -> LedgerOutbox:
+    _require_perm(actor, "ledger.can_manage_ledger_outbox")
+
+    if event.status != LedgerOutbox.STATUS_FAILED:
+        raise ValidationError("Only failed outbox events can be replayed")
+
+    event.status = LedgerOutbox.STATUS_PENDING
+    event.next_retry_at = None
+    event.save(update_fields=["status", "next_retry_at"])
+    return event
+
+def redrive_dead_lettered_outbox_event(*, actor, event: LedgerOutbox) -> LedgerOutbox:
+    _require_perm(actor, "ledger.can_manage_ledger_outbox")
+
+    if event.status != LedgerOutbox.STATUS_DEAD_LETTERED:
+        raise ValidationError("Only dead-lettered outbox events can be redriven")
+
+    now = timezone.now()
+    event.status = LedgerOutbox.STATUS_PENDING
+    event.redrive_count += 1
+    event.last_redriven_at = now
+    event.dead_lettered_at = None
+    event.dead_letter_reason = ""
+    event.next_retry_at = None
+    event.save(
+        update_fields=[
+            "status",
+            "redrive_count",
+            "last_redriven_at",
+            "dead_lettered_at",
+            "dead_letter_reason",
+            "next_retry_at",
+        ]
+    )
+    return event

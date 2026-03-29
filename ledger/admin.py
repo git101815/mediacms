@@ -41,11 +41,15 @@ class LedgerOutboxAdmin(ReadOnlyAdmin):
         "txn",
         "aggregate_id",
         "created_at",
+        "last_attempt_at",
+        "next_retry_at",
         "dispatched_at",
         "fail_count",
+        "redrive_count",
         "dead_lettered_at",
         "metadata_version",
     )
+    list_filter = ("status", "topic", "metadata_version")
     search_fields = ("topic", "txn__id", "txn__external_id")
     readonly_fields = (
         "txn",
@@ -61,6 +65,10 @@ class LedgerOutboxAdmin(ReadOnlyAdmin):
         "metadata_version",
         "dead_lettered_at",
         "dead_letter_reason",
+        "last_attempt_at",
+        "next_retry_at",
+        "redrive_count",
+        "last_redriven_at",
     )
 
 @admin.register(LedgerSaga)
@@ -78,6 +86,7 @@ class LedgerSagaAdmin(ReadOnlyAdmin):
         "compensated_at",
     )
     search_fields = ("external_id", "saga_type", "created_by__username")
+    list_filter = ("status", "saga_type", "metadata_version")
     readonly_fields = (
         "saga_type",
         "external_id",

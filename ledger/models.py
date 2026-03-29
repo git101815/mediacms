@@ -3,6 +3,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+from datetime import timedelta
 
 USER_WALLET_TYPE = "user"
 SYSTEM_WALLET_TYPE = "system"
@@ -20,6 +21,7 @@ LEDGER_OUTBOX_STATUS_PENDING = "pending"
 LEDGER_OUTBOX_STATUS_DISPATCHED = "dispatched"
 LEDGER_OUTBOX_STATUS_FAILED = "failed"
 LEDGER_OUTBOX_STATUS_DEAD_LETTERED = "dead_lettered"
+LEDGER_OUTBOX_RETRY_DELAY_SECONDS = 300
 
 LEDGER_OUTBOX_STATUS_CHOICES = (
     (LEDGER_OUTBOX_STATUS_PENDING, "Pending"),
@@ -279,12 +281,19 @@ class LedgerOutbox(models.Model):
     last_error = models.TextField(blank=True, default="")
     dead_lettered_at = models.DateTimeField(null=True, blank=True, db_index=True)
     dead_letter_reason = models.TextField(blank=True, default="")
+    last_attempt_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    redrive_count = models.PositiveIntegerField(default=0)
+    last_redriven_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         indexes = [
             models.Index(fields=["status", "created_at"]),
             models.Index(fields=["topic", "status", "created_at"]),
             models.Index(fields=["aggregate_type", "aggregate_id"]),
+            models.Index(fields=["status", "next_retry_at"]),
+            models.Index(fields=["status", "dead_lettered_at"]),
+            models.Index(fields=["status", "last_attempt_at"]),
         ]
         permissions = [
             ("can_manage_ledger_outbox", "Can manage ledger outbox"),

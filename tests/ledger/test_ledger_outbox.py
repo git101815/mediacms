@@ -1,4 +1,6 @@
 from django.core.exceptions import ValidationError
+from datetime import timedelta
+from django.utils import timezone
 
 from ledger.models import (
     LEDGER_METADATA_VERSION,
@@ -14,6 +16,11 @@ from ledger.services import (
     mark_outbox_event_failed,
     move_outbox_event_to_dlq,
     reverse_ledger_transaction,
+    get_dead_lettered_outbox_events,
+    get_failed_outbox_events,
+    get_stale_pending_outbox_events,
+    redrive_dead_lettered_outbox_event,
+    replay_failed_outbox_event,
 )
 
 from tests.ledger.base import BaseLedgerTestCase
@@ -207,7 +214,7 @@ class TestLedgerOutbox(BaseLedgerTestCase):
 
         self.assertNotIn(event.id, ids)
 
-    def test_failed_events_remain_dispatchable_before_dlq(self):
+    def test_failed_events_are_not_dispatchable_until_next_retry_at(self):
         txn = create_pending_ledger_transaction(
             actor=self.operator,
             kind="crypto_deposit",
@@ -220,6 +227,140 @@ class TestLedgerOutbox(BaseLedgerTestCase):
             event=event,
             error_message="temporary timeout",
         )
+        event.refresh_from_db()
+
         ids = [e.id for e in get_dispatchable_outbox_events(actor=self.operator, limit=100)]
 
+        self.assertNotIn(event.id, ids)
+        self.assertEqual(event.status, LedgerOutbox.STATUS_FAILED)
+        self.assertIsNotNone(event.next_retry_at)
+
+    def test_failed_event_becomes_dispatchable_when_next_retry_at_is_reached(self):
+        txn = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_deposit",
+            external_id="dlq-retry-window-2",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        mark_outbox_event_failed(
+            actor=self.operator,
+            event=event,
+            error_message="temporary timeout",
+        )
+
+        LedgerOutbox.objects.filter(id=event.id).update(
+            next_retry_at=timezone.now() - timedelta(seconds=1)
+        )
+
+        ids = [e.id for e in get_dispatchable_outbox_events(actor=self.operator, limit=100)]
+
+        self.assertIn(event.id, ids)
+
+    def test_failed_event_is_not_dispatchable_before_next_retry_at(self):
+        txn = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_deposit",
+            external_id="retry-window-1",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        mark_outbox_event_failed(
+            actor=self.operator,
+            event=event,
+            error_message="temporary timeout",
+        )
+        ids = [e.id for e in get_dispatchable_outbox_events(actor=self.operator, limit=100)]
+
+        self.assertNotIn(event.id, ids)
+        self.assertIsNotNone(event.next_retry_at)
+
+    def test_replay_failed_outbox_event_moves_back_to_pending(self):
+        txn = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_deposit",
+            external_id="replay-failed-1",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        mark_outbox_event_failed(
+            actor=self.operator,
+            event=event,
+            error_message="temporary timeout",
+        )
+        replay_failed_outbox_event(actor=self.operator, event=event)
+        event.refresh_from_db()
+
+        self.assertEqual(event.status, LedgerOutbox.STATUS_PENDING)
+        self.assertIsNone(event.next_retry_at)
+
+    def test_redrive_dead_lettered_outbox_event_moves_back_to_pending(self):
+        txn = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_deposit",
+            external_id="redrive-dlq-1",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        move_outbox_event_to_dlq(
+            actor=self.operator,
+            event=event,
+            reason="poison message",
+        )
+        redrive_dead_lettered_outbox_event(actor=self.operator, event=event)
+        event.refresh_from_db()
+
+        self.assertEqual(event.status, LedgerOutbox.STATUS_PENDING)
+        self.assertEqual(event.redrive_count, 1)
+        self.assertIsNotNone(event.last_redriven_at)
+        self.assertEqual(event.dead_letter_reason, "")
+        self.assertIsNone(event.dead_lettered_at)
+
+    def test_get_failed_outbox_events_returns_failed_only(self):
+        txn = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_deposit",
+            external_id="failed-list-1",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        mark_outbox_event_failed(
+            actor=self.operator,
+            event=event,
+            error_message="temporary timeout",
+        )
+
+        ids = [e.id for e in get_failed_outbox_events(actor=self.operator, limit=100)]
+        self.assertIn(event.id, ids)
+
+    def test_get_dead_lettered_outbox_events_returns_dead_lettered_only(self):
+        txn = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_deposit",
+            external_id="dlq-list-1",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        move_outbox_event_to_dlq(
+            actor=self.operator,
+            event=event,
+            reason="poison message",
+        )
+
+        ids = [e.id for e in get_dead_lettered_outbox_events(actor=self.operator, limit=100)]
+        self.assertIn(event.id, ids)
+
+    def test_get_stale_pending_outbox_events_returns_old_pending_only(self):
+        txn = create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="crypto_deposit",
+            external_id="stale-pending-1",
+        )
+        event = LedgerOutbox.objects.get(txn=txn)
+
+        LedgerOutbox.objects.filter(id=event.id).update(
+            created_at=timezone.now() - timedelta(seconds=1200)
+        )
+
+        ids = [e.id for e in get_stale_pending_outbox_events(actor=self.operator, older_than_seconds=900, limit=100)]
         self.assertIn(event.id, ids)

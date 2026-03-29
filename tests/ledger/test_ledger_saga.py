@@ -9,8 +9,11 @@ from ledger.services import (
     fail_saga_step,
     start_ledger_saga,
     start_saga_step,
+    get_failed_sagas,
+    get_stale_compensating_sagas,
 )
-
+from datetime import timedelta
+from django.utils import timezone
 from tests.ledger.base import BaseLedgerTestCase
 
 
@@ -151,3 +154,33 @@ class TestLedgerSaga(BaseLedgerTestCase):
         self.assertIsNotNone(step2.compensation_txn_id)
         self.assertEqual(self.w1.balance, 0)
         self.assertEqual(self.issuance.balance, 0)
+
+    def test_get_failed_sagas_returns_failed_only(self):
+        saga = create_ledger_saga(
+            actor=self.operator,
+            saga_type="crypto_withdrawal",
+            external_id="failed-saga-list-1",
+        )
+        start_ledger_saga(actor=self.operator, saga=saga)
+
+        step = add_saga_step(actor=self.operator, saga=saga, step_key="broadcast", step_order=1)
+        start_saga_step(actor=self.operator, step=step)
+        fail_saga_step(actor=self.operator, step=step, error_message="broadcast failed")
+
+        ids = [s.id for s in get_failed_sagas(actor=self.operator, limit=100)]
+        self.assertIn(saga.id, ids)
+
+    def test_get_stale_compensating_sagas_returns_old_compensating_only(self):
+        saga = create_ledger_saga(
+            actor=self.operator,
+            saga_type="crypto_withdrawal",
+            external_id="stale-compensating-1",
+        )
+
+        LedgerSaga.objects.filter(id=saga.id).update(
+            status=LedgerSaga.STATUS_COMPENSATING,
+            created_at=timezone.now() - timedelta(seconds=1200),
+        )
+
+        ids = [s.id for s in get_stale_compensating_sagas(actor=self.operator, older_than_seconds=900, limit=100)]
+        self.assertIn(saga.id, ids)
