@@ -2,12 +2,32 @@ from django.contrib.auth.models import Permission
 from django.test import TestCase
 from django.apps import apps
 from django.contrib.auth.management import create_permissions
+from django.contrib.contenttypes.models import ContentType
 
 from files.tests import create_account
-from ledger.models import TokenWallet
+from ledger.models import (
+    LedgerHold,
+    LedgerOutbox,
+    LedgerSaga,
+    LedgerTransaction,
+    LedgerVelocityWindow,
+    TokenWallet,
+)
 from ledger.services import get_system_wallet
-
-
+PERMISSION_MODEL_BY_CODENAME = {
+    "can_apply_raw_ledger_transaction": LedgerTransaction,
+    "can_create_pending_ledger_transaction": LedgerTransaction,
+    "can_reverse_ledger_transaction": LedgerTransaction,
+    "can_impersonate_ledger_creator": LedgerTransaction,
+    "can_manage_ledger_outbox": LedgerOutbox,
+    "can_manage_ledger_sagas": LedgerSaga,
+    "can_compensate_ledger_sagas": LedgerSaga,
+    "can_manage_wallet_risk": TokenWallet,
+    "can_view_wallet_risk": TokenWallet,
+    "can_manage_wallet_holds": LedgerHold,
+    "can_view_wallet_holds": LedgerHold,
+    "can_view_wallet_velocity": LedgerVelocityWindow,
+}
 class BaseLedgerTestCase(TestCase):
     def setUp(self):
         self.u1 = create_account(password="pass12345")
@@ -46,6 +66,15 @@ class BaseLedgerTestCase(TestCase):
             .first()
         )
         if perm is None:
-            raise Permission.DoesNotExist(f"ledger permission not found: {codename}")
+            model = PERMISSION_MODEL_BY_CODENAME.get(codename)
+            if model is None:
+                raise Permission.DoesNotExist(f"Unknown ledger permission codename: {codename}")
+
+            content_type = ContentType.objects.get_for_model(model)
+            perm, _ = Permission.objects.get_or_create(
+                content_type=content_type,
+                codename=codename,
+                defaults={"name": codename.replace("_", " ")},
+            )
 
         user.user_permissions.add(perm)
