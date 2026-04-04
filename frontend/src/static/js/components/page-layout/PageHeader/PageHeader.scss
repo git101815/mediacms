@@ -340,17 +340,32 @@ a.user-menu-top-link {
 
 .page-header-right {
   .token-balance {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     white-space: nowrap;
     font-weight: 500;
     padding-right: 6px;
+    color: var(--theme-color, var(--default-theme-color));
+    text-decoration: none;
+
+    &:hover,
+    &:focus,
+    &:active,
+    &:visited {
+      color: var(--theme-color, var(--default-theme-color));
+      text-decoration: none;
+    }
 
     .material-icons {
       font-size: 1.15em;
+      line-height: 1;
       vertical-align: middle;
-      margin-right: 4px;
+      margin-right: 0;
     }
 
     .amount {
+      line-height: 1;
       vertical-align: middle;
     }
   }

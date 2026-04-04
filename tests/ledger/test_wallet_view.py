@@ -1,7 +1,13 @@
 from django.urls import reverse
 
 from ledger.models import LEDGER_RISK_STATUS_REVIEW
-from ledger.services import apply_ledger_transaction, create_wallet_hold, set_wallet_risk_status
+from ledger.services import (
+    apply_ledger_transaction,
+    create_pending_ledger_transaction,
+    create_wallet_hold,
+    reverse_ledger_transaction,
+    set_wallet_risk_status,
+)
 
 from .base import BaseLedgerTestCase
 
@@ -73,3 +79,122 @@ class TestWalletView(BaseLedgerTestCase):
         response = self.client.get(reverse("wallet"))
 
         self.assertContains(response, "Manual review required")
+
+    def test_wallet_page_filters_transactions_by_tab(self):
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="deposit",
+            entries=[
+                (self.issuance, -600),
+                (self.w1, 600),
+            ],
+            created_by=self.u1,
+            memo="Deposit row",
+        )
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="purchase",
+            entries=[
+                (self.w1, -150),
+                (self.issuance, 150),
+            ],
+            created_by=self.u1,
+            memo="Purchase row",
+        )
+
+        self.client.force_login(self.u1)
+        response = self.client.get(reverse("wallet"), {"tab": "deposits"})
+
+        self.assertContains(response, "Deposit row")
+        self.assertNotContains(response, "Purchase row")
+        self.assertRegex(
+            response.content.decode(),
+            r'class="wallet-filter-pill wallet-filter-pill--active"[^>]*>\s*Deposits\s*</a>',
+        )
+
+    def test_wallet_page_filters_transactions_by_status(self):
+        posted_txn = apply_ledger_transaction(
+            actor=self.operator,
+            kind="deposit",
+            entries=[
+                (self.issuance, -400),
+                (self.w1, 400),
+            ],
+            created_by=self.u1,
+            memo="Posted deposit",
+        )
+        reverse_ledger_transaction(
+            actor=self.operator,
+            original_txn=posted_txn,
+            created_by=self.u1,
+            memo="Reversed deposit",
+        )
+
+        self.client.force_login(self.u1)
+        response = self.client.get(reverse("wallet"), {"status": "reversed"})
+
+        self.assertContains(response, "Reversed deposit")
+        self.assertNotContains(response, "Posted deposit")
+        self.assertContains(response, 'option value="reversed" selected', html=False)
+
+    def test_wallet_page_pending_filter_shows_empty_state_when_no_pending_entry_exists(self):
+        create_pending_ledger_transaction(
+            actor=self.operator,
+            kind="withdrawal",
+            created_by=self.u1,
+            memo="Pending withdrawal",
+        )
+
+        self.client.force_login(self.u1)
+        response = self.client.get(reverse("wallet"), {"status": "pending"})
+
+        self.assertContains(response, 'option value="pending" selected', html=False)
+        self.assertContains(response, "No activity yet")
+        self.assertContains(response, "No pending transaction matches this filter yet.")
+
+    def test_wallet_page_invalid_filters_fallback_to_all(self):
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="deposit",
+            entries=[
+                (self.issuance, -250),
+                (self.w1, 250),
+            ],
+            created_by=self.u1,
+            memo="Fallback row",
+        )
+
+        self.client.force_login(self.u1)
+        response = self.client.get(reverse("wallet"), {"tab": "nope", "status": "???"})
+
+        self.assertContains(response, "Fallback row")
+        self.assertRegex(
+            response.content.decode(),
+            r'class="wallet-filter-pill wallet-filter-pill--active"[^>]*>\s*All\s*</a>',
+        )
+        self.assertContains(response, 'option value="all" selected', html=False)
+
+    def test_wallet_page_paginates_activity(self):
+        for index in range(25):
+            apply_ledger_transaction(
+                actor=self.operator,
+                kind="deposit",
+                entries=[
+                    (self.issuance, -(index + 1)),
+                    (self.w1, index + 1),
+                ],
+                created_by=self.u1,
+                memo=f"Deposit {index}",
+            )
+
+        self.client.force_login(self.u1)
+        page_one = self.client.get(reverse("wallet"))
+        page_two = self.client.get(reverse("wallet"), {"page": 2})
+
+        self.assertContains(page_one, "Deposit 24")
+        self.assertContains(page_one, "Deposit 5")
+        self.assertNotContains(page_one, "Deposit 4")
+        self.assertContains(page_two, "Deposit 4")
+        self.assertContains(page_two, "Deposit 0")
+        self.assertContains(page_one, "Page 1 of 2")
+        self.assertContains(page_two, "Page 2 of 2")

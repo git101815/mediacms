@@ -12,6 +12,8 @@ from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonRespons
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from urllib.parse import urlencode
+from django.core.paginator import Paginator
 from django.views.decorators.csrf import csrf_exempt
 from drf_yasg import openapi as openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -84,6 +86,9 @@ from ledger.models import (
     LEDGER_RISK_STATUS_REVIEW,
     LedgerEntry,
     TokenWallet,
+    LEDGER_TXN_STATUS_PENDING,
+    LEDGER_TXN_STATUS_POSTED,
+    LEDGER_TXN_STATUS_REVERSED,
 )
 from ledger.services import get_wallet_available_balance, get_wallet_velocity_amount
 from .serializers import (
@@ -103,6 +108,40 @@ from .tasks import save_user_action, video_trim_task
 
 VALID_USER_ACTIONS = [action for action, name in USER_MEDIA_ACTIONS]
 cutoff = timezone.now() - timedelta(minutes=40)
+WALLET_PAGE_SIZE = 20
+WALLET_TAB_ALL = "all"
+WALLET_STATUS_ALL = "all"
+WALLET_TAB_LABELS = {
+    WALLET_TAB_ALL: "All",
+    "deposits": "Deposits",
+    "purchases": "Purchases",
+    "transfers": "Transfers",
+    "withdrawals": "Withdrawals",
+}
+WALLET_TAB_KIND_MAP = {
+    "deposits": [LEDGER_ACTION_DEPOSIT],
+    "purchases": [LEDGER_ACTION_PURCHASE],
+    "transfers": [LEDGER_ACTION_TRANSFER],
+    "withdrawals": [LEDGER_ACTION_WITHDRAWAL],
+}
+WALLET_STATUS_LABELS = {
+    WALLET_STATUS_ALL: "All statuses",
+    LEDGER_TXN_STATUS_PENDING: "Pending",
+    LEDGER_TXN_STATUS_POSTED: "Posted",
+    LEDGER_TXN_STATUS_REVERSED: "Reversed",
+}
+WALLET_STATUS_ICON_MAP = {
+    LEDGER_TXN_STATUS_PENDING: "schedule",
+    LEDGER_TXN_STATUS_POSTED: "check_circle",
+    LEDGER_TXN_STATUS_REVERSED: "undo",
+}
+WALLET_EMPTY_STATE_MESSAGES = {
+    WALLET_TAB_ALL: "No activity yet",
+    "deposits": "No deposits yet",
+    "purchases": "No purchases yet",
+    "transfers": "No transfers yet",
+    "withdrawals": "No withdrawals yet",
+}
 
 def about(request):
     """About view"""
@@ -165,6 +204,53 @@ def _format_token_amount(value: int, *, signed: bool = False) -> str:
     return formatted
 
 
+def _normalize_wallet_tab(value: str) -> str:
+    if value in WALLET_TAB_LABELS:
+        return value
+    return WALLET_TAB_ALL
+
+
+def _normalize_wallet_status(value: str) -> str:
+    if value in WALLET_STATUS_LABELS:
+        return value
+    return WALLET_STATUS_ALL
+
+
+def _build_wallet_querystring(*, tab: str, status: str, page: int | None = None) -> str:
+    params = {"tab": tab, "status": status}
+    if page and page > 1:
+        params["page"] = page
+    return urlencode(params)
+
+
+def _build_wallet_tab_items(*, active_tab: str, active_status: str) -> list[dict]:
+    items = []
+    for key, label in WALLET_TAB_LABELS.items():
+        items.append(
+            {
+                "key": key,
+                "label": label,
+                "is_active": key == active_tab,
+                "url": f"{reverse('wallet')}?{_build_wallet_querystring(tab=key, status=active_status)}",
+            }
+        )
+    return items
+
+
+def _build_wallet_status_items(*, active_tab: str, active_status: str) -> list[dict]:
+    items = []
+    for key, label in WALLET_STATUS_LABELS.items():
+        items.append(
+            {
+                "key": key,
+                "label": label,
+                "is_active": key == active_status,
+                "url": f"{reverse('wallet')}?{_build_wallet_querystring(tab=active_tab, status=key)}",
+            }
+        )
+    return items
+
+
 def _get_wallet_counterparty_label(wallet: TokenWallet) -> str:
     if wallet.wallet_type == TokenWallet.TYPE_SYSTEM:
         return wallet.get_system_key_display() or wallet.system_key or "System wallet"
@@ -173,8 +259,24 @@ def _get_wallet_counterparty_label(wallet: TokenWallet) -> str:
     return f"Wallet #{wallet.id}"
 
 
-def _build_wallet_transaction_rows(wallet: TokenWallet) -> list[dict]:
-    entries = list(
+def _get_wallet_empty_state_message(*, tab: str, status: str) -> tuple[str, str]:
+    title = WALLET_EMPTY_STATE_MESSAGES.get(tab, WALLET_EMPTY_STATE_MESSAGES[WALLET_TAB_ALL])
+    if status == WALLET_STATUS_ALL:
+        if tab == WALLET_TAB_ALL:
+            text = "Your wallet does not have any transaction yet."
+        else:
+            text = f"No {WALLET_TAB_LABELS[tab].lower()} have been recorded for this wallet yet."
+    else:
+        status_label = WALLET_STATUS_LABELS[status].lower()
+        if tab == WALLET_TAB_ALL:
+            text = f"No {status_label} transaction matches this filter yet."
+        else:
+            text = f"No {status_label} {WALLET_TAB_LABELS[tab].lower()} match this filter yet."
+    return title, text
+
+
+def _build_wallet_transaction_rows(*, wallet: TokenWallet, active_tab: str, active_status: str, page_number: int):
+    entries_queryset = (
         wallet.entries.select_related("txn", "txn__created_by")
         .prefetch_related(
             Prefetch(
@@ -182,11 +284,21 @@ def _build_wallet_transaction_rows(wallet: TokenWallet) -> list[dict]:
                 queryset=LedgerEntry.objects.select_related("wallet", "wallet__user").order_by("id"),
             )
         )
-        .order_by("-created_at", "-id")[:50]
+        .order_by("-created_at", "-id")
     )
 
+    txn_kinds = WALLET_TAB_KIND_MAP.get(active_tab)
+    if txn_kinds is not None:
+        entries_queryset = entries_queryset.filter(txn__kind__in=txn_kinds)
+
+    if active_status != WALLET_STATUS_ALL:
+        entries_queryset = entries_queryset.filter(txn__status=active_status)
+
+    paginator = Paginator(entries_queryset, WALLET_PAGE_SIZE)
+    page_obj = paginator.get_page(page_number)
+
     rows = []
-    for entry in entries:
+    for entry in list(page_obj.object_list):
         other_entries = [candidate for candidate in entry.txn.entries.all() if candidate.wallet_id != wallet.id]
         if len(other_entries) == 1:
             counterparty = _get_wallet_counterparty_label(other_entries[0].wallet)
@@ -202,6 +314,7 @@ def _build_wallet_transaction_rows(wallet: TokenWallet) -> list[dict]:
                 "kind": entry.txn.kind.replace("_", " ").strip().title(),
                 "status": entry.txn.status,
                 "status_label": entry.txn.get_status_display(),
+                "status_icon": WALLET_STATUS_ICON_MAP.get(entry.txn.status, "info"),
                 "memo": entry.txn.memo,
                 "counterparty": counterparty,
                 "delta": entry.delta,
@@ -210,7 +323,8 @@ def _build_wallet_transaction_rows(wallet: TokenWallet) -> list[dict]:
                 "direction": "credit" if entry.delta > 0 else "debit",
             }
         )
-    return rows
+
+    return rows, page_obj
 
 
 def _build_wallet_hold_rows(wallet: TokenWallet) -> list[dict]:
@@ -271,6 +385,13 @@ def wallet(request):
         },
     )
 
+    active_tab = _normalize_wallet_tab(request.GET.get("tab", WALLET_TAB_ALL).strip())
+    active_status = _normalize_wallet_status(request.GET.get("status", WALLET_STATUS_ALL).strip())
+    try:
+        page_number = max(int(request.GET.get("page", "1")), 1)
+    except (TypeError, ValueError):
+        page_number = 1
+
     available_balance = get_wallet_available_balance(wallet_obj)
     can_view_risk_reason = request.user.is_superuser or request.user.has_perm("ledger.can_view_wallet_risk")
 
@@ -288,6 +409,14 @@ def wallet(request):
             "message": "Transactions are temporarily paused while this wallet is being reviewed.",
         }
 
+    transaction_rows, page_obj = _build_wallet_transaction_rows(
+        wallet=wallet_obj,
+        active_tab=active_tab,
+        active_status=active_status,
+        page_number=page_number,
+    )
+    empty_state_title, empty_state_text = _get_wallet_empty_state_message(tab=active_tab, status=active_status)
+
     context = {
         "wallet": wallet_obj,
         "wallet_banner": wallet_banner,
@@ -296,9 +425,19 @@ def wallet(request):
         "available_balance_display": _format_token_amount(available_balance),
         "held_balance_display": _format_token_amount(wallet_obj.held_balance),
         "wallet_status_display": wallet_obj.get_risk_status_display(),
-        "transaction_rows": _build_wallet_transaction_rows(wallet_obj),
+        "active_tab": active_tab,
+        "active_status": active_status,
+        "tab_items": _build_wallet_tab_items(active_tab=active_tab, active_status=active_status),
+        "status_items": _build_wallet_status_items(active_tab=active_tab, active_status=active_status),
+        "status_select_options": [{"key": key, "label": label} for key, label in WALLET_STATUS_LABELS.items()],
+        "transaction_rows": transaction_rows,
+        "page_obj": page_obj,
+        "empty_state_title": empty_state_title,
+        "empty_state_text": empty_state_text,
         "active_holds": _build_wallet_hold_rows(wallet_obj),
         "velocity_rows": _build_wallet_velocity_rows(wallet_obj),
+        "wallet_base_url": reverse("wallet"),
+        "wallet_filters_querystring": _build_wallet_querystring(tab=active_tab, status=active_status),
     }
     return render(request, "cms/wallet.html", context)
 

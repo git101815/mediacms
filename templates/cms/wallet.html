@@ -61,8 +61,29 @@
             <h2 class="wallet-section__title">Recent Activity</h2>
           </div>
 
-          <div class="wallet-section__filters">
-            <span class="wallet-filter-pill wallet-filter-pill--active">All</span>
+          <div class="wallet-section__toolbar">
+            <div class="wallet-section__filters">
+              {% for item in tab_items %}
+              <a href="{{ item.url }}" class="wallet-filter-pill{% if item.is_active %} wallet-filter-pill--active{% endif %}" data-wallet-nav>
+                  {{ item.label }}
+              </a>
+              {% endfor %}
+            </div>
+
+            <form method="get" action="{{ wallet_base_url }}" class="wallet-status-filter-form" data-wallet-status-form>
+              <input type="hidden" name="tab" value="{{ active_tab }}">
+              <label for="wallet-status-filter" class="wallet-status-filter-form__label">Status</label>
+              <div class="wallet-status-filter-form__field">
+                <select id="wallet-status-filter" name="status" class="wallet-status-filter-form__select" data-wallet-status-select>
+                  {% for option in status_select_options %}
+                  <option value="{{ option.key }}"{% if option.key == active_status %} selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <noscript>
+                <button type="submit" class="wallet-status-filter-form__submit">Apply</button>
+              </noscript>
+            </form>
           </div>
 
           {% if transaction_rows %}
@@ -74,7 +95,10 @@
                   <span class="wallet-activity-item__date">{{ row.created_at|date:"M d, Y H:i" }}</span>
                   <div class="wallet-activity-item__badges">
                     <span class="wallet-kind-pill">{{ row.kind }}</span>
-                    <span class="wallet-status-pill wallet-status-pill--{{ row.status }}">{{ row.status_label }}</span>
+                    <span class="wallet-status-pill wallet-status-pill--{{ row.status }}">
+                      <i class="material-icons wallet-status-pill__icon" aria-hidden="true">{{ row.status_icon }}</i>
+                      <span>{{ row.status_label }}</span>
+                    </span>
                   </div>
                 </div>
 
@@ -104,10 +128,32 @@
             </article>
             {% endfor %}
           </div>
+
+          {% if page_obj.has_other_pages %}
+          <nav class="wallet-pagination" aria-label="Wallet activity pagination">
+            {% if page_obj.has_previous %}
+           <a href="{{ wallet_base_url }}?tab={{ active_tab }}&status={{ active_status }}&page={{ page_obj.previous_page_number }}" class="wallet-pagination__button" data-wallet-nav>
+              Previous
+            </a>
+            {% else %}
+            <span class="wallet-pagination__button wallet-pagination__button--disabled">Previous</span>
+            {% endif %}
+
+            <span class="wallet-pagination__summary">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+
+            {% if page_obj.has_next %}
+           <a href="{{ wallet_base_url }}?tab={{ active_tab }}&status={{ active_status }}&page={{ page_obj.next_page_number }}" class="wallet-pagination__button" data-wallet-nav>
+              Next
+            </a>
+            {% else %}
+            <span class="wallet-pagination__button wallet-pagination__button--disabled">Next</span>
+            {% endif %}
+          </nav>
+          {% endif %}
           {% else %}
           <div class="wallet-empty-state">
-            <div class="wallet-empty-state__title">No activity yet</div>
-            <div class="wallet-empty-state__text">Your wallet does not have any transaction yet.</div>
+            <div class="wallet-empty-state__title">{{ empty_state_title }}</div>
+            <div class="wallet-empty-state__text">{{ empty_state_text }}</div>
           </div>
           {% endif %}
         </section>
@@ -169,4 +215,111 @@
     </aside>
   </div>
 </div>
+{% endblock %}
+{% block bottomimports %}
+{{ block.super }}
+<script>
+(function () {
+  if (window.__walletPageEnhancementLoaded) {
+    return;
+  }
+  window.__walletPageEnhancementLoaded = true;
+
+  const ROOT_SELECTOR = '.wallet-page';
+
+  async function replaceWalletPage(url, pushState) {
+    const currentRoot = document.querySelector(ROOT_SELECTOR);
+    if (!currentRoot) {
+      return;
+    }
+
+    currentRoot.classList.add('wallet-page--loading');
+
+    try {
+      const response = await fetch(url, {
+        credentials: 'same-origin',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Wallet request failed');
+      }
+
+      const html = await response.text();
+      const parser = new DOMParser();
+      const nextDocument = parser.parseFromString(html, 'text/html');
+      const nextRoot = nextDocument.querySelector(ROOT_SELECTOR);
+
+      if (!nextRoot) {
+        window.location.href = url;
+        return;
+      }
+
+      currentRoot.replaceWith(nextRoot);
+
+      if (nextDocument.title) {
+        document.title = nextDocument.title;
+      }
+
+      if (pushState) {
+        window.history.pushState({ walletPage: true }, '', url);
+      }
+    } catch (error) {
+      window.location.href = url;
+    }
+  }
+
+  document.addEventListener('click', function (event) {
+    const link = event.target.closest('a[data-wallet-nav]');
+    if (!link) {
+      return;
+    }
+
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    replaceWalletPage(link.href, true);
+  });
+
+  document.addEventListener('change', function (event) {
+    const select = event.target.closest('[data-wallet-status-select]');
+    if (!select) {
+      return;
+    }
+
+    const form = select.closest('form[data-wallet-status-form]');
+    if (!form) {
+      return;
+    }
+
+    const url = new URL(form.action || window.location.href, window.location.origin);
+    const formData = new FormData(form);
+
+    for (const [key, value] of formData.entries()) {
+      url.searchParams.set(key, String(value));
+    }
+
+    url.searchParams.delete('page');
+
+    replaceWalletPage(url.toString(), true);
+  });
+
+  window.addEventListener('popstate', function () {
+    if (document.querySelector(ROOT_SELECTOR)) {
+      replaceWalletPage(window.location.href, false);
+    }
+  });
+})();
+</script>
 {% endblock %}

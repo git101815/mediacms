@@ -15,7 +15,7 @@ function headerPopupPages(user, popupNavItems, hasHeaderThemeSwitcher) {
     itemType: 'link',
     text: translateString('My tokens'),
     link: walletUrl,
-    icon: 'toll',
+    icon: 'account_balance_wallet',
   };
   if (user.is.anonymous) {
     pages.main = (
@@ -158,7 +158,7 @@ export function HeaderRight(props) {
                         title={translateString('Token balance')}
                         aria-label={translateString('Token balance')}
                       >
-                        <MaterialIcon type="toll" />
+                        <MaterialIcon type="account_balance_wallet" />
                         <span className="amount">{Number(user.balance || 0).toLocaleString()}</span>
                       </a>
                     ) : null}
