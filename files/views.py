@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.postgres.search import SearchQuery
 from django.core.mail import EmailMessage
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -75,6 +75,17 @@ from .models import (
     Tag,
     VideoTrimRequest,
 )
+from ledger.models import (
+    LEDGER_ACTION_DEPOSIT,
+    LEDGER_ACTION_PURCHASE,
+    LEDGER_ACTION_TRANSFER,
+    LEDGER_ACTION_WITHDRAWAL,
+    LEDGER_RISK_STATUS_BLOCKED,
+    LEDGER_RISK_STATUS_REVIEW,
+    LedgerEntry,
+    TokenWallet,
+)
+from ledger.services import get_wallet_available_balance, get_wallet_velocity_amount
 from .serializers import (
     CategorySerializer,
     CelebritySerializer,
@@ -145,9 +156,150 @@ def add_subtitle(request):
     context = {"media": media, "form": form, "subtitles": subtitles}
     return render(request, "cms/add_subtitle.html", context)
 
+def _format_token_amount(value: int, *, signed: bool = False) -> str:
+    value = int(value)
+    formatted = f"{abs(value):,}".replace(",", " ")
+    if signed:
+        prefix = "+" if value >= 0 else "-"
+        return f"{prefix}{formatted}"
+    return formatted
+
+
+def _get_wallet_counterparty_label(wallet: TokenWallet) -> str:
+    if wallet.wallet_type == TokenWallet.TYPE_SYSTEM:
+        return wallet.get_system_key_display() or wallet.system_key or "System wallet"
+    if wallet.user_id and wallet.user:
+        return wallet.user.username
+    return f"Wallet #{wallet.id}"
+
+
+def _build_wallet_transaction_rows(wallet: TokenWallet) -> list[dict]:
+    entries = list(
+        wallet.entries.select_related("txn", "txn__created_by")
+        .prefetch_related(
+            Prefetch(
+                "txn__entries",
+                queryset=LedgerEntry.objects.select_related("wallet", "wallet__user").order_by("id"),
+            )
+        )
+        .order_by("-created_at", "-id")[:50]
+    )
+
+    rows = []
+    for entry in entries:
+        other_entries = [candidate for candidate in entry.txn.entries.all() if candidate.wallet_id != wallet.id]
+        if len(other_entries) == 1:
+            counterparty = _get_wallet_counterparty_label(other_entries[0].wallet)
+        elif len(other_entries) > 1:
+            counterparty = f"{len(other_entries)} counterparties"
+        else:
+            counterparty = "—"
+
+        rows.append(
+            {
+                "created_at": entry.created_at,
+                "txn_id": entry.txn_id,
+                "kind": entry.txn.kind.replace("_", " ").strip().title(),
+                "status": entry.txn.status,
+                "status_label": entry.txn.get_status_display(),
+                "memo": entry.txn.memo,
+                "counterparty": counterparty,
+                "delta": entry.delta,
+                "delta_display": _format_token_amount(entry.delta, signed=True),
+                "balance_after_display": _format_token_amount(entry.balance_after),
+                "direction": "credit" if entry.delta > 0 else "debit",
+            }
+        )
+    return rows
+
+
+def _build_wallet_hold_rows(wallet: TokenWallet) -> list[dict]:
+    holds = wallet.holds.filter(released=False).select_related("created_by").order_by("-created_at", "-id")
+    rows = []
+    for hold in holds:
+        rows.append(
+            {
+                "amount_display": _format_token_amount(hold.amount),
+                "reason": hold.reason or "Manual hold",
+                "created_at": hold.created_at,
+                "created_by": hold.created_by.username if hold.created_by else "System",
+            }
+        )
+    return rows
+
+
+def _build_wallet_velocity_rows(wallet: TokenWallet) -> list[dict]:
+    definitions = [
+        ("Hourly inflow", LEDGER_ACTION_DEPOSIT, 3600, wallet.hourly_inflow_limit),
+        ("Daily inflow", LEDGER_ACTION_DEPOSIT, 86400, wallet.daily_inflow_limit),
+        ("Hourly outflow", LEDGER_ACTION_WITHDRAWAL, 3600, wallet.hourly_outflow_limit),
+        ("Daily outflow", LEDGER_ACTION_WITHDRAWAL, 86400, wallet.daily_outflow_limit),
+        ("Hourly transfers", LEDGER_ACTION_TRANSFER, 3600, wallet.hourly_outflow_limit),
+        ("Daily transfers", LEDGER_ACTION_TRANSFER, 86400, wallet.daily_outflow_limit),
+        ("Hourly purchases", LEDGER_ACTION_PURCHASE, 3600, wallet.hourly_outflow_limit),
+        ("Daily purchases", LEDGER_ACTION_PURCHASE, 86400, wallet.daily_outflow_limit),
+    ]
+
+    rows = []
+    for label, action, window_seconds, limit in definitions:
+        current = int(get_wallet_velocity_amount(wallet=wallet, action=action, window_seconds=window_seconds))
+        if limit is None and current == 0:
+            continue
+
+        progress_percent = None
+        if limit and limit > 0:
+            progress_percent = min(int((current / limit) * 100), 100)
+
+        rows.append(
+            {
+                "label": label,
+                "current_display": _format_token_amount(current),
+                "limit_display": _format_token_amount(limit) if limit is not None else "Unlimited",
+                "progress_percent": progress_percent,
+            }
+        )
+    return rows
+
+
 @login_required
 def wallet(request):
-    context = {}
+    wallet_obj, _ = TokenWallet.objects.get_or_create(
+        user=request.user,
+        defaults={
+            "wallet_type": TokenWallet.TYPE_USER,
+            "allow_negative": False,
+        },
+    )
+
+    available_balance = get_wallet_available_balance(wallet_obj)
+    can_view_risk_reason = request.user.is_superuser or request.user.has_perm("ledger.can_view_wallet_risk")
+
+    wallet_banner = None
+    if wallet_obj.risk_status == LEDGER_RISK_STATUS_BLOCKED:
+        wallet_banner = {
+            "tone": "danger",
+            "title": "Wallet blocked",
+            "message": "Transactions that debit or credit this wallet are currently blocked.",
+        }
+    elif wallet_obj.review_required or wallet_obj.risk_status == LEDGER_RISK_STATUS_REVIEW:
+        wallet_banner = {
+            "tone": "warning",
+            "title": "Wallet under review",
+            "message": "Transactions are temporarily paused while this wallet is being reviewed.",
+        }
+
+    context = {
+        "wallet": wallet_obj,
+        "wallet_banner": wallet_banner,
+        "can_view_risk_reason": can_view_risk_reason,
+        "total_balance_display": _format_token_amount(wallet_obj.balance),
+        "available_balance_display": _format_token_amount(available_balance),
+        "held_balance_display": _format_token_amount(wallet_obj.held_balance),
+        "wallet_status_display": wallet_obj.get_risk_status_display(),
+        "transaction_rows": _build_wallet_transaction_rows(wallet_obj),
+        "active_holds": _build_wallet_hold_rows(wallet_obj),
+        "velocity_rows": _build_wallet_velocity_rows(wallet_obj),
+    }
     return render(request, "cms/wallet.html", context)
 
 @login_required

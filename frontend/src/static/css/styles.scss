@@ -35,6 +35,7 @@ body {
 
 @import './includes/typography/_typography.scss';
 @import './includes/form_controls/_form_controls.scss';
+@import './WalletPage.scss';
 
 a {
   color: var(--theme-color, var(--default-theme-color));

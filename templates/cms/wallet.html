@@ -1,102 +1,172 @@
 {% extends "base.html" %}
 
-{% block headtitle %}Terms & Privacy - {{PORTAL_NAME}}{% endblock headtitle %}
+{% block headtitle %}Wallet - {{ PORTAL_NAME }}{% endblock headtitle %}
 
 {% block headermeta %}
-<meta property="og:title" content="Terms & Privacy - {{PORTAL_NAME}}">
+<meta property="og:title" content="Wallet - {{ PORTAL_NAME }}">
 <meta property="og:type" content="website">
-<meta property="og:description" content="">
 <meta name="twitter:card" content="summary">
-
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "BreadcrumbList",
-  "itemListElement": [{
-    "@type": "ListItem",
-    "position": 1,
-    "name": "{{PORTAL_NAME}}",
-    "item": {"@type":"WebPage","@id":"{{FRONTEND_HOST}}"}
-  },{
-    "@type": "ListItem",
-    "position": 2,
-    "name": "Terms & Privacy",
-    "item": {"@type":"WebPage","@id":"{{FRONTEND_HOST}}/terms"}
-  }]
-}
-</script>
 {% endblock headermeta %}
 
 {% block innercontent %}
-<div class="custom-page-wrapper">
-  <h2>Terms of Service</h2>
-  <hr/>
-  <h3>Site Usage</h3>
-  <ul>
-    <li>This service is intended for adults only. Do not use the service if you are under the age of majority in your jurisdiction.</li>
-    <li>Reposting or scraping other creators’ content is prohibited and may lead to removal and account ban.</li>
-    <li>You may perform non-destructive security testing and disclose findings to us at <strong>admin@celebfakes.ru</strong>. Do not access data, escalate, or disrupt service. Rewards (if any) are at our discretion.</li>
-  </ul>
+<div class="wallet-page">
+  <div class="wallet-page__layout">
+    <main class="wallet-page__main">
+      <section class="wallet-panel wallet-panel--main">
+        <header class="wallet-panel__header">
+          <div class="wallet-panel__header-left">
+            <button type="button" class="wallet-panel__back-button" onclick="history.back()">←</button>
+            <h1 class="wallet-panel__title">My Wallet</h1>
+          </div>
+        </header>
 
-  <h3>Comment Section</h3>
-  <ul>
-    <li>Trolling, harassment, or insults toward creators, users, or persons featured in videos is not tolerated.</li>
-    <li>Advertising or linking to other tube/adult/subscription sites without moderator consent may result in suspension or ban.</li>
-    <li>Users must verify their email to comment on or download videos.</li>
-  </ul>
+        {% if wallet_banner %}
+        <div class="wallet-notice wallet-notice--{{ wallet_banner.tone }}">
+          <strong class="wallet-notice__title">{{ wallet_banner.title }}</strong>
+          <p class="wallet-notice__text">{{ wallet_banner.message }}</p>
+          {% if can_view_risk_reason and wallet.risk_reason %}
+          <p class="wallet-notice__reason">{{ wallet.risk_reason }}</p>
+          {% endif %}
+        </div>
+        {% endif %}
 
-  <h3>Videos</h3>
-  <ul>
-    <li>Any content involving minors leads to permanent ban and removal.</li>
-    <li>The subject of each video must be a well-known public figure (e.g., 1,000,000+ followers or equivalent notoriety). Proof may be requested.</li>
-    <li>Only manually verified creators may publish. Every upload is reviewed by a moderator before publication.</li>
-    <li>No content featuring political figures or subjects from jurisdictions we exclude for regulatory risk (including the Russian Federation).</li>
-    <li>Reposting another creator’s work is forbidden.</li>
-    <li>We only allow creator-made DeepFake content of acceptable quality; low-effort automated face-swap uploads are not allowed.</li>
-  </ul>
+        <section class="wallet-balance">
+          <div class="wallet-balance__heading">Available Balance</div>
+          <div class="wallet-balance__value">{{ available_balance_display }}</div>
 
-  <h3>Data Deletion & Content Removal</h3>
-  <ul>
-    <li><strong>Account deletion</strong>: contact us via the contact form or <strong>support@celebfakes.ru</strong> to delete your account and associated data.</li>
-    <li><strong>Media deletion</strong>: if a media violates these Terms, use the “Report” button or email <strong>admin@celabfakes.ru</strong> with the exact URL and reason.</li>
-  </ul>
+          <div class="wallet-balance__divider">
+            <div class="wallet-balance__diamond"></div>
+          </div>
 
-  <br/>
-  <h2>Privacy</h2>
-  <hr/>
+          <div class="wallet-balance__stats">
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">Total balance</span>
+              <strong class="wallet-stat__value">{{ total_balance_display }}</strong>
+            </div>
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">Available</span>
+              <strong class="wallet-stat__value">{{ available_balance_display }}</strong>
+            </div>
+            <div class="wallet-stat">
+              <span class="wallet-stat__label">On hold</span>
+              <strong class="wallet-stat__value">{{ held_balance_display }}</strong>
+            </div>
+          </div>
+        </section>
 
-  <h3>What data we process</h3>
-  <ul>
-    <li><strong>Access handling without retained logs</strong>: we do not retain full web server access logs on our origin. Our infrastructure and protection providers may transiently process IP addresses and HTTP metadata to serve and secure traffic. We view aggregated dashboards (e.g., CDN/anti-DDoS, privacy-friendly analytics) rather than storing raw logs ourselves.</li>
-    <li><strong>Account & user content</strong> (if you register/upload): username, email, profile data you provide, uploads and related metadata, and communications sent to us.</li>
-    <li><strong>Forms</strong>: messages you submit via contact/report (content URL, reason, evidence, contact details).</li>
-    <li><strong>Payments</strong>: handled by third-party processors; we do not store full payment instrument details on our servers.</li>
-    <li><strong>Analytics</strong>: privacy-friendly, cookie-less page analytics with no cross-site tracking.</li>
-    <li><strong>Advertising delivery</strong>: we may display non-personalized ads such as popunders or pre-rolls. No behavioral targeting by us.</li>
-  </ul>
+        <div class="wallet-panel__separator"></div>
 
-  <h3>Local storage & cookies</h3>
-  <p>We do not use tracking cookies. Limited local storage may be used for functional purposes (e.g., age-gate confirmation).</p>
+        <section class="wallet-section">
+          <div class="wallet-section__header">
+            <h2 class="wallet-section__title">Recent Activity</h2>
+          </div>
 
-  <h3>How and why we use data</h3>
-  <ul>
-    <li>Provide and protect the platform; prevent abuse and fraud.</li>
-    <li>Moderate content and enforce these Terms.</li>
-    <li>Handle support and media deletion requests.</li>
-    <li>Measure basic usage with privacy-friendly analytics.</li>
-  </ul>
+          <div class="wallet-section__filters">
+            <span class="wallet-filter-pill wallet-filter-pill--active">All</span>
+          </div>
 
-  <h3>Retention</h3>
-  <ul>
-    <li>No full access logs retained on our origin. Aggregated metrics are kept as provided by our processors.</li>
-    <li>Accounts/uploads: retained while the account is active; you can delete your content or account.</li>
-    <li>Reports/abuse records: retained as needed to document moderation decisions.</li>
-  </ul>
+          {% if transaction_rows %}
+          <div class="wallet-activity-list">
+            {% for row in transaction_rows %}
+            <article class="wallet-activity-item">
+              <div class="wallet-activity-item__main">
+                <div class="wallet-activity-item__top">
+                  <span class="wallet-activity-item__date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                  <div class="wallet-activity-item__badges">
+                    <span class="wallet-kind-pill">{{ row.kind }}</span>
+                    <span class="wallet-status-pill wallet-status-pill--{{ row.status }}">{{ row.status_label }}</span>
+                  </div>
+                </div>
 
-  <h3>Sharing & processors</h3>
-  <p>We use service providers strictly to operate and protect this platform (e.g., hosting/CDN/DDoS protection, video delivery, payment processing). They process data under our instructions.</p>
+                <div class="wallet-activity-item__body">
+                  <div class="wallet-activity-item__description">
+                    {% if row.memo %}
+                    {{ row.memo }}
+                    {% else %}
+                    {{ row.kind }}
+                    {% endif %}
+                  </div>
 
-  <p><em>Last updated: November 4th 2025 </em></p>
+                  {% if row.counterparty != "—" %}
+                  <div class="wallet-activity-item__meta">{{ row.counterparty }}</div>
+                  {% endif %}
+
+                  <div class="wallet-activity-item__meta">Ref #{{ row.txn_id }}</div>
+                </div>
+              </div>
+
+              <div class="wallet-activity-item__side">
+                <div class="wallet-activity-item__amount wallet-activity-item__amount--{{ row.direction }}">
+                  {{ row.delta_display }}
+                </div>
+                <div class="wallet-activity-item__balance">Balance {{ row.balance_after_display }}</div>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="wallet-empty-state">
+            <div class="wallet-empty-state__title">No activity yet</div>
+            <div class="wallet-empty-state__text">Your wallet does not have any transaction yet.</div>
+          </div>
+          {% endif %}
+        </section>
+      </section>
+    </main>
+
+    <aside class="wallet-page__sidebar">
+      <section class="wallet-panel wallet-sidebar-card">
+        <div class="wallet-sidebar-card__top">
+          <div class="wallet-sidebar-card__amount">{{ available_balance_display }}</div>
+          <div class="wallet-sidebar-card__label">Available Balance</div>
+        </div>
+
+        <div class="wallet-sidebar-card__rows">
+          <div class="wallet-sidebar-card__row">
+            <span>Total balance</span>
+            <strong>{{ total_balance_display }}</strong>
+          </div>
+          <div class="wallet-sidebar-card__row">
+            <span>Available</span>
+            <strong>{{ available_balance_display }}</strong>
+          </div>
+          <div class="wallet-sidebar-card__row">
+            <span>On hold</span>
+            <strong>{{ held_balance_display }}</strong>
+          </div>
+          <div class="wallet-sidebar-card__row">
+            <span>Status</span>
+            <strong>{{ wallet_status_display }}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="wallet-panel wallet-sidebar-card">
+        <div class="wallet-section__header wallet-section__header--sidebar">
+          <h2 class="wallet-section__title">Active Holds</h2>
+        </div>
+
+        {% if active_holds %}
+        <div class="wallet-hold-list">
+          {% for hold in active_holds %}
+          <article class="wallet-hold-item">
+            <div class="wallet-hold-item__top">
+              <strong>{{ hold.amount_display }}</strong>
+              <span>{{ hold.created_at|date:"M d, Y H:i" }}</span>
+            </div>
+            <div class="wallet-hold-item__reason">{{ hold.reason }}</div>
+            <div class="wallet-hold-item__meta">By {{ hold.created_by }}</div>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="wallet-empty-state wallet-empty-state--compact">
+          <div class="wallet-empty-state__title">No active hold</div>
+          <div class="wallet-empty-state__text">Your balance is fully available.</div>
+        </div>
+        {% endif %}
+      </section>
+    </aside>
+  </div>
 </div>
-
 {% endblock %}
