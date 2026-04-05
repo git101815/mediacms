@@ -30,3 +30,4 @@ celerybeat-schedule-wal
 /static/
 /.env
 .env
+/backup
