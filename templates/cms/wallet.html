@@ -91,10 +91,48 @@
         </section>
 
         <div class="wallet-panel__separator"></div>
+        <section class="wallet-section">
+  <div class="wallet-section__header">
+    <h2 class="wallet-section__title">Recent Deposit Sessions</h2>
+  </div>
 
+  {% if recent_deposit_session_rows %}
+  <div class="wallet-request-list">
+    {% for row in recent_deposit_session_rows %}
+    <article class="wallet-request-item">
+      <div class="wallet-request-item__main">
+        <div class="wallet-request-item__top">
+          <span class="wallet-request-item__date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+          <div class="wallet-request-item__badges">
+            <span class="wallet-kind-pill">
+              <i class="material-icons wallet-kind-pill__icon" aria-hidden="true">south_west</i>
+              <span>{{ row.label }}</span>
+            </span>
+            <span class="wallet-status-pill wallet-status-pill--{{ row.status }}">
+              <i class="material-icons wallet-status-pill__icon" aria-hidden="true">{{ row.status_icon }}</i>
+              <span>{{ row.status_label }}</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="wallet-request-item__body">
+          <div class="wallet-request-item__meta">Address {{ row.deposit_address }}</div>
+          <div class="wallet-request-item__meta"><a href="{{ row.url }}">Open session</a></div>
+        </div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="wallet-empty-state wallet-empty-state--compact">
+    <div class="wallet-empty-state__title">No deposit session yet</div>
+    <div class="wallet-empty-state__text">Your recent deposit sessions will appear here.</div>
+  </div>
+  {% endif %}
+</section>
         <section class="wallet-section">
           <div class="wallet-section__header">
-            <h2 class="wallet-section__title">Recent Requests</h2>
+            <h2 class="wallet-section__title">Recent Withdrawal Requests</h2>
           </div>
 
           {% if recent_request_rows %}
@@ -326,39 +364,51 @@
   data-wallet-modal-backdrop="deposit"
   {% if wallet_open_modal != 'deposit' %}hidden{% endif %}
 >
-  <div class="wallet-modal" role="dialog" aria-modal="true" aria-labelledby="wallet-deposit-modal-title">
-    <div class="wallet-modal__header">
-      <div>
-        <h2 id="wallet-deposit-modal-title" class="wallet-modal__title">Create deposit request</h2>
-        <p class="wallet-modal__subtitle">This creates a pending deposit request. Your balance is credited later.</p>
-      </div>
-      <button type="button" class="wallet-modal__close" data-wallet-modal-close="deposit">
-        <i class="material-icons" aria-hidden="true">close</i>
-      </button>
+<h2 id="wallet-deposit-modal-title" class="wallet-modal__title">Start deposit</h2>
+<p class="wallet-modal__subtitle">
+  Choose a supported network. A dedicated deposit address will be allocated to this session.
+</p>
+
+{% if deposit_options %}
+<form method="post" action="{{ wallet_deposit_request_url }}" class="wallet-form">
+  {% csrf_token %}
+  <input type="hidden" name="return_tab" value="{{ active_tab }}">
+  <input type="hidden" name="return_status" value="{{ active_status }}">
+
+  <label class="wallet-form__field">
+    <span class="wallet-form__label">Network</span>
+    <select class="wallet-form__input" name="deposit_option_key" required>
+      {% for option in deposit_options %}
+      <option value="{{ option.key }}">
+        {{ option.label }} · {{ option.required_confirmations }} confirmations · Min {{ option.min_amount }}
+      </option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <div class="wallet-form__field">
+    <div class="wallet-request-item__meta">
+      Send only the exact asset shown for the selected network. Unsupported assets or networks are not credited automatically.
     </div>
+  </div>
 
-    <form method="post" action="{{ wallet_deposit_request_url }}" class="wallet-form">
-      {% csrf_token %}
-      <input type="hidden" name="return_tab" value="{{ active_tab }}">
-      <input type="hidden" name="return_status" value="{{ active_status }}">
-
-      <label class="wallet-form__field">
-        <span class="wallet-form__label">Amount</span>
-        <input class="wallet-form__input" type="number" name="amount" min="1" step="1" required>
-      </label>
-
-      <label class="wallet-form__field">
-        <span class="wallet-form__label">Note</span>
-        <textarea class="wallet-form__textarea" name="notes" rows="3" placeholder="Optional note"></textarea>
-      </label>
-
-      <div class="wallet-form__actions">
-        <button type="button" class="wallet-form__button wallet-form__button--secondary" data-wallet-modal-close="deposit">Cancel</button>
-        <button type="submit" class="wallet-form__button wallet-form__button--primary">Create request</button>
-      </div>
-    </form>
+  <div class="wallet-form__actions">
+    <button type="button" class="wallet-form__button wallet-form__button--secondary" data-wallet-modal-close="deposit">
+      Cancel
+    </button>
+    <button type="submit" class="wallet-form__button wallet-form__button--primary">
+      Continue
+    </button>
+  </div>
+</form>
+{% else %}
+<div class="wallet-empty-state wallet-empty-state--compact">
+  <div class="wallet-empty-state__title">Deposits are temporarily unavailable</div>
+  <div class="wallet-empty-state__text">
+    No deposit address is currently available for any supported network.
   </div>
 </div>
+{% endif %}
 
 <div
   class="wallet-modal-backdrop{% if wallet_open_modal == 'withdraw' %} wallet-modal-backdrop--open{% endif %}"

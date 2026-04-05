@@ -91,8 +91,16 @@ from ledger.models import (
     LEDGER_TXN_STATUS_POSTED,
     LEDGER_TXN_STATUS_REVERSED,
     WalletRequest,
+    DepositSession,
 )
-from ledger.services import get_wallet_available_balance, get_wallet_velocity_amount, create_wallet_deposit_request, create_wallet_withdrawal_request
+from ledger.services import (
+    get_wallet_available_balance,
+    get_wallet_velocity_amount,
+    create_wallet_deposit_request,
+    create_wallet_withdrawal_request,
+    list_available_deposit_options,
+    open_user_deposit_session,
+)
 from .serializers import (
     CategorySerializer,
     CelebritySerializer,
@@ -156,6 +164,30 @@ WALLET_REQUEST_TYPE_ICON_MAP = {
     WalletRequest.REQUEST_TYPE_DEPOSIT: "south",
     WalletRequest.REQUEST_TYPE_WITHDRAWAL: "north_east",
 }
+DEPOSIT_SESSION_TERMINAL_STATUSES = {
+    DepositSession.STATUS_CREDITED,
+    DepositSession.STATUS_EXPIRED,
+    DepositSession.STATUS_FAILED,
+}
+
+DEPOSIT_SESSION_STATUS_LABELS = {
+    DepositSession.STATUS_AWAITING_PAYMENT: "Awaiting payment",
+    DepositSession.STATUS_SEEN_ONCHAIN: "Seen on-chain",
+    DepositSession.STATUS_CONFIRMING: "Confirming",
+    DepositSession.STATUS_CREDITED: "Credited",
+    DepositSession.STATUS_EXPIRED: "Expired",
+    DepositSession.STATUS_FAILED: "Failed",
+}
+
+DEPOSIT_SESSION_STATUS_ICONS = {
+    DepositSession.STATUS_AWAITING_PAYMENT: "schedule",
+    DepositSession.STATUS_SEEN_ONCHAIN: "visibility",
+    DepositSession.STATUS_CONFIRMING: "hourglass_top",
+    DepositSession.STATUS_CREDITED: "check_circle",
+    DepositSession.STATUS_EXPIRED: "event_busy",
+    DepositSession.STATUS_FAILED: "error",
+}
+
 def about(request):
     """About view"""
 
@@ -456,6 +488,49 @@ def _build_wallet_request_rows(wallet: TokenWallet) -> list[dict]:
         )
     return rows
 
+def _build_recent_deposit_session_rows(wallet):
+    sessions = (
+        DepositSession.objects.filter(wallet=wallet)
+        .order_by("-created_at")[:5]
+    )
+
+    rows = []
+    for session in sessions:
+        display_label = session.metadata.get("display_label") or f"{session.asset_code} on {session.chain}"
+        rows.append(
+            {
+                "public_id": str(session.public_id),
+                "label": display_label,
+                "status": session.status,
+                "status_label": DEPOSIT_SESSION_STATUS_LABELS.get(session.status, session.status),
+                "status_icon": DEPOSIT_SESSION_STATUS_ICONS.get(session.status, "schedule"),
+                "deposit_address": session.deposit_address,
+                "created_at": session.created_at,
+                "url": reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}),
+            }
+        )
+    return rows
+
+def _build_deposit_session_payload(session: DepositSession) -> dict:
+    display_label = session.metadata.get("display_label") or f"{session.asset_code} on {session.chain}"
+    return {
+        "public_id": str(session.public_id),
+        "status": session.status,
+        "status_label": DEPOSIT_SESSION_STATUS_LABELS.get(session.status, session.status),
+        "status_icon": DEPOSIT_SESSION_STATUS_ICONS.get(session.status, "schedule"),
+        "chain": session.chain,
+        "asset_code": session.asset_code,
+        "display_label": display_label,
+        "deposit_address": session.deposit_address,
+        "required_confirmations": session.required_confirmations,
+        "confirmations": session.confirmations,
+        "observed_txid": session.observed_txid,
+        "observed_amount_display": _format_token_amount(session.observed_amount) if session.observed_amount else "",
+        "expires_at_iso": session.expires_at.isoformat(),
+        "is_terminal": session.status in DEPOSIT_SESSION_TERMINAL_STATUSES,
+        "wallet_url": reverse("wallet"),
+    }
+
 @login_required
 @require_POST
 def wallet_deposit_request(request):
@@ -467,27 +542,22 @@ def wallet_deposit_request(request):
         },
     )
 
-    return_tab = _normalize_wallet_tab(request.POST.get("return_tab", WALLET_TAB_ALL).strip())
-    return_status = _normalize_wallet_status(request.POST.get("return_status", WALLET_STATUS_ALL).strip())
-    amount = request.POST.get("amount", "").strip()
-    notes = request.POST.get("notes", "").strip()
+    option_key = (request.POST.get("deposit_option_key") or "").strip()
+    return_tab = (request.POST.get("return_tab") or WALLET_TAB_ALL).strip()
+    return_status = (request.POST.get("return_status") or WALLET_STATUS_ALL).strip()
 
     try:
-        wallet_request = create_wallet_deposit_request(
+        session = open_user_deposit_session(
             actor=request.user,
             wallet=wallet_obj,
-            amount=amount,
-            notes=notes,
-            metadata={"source": "wallet_ui"},
+            option_key=option_key,
         )
-    except (DjangoValidationError, DjangoPermissionDenied) as exc:
-        messages.error(request, _extract_wallet_form_error(exc))
-        return redirect(
-            f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status, open_modal='deposit')}"
-        )
+    except ValidationError as exc:
+        messages.add_message(request, messages.ERROR, str(exc))
+        query = urlencode({"tab": return_tab, "status": return_status})
+        return redirect(f"{reverse('wallet')}?{query}")
 
-    messages.success(request, f"Deposit request {wallet_request.reference} created.")
-    return redirect(f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status)}")
+    return redirect("wallet_deposit_session", public_id=session.public_id)
 
 
 @login_required
@@ -524,6 +594,45 @@ def wallet_withdrawal_request(request):
 
     messages.success(request, f"Withdrawal request {wallet_request.reference} created.")
     return redirect(f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status)}")
+
+@login_required
+def wallet_deposit_session(request, public_id):
+    session = get_object_or_404(
+        DepositSession.objects.select_related("wallet"),
+        public_id=public_id,
+        user=request.user,
+    )
+
+    context = {
+        "deposit_session": _build_deposit_session_payload(session),
+        "wallet_url": reverse("wallet"),
+        "wallet_deposit_session_status_url": reverse(
+            "wallet_deposit_session_status",
+            kwargs={"public_id": session.public_id},
+        ),
+    }
+    return render(request, "cms/deposit_session.html", context)
+@login_required
+def wallet_deposit_session_status(request, public_id):
+    session = get_object_or_404(
+        DepositSession.objects.only(
+            "public_id",
+            "user_id",
+            "status",
+            "chain",
+            "asset_code",
+            "deposit_address",
+            "required_confirmations",
+            "confirmations",
+            "observed_txid",
+            "observed_amount",
+            "expires_at",
+            "metadata",
+        ),
+        public_id=public_id,
+        user=request.user,
+    )
+    return JsonResponse(_build_deposit_session_payload(session))
 
 @login_required
 def wallet(request):
@@ -573,6 +682,7 @@ def wallet(request):
         tab=active_tab,
         status=active_status,
     )
+    deposit_options = list_available_deposit_options()
 
     context = {
         "wallet": wallet_obj,
@@ -600,6 +710,8 @@ def wallet(request):
         "wallet_filters_querystring": _build_wallet_querystring(tab=active_tab, status=active_status),
         "wallet_deposit_request_url": reverse("wallet_deposit_request"),
         "wallet_withdrawal_request_url": reverse("wallet_withdrawal_request"),
+        "deposit_options": deposit_options,
+        "recent_deposit_session_rows": _build_recent_deposit_session_rows(wallet_obj),
     }
     return render(request, "cms/wallet.html", context)
 

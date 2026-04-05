@@ -1,6 +1,6 @@
 from django.urls import reverse
 
-from ledger.models import LEDGER_RISK_STATUS_REVIEW, WalletRequest
+from ledger.models import LEDGER_RISK_STATUS_REVIEW, WalletRequest, DepositAddress, DepositSession
 from ledger.services import (
     apply_ledger_transaction,
     create_pending_ledger_transaction,
@@ -207,33 +207,39 @@ class TestWalletView(BaseLedgerTestCase):
         self.assertContains(response, "Deposit")
         self.assertContains(response, "Withdraw")
 
-    def test_user_can_create_deposit_request_from_wallet(self):
+    def test_user_can_open_deposit_session_from_wallet(self):
+        DepositAddress.objects.create(
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            display_label="Ethereum · USDT",
+            address="0x1111111111111111111111111111111111111111",
+            address_derivation_ref="m/44'/60'/0'/0/10",
+            required_confirmations=12,
+            min_amount=100,
+            session_ttl_seconds=3600,
+        )
+
         self.client.force_login(self.u1)
 
         response = self.client.post(
             reverse("wallet_deposit_request"),
             {
-                "amount": "250",
-                "notes": "Top up request",
+                "deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
                 "return_tab": "all",
                 "return_status": "all",
             },
         )
 
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(WalletRequest.objects.filter(request_type=WalletRequest.REQUEST_TYPE_DEPOSIT).count(), 0)
 
-        wallet_request = WalletRequest.objects.get(
-            wallet=self.w1,
-            request_type=WalletRequest.REQUEST_TYPE_DEPOSIT,
-        )
-        self.assertEqual(wallet_request.status, WalletRequest.STATUS_PENDING)
-        self.assertEqual(wallet_request.amount, 250)
-        self.assertEqual(wallet_request.notes, "Top up request")
-        self.assertIsNone(wallet_request.hold)
+        session = DepositSession.objects.get(wallet=self.w1)
+        self.assertRedirects(response, reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}))
 
         wallet_response = self.client.get(reverse("wallet"))
-        self.assertContains(wallet_response, "Top up request")
-        self.assertContains(wallet_response, "Deposit")
+        self.assertContains(wallet_response, "Recent Deposit Sessions")
+        self.assertContains(wallet_response, "Ethereum · USDT")
 
     def test_user_can_create_withdrawal_request_from_wallet(self):
         apply_ledger_transaction(

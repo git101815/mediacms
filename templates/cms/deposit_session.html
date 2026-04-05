@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block headtitle %}Deposit - {{ PORTAL_NAME }}{% endblock headtitle %}
+
+{% block innercontent %}
+<div
+  class="wallet-page"
+  data-deposit-session-root
+  data-status-url="{{ wallet_deposit_session_status_url }}"
+>
+  <div class="wallet-page__layout">
+    <main class="wallet-page__main">
+      <section class="wallet-panel wallet-panel--main">
+        <header class="wallet-panel__header">
+          <div class="wallet-panel__header-left">
+            <a href="{{ wallet_url }}" class="wallet-panel__back-button">←</a>
+            <h1 class="wallet-panel__title">Deposit</h1>
+          </div>
+        </header>
+
+        <section class="wallet-balance">
+          <div class="wallet-balance__heading" data-deposit-label>{{ deposit_session.display_label }}</div>
+          <div class="wallet-balance__value" data-deposit-address>{{ deposit_session.deposit_address }}</div>
+
+          <div class="wallet-balance__actions">
+            <button type="button" class="wallet-action-button wallet-action-button--primary" data-copy-deposit-address>
+              <i class="material-icons" aria-hidden="true">content_copy</i>
+              <span>Copy address</span>
+            </button>
+
+            <a
+              href="{{ wallet_url }}"
+              class="wallet-action-button"
+              data-deposit-return-link
+              {% if not deposit_session.is_terminal %}hidden{% endif %}
+            >
+              <i class="material-icons" aria-hidden="true">account_balance_wallet</i>
+              <span>Return to wallet</span>
+            </a>
+          </div>
+
+          <p class="wallet-balance__actions-hint">
+            Send only the supported asset on the exact network shown for this session.
+          </p>
+        </section>
+
+        <div class="wallet-panel__separator"></div>
+
+        <section class="wallet-section">
+          <div class="wallet-section__header">
+            <h2 class="wallet-section__title">Status</h2>
+          </div>
+
+          <div class="wallet-request-item">
+            <div class="wallet-request-item__main">
+              <div class="wallet-request-item__top">
+                <span class="wallet-request-item__date">Session {{ deposit_session.public_id }}</span>
+                <div class="wallet-request-item__badges">
+                  <span class="wallet-status-pill wallet-status-pill--{{ deposit_session.status }}" data-deposit-status-pill>
+                    <i class="material-icons wallet-status-pill__icon" aria-hidden="true" data-deposit-status-icon>{{ deposit_session.status_icon }}</i>
+                    <span data-deposit-status-label>{{ deposit_session.status_label }}</span>
+                  </span>
+                </div>
+              </div>
+
+              <div class="wallet-request-item__body">
+                <div class="wallet-request-item__meta">Network {{ deposit_session.chain }}</div>
+                <div class="wallet-request-item__meta">Asset {{ deposit_session.asset_code }}</div>
+                <div class="wallet-request-item__meta">
+                  Confirmations <span data-deposit-confirmations>{{ deposit_session.confirmations }}</span> / {{ deposit_session.required_confirmations }}
+                </div>
+                <div class="wallet-request-item__meta">
+                  Observed amount <span data-deposit-observed-amount>{{ deposit_session.observed_amount_display|default:"—" }}</span>
+                </div>
+                <div class="wallet-request-item__meta">
+                  Transaction <span data-deposit-txid>{{ deposit_session.observed_txid|default:"—" }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="wallet-panel__separator"></div>
+
+        <section class="wallet-section">
+          <div class="wallet-section__header">
+            <h2 class="wallet-section__title">What happens next</h2>
+          </div>
+
+          <div class="wallet-request-list">
+            <article class="wallet-request-item">
+              <div class="wallet-request-item__main">
+                <div class="wallet-request-item__body">
+                  <div class="wallet-request-item__description">1. Awaiting payment</div>
+                  <div class="wallet-request-item__meta">Transfer funds to the address shown above.</div>
+                </div>
+              </div>
+            </article>
+
+            <article class="wallet-request-item">
+              <div class="wallet-request-item__main">
+                <div class="wallet-request-item__body">
+                  <div class="wallet-request-item__description">2. Seen on-chain</div>
+                  <div class="wallet-request-item__meta">The transfer is detected by the deposit watcher.</div>
+                </div>
+              </div>
+            </article>
+
+            <article class="wallet-request-item">
+              <div class="wallet-request-item__main">
+                <div class="wallet-request-item__body">
+                  <div class="wallet-request-item__description">3. Confirming</div>
+                  <div class="wallet-request-item__meta">The required number of confirmations is reached.</div>
+                </div>
+              </div>
+            </article>
+
+            <article class="wallet-request-item">
+              <div class="wallet-request-item__main">
+                <div class="wallet-request-item__body">
+                  <div class="wallet-request-item__description">4. Credited</div>
+                  <div class="wallet-request-item__meta">Your wallet balance is credited exactly once.</div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block bottomimports %}
+{{ block.super }}
+<script>
+(function () {
+  const root = document.querySelector('[data-deposit-session-root]');
+  if (!root) {
+    return;
+  }
+
+  const statusUrl = root.getAttribute('data-status-url');
+  const addressNode = root.querySelector('[data-deposit-address]');
+  const copyButton = root.querySelector('[data-copy-deposit-address]');
+  const statusPill = root.querySelector('[data-deposit-status-pill]');
+  const statusIcon = root.querySelector('[data-deposit-status-icon]');
+  const statusLabel = root.querySelector('[data-deposit-status-label]');
+  const confirmationsNode = root.querySelector('[data-deposit-confirmations]');
+  const observedAmountNode = root.querySelector('[data-deposit-observed-amount]');
+  const txidNode = root.querySelector('[data-deposit-txid]');
+  const returnLink = root.querySelector('[data-deposit-return-link]');
+
+  if (copyButton && addressNode) {
+    copyButton.addEventListener('click', async function () {
+      try {
+        await navigator.clipboard.writeText(addressNode.textContent.trim());
+      } catch (error) {
+      }
+    });
+  }
+
+  let pollTimer = null;
+
+  async function refreshStatus() {
+    const response = await fetch(statusUrl, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      credentials: 'same-origin',
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = await response.json();
+
+    statusPill.className = 'wallet-status-pill wallet-status-pill--' + payload.status;
+    statusIcon.textContent = payload.status_icon;
+    statusLabel.textContent = payload.status_label;
+    confirmationsNode.textContent = payload.confirmations;
+    observedAmountNode.textContent = payload.observed_amount_display || '—';
+    txidNode.textContent = payload.observed_txid || '—';
+
+    if (payload.is_terminal && returnLink) {
+      returnLink.hidden = false;
+    }
+
+    if (!payload.is_terminal) {
+      pollTimer = window.setTimeout(refreshStatus, 5000);
+    }
+  }
+
+  pollTimer = window.setTimeout(refreshStatus, 5000);
+})();
+</script>
+{% endblock %}

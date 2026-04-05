@@ -11,6 +11,7 @@ from .models import (
     WalletRequest,
     DepositSession,
     ObservedOnchainTransfer,
+    DepositAddress
 )
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -345,6 +346,40 @@ class ObservedOnchainTransferAdmin(ReadOnlyAdmin):
         "metadata_version",
         "first_seen_at",
         "confirmed_at",
+        "created_at",
+        "updated_at",
+    )
+@admin.register(DepositAddress)
+class DepositAddressAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "display_label",
+        "chain",
+        "asset_code",
+        "token_contract_address",
+        "address",
+        "status",
+        "required_confirmations",
+        "min_amount",
+        "allocated_deposit_session",
+        "created_at",
+    )
+    list_filter = ("status", "chain", "asset_code")
+    search_fields = ("display_label", "address", "address_derivation_ref", "token_contract_address")
+    readonly_fields = (
+        "display_label",
+        "chain",
+        "asset_code",
+        "token_contract_address",
+        "address",
+        "address_derivation_ref",
+        "required_confirmations",
+        "min_amount",
+        "session_ttl_seconds",
+        "status",
+        "allocated_deposit_session",
+        "metadata",
+        "metadata_version",
         "created_at",
         "updated_at",
     )

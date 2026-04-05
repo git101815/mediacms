@@ -846,3 +846,74 @@ class ObservedOnchainTransfer(models.Model):
 
     def __str__(self):
         return f"ObservedOnchainTransfer #{self.id} {self.event_key} {self.status}"
+
+class DepositAddress(models.Model):
+    STATUS_AVAILABLE = "available"
+    STATUS_ALLOCATED = "allocated"
+    STATUS_RETIRED = "retired"
+
+    STATUS_CHOICES = (
+        (STATUS_AVAILABLE, "Available"),
+        (STATUS_ALLOCATED, "Allocated"),
+        (STATUS_RETIRED, "Retired"),
+    )
+
+    chain = models.CharField(max_length=32, db_index=True)
+    asset_code = models.CharField(max_length=32, db_index=True)
+    token_contract_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
+
+    display_label = models.CharField(max_length=64)
+    address = models.CharField(max_length=128, unique=True)
+    address_derivation_ref = models.CharField(max_length=128, unique=True)
+
+    required_confirmations = models.PositiveIntegerField(default=1)
+    min_amount = models.BigIntegerField(default=1)
+    session_ttl_seconds = models.PositiveIntegerField(default=3600)
+
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_AVAILABLE,
+        db_index=True,
+    )
+
+    allocated_deposit_session = models.OneToOneField(
+        "ledger.DepositSession",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="allocated_address",
+    )
+
+    metadata = models.JSONField(default=dict, blank=True)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "chain", "asset_code"]),
+            models.Index(fields=["status", "chain", "asset_code", "token_contract_address"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(required_confirmations__gte=1),
+                name="depositaddress_required_confirmations_gte_1",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(min_amount__gt=0),
+                name="depositaddress_min_amount_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(session_ttl_seconds__gt=0),
+                name="depositaddress_session_ttl_seconds_gt_0",
+            ),
+        ]
+        permissions = [
+            ("can_manage_deposit_addresses", "Can manage deposit addresses"),
+            ("can_view_deposit_addresses", "Can view deposit addresses"),
+        ]
+
+    def __str__(self):
+        return f"DepositAddress #{self.id} {self.display_label} {self.address} {self.status}"

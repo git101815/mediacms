@@ -22,6 +22,7 @@ from .models import (
     DepositSession,
     ObservedOnchainTransfer,
     SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING,
+    DepositAddress,
 )
 import uuid
 import hashlib
@@ -29,6 +30,12 @@ import json
 from django.utils import timezone
 from datetime import timedelta
 from django.db.models import Q
+
+ACTIVE_DEPOSIT_SESSION_STATUSES = {
+    DepositSession.STATUS_AWAITING_PAYMENT,
+    DepositSession.STATUS_SEEN_ONCHAIN,
+    DepositSession.STATUS_CONFIRMING,
+}
 
 def _compute_next_retry_at() -> timezone.datetime:
     return timezone.now() + timedelta(seconds=LEDGER_OUTBOX_RETRY_DELAY_SECONDS)
@@ -1343,3 +1350,125 @@ def credit_confirmed_deposit_session(
     )
 
     return txn
+
+def build_deposit_option_key(*, chain: str, asset_code: str, token_contract_address: str) -> str:
+    normalized_chain = _normalize_chain(chain)
+    normalized_asset = (asset_code or "").strip().upper()
+    normalized_contract = _normalize_evm_address(token_contract_address)
+    contract_part = normalized_contract or "native"
+    return f"{normalized_chain}:{normalized_asset}:{contract_part}"
+
+
+def parse_deposit_option_key(option_key: str) -> tuple[str, str, str]:
+    raw_value = (option_key or "").strip()
+    parts = raw_value.split(":", 2)
+    if len(parts) != 3:
+        raise ValidationError("Invalid deposit option")
+    chain, asset_code, contract_part = parts
+    token_contract_address = "" if contract_part == "native" else contract_part
+    return _normalize_chain(chain), asset_code.strip().upper(), _normalize_evm_address(token_contract_address)
+
+def list_available_deposit_options() -> list[dict]:
+    rows = (
+        DepositAddress.objects.filter(status=DepositAddress.STATUS_AVAILABLE)
+        .values(
+            "display_label",
+            "chain",
+            "asset_code",
+            "token_contract_address",
+            "required_confirmations",
+            "min_amount",
+            "session_ttl_seconds",
+        )
+        .order_by("display_label", "chain", "asset_code", "token_contract_address")
+        .distinct()
+    )
+
+    options = []
+    for row in rows:
+        option_key = build_deposit_option_key(
+            chain=row["chain"],
+            asset_code=row["asset_code"],
+            token_contract_address=row["token_contract_address"],
+        )
+        options.append(
+            {
+                "key": option_key,
+                "label": row["display_label"],
+                "chain": row["chain"],
+                "asset_code": row["asset_code"],
+                "token_contract_address": row["token_contract_address"],
+                "required_confirmations": row["required_confirmations"],
+                "min_amount": row["min_amount"],
+                "session_ttl_seconds": row["session_ttl_seconds"],
+            }
+        )
+    return options
+
+@transaction.atomic
+def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) -> DepositSession:
+    actor = _require_authenticated_actor(actor)
+
+    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
+    if wallet.wallet_type != TokenWallet.TYPE_USER:
+        raise ValidationError("Deposit sessions can only target user wallets")
+    if wallet.user_id != actor.id:
+        raise PermissionDenied("Cannot open a deposit session for another user's wallet")
+
+    chain, asset_code, token_contract_address = parse_deposit_option_key(option_key)
+
+    existing_session = (
+        DepositSession.objects.select_for_update()
+        .filter(
+            wallet=wallet,
+            chain=chain,
+            asset_code=asset_code,
+            token_contract_address=token_contract_address,
+            status__in=ACTIVE_DEPOSIT_SESSION_STATUSES,
+            expires_at__gt=timezone.now(),
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if existing_session:
+        return existing_session
+
+    address_row = (
+        DepositAddress.objects.select_for_update()
+        .filter(
+            status=DepositAddress.STATUS_AVAILABLE,
+            chain=chain,
+            asset_code=asset_code,
+            token_contract_address=token_contract_address,
+        )
+        .order_by("id")
+        .first()
+    )
+    if address_row is None:
+        raise ValidationError("No deposit address is currently available for this asset")
+
+    expires_at = timezone.now() + timedelta(seconds=int(address_row.session_ttl_seconds))
+
+    session = create_deposit_session(
+        actor=actor,
+        wallet=wallet,
+        chain=address_row.chain,
+        asset_code=address_row.asset_code,
+        token_contract_address=address_row.token_contract_address,
+        deposit_address=address_row.address,
+        address_derivation_ref=address_row.address_derivation_ref,
+        expires_at=expires_at,
+        required_confirmations=address_row.required_confirmations,
+        min_amount=address_row.min_amount,
+        metadata={
+            "display_label": address_row.display_label,
+            "address_pool_id": address_row.id,
+            "allocation_source": "app_pool",
+        },
+    )
+
+    address_row.status = DepositAddress.STATUS_ALLOCATED
+    address_row.allocated_deposit_session = session
+    address_row.save(update_fields=["status", "allocated_deposit_session", "updated_at"])
+
+    return session
