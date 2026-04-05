@@ -1,5 +1,17 @@
 from django.contrib import admin
-from .models import TokenWallet, LedgerTransaction, LedgerEntry,LedgerOutbox, LedgerSaga, LedgerSagaStep, LedgerHold, LedgerVelocityWindow, WalletRequest
+from .models import (
+    TokenWallet,
+    LedgerTransaction,
+    LedgerEntry,
+    LedgerOutbox,
+    LedgerSaga,
+    LedgerSagaStep,
+    LedgerHold,
+    LedgerVelocityWindow,
+    WalletRequest,
+    DepositSession,
+    ObservedOnchainTransfer,
+)
 
 class ReadOnlyAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
@@ -232,6 +244,107 @@ class LedgerVelocityWindowAdmin(ReadOnlyAdmin):
         "amount",
         "count",
         "window_start",
+        "created_at",
+        "updated_at",
+    )
+
+@admin.register(DepositSession)
+class DepositSessionAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "public_id",
+        "user",
+        "wallet",
+        "chain",
+        "asset_code",
+        "deposit_address",
+        "status",
+        "required_confirmations",
+        "confirmations",
+        "observed_amount",
+        "credited_ledger_txn",
+        "expires_at",
+        "created_at",
+    )
+    list_filter = ("chain", "asset_code", "status", "required_confirmations")
+    search_fields = (
+        "public_id",
+        "user__username",
+        "user__email",
+        "deposit_address",
+        "observed_txid",
+        "address_derivation_ref",
+    )
+    readonly_fields = (
+        "public_id",
+        "user",
+        "wallet",
+        "chain",
+        "asset_code",
+        "token_contract_address",
+        "deposit_address",
+        "address_derivation_ref",
+        "status",
+        "min_amount",
+        "required_confirmations",
+        "expires_at",
+        "observed_txid",
+        "observed_amount",
+        "confirmations",
+        "credited_ledger_txn",
+        "created_by",
+        "metadata",
+        "metadata_version",
+        "created_at",
+        "updated_at",
+    )
+
+
+@admin.register(ObservedOnchainTransfer)
+class ObservedOnchainTransferAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "event_key",
+        "chain",
+        "asset_code",
+        "txid",
+        "log_index",
+        "to_address",
+        "amount",
+        "confirmations",
+        "status",
+        "deposit_session",
+        "credited_ledger_txn",
+        "first_seen_at",
+        "confirmed_at",
+    )
+    list_filter = ("chain", "asset_code", "status")
+    search_fields = (
+        "event_key",
+        "txid",
+        "to_address",
+        "from_address",
+        "token_contract_address",
+    )
+    readonly_fields = (
+        "event_key",
+        "chain",
+        "txid",
+        "log_index",
+        "block_number",
+        "from_address",
+        "to_address",
+        "token_contract_address",
+        "asset_code",
+        "amount",
+        "confirmations",
+        "status",
+        "deposit_session",
+        "credited_ledger_txn",
+        "raw_payload",
+        "metadata_version",
+        "first_seen_at",
+        "confirmed_at",
         "created_at",
         "updated_at",
     )

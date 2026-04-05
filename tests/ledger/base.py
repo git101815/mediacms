@@ -12,6 +12,8 @@ from ledger.models import (
     LedgerTransaction,
     LedgerVelocityWindow,
     TokenWallet,
+    DepositSession,
+    ObservedOnchainTransfer,
 )
 from ledger.services import get_system_wallet
 PERMISSION_MODEL_BY_CODENAME = {
@@ -27,6 +29,11 @@ PERMISSION_MODEL_BY_CODENAME = {
     "can_manage_wallet_holds": LedgerHold,
     "can_view_wallet_holds": LedgerHold,
     "can_view_wallet_velocity": LedgerVelocityWindow,
+    "can_manage_deposit_sessions": DepositSession,
+    "can_view_deposit_sessions": DepositSession,
+    "can_credit_confirmed_deposits": DepositSession,
+    "can_record_onchain_observations": ObservedOnchainTransfer,
+    "can_view_onchain_transfers": ObservedOnchainTransfer,
 }
 class BaseLedgerTestCase(TestCase):
     def setUp(self):

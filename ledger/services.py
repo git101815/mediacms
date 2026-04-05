@@ -19,6 +19,9 @@ from .models import (
     LEDGER_RISK_STATUS_BLOCKED,
     LEDGER_RISK_STATUS_REVIEW,
     WalletRequest,
+    DepositSession,
+    ObservedOnchainTransfer,
+    SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING,
 )
 import uuid
 import hashlib
@@ -174,6 +177,26 @@ def _infer_action_from_kind(kind: str) -> str:
     if "deposit" in lowered or "mint" in lowered:
         return LEDGER_ACTION_DEPOSIT
     return LEDGER_ACTION_TRANSFER
+
+def _normalize_chain(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def _normalize_evm_address(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def build_evm_event_key(*, chain: str, txid: str, log_index: int) -> str:
+    normalized_chain = _normalize_chain(chain)
+    normalized_txid = (txid or "").strip().lower()
+    return f"{normalized_chain}:{normalized_txid}:{int(log_index)}"
+
+
+def get_external_asset_clearing_wallet() -> TokenWallet:
+    return get_system_wallet(
+        TokenWallet.SYSTEM_EXTERNAL_ASSET_CLEARING,
+        allow_negative=True,
+    )
 
 @transaction.atomic
 def create_wallet_deposit_request(
@@ -1007,3 +1030,316 @@ def set_wallet_velocity_limits(
         ]
     )
     return wallet
+
+@transaction.atomic
+def create_deposit_session(
+    *,
+    actor,
+    wallet: TokenWallet,
+    chain: str,
+    asset_code: str,
+    token_contract_address: str,
+    deposit_address: str,
+    address_derivation_ref: str,
+    expires_at,
+    required_confirmations: int = 1,
+    min_amount: int = 1,
+    metadata=None,
+) -> DepositSession:
+    actor = _require_authenticated_actor(actor)
+
+    if metadata is None:
+        metadata = {}
+
+    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
+
+    if wallet.wallet_type != TokenWallet.TYPE_USER:
+        raise ValidationError("Deposit sessions can only target user wallets")
+
+    if wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
+        raise PermissionDenied("Cannot create a deposit session for another user's wallet")
+
+    if expires_at <= timezone.now():
+        raise ValidationError("Deposit session expiry must be in the future")
+
+    chain = _normalize_chain(chain)
+    token_contract_address = _normalize_evm_address(token_contract_address)
+    deposit_address = _normalize_evm_address(deposit_address)
+
+    if min_amount <= 0:
+        raise ValidationError("Minimum amount must be positive")
+
+    if required_confirmations < 1:
+        raise ValidationError("Required confirmations must be at least 1")
+
+    return DepositSession.objects.create(
+        user=wallet.user,
+        wallet=wallet,
+        chain=chain,
+        asset_code=(asset_code or "").strip().upper(),
+        token_contract_address=token_contract_address,
+        deposit_address=deposit_address,
+        address_derivation_ref=(address_derivation_ref or "").strip(),
+        status=DepositSession.STATUS_AWAITING_PAYMENT,
+        min_amount=int(min_amount),
+        required_confirmations=int(required_confirmations),
+        expires_at=expires_at,
+        created_by=actor,
+        metadata=metadata,
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+@transaction.atomic
+def record_onchain_observation(
+    *,
+    actor,
+    deposit_session: DepositSession,
+    chain: str,
+    txid: str,
+    log_index: int,
+    block_number: int | None,
+    from_address: str,
+    to_address: str,
+    token_contract_address: str,
+    asset_code: str,
+    amount: int,
+    confirmations: int,
+    raw_payload=None,
+) -> ObservedOnchainTransfer:
+    _require_perm(actor, "ledger.can_record_onchain_observations")
+
+    if raw_payload is None:
+        raw_payload = {}
+
+    deposit_session = (
+        DepositSession.objects.select_for_update()
+        .select_related("wallet")
+        .get(id=deposit_session.id)
+    )
+
+    chain = _normalize_chain(chain)
+    txid = (txid or "").strip().lower()
+    token_contract_address = _normalize_evm_address(token_contract_address)
+    from_address = _normalize_evm_address(from_address)
+    to_address = _normalize_evm_address(to_address)
+    asset_code = (asset_code or "").strip().upper()
+    amount = int(amount)
+    confirmations = int(confirmations)
+
+    if amount <= 0:
+        raise ValidationError("Observed amount must be positive")
+
+    if confirmations < 0:
+        raise ValidationError("Confirmations cannot be negative")
+
+    if deposit_session.status in {DepositSession.STATUS_EXPIRED, DepositSession.STATUS_FAILED}:
+        raise ValidationError("Cannot record an observation for a closed deposit session")
+
+    if chain != deposit_session.chain:
+        raise ValidationError("Observed chain does not match deposit session chain")
+
+    if asset_code != deposit_session.asset_code:
+        raise ValidationError("Observed asset does not match deposit session asset")
+
+    if token_contract_address != deposit_session.token_contract_address:
+        raise ValidationError("Observed token contract does not match deposit session token contract")
+
+    if to_address != deposit_session.deposit_address:
+        raise ValidationError("Observed destination address does not match deposit session address")
+
+    event_key = build_evm_event_key(chain=chain, txid=txid, log_index=log_index)
+
+    defaults = {
+        "chain": chain,
+        "txid": txid,
+        "log_index": int(log_index),
+        "block_number": block_number,
+        "from_address": from_address,
+        "to_address": to_address,
+        "token_contract_address": token_contract_address,
+        "asset_code": asset_code,
+        "amount": amount,
+        "confirmations": confirmations,
+        "deposit_session": deposit_session,
+        "raw_payload": raw_payload,
+        "metadata_version": LEDGER_METADATA_VERSION,
+    }
+
+    observed, created = ObservedOnchainTransfer.objects.get_or_create(
+        event_key=event_key,
+        defaults=defaults,
+    )
+
+    if not created:
+        immutable_mismatch = (
+            observed.chain != chain
+            or observed.txid != txid
+            or observed.log_index != int(log_index)
+            or observed.to_address != to_address
+            or observed.token_contract_address != token_contract_address
+            or observed.asset_code != asset_code
+            or int(observed.amount) != amount
+        )
+        if immutable_mismatch:
+            raise ValidationError("On-chain event key reused with different payload")
+
+        if observed.deposit_session_id != deposit_session.id:
+            raise ValidationError("Observed event already linked to another deposit session")
+
+        update_fields = []
+        if block_number is not None and observed.block_number != block_number:
+            observed.block_number = block_number
+            update_fields.append("block_number")
+        if confirmations > observed.confirmations:
+            observed.confirmations = confirmations
+            update_fields.append("confirmations")
+        if raw_payload and observed.raw_payload != raw_payload:
+            observed.raw_payload = raw_payload
+            update_fields.append("raw_payload")
+        if update_fields:
+            update_fields.append("updated_at")
+            observed.save(update_fields=update_fields)
+
+    if observed.confirmations >= deposit_session.required_confirmations:
+        observed.status = ObservedOnchainTransfer.STATUS_CONFIRMED
+        observed.confirmed_at = observed.confirmed_at or timezone.now()
+        observed.save(update_fields=["status", "confirmed_at", "updated_at"])
+        new_session_status = DepositSession.STATUS_CONFIRMING
+    else:
+        observed.status = ObservedOnchainTransfer.STATUS_CONFIRMING if observed.confirmations > 0 else ObservedOnchainTransfer.STATUS_OBSERVED
+        observed.save(update_fields=["status", "updated_at"])
+        new_session_status = DepositSession.STATUS_SEEN_ONCHAIN if observed.confirmations == 0 else DepositSession.STATUS_CONFIRMING
+
+    deposit_session.observed_txid = observed.txid
+    deposit_session.observed_amount = observed.amount
+    deposit_session.confirmations = observed.confirmations
+    if deposit_session.status != DepositSession.STATUS_CREDITED:
+        deposit_session.status = new_session_status
+    deposit_session.save(
+        update_fields=[
+            "observed_txid",
+            "observed_amount",
+            "confirmations",
+            "status",
+            "updated_at",
+        ]
+    )
+
+    return observed
+
+@transaction.atomic
+def credit_confirmed_deposit_session(
+    *,
+    actor,
+    deposit_session: DepositSession,
+    observed_transfer: ObservedOnchainTransfer,
+    created_by=None,
+) -> LedgerTransaction:
+    _require_perm(actor, "ledger.can_credit_confirmed_deposits")
+    created_by = _resolve_created_by(actor=actor, created_by=created_by)
+
+    deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
+    observed_transfer = ObservedOnchainTransfer.objects.select_for_update().get(id=observed_transfer.id)
+
+    wallet = TokenWallet.objects.select_for_update().get(id=deposit_session.wallet_id)
+    deposit_session.wallet = wallet
+
+    if observed_transfer.credited_ledger_txn_id and deposit_session.status != DepositSession.STATUS_CREDITED:
+        raise ValidationError("Observed transfer already linked to a credited ledger transaction")
+
+    if observed_transfer.deposit_session_id != deposit_session.id:
+        raise ValidationError("Observed transfer does not belong to this deposit session")
+
+    if deposit_session.status == DepositSession.STATUS_CREDITED:
+        if not deposit_session.credited_ledger_txn_id:
+            raise ValidationError("Credited session missing linked ledger transaction")
+        return deposit_session.credited_ledger_txn
+
+    if deposit_session.expires_at <= timezone.now():
+        raise ValidationError("Deposit session has expired")
+
+    if observed_transfer.status not in {
+        ObservedOnchainTransfer.STATUS_CONFIRMED,
+        ObservedOnchainTransfer.STATUS_CREDITED,
+    }:
+        raise ValidationError("Observed transfer is not confirmed")
+
+    if observed_transfer.chain != deposit_session.chain:
+        raise ValidationError("Observed chain does not match deposit session chain")
+
+    if observed_transfer.asset_code != deposit_session.asset_code:
+        raise ValidationError("Observed asset does not match deposit session asset")
+
+    if observed_transfer.token_contract_address != deposit_session.token_contract_address:
+        raise ValidationError("Observed token contract does not match deposit session token contract")
+
+    if observed_transfer.to_address != deposit_session.deposit_address:
+        raise ValidationError("Observed destination address does not match deposit session address")
+
+    if int(observed_transfer.amount) < int(deposit_session.min_amount):
+        raise ValidationError("Observed amount is below deposit minimum")
+
+    if int(observed_transfer.confirmations) < int(deposit_session.required_confirmations):
+        raise ValidationError("Observed transfer does not have enough confirmations")
+
+    clearing_wallet = get_external_asset_clearing_wallet()
+    external_id = f"deposit-credit:{observed_transfer.event_key}"
+
+    txn = apply_ledger_transaction(
+        actor=actor,
+        kind="deposit",
+        entries=[
+            (clearing_wallet, -int(observed_transfer.amount)),
+            (deposit_session.wallet, int(observed_transfer.amount)),
+        ],
+        created_by=created_by,
+        external_id=external_id,
+        memo=f"Confirmed on-chain deposit {observed_transfer.txid}",
+        metadata={
+            "source": "onchain_deposit",
+            "deposit_session_id": deposit_session.id,
+            "deposit_session_public_id": str(deposit_session.public_id),
+            "observed_transfer_id": observed_transfer.id,
+            "event_key": observed_transfer.event_key,
+            "chain": deposit_session.chain,
+            "asset_code": deposit_session.asset_code,
+            "token_contract_address": deposit_session.token_contract_address,
+            "deposit_address": deposit_session.deposit_address,
+            "txid": observed_transfer.txid,
+            "log_index": observed_transfer.log_index,
+            "block_number": observed_transfer.block_number,
+            "confirmations": observed_transfer.confirmations,
+            "amount": observed_transfer.amount,
+        },
+    )
+
+    deposit_session.observed_txid = observed_transfer.txid
+    deposit_session.observed_amount = observed_transfer.amount
+    deposit_session.confirmations = observed_transfer.confirmations
+    deposit_session.status = DepositSession.STATUS_CREDITED
+    deposit_session.credited_ledger_txn = txn
+    deposit_session.save(
+        update_fields=[
+            "observed_txid",
+            "observed_amount",
+            "confirmations",
+            "status",
+            "credited_ledger_txn",
+            "updated_at",
+        ]
+    )
+
+    observed_transfer.status = ObservedOnchainTransfer.STATUS_CREDITED
+    observed_transfer.credited_ledger_txn = txn
+    if observed_transfer.confirmed_at is None:
+        observed_transfer.confirmed_at = timezone.now()
+    observed_transfer.save(
+        update_fields=[
+            "status",
+            "credited_ledger_txn",
+            "confirmed_at",
+            "updated_at",
+        ]
+    )
+
+    return txn

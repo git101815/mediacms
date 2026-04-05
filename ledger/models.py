@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 from datetime import timedelta
+import uuid
 
 USER_WALLET_TYPE = "user"
 SYSTEM_WALLET_TYPE = "system"
@@ -105,6 +106,7 @@ WALLET_REQUEST_STATUS_CHOICES = (
     (WALLET_REQUEST_STATUS_CANCELED, "Canceled"),
     (WALLET_REQUEST_STATUS_COMPLETED, "Completed"),
 )
+SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING = "external_asset_clearing"
 
 class ImmutableLedgerRow(models.Model):
     class Meta:
@@ -139,9 +141,11 @@ class TokenWallet(models.Model):
 
     SYSTEM_ISSUANCE = SYSTEM_WALLET_ISSUANCE
     SYSTEM_PLATFORM_FEES = SYSTEM_WALLET_PLATFORM_FEES
+    SYSTEM_EXTERNAL_ASSET_CLEARING = SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING
     SYSTEM_CHOICES = (
         (SYSTEM_ISSUANCE, "Issuance"),
         (SYSTEM_PLATFORM_FEES, "Platform fees"),
+        (SYSTEM_EXTERNAL_ASSET_CLEARING, "External asset clearing"),
     )
 
     wallet_type = models.CharField(max_length=16, choices=TYPE_CHOICES, default=TYPE_USER, db_index=True)
@@ -644,3 +648,201 @@ class LedgerHold(models.Model):
 
     def __str__(self):
         return f"Hold #{self.id} wallet={self.wallet_id} amount={self.amount} released={self.released}"
+
+class DepositSession(models.Model):
+    STATUS_AWAITING_PAYMENT = "awaiting_payment"
+    STATUS_SEEN_ONCHAIN = "seen_onchain"
+    STATUS_CONFIRMING = "confirming"
+    STATUS_CREDITED = "credited"
+    STATUS_EXPIRED = "expired"
+    STATUS_FAILED = "failed"
+
+    STATUS_CHOICES = (
+        (STATUS_AWAITING_PAYMENT, "Awaiting payment"),
+        (STATUS_SEEN_ONCHAIN, "Seen on-chain"),
+        (STATUS_CONFIRMING, "Confirming"),
+        (STATUS_CREDITED, "Credited"),
+        (STATUS_EXPIRED, "Expired"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True)
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="deposit_sessions",
+        db_index=True,
+    )
+    wallet = models.ForeignKey(
+        TokenWallet,
+        on_delete=models.PROTECT,
+        related_name="deposit_sessions",
+        db_index=True,
+    )
+
+    chain = models.CharField(max_length=32, db_index=True)
+    asset_code = models.CharField(max_length=32, db_index=True)
+    token_contract_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
+
+    deposit_address = models.CharField(max_length=128, unique=True)
+    address_derivation_ref = models.CharField(max_length=128, unique=True)
+
+    status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_AWAITING_PAYMENT,
+        db_index=True,
+    )
+
+    min_amount = models.BigIntegerField(default=1)
+    required_confirmations = models.PositiveIntegerField(default=1)
+    expires_at = models.DateTimeField(db_index=True)
+
+    observed_txid = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    observed_amount = models.BigIntegerField(null=True, blank=True)
+    confirmations = models.PositiveIntegerField(default=0)
+
+    credited_ledger_txn = models.OneToOneField(
+        LedgerTransaction,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="credited_deposit_session",
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="deposit_sessions_created",
+    )
+
+    metadata = models.JSONField(default=dict, blank=True)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "status", "-created_at"]),
+            models.Index(fields=["wallet", "status", "-created_at"]),
+            models.Index(fields=["chain", "asset_code", "status"]),
+            models.Index(fields=["expires_at", "status"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(min_amount__gt=0),
+                name="depositsession_min_amount_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(required_confirmations__gte=1),
+                name="depositsession_required_confirmations_gte_1",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(confirmations__gte=0),
+                name="depositsession_confirmations_gte_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(observed_amount__isnull=True) | models.Q(observed_amount__gt=0),
+                name="depositsession_observed_amount_gt_0_if_present",
+            ),
+        ]
+        permissions = [
+            ("can_manage_deposit_sessions", "Can manage deposit sessions"),
+            ("can_view_deposit_sessions", "Can view deposit sessions"),
+            ("can_credit_confirmed_deposits", "Can credit confirmed deposits"),
+        ]
+
+    def __str__(self):
+        return f"DepositSession #{self.id} user={self.user_id} {self.chain}/{self.asset_code} {self.status}"
+
+class ObservedOnchainTransfer(models.Model):
+    STATUS_OBSERVED = "observed"
+    STATUS_CONFIRMING = "confirming"
+    STATUS_CONFIRMED = "confirmed"
+    STATUS_CREDITED = "credited"
+    STATUS_IGNORED = "ignored"
+    STATUS_FAILED = "failed"
+
+    STATUS_CHOICES = (
+        (STATUS_OBSERVED, "Observed"),
+        (STATUS_CONFIRMING, "Confirming"),
+        (STATUS_CONFIRMED, "Confirmed"),
+        (STATUS_CREDITED, "Credited"),
+        (STATUS_IGNORED, "Ignored"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    event_key = models.CharField(max_length=160, unique=True)
+
+    chain = models.CharField(max_length=32, db_index=True)
+    txid = models.CharField(max_length=128, db_index=True)
+    log_index = models.BigIntegerField(null=True, blank=True)
+    block_number = models.BigIntegerField(null=True, blank=True, db_index=True)
+
+    from_address = models.CharField(max_length=128, blank=True, default="")
+    to_address = models.CharField(max_length=128, db_index=True)
+    token_contract_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    asset_code = models.CharField(max_length=32, db_index=True)
+
+    amount = models.BigIntegerField()
+    confirmations = models.PositiveIntegerField(default=0)
+
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_OBSERVED,
+        db_index=True,
+    )
+
+    deposit_session = models.ForeignKey(
+        DepositSession,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="observed_transfers",
+    )
+
+    credited_ledger_txn = models.OneToOneField(
+        LedgerTransaction,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="credited_onchain_transfer",
+    )
+
+    raw_payload = models.JSONField(default=dict, blank=True)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+
+    first_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["chain", "txid"]),
+            models.Index(fields=["chain", "to_address", "status"]),
+            models.Index(fields=["deposit_session", "status"]),
+            models.Index(fields=["status", "first_seen_at"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="observedonchaintransfer_amount_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(confirmations__gte=0),
+                name="observedonchaintransfer_confirmations_gte_0",
+            ),
+        ]
+        permissions = [
+            ("can_record_onchain_observations", "Can record on-chain observations"),
+            ("can_view_onchain_transfers", "Can view on-chain transfers"),
+        ]
+
+    def __str__(self):
+        return f"ObservedOnchainTransfer #{self.id} {self.event_key} {self.status}"
