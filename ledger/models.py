@@ -86,6 +86,26 @@ LEDGER_ACTION_CHOICES = (
     (LEDGER_ACTION_PURCHASE, "Purchase"),
 )
 
+WALLET_REQUEST_TYPE_DEPOSIT = "deposit"
+WALLET_REQUEST_TYPE_WITHDRAWAL = "withdrawal"
+WALLET_REQUEST_TYPE_CHOICES = (
+    (WALLET_REQUEST_TYPE_DEPOSIT, "Deposit"),
+    (WALLET_REQUEST_TYPE_WITHDRAWAL, "Withdrawal"),
+)
+
+WALLET_REQUEST_STATUS_PENDING = "pending"
+WALLET_REQUEST_STATUS_APPROVED = "approved"
+WALLET_REQUEST_STATUS_REJECTED = "rejected"
+WALLET_REQUEST_STATUS_CANCELED = "canceled"
+WALLET_REQUEST_STATUS_COMPLETED = "completed"
+WALLET_REQUEST_STATUS_CHOICES = (
+    (WALLET_REQUEST_STATUS_PENDING, "Pending"),
+    (WALLET_REQUEST_STATUS_APPROVED, "Approved"),
+    (WALLET_REQUEST_STATUS_REJECTED, "Rejected"),
+    (WALLET_REQUEST_STATUS_CANCELED, "Canceled"),
+    (WALLET_REQUEST_STATUS_COMPLETED, "Completed"),
+)
+
 class ImmutableLedgerRow(models.Model):
     class Meta:
         abstract = True
@@ -199,6 +219,88 @@ class TokenWallet(models.Model):
             return f"[system:{self.system_key}] ({self.balance})"
         return f"{self.user.username} ({self.balance})"
 
+class WalletRequest(models.Model):
+    REQUEST_TYPE_DEPOSIT = WALLET_REQUEST_TYPE_DEPOSIT
+    REQUEST_TYPE_WITHDRAWAL = WALLET_REQUEST_TYPE_WITHDRAWAL
+    REQUEST_TYPE_CHOICES = WALLET_REQUEST_TYPE_CHOICES
+
+    STATUS_PENDING = WALLET_REQUEST_STATUS_PENDING
+    STATUS_APPROVED = WALLET_REQUEST_STATUS_APPROVED
+    STATUS_REJECTED = WALLET_REQUEST_STATUS_REJECTED
+    STATUS_CANCELED = WALLET_REQUEST_STATUS_CANCELED
+    STATUS_COMPLETED = WALLET_REQUEST_STATUS_COMPLETED
+    STATUS_CHOICES = WALLET_REQUEST_STATUS_CHOICES
+
+    wallet = models.ForeignKey(
+        TokenWallet,
+        on_delete=models.PROTECT,
+        related_name="wallet_requests",
+    )
+    request_type = models.CharField(max_length=16, choices=REQUEST_TYPE_CHOICES, db_index=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    amount = models.BigIntegerField()
+    asset_code = models.CharField(max_length=16, default="TOKENS")
+    destination_address = models.CharField(max_length=255, blank=True)
+    reference = models.CharField(max_length=64, unique=True, db_index=True)
+    notes = models.TextField(blank=True)
+    rejection_reason = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    metadata_version = models.PositiveIntegerField(default=LEDGER_METADATA_VERSION)
+
+    hold = models.OneToOneField(
+        "ledger.LedgerHold",
+        on_delete=models.SET_NULL,
+        related_name="wallet_request",
+        null=True,
+        blank=True,
+    )
+    linked_ledger_txn = models.ForeignKey(
+        "ledger.LedgerTransaction",
+        on_delete=models.PROTECT,
+        related_name="wallet_requests",
+        null=True,
+        blank=True,
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="wallet_requests_created",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="wallet_requests_reviewed",
+    )
+
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=["wallet", "status", "created_at"]),
+            models.Index(fields=["wallet", "request_type", "created_at"]),
+        ]
+        permissions = [
+            ("can_manage_wallet_requests", "Can manage wallet requests"),
+            ("can_review_wallet_requests", "Can review wallet requests"),
+        ]
+
+    def clean(self):
+        if int(self.amount) <= 0:
+            raise ValidationError("Request amount must be greater than zero")
+        if self.request_type == self.REQUEST_TYPE_WITHDRAWAL and not self.destination_address.strip():
+            raise ValidationError("Destination address is required for withdrawal requests")
+
+    def __str__(self):
+        return f"{self.get_request_type_display()} {self.amount} [{self.status}] #{self.reference}"
 
 class LedgerTransaction(models.Model):
     objects = LedgerImmutableManager()

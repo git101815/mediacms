@@ -1,6 +1,6 @@
 from django.urls import reverse
 
-from ledger.models import LEDGER_RISK_STATUS_REVIEW
+from ledger.models import LEDGER_RISK_STATUS_REVIEW, WalletRequest
 from ledger.services import (
     apply_ledger_transaction,
     create_pending_ledger_transaction,
@@ -198,3 +198,116 @@ class TestWalletView(BaseLedgerTestCase):
         self.assertContains(page_two, "Deposit 0")
         self.assertContains(page_one, "Page 1 of 2")
         self.assertContains(page_two, "Page 2 of 2")
+
+    def test_wallet_page_shows_request_actions(self):
+        self.client.force_login(self.u1)
+        response = self.client.get(reverse("wallet"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Deposit")
+        self.assertContains(response, "Withdraw")
+
+    def test_user_can_create_deposit_request_from_wallet(self):
+        self.client.force_login(self.u1)
+
+        response = self.client.post(
+            reverse("wallet_deposit_request"),
+            {
+                "amount": "250",
+                "notes": "Top up request",
+                "return_tab": "all",
+                "return_status": "all",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+
+        wallet_request = WalletRequest.objects.get(
+            wallet=self.w1,
+            request_type=WalletRequest.REQUEST_TYPE_DEPOSIT,
+        )
+        self.assertEqual(wallet_request.status, WalletRequest.STATUS_PENDING)
+        self.assertEqual(wallet_request.amount, 250)
+        self.assertEqual(wallet_request.notes, "Top up request")
+        self.assertIsNone(wallet_request.hold)
+
+        wallet_response = self.client.get(reverse("wallet"))
+        self.assertContains(wallet_response, "Top up request")
+        self.assertContains(wallet_response, "Deposit")
+
+    def test_user_can_create_withdrawal_request_from_wallet(self):
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="deposit",
+            entries=[
+                (self.issuance, -500),
+                (self.w1, 500),
+            ],
+            created_by=self.u1,
+            memo="Initial top-up",
+        )
+
+        self.client.force_login(self.u1)
+
+        response = self.client.post(
+            reverse("wallet_withdrawal_request"),
+            {
+                "amount": "120",
+                "destination_address": "0xabc123",
+                "notes": "First withdrawal",
+                "return_tab": "all",
+                "return_status": "all",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+
+        wallet_request = WalletRequest.objects.get(
+            wallet=self.w1,
+            request_type=WalletRequest.REQUEST_TYPE_WITHDRAWAL,
+        )
+        self.assertEqual(wallet_request.status, WalletRequest.STATUS_PENDING)
+        self.assertEqual(wallet_request.amount, 120)
+        self.assertEqual(wallet_request.destination_address, "0xabc123")
+        self.assertEqual(wallet_request.notes, "First withdrawal")
+        self.assertIsNotNone(wallet_request.hold)
+
+        self.w1.refresh_from_db()
+        self.assertEqual(self.w1.balance, 500)
+        self.assertEqual(self.w1.held_balance, 120)
+
+        wallet_response = self.client.get(reverse("wallet"))
+        self.assertContains(wallet_response, "First withdrawal")
+        self.assertContains(wallet_response, "0xabc123")
+        self.assertContains(wallet_response, "Reserved 120")
+
+    def test_withdrawal_request_rejected_when_amount_exceeds_available_balance(self):
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="deposit",
+            entries=[
+                (self.issuance, -100),
+                (self.w1, 100),
+            ],
+            created_by=self.u1,
+            memo="Small top-up",
+        )
+
+        self.client.force_login(self.u1)
+
+        response = self.client.post(
+            reverse("wallet_withdrawal_request"),
+            {
+                "amount": "150",
+                "destination_address": "0xoverflow",
+                "notes": "Too much",
+                "return_tab": "all",
+                "return_status": "all",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(WalletRequest.objects.count(), 0)
+
+        self.w1.refresh_from_db()
+        self.assertEqual(self.w1.held_balance, 0)

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import TokenWallet, LedgerTransaction, LedgerEntry,LedgerOutbox, LedgerSaga, LedgerSagaStep, LedgerHold, LedgerVelocityWindow
+from .models import TokenWallet, LedgerTransaction, LedgerEntry,LedgerOutbox, LedgerSaga, LedgerSagaStep, LedgerHold, LedgerVelocityWindow, WalletRequest
 
 class ReadOnlyAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
@@ -32,6 +32,45 @@ class TokenWalletAdmin(ReadOnlyAdmin):
     list_filter = ("wallet_type", "risk_status", "review_required", "allow_negative")
     search_fields = ("user__username", "user__email")
     readonly_fields = ("user", "balance", "created_at", "updated_at")
+
+@admin.register(WalletRequest)
+class WalletRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "wallet",
+        "request_type",
+        "status",
+        "amount",
+        "asset_code",
+        "reference",
+        "created_by",
+        "reviewed_by",
+        "created_at",
+        "updated_at",
+    )
+    list_filter = ("request_type", "status", "asset_code")
+    search_fields = (
+        "reference",
+        "wallet__user__username",
+        "wallet__user__email",
+        "destination_address",
+        "notes",
+    )
+    readonly_fields = (
+        "wallet",
+        "request_type",
+        "amount",
+        "asset_code",
+        "destination_address",
+        "reference",
+        "notes",
+        "metadata",
+        "metadata_version",
+        "hold",
+        "created_by",
+        "created_at",
+        "updated_at",
+    )
 
 @admin.register(LedgerTransaction)
 class LedgerTransactionAdmin(ReadOnlyAdmin):

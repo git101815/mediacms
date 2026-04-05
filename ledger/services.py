@@ -18,7 +18,9 @@ from .models import (
     LEDGER_ACTION_WITHDRAWAL,
     LEDGER_RISK_STATUS_BLOCKED,
     LEDGER_RISK_STATUS_REVIEW,
+    WalletRequest,
 )
+import uuid
 import hashlib
 import json
 from django.utils import timezone
@@ -112,6 +114,28 @@ def _require_wallet_not_blocked(wallet: TokenWallet):
     if wallet.review_required or wallet.risk_status == LEDGER_RISK_STATUS_REVIEW:
         raise ValidationError("Wallet requires review")
 
+def _require_wallet_owner(actor, wallet: TokenWallet):
+    actor = _require_authenticated_actor(actor)
+    if getattr(actor, "is_superuser", False):
+        return actor
+    if wallet.user_id != actor.id:
+        raise PermissionDenied("Cannot manage another user's wallet")
+    return actor
+
+
+def _normalize_wallet_request_amount(amount) -> int:
+    try:
+        normalized = int(amount)
+    except (TypeError, ValueError):
+        raise ValidationError("Amount must be a whole number")
+    if normalized <= 0:
+        raise ValidationError("Amount must be greater than zero")
+    return normalized
+
+
+def _build_wallet_request_reference(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:24]}"
+
 def _floor_window_start(now, window_seconds: int):
     ts = int(now.timestamp())
     floored = ts - (ts % window_seconds)
@@ -150,6 +174,103 @@ def _infer_action_from_kind(kind: str) -> str:
     if "deposit" in lowered or "mint" in lowered:
         return LEDGER_ACTION_DEPOSIT
     return LEDGER_ACTION_TRANSFER
+
+@transaction.atomic
+def create_wallet_deposit_request(
+    *,
+    actor,
+    wallet: TokenWallet,
+    amount: int,
+    notes: str = "",
+    metadata=None,
+) -> WalletRequest:
+    actor = _require_wallet_owner(actor, wallet)
+
+    if metadata is None:
+        metadata = {}
+
+    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
+    _require_wallet_not_blocked(wallet)
+
+    normalized_amount = _normalize_wallet_request_amount(amount)
+    reference = _build_wallet_request_reference("dep")
+
+    wallet_request = WalletRequest.objects.create(
+        wallet=wallet,
+        request_type=WalletRequest.REQUEST_TYPE_DEPOSIT,
+        status=WalletRequest.STATUS_PENDING,
+        amount=normalized_amount,
+        asset_code="TOKENS",
+        reference=reference,
+        notes=notes,
+        metadata=metadata,
+        metadata_version=LEDGER_METADATA_VERSION,
+        created_by=actor,
+    )
+    return wallet_request
+
+
+@transaction.atomic
+def create_wallet_withdrawal_request(
+    *,
+    actor,
+    wallet: TokenWallet,
+    amount: int,
+    destination_address: str,
+    notes: str = "",
+    metadata=None,
+) -> WalletRequest:
+    actor = _require_wallet_owner(actor, wallet)
+
+    if metadata is None:
+        metadata = {}
+
+    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
+    _require_wallet_not_blocked(wallet)
+
+    normalized_amount = _normalize_wallet_request_amount(amount)
+    destination_address = (destination_address or "").strip()
+    if not destination_address:
+        raise ValidationError("Destination address is required")
+
+    available_balance = get_wallet_available_balance(wallet)
+    if not wallet.allow_negative and normalized_amount > available_balance:
+        raise ValidationError("Insufficient available balance")
+
+    reference = _build_wallet_request_reference("wdr")
+
+    wallet.held_balance += normalized_amount
+    wallet.save(update_fields=["held_balance", "updated_at"])
+
+    hold = LedgerHold.objects.create(
+        wallet=wallet,
+        amount=normalized_amount,
+        reason=f"Reserved for withdrawal request {reference}",
+        created_by=actor,
+        metadata={
+            **metadata,
+            "reference": reference,
+            "destination_address": destination_address,
+            "source": "wallet_ui",
+        },
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+    wallet_request = WalletRequest.objects.create(
+        wallet=wallet,
+        request_type=WalletRequest.REQUEST_TYPE_WITHDRAWAL,
+        status=WalletRequest.STATUS_PENDING,
+        amount=normalized_amount,
+        asset_code="TOKENS",
+        destination_address=destination_address,
+        reference=reference,
+        notes=notes,
+        metadata=metadata,
+        metadata_version=LEDGER_METADATA_VERSION,
+        hold=hold,
+        created_by=actor,
+    )
+    return wallet_request
 
 @transaction.atomic
 def create_pending_ledger_transaction(*, actor, kind: str, created_by=None, external_id=None, memo="", metadata=None):

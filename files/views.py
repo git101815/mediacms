@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta
-
+from django.core.exceptions import PermissionDenied as DjangoPermissionDenied, ValidationError as DjangoValidationError
+from django.views.decorators.http import require_POST
 from allauth.socialaccount.models import SocialApp
 from django.conf import settings
 from django.contrib import messages
@@ -89,8 +90,9 @@ from ledger.models import (
     LEDGER_TXN_STATUS_PENDING,
     LEDGER_TXN_STATUS_POSTED,
     LEDGER_TXN_STATUS_REVERSED,
+    WalletRequest,
 )
-from ledger.services import get_wallet_available_balance, get_wallet_velocity_amount
+from ledger.services import get_wallet_available_balance, get_wallet_velocity_amount, create_wallet_deposit_request, create_wallet_withdrawal_request
 from .serializers import (
     CategorySerializer,
     CelebritySerializer,
@@ -142,7 +144,18 @@ WALLET_EMPTY_STATE_MESSAGES = {
     "transfers": "No transfers yet",
     "withdrawals": "No withdrawals yet",
 }
-
+WALLET_OPEN_MODAL_KEYS = {"deposit", "withdraw"}
+WALLET_REQUEST_STATUS_ICON_MAP = {
+    WalletRequest.STATUS_PENDING: "schedule",
+    WalletRequest.STATUS_APPROVED: "task_alt",
+    WalletRequest.STATUS_REJECTED: "cancel",
+    WalletRequest.STATUS_CANCELED: "block",
+    WalletRequest.STATUS_COMPLETED: "check_circle",
+}
+WALLET_REQUEST_TYPE_ICON_MAP = {
+    WalletRequest.REQUEST_TYPE_DEPOSIT: "south",
+    WalletRequest.REQUEST_TYPE_WITHDRAWAL: "north_east",
+}
 def about(request):
     """About view"""
 
@@ -216,10 +229,12 @@ def _normalize_wallet_status(value: str) -> str:
     return WALLET_STATUS_ALL
 
 
-def _build_wallet_querystring(*, tab: str, status: str, page: int | None = None) -> str:
+def _build_wallet_querystring(*, tab: str, status: str, page: int | None = None, open_modal: str | None = None) -> str:
     params = {"tab": tab, "status": status}
     if page and page > 1:
         params["page"] = page
+    if open_modal in WALLET_OPEN_MODAL_KEYS:
+        params["open_modal"] = open_modal
     return urlencode(params)
 
 
@@ -374,6 +389,141 @@ def _build_wallet_velocity_rows(wallet: TokenWallet) -> list[dict]:
         )
     return rows
 
+def _normalize_wallet_open_modal(value: str) -> str:
+    if value in WALLET_OPEN_MODAL_KEYS:
+        return value
+    return ""
+
+
+def _extract_wallet_form_error(exc) -> str:
+    if hasattr(exc, "messages") and exc.messages:
+        return exc.messages[0]
+    return str(exc)
+
+
+def _build_wallet_action_state(*, wallet: TokenWallet, available_balance: int) -> dict:
+    if wallet.risk_status == LEDGER_RISK_STATUS_BLOCKED:
+        return {
+            "can_deposit": False,
+            "can_withdraw": False,
+            "hint": "Wallet actions are disabled while this wallet is blocked.",
+        }
+
+    if wallet.review_required or wallet.risk_status == LEDGER_RISK_STATUS_REVIEW:
+        return {
+            "can_deposit": False,
+            "can_withdraw": False,
+            "hint": "Wallet actions are disabled while this wallet is under review.",
+        }
+
+    if available_balance <= 0:
+        return {
+            "can_deposit": True,
+            "can_withdraw": False,
+            "hint": "Add funds before requesting a withdrawal.",
+        }
+
+    return {
+        "can_deposit": True,
+        "can_withdraw": True,
+        "hint": "Withdrawals reserve your available balance until the request is processed.",
+    }
+
+
+def _build_wallet_request_rows(wallet: TokenWallet) -> list[dict]:
+    wallet_requests = (
+        wallet.wallet_requests.select_related("created_by", "reviewed_by", "hold", "linked_ledger_txn")
+        .order_by("-created_at", "-id")[:10]
+    )
+
+    rows = []
+    for wallet_request in wallet_requests:
+        rows.append(
+            {
+                "created_at": wallet_request.created_at,
+                "reference": wallet_request.reference,
+                "request_type": wallet_request.request_type,
+                "request_type_label": wallet_request.get_request_type_display(),
+                "request_type_icon": WALLET_REQUEST_TYPE_ICON_MAP.get(wallet_request.request_type, "swap_horiz"),
+                "status": wallet_request.status,
+                "status_label": wallet_request.get_status_display(),
+                "status_icon": WALLET_REQUEST_STATUS_ICON_MAP.get(wallet_request.status, "info"),
+                "amount_display": _format_token_amount(wallet_request.amount),
+                "notes": wallet_request.notes,
+                "destination_address": wallet_request.destination_address,
+                "hold_amount_display": _format_token_amount(wallet_request.hold.amount) if wallet_request.hold_id else "",
+            }
+        )
+    return rows
+
+@login_required
+@require_POST
+def wallet_deposit_request(request):
+    wallet_obj, _ = TokenWallet.objects.get_or_create(
+        user=request.user,
+        defaults={
+            "wallet_type": TokenWallet.TYPE_USER,
+            "allow_negative": False,
+        },
+    )
+
+    return_tab = _normalize_wallet_tab(request.POST.get("return_tab", WALLET_TAB_ALL).strip())
+    return_status = _normalize_wallet_status(request.POST.get("return_status", WALLET_STATUS_ALL).strip())
+    amount = request.POST.get("amount", "").strip()
+    notes = request.POST.get("notes", "").strip()
+
+    try:
+        wallet_request = create_wallet_deposit_request(
+            actor=request.user,
+            wallet=wallet_obj,
+            amount=amount,
+            notes=notes,
+            metadata={"source": "wallet_ui"},
+        )
+    except (DjangoValidationError, DjangoPermissionDenied) as exc:
+        messages.error(request, _extract_wallet_form_error(exc))
+        return redirect(
+            f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status, open_modal='deposit')}"
+        )
+
+    messages.success(request, f"Deposit request {wallet_request.reference} created.")
+    return redirect(f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status)}")
+
+
+@login_required
+@require_POST
+def wallet_withdrawal_request(request):
+    wallet_obj, _ = TokenWallet.objects.get_or_create(
+        user=request.user,
+        defaults={
+            "wallet_type": TokenWallet.TYPE_USER,
+            "allow_negative": False,
+        },
+    )
+
+    return_tab = _normalize_wallet_tab(request.POST.get("return_tab", WALLET_TAB_ALL).strip())
+    return_status = _normalize_wallet_status(request.POST.get("return_status", WALLET_STATUS_ALL).strip())
+    amount = request.POST.get("amount", "").strip()
+    destination_address = request.POST.get("destination_address", "").strip()
+    notes = request.POST.get("notes", "").strip()
+
+    try:
+        wallet_request = create_wallet_withdrawal_request(
+            actor=request.user,
+            wallet=wallet_obj,
+            amount=amount,
+            destination_address=destination_address,
+            notes=notes,
+            metadata={"source": "wallet_ui"},
+        )
+    except (DjangoValidationError, DjangoPermissionDenied) as exc:
+        messages.error(request, _extract_wallet_form_error(exc))
+        return redirect(
+            f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status, open_modal='withdraw')}"
+        )
+
+    messages.success(request, f"Withdrawal request {wallet_request.reference} created.")
+    return redirect(f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status)}")
 
 @login_required
 def wallet(request):
@@ -387,6 +537,8 @@ def wallet(request):
 
     active_tab = _normalize_wallet_tab(request.GET.get("tab", WALLET_TAB_ALL).strip())
     active_status = _normalize_wallet_status(request.GET.get("status", WALLET_STATUS_ALL).strip())
+    open_modal = _normalize_wallet_open_modal(request.GET.get("open_modal", "").strip())
+
     try:
         page_number = max(int(request.GET.get("page", "1")), 1)
     except (TypeError, ValueError):
@@ -394,6 +546,8 @@ def wallet(request):
 
     available_balance = get_wallet_available_balance(wallet_obj)
     can_view_risk_reason = request.user.is_superuser or request.user.has_perm("ledger.can_view_wallet_risk")
+    recent_request_rows = _build_wallet_request_rows(wallet_obj)
+    wallet_actions = _build_wallet_action_state(wallet=wallet_obj, available_balance=available_balance)
 
     wallet_banner = None
     if wallet_obj.risk_status == LEDGER_RISK_STATUS_BLOCKED:
@@ -415,7 +569,10 @@ def wallet(request):
         active_status=active_status,
         page_number=page_number,
     )
-    empty_state_title, empty_state_text = _get_wallet_empty_state_message(tab=active_tab, status=active_status)
+    empty_state_title, empty_state_text = _get_wallet_empty_state_message(
+        tab=active_tab,
+        status=active_status,
+    )
 
     context = {
         "wallet": wallet_obj,
@@ -427,6 +584,9 @@ def wallet(request):
         "wallet_status_display": wallet_obj.get_risk_status_display(),
         "active_tab": active_tab,
         "active_status": active_status,
+        "wallet_open_modal": open_modal,
+        "wallet_actions": wallet_actions,
+        "recent_request_rows": recent_request_rows,
         "tab_items": _build_wallet_tab_items(active_tab=active_tab, active_status=active_status),
         "status_items": _build_wallet_status_items(active_tab=active_tab, active_status=active_status),
         "status_select_options": [{"key": key, "label": label} for key, label in WALLET_STATUS_LABELS.items()],
@@ -438,6 +598,8 @@ def wallet(request):
         "velocity_rows": _build_wallet_velocity_rows(wallet_obj),
         "wallet_base_url": reverse("wallet"),
         "wallet_filters_querystring": _build_wallet_querystring(tab=active_tab, status=active_status),
+        "wallet_deposit_request_url": reverse("wallet_deposit_request"),
+        "wallet_withdrawal_request_url": reverse("wallet_withdrawal_request"),
     }
     return render(request, "cms/wallet.html", context)
 

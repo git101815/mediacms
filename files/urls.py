@@ -24,6 +24,8 @@ urlpatterns = [
     re_path(r"^edit", views.edit_media, name="edit_media"),
     re_path(r"^embed", views.embed_media, name="get_embed"),
     re_path(r"^featured$", views.featured_media),
+    re_path(r"^wallet/deposit-request$", views.wallet_deposit_request, name="wallet_deposit_request"),
+    re_path(r"^wallet/withdrawal-request$", views.wallet_withdrawal_request, name="wallet_withdrawal_request"),
     re_path(r"^wallet$", views.wallet, name="wallet"),
     re_path(r"^fu/", include(("uploader.urls", "uploader"), namespace="uploader")),
     re_path(r"^history$", views.history, name="history"),
