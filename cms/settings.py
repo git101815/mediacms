@@ -547,6 +547,23 @@ try:
 except ImportError:
     pass
 
+LEDGER_INTERNAL_API_MAX_SKEW_SECONDS = int(
+    os.environ.get("LEDGER_INTERNAL_API_MAX_SKEW_SECONDS", "300")
+)
+
+LEDGER_INTERNAL_NONCE_TTL_SECONDS = int(
+    os.environ.get("LEDGER_INTERNAL_NONCE_TTL_SECONDS", "900")
+)
+
+LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME = os.environ.get(
+    "LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME",
+    "",
+).strip()
+
+LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET = os.environ.get(
+    "LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET",
+    "",
+).strip()
 
 if GLOBAL_LOGIN_REQUIRED:
     auth_index = MIDDLEWARE.index("django.contrib.auth.middleware.AuthenticationMiddleware")

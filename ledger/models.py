@@ -917,3 +917,25 @@ class DepositAddress(models.Model):
 
     def __str__(self):
         return f"DepositAddress #{self.id} {self.display_label} {self.address} {self.status}"
+
+class InternalAPIRequestNonce(models.Model):
+    service_name = models.CharField(max_length=64, db_index=True)
+    nonce = models.CharField(max_length=128)
+    request_sha256 = models.CharField(max_length=64)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["service_name", "created_at"]),
+            models.Index(fields=["expires_at"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["service_name", "nonce"],
+                name="uniq_internalapirequestnonce_service_nonce",
+            ),
+        ]
+
+    def __str__(self):
+        return f"InternalAPIRequestNonce #{self.id} {self.service_name}:{self.nonce}"

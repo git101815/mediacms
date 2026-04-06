@@ -29,6 +29,11 @@ urlpatterns = [
     re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/$", views.wallet_deposit_session,name="wallet_deposit_session"),
     re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/status/$", views.wallet_deposit_session_status,name="wallet_deposit_session_status"),
     re_path(r"^wallet$", views.wallet, name="wallet"),
+    re_path(
+        r"^api/internal/ledger/deposit-observations$",
+        views.internal_deposit_observation,
+        name="internal_deposit_observation",
+    ),
     re_path(r"^fu/", include(("uploader.urls", "uploader"), namespace="uploader")),
     re_path(r"^history$", views.history, name="history"),
     re_path(r"^liked$", views.liked_media, name="liked_media"),

@@ -1472,3 +1472,64 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
     address_row.save(update_fields=["status", "allocated_deposit_session", "updated_at"])
 
     return session
+
+@transaction.atomic
+def ingest_deposit_observation_event(
+    *,
+    actor,
+    session_public_id,
+    chain: str,
+    txid: str,
+    log_index: int,
+    block_number: int | None,
+    from_address: str,
+    to_address: str,
+    token_contract_address: str,
+    asset_code: str,
+    amount: int,
+    confirmations: int,
+    raw_payload=None,
+):
+    if raw_payload is None:
+        raw_payload = {}
+
+    deposit_session = (
+        DepositSession.objects.select_for_update()
+        .select_related("wallet")
+        .get(public_id=session_public_id)
+    )
+
+    observed_transfer = record_onchain_observation(
+        actor=actor,
+        deposit_session=deposit_session,
+        chain=chain,
+        txid=txid,
+        log_index=log_index,
+        block_number=block_number,
+        from_address=from_address,
+        to_address=to_address,
+        token_contract_address=token_contract_address,
+        asset_code=asset_code,
+        amount=amount,
+        confirmations=confirmations,
+        raw_payload=raw_payload,
+    )
+
+    deposit_session.refresh_from_db()
+    observed_transfer.refresh_from_db()
+
+    ledger_txn = None
+    if observed_transfer.confirmations >= deposit_session.required_confirmations:
+        ledger_txn = credit_confirmed_deposit_session(
+            actor=actor,
+            deposit_session=deposit_session,
+            observed_transfer=observed_transfer,
+        )
+        deposit_session.refresh_from_db()
+        observed_transfer.refresh_from_db()
+
+    return {
+        "deposit_session": deposit_session,
+        "observed_transfer": observed_transfer,
+        "ledger_txn": ledger_txn,
+    }

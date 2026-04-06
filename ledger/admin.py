@@ -11,7 +11,8 @@ from .models import (
     WalletRequest,
     DepositSession,
     ObservedOnchainTransfer,
-    DepositAddress
+    DepositAddress,
+    InternalAPIRequestNonce,
 )
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -382,4 +383,24 @@ class DepositAddressAdmin(ReadOnlyAdmin):
         "metadata_version",
         "created_at",
         "updated_at",
+    )
+
+@admin.register(InternalAPIRequestNonce)
+class InternalAPIRequestNonceAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "service_name",
+        "nonce",
+        "request_sha256",
+        "created_at",
+        "expires_at",
+    )
+    list_filter = ("service_name",)
+    search_fields = ("service_name", "nonce", "request_sha256")
+    readonly_fields = (
+        "service_name",
+        "nonce",
+        "request_sha256",
+        "created_at",
+        "expires_at",
     )

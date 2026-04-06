@@ -5,6 +5,7 @@ from django.views.decorators.http import require_POST
 from allauth.socialaccount.models import SocialApp
 from django.conf import settings
 from django.contrib import messages
+from django.core.exceptions import ImproperlyConfigured
 from django.contrib.auth.decorators import login_required
 from django.contrib.postgres.search import SearchQuery
 from django.core.mail import EmailMessage
@@ -100,6 +101,10 @@ from ledger.services import (
     create_wallet_withdrawal_request,
     list_available_deposit_options,
     open_user_deposit_session,
+    ingest_deposit_observation_event,
+)
+from ledger.internal_api import (
+    authenticate_internal_deposit_request,
 )
 from .serializers import (
     CategorySerializer,
@@ -2344,3 +2349,48 @@ def custom_login_view(request):
     for option in LoginOption.objects.filter(active=True):
         login_options.append({'url': option.url, 'title': option.title})
     return render(request, 'account/custom_login_selector.html', {'login_options': login_options})
+
+@csrf_exempt
+@require_POST
+def internal_deposit_observation(request):
+    try:
+        actor, payload = authenticate_internal_deposit_request(request)
+
+        result = ingest_deposit_observation_event(
+            actor=actor,
+            session_public_id=payload.get("session_public_id"),
+            chain=payload.get("chain", ""),
+            txid=payload.get("txid", ""),
+            log_index=payload.get("log_index"),
+            block_number=payload.get("block_number"),
+            from_address=payload.get("from_address", ""),
+            to_address=payload.get("deposit_address", ""),
+            token_contract_address=payload.get("token_contract_address", ""),
+            asset_code=payload.get("asset_code", ""),
+            amount=payload.get("amount"),
+            confirmations=payload.get("confirmations", 0),
+            raw_payload=payload.get("raw_payload") or payload,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except ValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except DepositSession.DoesNotExist:
+        return JsonResponse({"error": "Deposit session not found"}, status=404)
+
+    deposit_session = result["deposit_session"]
+    observed_transfer = result["observed_transfer"]
+    ledger_txn = result["ledger_txn"] or deposit_session.credited_ledger_txn
+
+    return JsonResponse(
+        {
+            "session_public_id": str(deposit_session.public_id),
+            "deposit_status": deposit_session.status,
+            "observed_transfer_id": observed_transfer.id,
+            "observed_status": observed_transfer.status,
+            "credited_ledger_txn_id": ledger_txn.id if ledger_txn else None,
+            "confirmations": observed_transfer.confirmations,
+        }
+    )
