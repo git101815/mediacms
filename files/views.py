@@ -93,6 +93,7 @@ from ledger.models import (
     LEDGER_TXN_STATUS_REVERSED,
     WalletRequest,
     DepositSession,
+    DepositSweepJob,
 )
 from ledger.services import (
     get_wallet_available_balance,
@@ -550,6 +551,12 @@ def _parse_required_list(payload, key):
     value = payload.get(key)
     if not isinstance(value, list) or not value:
         raise DjangoValidationError(f"Invalid list field: {key}")
+    return value
+
+def _parse_required_string(payload, key):
+    value = (payload.get(key) or "").strip()
+    if not value:
+        raise DjangoValidationError(f"Missing required field: {key}")
     return value
 
 @login_required
@@ -2379,7 +2386,7 @@ def _parse_required_int(payload, key):
 @require_POST
 def internal_deposit_observation(request):
     try:
-        actor, payload = authenticate_internal_deposit_request(request)
+        actor, payload, _service_name = authenticate_internal_deposit_request(request)
 
         result = ingest_deposit_observation_event(
             actor=actor,
@@ -2424,7 +2431,7 @@ def internal_deposit_observation(request):
 @require_POST
 def internal_deposit_address_provision(request):
     try:
-        actor, payload = authenticate_internal_deposit_request(request)
+        actor, payload, _service_name = authenticate_internal_deposit_request(request)
         address_rows = _parse_required_list(payload, "addresses")
 
         if len(address_rows) > settings.LEDGER_INTERNAL_ADDRESS_BATCH_MAX_SIZE:
@@ -2447,7 +2454,7 @@ def internal_deposit_address_provision(request):
 @require_POST
 def internal_deposit_address_stats(request):
     try:
-        actor, payload = authenticate_internal_deposit_request(request)
+        actor, payload, _service_name = authenticate_internal_deposit_request(request)
         option_rows = _parse_required_list(payload, "options")
 
         if len(option_rows) > settings.LEDGER_INTERNAL_ADDRESS_STATS_MAX_SIZE:
@@ -2470,7 +2477,7 @@ def internal_deposit_address_stats(request):
 @require_POST
 def internal_deposit_watchlist(request):
     try:
-        actor, payload = authenticate_internal_deposit_request(request)
+        actor, payload, _service_name = authenticate_internal_deposit_request(request)
         option_rows = _parse_required_list(payload, "options")
         results = list_active_deposit_watch_targets(
             actor=actor,
@@ -2509,3 +2516,159 @@ def internal_sweep_jobs_claim(request):
         return JsonResponse({"error": str(exc)}, status=503)
 
     return JsonResponse({"results": results})
+
+@csrf_exempt
+@require_POST
+def internal_sweep_job_funding_broadcasted(request, public_id):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        gas_funding_txid = _parse_required_string(payload, "gas_funding_txid")
+        destination_address = _parse_required_string(payload, "destination_address")
+
+        job = mark_sweep_job_funding_broadcasted(
+            actor=actor,
+            public_id=public_id,
+            service_name=service_name,
+            gas_funding_txid=gas_funding_txid,
+            destination_address=destination_address,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except DepositSweepJob.DoesNotExist:
+        return JsonResponse({"error": "Sweep job not found"}, status=404)
+
+    return JsonResponse(
+        {
+            "public_id": str(job.public_id),
+            "status": job.status,
+            "gas_funding_txid": job.gas_funding_txid,
+            "destination_address": job.destination_address,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def internal_sweep_job_ready_to_sweep(request, public_id):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+
+        job = mark_sweep_job_ready_to_sweep(
+            actor=actor,
+            public_id=public_id,
+            service_name=service_name,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except DepositSweepJob.DoesNotExist:
+        return JsonResponse({"error": "Sweep job not found"}, status=404)
+
+    return JsonResponse(
+        {
+            "public_id": str(job.public_id),
+            "status": job.status,
+            "gas_funding_txid": job.gas_funding_txid,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def internal_sweep_job_sweep_broadcasted(request, public_id):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        sweep_txid = _parse_required_string(payload, "sweep_txid")
+        destination_address = _parse_required_string(payload, "destination_address")
+
+        job = mark_sweep_job_sweep_broadcasted(
+            actor=actor,
+            public_id=public_id,
+            service_name=service_name,
+            sweep_txid=sweep_txid,
+            destination_address=destination_address,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except DepositSweepJob.DoesNotExist:
+        return JsonResponse({"error": "Sweep job not found"}, status=404)
+
+    return JsonResponse(
+        {
+            "public_id": str(job.public_id),
+            "status": job.status,
+            "sweep_txid": job.sweep_txid,
+            "destination_address": job.destination_address,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def internal_sweep_job_confirmed(request, public_id):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+
+        job = mark_sweep_job_confirmed(
+            actor=actor,
+            public_id=public_id,
+            service_name=service_name,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except DepositSweepJob.DoesNotExist:
+        return JsonResponse({"error": "Sweep job not found"}, status=404)
+
+    return JsonResponse(
+        {
+            "public_id": str(job.public_id),
+            "status": job.status,
+            "confirmed_at": job.confirmed_at.isoformat() if job.confirmed_at else None,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def internal_sweep_job_failed(request, public_id):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        error = _parse_required_string(payload, "error")
+
+        job = mark_sweep_job_failed(
+            actor=actor,
+            public_id=public_id,
+            service_name=service_name,
+            error=error,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except DepositSweepJob.DoesNotExist:
+        return JsonResponse({"error": "Sweep job not found"}, status=404)
+
+    return JsonResponse(
+        {
+            "public_id": str(job.public_id),
+            "status": job.status,
+            "last_error": job.last_error,
+        }
+    )

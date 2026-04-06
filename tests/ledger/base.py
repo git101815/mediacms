@@ -15,6 +15,7 @@ from ledger.models import (
     DepositSession,
     ObservedOnchainTransfer,
     DepositAddress,
+    DepositSweepJob,
 )
 from ledger.services import get_system_wallet
 PERMISSION_MODEL_BY_CODENAME = {

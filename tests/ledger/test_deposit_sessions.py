@@ -18,7 +18,7 @@ class TestDepositSessions(BaseLedgerTestCase):
         super().setUp()
         self.grant_perm(self.operator, "can_record_onchain_observations")
         self.grant_perm(self.operator, "can_credit_confirmed_deposits")
-
+        self.grant_perm(self.operator, "can_manage_deposit_sweep_jobs")
     def test_create_deposit_session_creates_unique_address_session(self):
         session = create_deposit_session(
             actor=self.u1,

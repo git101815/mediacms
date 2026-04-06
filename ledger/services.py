@@ -215,6 +215,23 @@ def _parse_derivation_index_from_ref(address_derivation_ref: str):
 
     return parsed
 
+def _get_claimed_sweep_job_for_update(*, actor, public_id, service_name: str) -> DepositSweepJob:
+    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+
+    job = DepositSweepJob.objects.select_for_update().get(public_id=public_id)
+
+    if job.claimed_by_service != service_name:
+        raise ValidationError("Sweep job is not claimed by this service")
+
+    if job.claim_expires_at is None or job.claim_expires_at <= timezone.now():
+        raise ValidationError("Sweep job claim has expired")
+
+    return job
+
+def _clear_sweep_job_claim(job: DepositSweepJob) -> None:
+    job.claimed_by_service = ""
+    job.claim_expires_at = None
+
 def build_evm_event_key(*, chain: str, txid: str, log_index: int) -> str:
     normalized_chain = _normalize_chain(chain)
     normalized_txid = (txid or "").strip().lower()
@@ -2050,7 +2067,7 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
                 ],
             )
             .filter(
-                models.Q(claim_expires_at__isnull=True) | models.Q(claim_expires_at__lt=now)
+                Q(claim_expires_at__isnull=True) | Q(claim_expires_at__lt=now)
             )
             .order_by("id")
         )
@@ -2084,3 +2101,213 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
             break
 
     return claimed
+
+@transaction.atomic
+def mark_sweep_job_funding_broadcasted(
+    *,
+    actor,
+    public_id,
+    service_name: str,
+    gas_funding_txid: str,
+    destination_address: str,
+) -> DepositSweepJob:
+    gas_funding_txid = (gas_funding_txid or "").strip().lower()
+    destination_address = _normalize_evm_address(destination_address)
+
+    if not gas_funding_txid:
+        raise ValidationError("Gas funding txid is required")
+    if not destination_address:
+        raise ValidationError("Destination address is required")
+
+    job = _get_claimed_sweep_job_for_update(
+        actor=actor,
+        public_id=public_id,
+        service_name=service_name,
+    )
+
+    if job.status == DepositSweepJob.STATUS_FUNDING_BROADCASTED:
+        if (
+            job.gas_funding_txid == gas_funding_txid
+            and job.destination_address == destination_address
+        ):
+            return job
+        raise ValidationError("Sweep job already has a different gas funding txid")
+
+    if job.status != DepositSweepJob.STATUS_PENDING:
+        raise ValidationError("Sweep job cannot transition to funding_broadcasted from its current status")
+
+    job.status = DepositSweepJob.STATUS_FUNDING_BROADCASTED
+    job.gas_funding_txid = gas_funding_txid
+    job.destination_address = destination_address
+    job.last_error = ""
+    job.save(
+        update_fields=[
+            "status",
+            "gas_funding_txid",
+            "destination_address",
+            "last_error",
+            "updated_at",
+        ]
+    )
+    return job
+
+
+@transaction.atomic
+def mark_sweep_job_ready_to_sweep(
+    *,
+    actor,
+    public_id,
+    service_name: str,
+) -> DepositSweepJob:
+    job = _get_claimed_sweep_job_for_update(
+        actor=actor,
+        public_id=public_id,
+        service_name=service_name,
+    )
+
+    if job.status == DepositSweepJob.STATUS_READY_TO_SWEEP:
+        return job
+
+    if job.status != DepositSweepJob.STATUS_FUNDING_BROADCASTED:
+        raise ValidationError("Sweep job cannot transition to ready_to_sweep from its current status")
+
+    if not job.gas_funding_txid:
+        raise ValidationError("Sweep job is missing gas funding txid")
+
+    job.status = DepositSweepJob.STATUS_READY_TO_SWEEP
+    job.last_error = ""
+    job.save(update_fields=["status", "last_error", "updated_at"])
+    return job
+
+
+@transaction.atomic
+def mark_sweep_job_sweep_broadcasted(
+    *,
+    actor,
+    public_id,
+    service_name: str,
+    sweep_txid: str,
+    destination_address: str,
+) -> DepositSweepJob:
+    sweep_txid = (sweep_txid or "").strip().lower()
+    destination_address = _normalize_evm_address(destination_address)
+
+    if not sweep_txid:
+        raise ValidationError("Sweep txid is required")
+    if not destination_address:
+        raise ValidationError("Destination address is required")
+
+    job = _get_claimed_sweep_job_for_update(
+        actor=actor,
+        public_id=public_id,
+        service_name=service_name,
+    )
+
+    if job.status == DepositSweepJob.STATUS_SWEEP_BROADCASTED:
+        if (
+            job.sweep_txid == sweep_txid
+            and job.destination_address == destination_address
+        ):
+            return job
+        raise ValidationError("Sweep job already has a different sweep txid")
+
+    if job.status != DepositSweepJob.STATUS_READY_TO_SWEEP:
+        raise ValidationError("Sweep job cannot transition to sweep_broadcasted from its current status")
+
+    job.status = DepositSweepJob.STATUS_SWEEP_BROADCASTED
+    job.sweep_txid = sweep_txid
+    job.destination_address = destination_address
+    job.last_error = ""
+    job.save(
+        update_fields=[
+            "status",
+            "sweep_txid",
+            "destination_address",
+            "last_error",
+            "updated_at",
+        ]
+    )
+    return job
+
+
+@transaction.atomic
+def mark_sweep_job_confirmed(
+    *,
+    actor,
+    public_id,
+    service_name: str,
+) -> DepositSweepJob:
+    job = _get_claimed_sweep_job_for_update(
+        actor=actor,
+        public_id=public_id,
+        service_name=service_name,
+    )
+
+    if job.status == DepositSweepJob.STATUS_CONFIRMED:
+        return job
+
+    if job.status != DepositSweepJob.STATUS_SWEEP_BROADCASTED:
+        raise ValidationError("Sweep job cannot transition to confirmed from its current status")
+
+    if not job.sweep_txid:
+        raise ValidationError("Sweep job is missing sweep txid")
+
+    job.status = DepositSweepJob.STATUS_CONFIRMED
+    job.confirmed_at = timezone.now()
+    job.last_error = ""
+    _clear_sweep_job_claim(job)
+    job.save(
+        update_fields=[
+            "status",
+            "confirmed_at",
+            "last_error",
+            "claimed_by_service",
+            "claim_expires_at",
+            "updated_at",
+        ]
+    )
+    return job
+
+
+@transaction.atomic
+def mark_sweep_job_failed(
+    *,
+    actor,
+    public_id,
+    service_name: str,
+    error: str,
+) -> DepositSweepJob:
+    error = (error or "").strip()
+    if not error:
+        raise ValidationError("Failure reason is required")
+
+    job = _get_claimed_sweep_job_for_update(
+        actor=actor,
+        public_id=public_id,
+        service_name=service_name,
+    )
+
+    if job.status == DepositSweepJob.STATUS_FAILED:
+        if job.last_error == error:
+            return job
+        raise ValidationError("Sweep job is already failed with a different error")
+
+    if job.status in {
+        DepositSweepJob.STATUS_CONFIRMED,
+        DepositSweepJob.STATUS_ABANDONED,
+    }:
+        raise ValidationError("Terminal sweep job cannot transition to failed")
+
+    job.status = DepositSweepJob.STATUS_FAILED
+    job.last_error = error
+    _clear_sweep_job_claim(job)
+    job.save(
+        update_fields=[
+            "status",
+            "last_error",
+            "claimed_by_service",
+            "claim_expires_at",
+            "updated_at",
+        ]
+    )
+    return job

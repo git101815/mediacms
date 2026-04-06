@@ -32,6 +32,7 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         self.grant_perm(self.deposit_service_user, "can_record_onchain_observations")
         self.grant_perm(self.deposit_service_user, "can_credit_confirmed_deposits")
         self.grant_perm(self.deposit_service_user, "can_apply_raw_ledger_transaction")
+        self.grant_perm(self.deposit_service_user, "can_manage_deposit_sweep_jobs")
 
         self.session = create_deposit_session(
             actor=self.u1,
@@ -56,7 +57,9 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         self.assertTrue(
             self.deposit_service_user.has_perm("ledger.can_apply_raw_ledger_transaction")
         )
-
+        self.assertTrue(
+            self.deposit_service_user.has_perm("ledger.can_manage_deposit_sweep_jobs")
+        )
     def _build_payload(
         self,
         *,
