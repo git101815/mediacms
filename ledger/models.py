@@ -885,6 +885,12 @@ class DepositAddress(models.Model):
         related_name="allocated_address",
     )
 
+    derivation_index = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+
     metadata = models.JSONField(default=dict, blank=True)
     metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
 
@@ -908,6 +914,11 @@ class DepositAddress(models.Model):
             models.CheckConstraint(
                 condition=models.Q(session_ttl_seconds__gt=0),
                 name="depositaddress_session_ttl_seconds_gt_0",
+            ),
+            models.UniqueConstraint(
+                fields=["chain", "asset_code", "token_contract_address", "derivation_index"],
+                condition=models.Q(derivation_index__isnull=False),
+                name="uniq_depositaddress_option_derivation_index",
             ),
         ]
         permissions = [

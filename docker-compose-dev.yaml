@@ -21,6 +21,8 @@ services:
       ADMIN_USER: 'admin'
       ADMIN_EMAIL: 'admin@localhost'
       ADMIN_PASSWORD: 'admin'
+      LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
+      LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
     restart: on-failure
     depends_on:
       redis:
@@ -44,6 +46,8 @@ services:
     command: "python manage.py runserver 0.0.0.0:80"
     environment:
       DEVELOPMENT_MODE: True
+      LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
+      LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
     ports:
       - "80:80"
     volumes:
@@ -61,6 +65,7 @@ services:
       DEPOSIT_SERVICE_CONFIG_PATH: /app/config/deposit-service.json
       DEPOSIT_SERVICE_STATE_PATH: /data/state.json
       DEPOSIT_SERVICE_POLL_INTERVAL_SECONDS: 30
+      DEPOSIT_SERVICE_PROVISION_BATCH_SIZE: 100
     volumes:
       - ./deposit_service/config:/app/config:ro
       - ./deposit_service/data:/data

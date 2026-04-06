@@ -1,5 +1,6 @@
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Max, Q
 from .models import (
     LEDGER_METADATA_VERSION,
     LEDGER_OUTBOX_MAX_RETRIES,
@@ -192,6 +193,21 @@ def _normalize_chain(value: str) -> str:
 def _normalize_evm_address(value: str) -> str:
     return (value or "").strip().lower()
 
+def _parse_derivation_index_from_ref(address_derivation_ref: str):
+    raw_value = (address_derivation_ref or "").strip()
+    if not raw_value:
+        return None
+
+    tail = raw_value.rsplit(":", 1)[-1]
+    try:
+        parsed = int(tail)
+    except (TypeError, ValueError):
+        return None
+
+    if parsed < 0:
+        return None
+
+    return parsed
 
 def build_evm_event_key(*, chain: str, txid: str, log_index: int) -> str:
     normalized_chain = _normalize_chain(chain)
@@ -1625,6 +1641,7 @@ def provision_deposit_address(
     display_label: str,
     address: str,
     address_derivation_ref: str,
+    derivation_index,
     required_confirmations: int,
     min_amount: int,
     session_ttl_seconds: int,
@@ -1646,20 +1663,38 @@ def provision_deposit_address(
     min_amount = int(min_amount)
     session_ttl_seconds = int(session_ttl_seconds)
 
+    if derivation_index is None:
+        derivation_index = _parse_derivation_index_from_ref(address_derivation_ref)
+    else:
+        derivation_index = int(derivation_index)
+
     if not chain:
         raise ValidationError("Chain is required")
+
     if not asset_code:
         raise ValidationError("Asset code is required")
+
     if not display_label:
         raise ValidationError("Display label is required")
+
     if not address:
         raise ValidationError("Address is required")
+
     if not address_derivation_ref:
         raise ValidationError("Address derivation reference is required")
+
+    if derivation_index is None:
+        raise ValidationError("Derivation index is required")
+
+    if derivation_index < 0:
+        raise ValidationError("Derivation index cannot be negative")
+
     if required_confirmations < 1:
         raise ValidationError("Required confirmations must be at least 1")
+
     if min_amount <= 0:
         raise ValidationError("Minimum amount must be positive")
+
     if session_ttl_seconds <= 0:
         raise ValidationError("Session TTL must be positive")
 
@@ -1673,15 +1708,36 @@ def provision_deposit_address(
         .filter(address_derivation_ref=address_derivation_ref)
         .first()
     )
+    existing_by_index = (
+        DepositAddress.objects.select_for_update()
+        .filter(
+            chain=chain,
+            asset_code=asset_code,
+            token_contract_address=token_contract_address,
+            derivation_index=derivation_index,
+        )
+        .first()
+    )
 
-    if (
-        existing_by_address is not None
-        and existing_by_ref is not None
-        and existing_by_address.id != existing_by_ref.id
-    ):
-        raise ValidationError("Address and derivation reference already belong to different rows")
+    candidate_ids = {
+        obj.id
+        for obj in (existing_by_address, existing_by_ref, existing_by_index)
+        if obj is not None
+    }
 
-    existing = existing_by_address or existing_by_ref
+    if len(candidate_ids) > 1:
+        raise ValidationError(
+            "Address, derivation reference, and derivation index already belong to different rows"
+        )
+
+    existing = None
+    if existing_by_address is not None:
+        existing = existing_by_address
+    elif existing_by_ref is not None:
+        existing = existing_by_ref
+    else:
+        existing = existing_by_index
+
     if existing is not None:
         immutable_mismatch = (
             existing.chain != chain
@@ -1690,6 +1746,7 @@ def provision_deposit_address(
             or existing.display_label != display_label
             or existing.address != address
             or existing.address_derivation_ref != address_derivation_ref
+            or existing.derivation_index != derivation_index
             or int(existing.required_confirmations) != required_confirmations
             or int(existing.min_amount) != min_amount
             or int(existing.session_ttl_seconds) != session_ttl_seconds
@@ -1709,6 +1766,7 @@ def provision_deposit_address(
         display_label=display_label,
         address=address,
         address_derivation_ref=address_derivation_ref,
+        derivation_index=derivation_index,
         required_confirmations=required_confirmations,
         min_amount=min_amount,
         session_ttl_seconds=session_ttl_seconds,
@@ -1745,6 +1803,7 @@ def provision_deposit_addresses_batch(*, actor, address_rows):
             min_amount=row.get("min_amount"),
             session_ttl_seconds=row.get("session_ttl_seconds"),
             metadata=row.get("metadata") or {},
+            derivation_index=row.get("derivation_index"),
         )
 
         if created:
@@ -1762,6 +1821,7 @@ def provision_deposit_addresses_batch(*, actor, address_rows):
                 "address_derivation_ref": address_obj.address_derivation_ref,
                 "status": address_obj.status,
                 "created": created,
+                "derivation_index": address_obj.derivation_index,
             }
         )
 
@@ -1785,7 +1845,9 @@ def get_deposit_address_pool_stats(*, actor, option_rows):
         chain = _normalize_chain(row.get("chain", ""))
         asset_code = (row.get("asset_code", "") or "").strip().upper()
         token_contract_address = _normalize_evm_address(row.get("token_contract_address", ""))
-
+        start_index = int(row.get("start_index", 0))
+        if start_index < 0:
+            raise ValidationError("start_index cannot be negative")
         if not chain or not asset_code:
             raise ValidationError("Each option requires chain and asset_code")
 
@@ -1794,7 +1856,26 @@ def get_deposit_address_pool_stats(*, actor, option_rows):
             asset_code=asset_code,
             token_contract_address=token_contract_address,
         )
+        known_indexes = []
 
+        for derivation_index, address_derivation_ref in qs.values_list(
+            "derivation_index",
+            "address_derivation_ref",
+        ):
+            if derivation_index is not None:
+                known_indexes.append(int(derivation_index))
+                continue
+
+            parsed = _parse_derivation_index_from_ref(address_derivation_ref)
+            if parsed is not None:
+                known_indexes.append(parsed)
+
+        max_derivation_index = max(known_indexes) if known_indexes else None
+        next_derivation_index = (
+            max(start_index, max_derivation_index + 1)
+            if max_derivation_index is not None
+            else start_index
+        )
         results.append(
             {
                 "chain": chain,
@@ -1803,6 +1884,8 @@ def get_deposit_address_pool_stats(*, actor, option_rows):
                 "available_count": qs.filter(status=DepositAddress.STATUS_AVAILABLE).count(),
                 "allocated_count": qs.filter(status=DepositAddress.STATUS_ALLOCATED).count(),
                 "retired_count": qs.filter(status=DepositAddress.STATUS_RETIRED).count(),
+                "max_derivation_index": max_derivation_index,
+                "next_derivation_index": next_derivation_index,
             }
         )
 

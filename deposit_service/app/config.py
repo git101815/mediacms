@@ -26,6 +26,7 @@ class ServiceConfig:
     state_path: str
     poll_interval_seconds: int
     options: list[DepositOptionConfig]
+    provision_batch_size: int
 
 
 def _require_env(name: str) -> str:
@@ -70,4 +71,5 @@ def load_config() -> ServiceConfig:
         state_path=_require_env("DEPOSIT_SERVICE_STATE_PATH"),
         poll_interval_seconds=int(os.environ.get("DEPOSIT_SERVICE_POLL_INTERVAL_SECONDS", "30")),
         options=options,
+        provision_batch_size=int(os.environ.get("DEPOSIT_SERVICE_PROVISION_BATCH_SIZE", "100")),
     )

@@ -15,6 +15,8 @@ services:
       ADMIN_USER: 'admin'
       ADMIN_EMAIL: 'admin@localhost'
       # ADMIN_PASSWORD: 'uncomment_and_set_password_here'
+      LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
+      LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
     command: "./deploy/docker/prestart.sh"
     restart: on-failure
     depends_on:
@@ -36,6 +38,8 @@ services:
       ENABLE_CELERY_SHORT: 'no'
       ENABLE_CELERY_LONG: 'no'
       ENABLE_MIGRATIONS: 'no'
+      LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
+      LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
     depends_on:
       - migrations
   deposit_service:
@@ -49,6 +53,7 @@ services:
       DEPOSIT_SERVICE_CONFIG_PATH: /app/config/deposit-service.json
       DEPOSIT_SERVICE_STATE_PATH: /data/state.json
       DEPOSIT_SERVICE_POLL_INTERVAL_SECONDS: 30
+      DEPOSIT_SERVICE_PROVISION_BATCH_SIZE: 100
     volumes:
       - ./deposit_service/config:/app/config:ro
       - ./deposit_service/data:/data

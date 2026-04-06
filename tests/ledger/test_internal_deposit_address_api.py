@@ -67,6 +67,7 @@ class TestInternalDepositAddressAPI(BaseLedgerTestCase):
                     "min_amount": 100,
                     "session_ttl_seconds": 3600,
                     "metadata": {"provisioned_by": "deposit-service"},
+                    "derivation_index": 0,
                 },
                 {
                     "chain": "bsc",
@@ -79,6 +80,7 @@ class TestInternalDepositAddressAPI(BaseLedgerTestCase):
                     "min_amount": 100,
                     "session_ttl_seconds": 3600,
                     "metadata": {"provisioned_by": "deposit-service"},
+                    "derivation_index": 1,
                 },
             ]
         }
@@ -112,6 +114,7 @@ class TestInternalDepositAddressAPI(BaseLedgerTestCase):
                     "required_confirmations": 12,
                     "min_amount": 100,
                     "session_ttl_seconds": 3600,
+                    "derivation_index": 2,
                 }
             ]
         }
@@ -159,6 +162,7 @@ class TestInternalDepositAddressAPI(BaseLedgerTestCase):
                     "chain": "ethereum",
                     "asset_code": "USDT",
                     "token_contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                    "start_index": 0,
                 }
             ]
         }
@@ -175,3 +179,46 @@ class TestInternalDepositAddressAPI(BaseLedgerTestCase):
         self.assertEqual(data["results"][0]["available_count"], 1)
         self.assertEqual(data["results"][0]["allocated_count"], 0)
         self.assertEqual(data["results"][0]["retired_count"], 0)
+        self.assertEqual(data["results"][0]["max_derivation_index"], 2)
+        self.assertEqual(data["results"][0]["next_derivation_index"], 3)
+
+    @patch("ledger.internal_api.timezone.now")
+    def test_pool_stats_falls_back_to_derivation_ref_when_index_is_null(self, mocked_now):
+        mocked_now.return_value = timezone.datetime(2026, 4, 6, 12, 0, 0, tzinfo=timezone.utc)
+
+        DepositAddress.objects.create(
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            display_label="Ethereum · USDT",
+            address="0x5555555555555555555555555555555555555555",
+            address_derivation_ref="evm:ethereum:external:7",
+            derivation_index=None,
+            required_confirmations=12,
+            min_amount=100,
+            session_ttl_seconds=3600,
+            status=DepositAddress.STATUS_AVAILABLE,
+        )
+
+        payload = {
+            "options": [
+                {
+                    "chain": "ethereum",
+                    "asset_code": "USDT",
+                    "token_contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                    "start_index": 0,
+                }
+            ]
+        }
+
+        response = self._post_signed(
+            "internal_deposit_address_stats",
+            payload,
+            nonce="nonce-stats-fallback-1",
+            now_value=mocked_now.return_value,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["results"][0]["max_derivation_index"], 7)
+        self.assertEqual(data["results"][0]["next_derivation_index"], 8)
