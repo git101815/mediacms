@@ -61,6 +61,23 @@ services:
       - migrations
     mem_limit: 40g
     cpus: 50.0
+  deposit_service:
+    build:
+      context: .
+      dockerfile: ./deposit_service/Dockerfile
+    environment:
+      MEDIACMS_INTERNAL_BASE_URL: http://web
+      MEDIACMS_INTERNAL_SERVICE: deposit-service
+      MEDIACMS_INTERNAL_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
+      DEPOSIT_SERVICE_CONFIG_PATH: /app/config/deposit-service.json
+      DEPOSIT_SERVICE_STATE_PATH: /data/state.json
+      DEPOSIT_SERVICE_POLL_INTERVAL_SECONDS: 30
+    volumes:
+      - ./deposit_service/config:/app/config:ro
+      - ./deposit_service/data:/data
+    depends_on:
+      - web
+    restart: unless-stopped
   db:
     image: postgres:17.2-alpine
     volumes:

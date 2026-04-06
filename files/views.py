@@ -102,6 +102,8 @@ from ledger.services import (
     list_available_deposit_options,
     open_user_deposit_session,
     ingest_deposit_observation_event,
+    get_deposit_address_pool_stats,
+    provision_deposit_addresses_batch,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
@@ -535,6 +537,12 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "is_terminal": session.status in DEPOSIT_SESSION_TERMINAL_STATUSES,
         "wallet_url": reverse("wallet"),
     }
+
+def _parse_required_list(payload, key):
+    value = payload.get(key)
+    if not isinstance(value, list) or not value:
+        raise DjangoValidationError(f"Invalid list field: {key}")
+    return value
 
 @login_required
 @require_POST
@@ -2403,3 +2411,49 @@ def internal_deposit_observation(request):
             "confirmations": observed_transfer.confirmations,
         }
     )
+
+@csrf_exempt
+@require_POST
+def internal_deposit_address_provision(request):
+    try:
+        actor, payload = authenticate_internal_deposit_request(request)
+        address_rows = _parse_required_list(payload, "addresses")
+
+        if len(address_rows) > settings.LEDGER_INTERNAL_ADDRESS_BATCH_MAX_SIZE:
+            raise DjangoValidationError("Address batch exceeds configured maximum size")
+
+        result = provision_deposit_addresses_batch(
+            actor=actor,
+            address_rows=address_rows,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+
+    return JsonResponse(result)
+
+@csrf_exempt
+@require_POST
+def internal_deposit_address_stats(request):
+    try:
+        actor, payload = authenticate_internal_deposit_request(request)
+        option_rows = _parse_required_list(payload, "options")
+
+        if len(option_rows) > settings.LEDGER_INTERNAL_ADDRESS_STATS_MAX_SIZE:
+            raise DjangoValidationError("Options batch exceeds configured maximum size")
+
+        results = get_deposit_address_pool_stats(
+            actor=actor,
+            option_rows=option_rows,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+
+    return JsonResponse({"results": results})

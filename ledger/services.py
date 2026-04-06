@@ -1614,3 +1614,196 @@ def ingest_deposit_observation_event(
         "observed_transfer": observed_transfer,
         "ledger_txn": ledger_txn,
     }
+
+@transaction.atomic
+def provision_deposit_address(
+    *,
+    actor,
+    chain: str,
+    asset_code: str,
+    token_contract_address: str,
+    display_label: str,
+    address: str,
+    address_derivation_ref: str,
+    required_confirmations: int,
+    min_amount: int,
+    session_ttl_seconds: int,
+    metadata=None,
+):
+    _require_perm(actor, "ledger.can_manage_deposit_addresses")
+
+    if metadata is None:
+        metadata = {}
+
+    chain = _normalize_chain(chain)
+    asset_code = (asset_code or "").strip().upper()
+    token_contract_address = _normalize_evm_address(token_contract_address)
+    address = _normalize_evm_address(address)
+    address_derivation_ref = (address_derivation_ref or "").strip()
+    display_label = (display_label or "").strip()
+
+    required_confirmations = int(required_confirmations)
+    min_amount = int(min_amount)
+    session_ttl_seconds = int(session_ttl_seconds)
+
+    if not chain:
+        raise ValidationError("Chain is required")
+    if not asset_code:
+        raise ValidationError("Asset code is required")
+    if not display_label:
+        raise ValidationError("Display label is required")
+    if not address:
+        raise ValidationError("Address is required")
+    if not address_derivation_ref:
+        raise ValidationError("Address derivation reference is required")
+    if required_confirmations < 1:
+        raise ValidationError("Required confirmations must be at least 1")
+    if min_amount <= 0:
+        raise ValidationError("Minimum amount must be positive")
+    if session_ttl_seconds <= 0:
+        raise ValidationError("Session TTL must be positive")
+
+    existing_by_address = (
+        DepositAddress.objects.select_for_update()
+        .filter(address=address)
+        .first()
+    )
+    existing_by_ref = (
+        DepositAddress.objects.select_for_update()
+        .filter(address_derivation_ref=address_derivation_ref)
+        .first()
+    )
+
+    if (
+        existing_by_address is not None
+        and existing_by_ref is not None
+        and existing_by_address.id != existing_by_ref.id
+    ):
+        raise ValidationError("Address and derivation reference already belong to different rows")
+
+    existing = existing_by_address or existing_by_ref
+    if existing is not None:
+        immutable_mismatch = (
+            existing.chain != chain
+            or existing.asset_code != asset_code
+            or existing.token_contract_address != token_contract_address
+            or existing.display_label != display_label
+            or existing.address != address
+            or existing.address_derivation_ref != address_derivation_ref
+            or int(existing.required_confirmations) != required_confirmations
+            or int(existing.min_amount) != min_amount
+            or int(existing.session_ttl_seconds) != session_ttl_seconds
+        )
+        if immutable_mismatch:
+            raise ValidationError("Deposit address already exists with different immutable fields")
+
+        if existing.status != DepositAddress.STATUS_AVAILABLE:
+            raise ValidationError("Deposit address already exists in a non-available state")
+
+        return existing, False
+
+    created = DepositAddress.objects.create(
+        chain=chain,
+        asset_code=asset_code,
+        token_contract_address=token_contract_address,
+        display_label=display_label,
+        address=address,
+        address_derivation_ref=address_derivation_ref,
+        required_confirmations=required_confirmations,
+        min_amount=min_amount,
+        session_ttl_seconds=session_ttl_seconds,
+        status=DepositAddress.STATUS_AVAILABLE,
+        metadata=metadata,
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+    return created, True
+
+@transaction.atomic
+def provision_deposit_addresses_batch(*, actor, address_rows):
+    _require_perm(actor, "ledger.can_manage_deposit_addresses")
+
+    if not isinstance(address_rows, list) or not address_rows:
+        raise ValidationError("Addresses payload must be a non-empty list")
+
+    created_count = 0
+    existing_count = 0
+    rows = []
+
+    for row in address_rows:
+        if not isinstance(row, dict):
+            raise ValidationError("Each address row must be an object")
+
+        address_obj, created = provision_deposit_address(
+            actor=actor,
+            chain=row.get("chain", ""),
+            asset_code=row.get("asset_code", ""),
+            token_contract_address=row.get("token_contract_address", ""),
+            display_label=row.get("display_label", ""),
+            address=row.get("address", ""),
+            address_derivation_ref=row.get("address_derivation_ref", ""),
+            required_confirmations=row.get("required_confirmations"),
+            min_amount=row.get("min_amount"),
+            session_ttl_seconds=row.get("session_ttl_seconds"),
+            metadata=row.get("metadata") or {},
+        )
+
+        if created:
+            created_count += 1
+        else:
+            existing_count += 1
+
+        rows.append(
+            {
+                "id": address_obj.id,
+                "chain": address_obj.chain,
+                "asset_code": address_obj.asset_code,
+                "token_contract_address": address_obj.token_contract_address,
+                "address": address_obj.address,
+                "address_derivation_ref": address_obj.address_derivation_ref,
+                "status": address_obj.status,
+                "created": created,
+            }
+        )
+
+    return {
+        "created_count": created_count,
+        "existing_count": existing_count,
+        "rows": rows,
+    }
+
+def get_deposit_address_pool_stats(*, actor, option_rows):
+    _require_perm(actor, "ledger.can_manage_deposit_addresses")
+
+    if not isinstance(option_rows, list) or not option_rows:
+        raise ValidationError("Options payload must be a non-empty list")
+
+    results = []
+    for row in option_rows:
+        if not isinstance(row, dict):
+            raise ValidationError("Each option row must be an object")
+
+        chain = _normalize_chain(row.get("chain", ""))
+        asset_code = (row.get("asset_code", "") or "").strip().upper()
+        token_contract_address = _normalize_evm_address(row.get("token_contract_address", ""))
+
+        if not chain or not asset_code:
+            raise ValidationError("Each option requires chain and asset_code")
+
+        qs = DepositAddress.objects.filter(
+            chain=chain,
+            asset_code=asset_code,
+            token_contract_address=token_contract_address,
+        )
+
+        results.append(
+            {
+                "chain": chain,
+                "asset_code": asset_code,
+                "token_contract_address": token_contract_address,
+                "available_count": qs.filter(status=DepositAddress.STATUS_AVAILABLE).count(),
+                "allocated_count": qs.filter(status=DepositAddress.STATUS_ALLOCATED).count(),
+                "retired_count": qs.filter(status=DepositAddress.STATUS_RETIRED).count(),
+            }
+        )
+
+    return results
