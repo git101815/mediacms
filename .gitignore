@@ -31,3 +31,5 @@ celerybeat-schedule-wal
 /.env
 .env
 /backup
+deposit_service/config/deposit-service.json
+sweeper_service/config/sweeper-service.json
