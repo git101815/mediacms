@@ -1,9 +1,10 @@
 import json
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 from unittest.mock import patch
 
 from django.test import override_settings
 from django.urls import reverse
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from ledger.internal_api import build_internal_request_signature
@@ -25,7 +26,7 @@ from deposit_service.app.erc20_logs import (
 class TestInternalDepositWatchlistAPI(BaseLedgerTestCase):
     def setUp(self):
         super().setUp()
-        self.deposit_service_user = self.user_model.objects.create_user(
+        self.deposit_service_user = get_user_model().objects.create_user(
             username="deposit-service",
             email="deposit-service@example.com",
             password="test-password-123",
@@ -46,7 +47,7 @@ class TestInternalDepositWatchlistAPI(BaseLedgerTestCase):
         )
 
     def _post_signed(self, payload, *, nonce="nonce-watchlist-1", now_value=None):
-        now_value = now_value or timezone.datetime(2026, 4, 6, 12, 0, 0, tzinfo=timezone.utc)
+        now_value = now_value or timezone.datetime(2026, 4, 6, 12, 0, 0, tzinfo=dt_timezone.utc)
         body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         timestamp = str(int(now_value.timestamp()))
         signature = build_internal_request_signature(
@@ -68,7 +69,7 @@ class TestInternalDepositWatchlistAPI(BaseLedgerTestCase):
 
     @patch("ledger.internal_api.timezone.now")
     def test_watchlist_returns_active_targets(self, mocked_now):
-        mocked_now.return_value = timezone.datetime(2026, 4, 6, 12, 0, 0, tzinfo=timezone.utc)
+        mocked_now.return_value = timezone.datetime(2026, 4, 6, 12, 0, 0, tzinfo=dt_timezone.utc)
 
         response = self._post_signed(
             {
