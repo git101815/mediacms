@@ -105,9 +105,16 @@ from ledger.services import (
     provision_deposit_addresses_batch,
     list_active_deposit_watch_targets,
     list_available_deposit_options,
+    claim_deposit_sweep_jobs,
+    mark_sweep_job_confirmed,
+    mark_sweep_job_failed,
+    mark_sweep_job_funding_broadcasted,
+    mark_sweep_job_ready_to_sweep,
+    mark_sweep_job_sweep_broadcasted,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
+    authenticate_internal_sweeper_request,
 )
 from .serializers import (
     CategorySerializer,
@@ -2468,6 +2475,31 @@ def internal_deposit_watchlist(request):
         results = list_active_deposit_watch_targets(
             actor=actor,
             option_rows=option_rows,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+
+    return JsonResponse({"results": results})
+
+@csrf_exempt
+@require_POST
+def internal_sweep_jobs_claim(request):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        option_rows = _parse_required_list(payload, "options")
+        limit = int(payload.get("limit", settings.LEDGER_SWEEP_JOB_CLAIM_MAX_BATCH))
+        limit = min(limit, settings.LEDGER_SWEEP_JOB_CLAIM_MAX_BATCH)
+
+        results = claim_deposit_sweep_jobs(
+            actor=actor,
+            service_name=service_name,
+            option_rows=option_rows,
+            limit=limit,
+            lease_seconds=settings.LEDGER_SWEEP_JOB_CLAIM_LEASE_SECONDS,
         )
     except DjangoPermissionDenied as exc:
         return JsonResponse({"error": str(exc)}, status=403)

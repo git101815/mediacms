@@ -24,6 +24,7 @@ from .models import (
     ObservedOnchainTransfer,
     SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING,
     DepositAddress,
+    DepositSweepJob,
 )
 import uuid
 import hashlib
@@ -1450,7 +1451,11 @@ def credit_confirmed_deposit_session(
             "updated_at",
         ]
     )
-
+    enqueue_deposit_sweep_job(
+        actor=actor,
+        deposit_session=deposit_session,
+        observed_transfer=observed_transfer,
+    )
     return txn
 
 def build_deposit_option_key(*, chain: str, asset_code: str, token_contract_address: str) -> str:
@@ -1957,3 +1962,125 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
         )
 
     return results
+
+@transaction.atomic
+def enqueue_deposit_sweep_job(*, actor, deposit_session: DepositSession, observed_transfer: ObservedOnchainTransfer):
+    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+
+    deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
+    observed_transfer = ObservedOnchainTransfer.objects.select_for_update().get(id=observed_transfer.id)
+
+    if deposit_session.status != DepositSession.STATUS_CREDITED:
+        raise ValidationError("Cannot enqueue sweep for a non-credited deposit session")
+
+    if observed_transfer.status != ObservedOnchainTransfer.STATUS_CREDITED:
+        raise ValidationError("Cannot enqueue sweep for a non-credited observed transfer")
+
+    derivation_index = _parse_derivation_index_from_ref(deposit_session.address_derivation_ref)
+
+    job, created = DepositSweepJob.objects.get_or_create(
+        observed_transfer=observed_transfer,
+        defaults={
+            "deposit_session": deposit_session,
+            "chain": deposit_session.chain,
+            "asset_code": deposit_session.asset_code,
+            "token_contract_address": deposit_session.token_contract_address,
+            "source_address": deposit_session.deposit_address,
+            "address_derivation_ref": deposit_session.address_derivation_ref,
+            "derivation_index": derivation_index,
+            "amount": observed_transfer.amount,
+            "status": DepositSweepJob.STATUS_PENDING,
+            "metadata": {
+                "source": "credited_deposit",
+                "deposit_session_public_id": str(deposit_session.public_id),
+                "observed_transfer_event_key": observed_transfer.event_key,
+            },
+            "metadata_version": LEDGER_METADATA_VERSION,
+        },
+    )
+
+    if not created:
+        immutable_mismatch = (
+            job.deposit_session_id != deposit_session.id
+            or job.chain != deposit_session.chain
+            or job.asset_code != deposit_session.asset_code
+            or job.token_contract_address != deposit_session.token_contract_address
+            or job.source_address != deposit_session.deposit_address
+            or job.address_derivation_ref != deposit_session.address_derivation_ref
+            or int(job.amount) != int(observed_transfer.amount)
+        )
+        if immutable_mismatch:
+            raise ValidationError("Sweep job already exists with different immutable fields")
+
+    return job
+
+@transaction.atomic
+def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: int, lease_seconds: int):
+    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+
+    limit = int(limit)
+    lease_seconds = int(lease_seconds)
+
+    if limit <= 0:
+        raise ValidationError("Claim limit must be positive")
+    if lease_seconds <= 0:
+        raise ValidationError("Claim lease must be positive")
+
+    now = timezone.now()
+    claim_until = now + timezone.timedelta(seconds=lease_seconds)
+
+    claimed = []
+
+    for row in option_rows:
+        chain = _normalize_chain(row.get("chain", ""))
+        asset_code = (row.get("asset_code", "") or "").strip().upper()
+        token_contract_address = _normalize_evm_address(row.get("token_contract_address", ""))
+
+        qs = (
+            DepositSweepJob.objects.select_for_update(skip_locked=True)
+            .filter(
+                chain=chain,
+                asset_code=asset_code,
+                token_contract_address=token_contract_address,
+                status__in=[
+                    DepositSweepJob.STATUS_PENDING,
+                    DepositSweepJob.STATUS_READY_TO_SWEEP,
+                    DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+                    DepositSweepJob.STATUS_SWEEP_BROADCASTED,
+                ],
+            )
+            .filter(
+                models.Q(claim_expires_at__isnull=True) | models.Q(claim_expires_at__lt=now)
+            )
+            .order_by("id")
+        )
+
+        for job in qs[:limit - len(claimed)]:
+            job.claimed_by_service = service_name
+            job.claim_expires_at = claim_until
+            job.attempt_count += 1
+            job.save(update_fields=["claimed_by_service", "claim_expires_at", "attempt_count", "updated_at"])
+
+            claimed.append(
+                {
+                    "public_id": str(job.public_id),
+                    "status": job.status,
+                    "chain": job.chain,
+                    "asset_code": job.asset_code,
+                    "token_contract_address": job.token_contract_address,
+                    "source_address": job.source_address,
+                    "address_derivation_ref": job.address_derivation_ref,
+                    "derivation_index": job.derivation_index,
+                    "amount": job.amount,
+                    "gas_funding_txid": job.gas_funding_txid,
+                    "sweep_txid": job.sweep_txid,
+                }
+            )
+
+            if len(claimed) >= limit:
+                break
+
+        if len(claimed) >= limit:
+            break
+
+    return claimed

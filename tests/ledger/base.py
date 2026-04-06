@@ -37,6 +37,8 @@ PERMISSION_MODEL_BY_CODENAME = {
     "can_view_onchain_transfers": ObservedOnchainTransfer,
     "can_manage_deposit_addresses": DepositAddress,
     "can_view_deposit_addresses": DepositAddress,
+    "can_manage_deposit_sweep_jobs": DepositSweepJob,
+    "can_view_deposit_sweep_jobs": DepositSweepJob,
 }
 class BaseLedgerTestCase(TestCase):
     def setUp(self):

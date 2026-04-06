@@ -62,23 +62,28 @@ def _validate_internal_request_timestamp(timestamp_value: str) -> datetime:
 
     return request_time
 
-
 @transaction.atomic
-def authenticate_internal_deposit_request(request):
+def authenticate_internal_service_request(
+    request,
+    *,
+    expected_service_name: str,
+    username_setting_name: str,
+    shared_secret_setting_name: str,
+):
     service_name = (request.headers.get("X-Ledger-Service") or "").strip()
     timestamp_value = (request.headers.get("X-Ledger-Timestamp") or "").strip()
     nonce = (request.headers.get("X-Ledger-Nonce") or "").strip()
     provided_signature = (request.headers.get("X-Ledger-Signature") or "").strip().lower()
 
-    if service_name != "deposit-service":
+    if service_name != expected_service_name:
         raise PermissionDenied("Invalid internal service name")
 
     if not timestamp_value or not nonce or not provided_signature:
         raise PermissionDenied("Missing internal authentication headers")
 
-    shared_secret = settings.LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET
+    shared_secret = getattr(settings, shared_secret_setting_name, "").strip()
     if not shared_secret:
-        raise ImproperlyConfigured("LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET is not configured")
+        raise ImproperlyConfigured(f"{shared_secret_setting_name} is not configured")
 
     body_bytes = request.body or b""
     expected_signature = build_internal_request_signature(
@@ -115,5 +120,30 @@ def authenticate_internal_deposit_request(request):
     if not isinstance(payload, dict):
         raise ValidationError("Request body must be a JSON object")
 
-    actor = _get_internal_deposit_service_actor()
-    return actor, payload
+    username = getattr(settings, username_setting_name, "").strip()
+    if not username:
+        raise ImproperlyConfigured(f"{username_setting_name} is not configured")
+
+    user_model = get_user_model()
+    actor = user_model.objects.filter(username=username).first()
+    if actor is None:
+        raise ImproperlyConfigured("Configured internal service actor does not exist")
+
+    return actor, payload, service_name
+
+def authenticate_internal_deposit_request(request):
+    return authenticate_internal_service_request(
+        request,
+        expected_service_name="deposit-service",
+        username_setting_name="LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME",
+        shared_secret_setting_name="LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET",
+    )
+
+
+def authenticate_internal_sweeper_request(request):
+    return authenticate_internal_service_request(
+        request,
+        expected_service_name="sweeper-service",
+        username_setting_name="LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME",
+        shared_secret_setting_name="LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET",
+    )

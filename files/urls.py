@@ -49,6 +49,36 @@ urlpatterns = [
         views.internal_deposit_watchlist,
         name="internal_deposit_watchlist",
     ),
+    re_path(
+        r"^api/internal/ledger/sweep-jobs/claim$",
+        views.internal_sweep_jobs_claim,
+        name="internal_sweep_jobs_claim",
+    ),
+    path(
+        "api/internal/ledger/sweep-jobs/<uuid:public_id>/funding-broadcasted",
+        views.internal_sweep_job_funding_broadcasted,
+        name="internal_sweep_job_funding_broadcasted",
+    ),
+    path(
+        "api/internal/ledger/sweep-jobs/<uuid:public_id>/ready-to-sweep",
+        views.internal_sweep_job_ready_to_sweep,
+        name="internal_sweep_job_ready_to_sweep",
+    ),
+    path(
+        "api/internal/ledger/sweep-jobs/<uuid:public_id>/sweep-broadcasted",
+        views.internal_sweep_job_sweep_broadcasted,
+        name="internal_sweep_job_sweep_broadcasted",
+    ),
+    path(
+        "api/internal/ledger/sweep-jobs/<uuid:public_id>/confirmed",
+        views.internal_sweep_job_confirmed,
+        name="internal_sweep_job_confirmed",
+    ),
+    path(
+        "api/internal/ledger/sweep-jobs/<uuid:public_id>/failed",
+        views.internal_sweep_job_failed,
+        name="internal_sweep_job_failed",
+    ),
     re_path(r"^fu/", include(("uploader.urls", "uploader"), namespace="uploader")),
     re_path(r"^history$", views.history, name="history"),
     re_path(r"^liked$", views.liked_media, name="liked_media"),

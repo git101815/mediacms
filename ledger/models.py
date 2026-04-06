@@ -950,3 +950,88 @@ class InternalAPIRequestNonce(models.Model):
 
     def __str__(self):
         return f"InternalAPIRequestNonce #{self.id} {self.service_name}:{self.nonce}"
+
+class DepositSweepJob(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_FUNDING_BROADCASTED = "funding_broadcasted"
+    STATUS_READY_TO_SWEEP = "ready_to_sweep"
+    STATUS_SWEEP_BROADCASTED = "sweep_broadcasted"
+    STATUS_CONFIRMED = "confirmed"
+    STATUS_FAILED = "failed"
+    STATUS_ABANDONED = "abandoned"
+
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_FUNDING_BROADCASTED, "Funding broadcasted"),
+        (STATUS_READY_TO_SWEEP, "Ready to sweep"),
+        (STATUS_SWEEP_BROADCASTED, "Sweep broadcasted"),
+        (STATUS_CONFIRMED, "Confirmed"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_ABANDONED, "Abandoned"),
+    )
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True)
+
+    deposit_session = models.ForeignKey(
+        "ledger.DepositSession",
+        on_delete=models.PROTECT,
+        related_name="sweep_jobs",
+    )
+    observed_transfer = models.OneToOneField(
+        "ledger.ObservedOnchainTransfer",
+        on_delete=models.PROTECT,
+        related_name="sweep_job",
+    )
+
+    chain = models.CharField(max_length=32, db_index=True)
+    asset_code = models.CharField(max_length=32, db_index=True)
+    token_contract_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
+
+    source_address = models.CharField(max_length=128, db_index=True)
+    address_derivation_ref = models.CharField(max_length=128)
+    derivation_index = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
+
+    amount = models.BigIntegerField()
+
+    destination_address = models.CharField(max_length=128, blank=True, default="")
+    gas_funding_txid = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    sweep_txid = models.CharField(max_length=128, blank=True, default="", db_index=True)
+
+    status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+
+    claimed_by_service = models.CharField(max_length=64, blank=True, default="")
+    claim_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    attempt_count = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True, default="")
+
+    metadata = models.JSONField(default=dict, blank=True)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "chain", "asset_code"]),
+            models.Index(fields=["status", "claim_expires_at"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="depositsweepjob_amount_gt_0",
+            ),
+        ]
+        permissions = [
+            ("can_manage_deposit_sweep_jobs", "Can manage deposit sweep jobs"),
+            ("can_view_deposit_sweep_jobs", "Can view deposit sweep jobs"),
+        ]
+
+    def __str__(self):
+        return f"DepositSweepJob #{self.id} {self.chain}/{self.asset_code} {self.status}"
