@@ -37,6 +37,11 @@ ACTIVE_DEPOSIT_SESSION_STATUSES = {
     DepositSession.STATUS_SEEN_ONCHAIN,
     DepositSession.STATUS_CONFIRMING,
 }
+ACTIVE_DEPOSIT_WATCH_STATUSES = {
+    DepositSession.STATUS_AWAITING_PAYMENT,
+    DepositSession.STATUS_SEEN_ONCHAIN,
+    DepositSession.STATUS_CONFIRMING,
+}
 
 def _compute_next_retry_at() -> timezone.datetime:
     return timezone.now() + timedelta(seconds=LEDGER_OUTBOX_RETRY_DELAY_SECONDS)
@@ -1886,6 +1891,68 @@ def get_deposit_address_pool_stats(*, actor, option_rows):
                 "retired_count": qs.filter(status=DepositAddress.STATUS_RETIRED).count(),
                 "max_derivation_index": max_derivation_index,
                 "next_derivation_index": next_derivation_index,
+            }
+        )
+
+    return results
+
+@transaction.atomic
+def list_active_deposit_watch_targets(*, actor, option_rows):
+    _require_perm(actor, "ledger.can_view_deposit_sessions")
+
+    if not isinstance(option_rows, list) or not option_rows:
+        raise ValidationError("Options payload must be a non-empty list")
+
+    results = []
+
+    for row in option_rows:
+        if not isinstance(row, dict):
+            raise ValidationError("Each option row must be an object")
+
+        chain = _normalize_chain(row.get("chain", ""))
+        asset_code = (row.get("asset_code", "") or "").strip().upper()
+        token_contract_address = _normalize_evm_address(row.get("token_contract_address", ""))
+
+        if not chain or not asset_code:
+            raise ValidationError("Each option requires chain and asset_code")
+
+        sessions = (
+            DepositSession.objects.filter(
+                chain=chain,
+                asset_code=asset_code,
+                token_contract_address=token_contract_address,
+                status__in=ACTIVE_DEPOSIT_WATCH_STATUSES,
+            )
+            .order_by("id")
+            .values(
+                "public_id",
+                "deposit_address",
+                "required_confirmations",
+                "min_amount",
+                "status",
+                "expires_at",
+            )
+        )
+
+        targets = []
+        for session in sessions:
+            targets.append(
+                {
+                    "session_public_id": str(session["public_id"]),
+                    "deposit_address": session["deposit_address"],
+                    "required_confirmations": session["required_confirmations"],
+                    "min_amount": session["min_amount"],
+                    "status": session["status"],
+                    "expires_at": session["expires_at"].isoformat(),
+                }
+            )
+
+        results.append(
+            {
+                "chain": chain,
+                "asset_code": asset_code,
+                "token_contract_address": token_contract_address,
+                "targets": targets,
             }
         )
 

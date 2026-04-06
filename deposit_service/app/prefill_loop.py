@@ -5,7 +5,7 @@ from .client import MediaCMSInternalClient
 from .config import load_config
 from .derivation import derive_evm_address
 from .state import StateStore
-
+from .observe_once import observe_once
 
 logging.basicConfig(
     level=logging.INFO,
@@ -128,6 +128,7 @@ def main() -> None:
         while True:
             try:
                 run_once(client=client, state=state, options=config.options, config=config)
+                observe_once(client=client, state=state, options=config.options)
             except Exception:
                 logging.exception("deposit_service cycle failed")
             time.sleep(config.poll_interval_seconds)

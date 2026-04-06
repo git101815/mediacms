@@ -44,6 +44,11 @@ urlpatterns = [
         views.internal_deposit_address_stats,
         name="internal_deposit_address_stats",
     ),
+    re_path(
+        r"^api/internal/ledger/deposit-watchlist$",
+        views.internal_deposit_watchlist,
+        name="internal_deposit_watchlist",
+    ),
     re_path(r"^fu/", include(("uploader.urls", "uploader"), namespace="uploader")),
     re_path(r"^history$", views.history, name="history"),
     re_path(r"^liked$", views.liked_media, name="liked_media"),

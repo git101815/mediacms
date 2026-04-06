@@ -42,3 +42,12 @@ class StateStore:
         payload = self._load()
         payload[option_key] = int(value)
         self._save(payload)
+
+    def get_scan_cursor(self, option_key: str, default: int) -> int:
+        payload = self._load()
+        return int(payload.get(f"scan_cursor:{option_key}", default))
+
+    def set_scan_cursor(self, option_key: str, value: int) -> None:
+        payload = self._load()
+        payload[f"scan_cursor:{option_key}"] = int(value)
+        self._save(payload)

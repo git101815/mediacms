@@ -16,6 +16,11 @@ class DepositOptionConfig:
     required_confirmations: int
     min_amount: int
     session_ttl_seconds: int
+    rpc_url: str
+    start_block: int
+    reorg_backtrack_blocks: int
+    scan_chunk_size: int
+    poa_compatible: bool
 
 
 @dataclass(frozen=True)
@@ -65,8 +70,19 @@ def load_config() -> ServiceConfig:
                 required_confirmations=int(item["required_confirmations"]),
                 min_amount=int(item["min_amount"]),
                 session_ttl_seconds=int(item["session_ttl_seconds"]),
+                rpc_url=item["rpc_url"],
+                start_block=int(item.get("start_block", 0)),
+                reorg_backtrack_blocks=int(item.get("reorg_backtrack_blocks", 12)),
+                scan_chunk_size=int(item.get("scan_chunk_size", 1000)),
+                poa_compatible=bool(item.get("poa_compatible", False)),
             )
         )
+    if option.start_block < 0:
+        raise RuntimeError(f"start_block must be >= 0 for option {option.key}")
+    if option.reorg_backtrack_blocks < 0:
+        raise RuntimeError(f"reorg_backtrack_blocks must be >= 0 for option {option.key}")
+    if option.scan_chunk_size <= 0:
+        raise RuntimeError(f"scan_chunk_size must be > 0 for option {option.key}")
 
     return ServiceConfig(
         mediacms_base_url=_require_env("MEDIACMS_INTERNAL_BASE_URL").rstrip("/"),

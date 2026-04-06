@@ -99,11 +99,12 @@ from ledger.services import (
     get_wallet_velocity_amount,
     create_wallet_deposit_request,
     create_wallet_withdrawal_request,
-    list_available_deposit_options,
     open_user_deposit_session,
     ingest_deposit_observation_event,
     get_deposit_address_pool_stats,
     provision_deposit_addresses_batch,
+    list_active_deposit_watch_targets,
+    list_available_deposit_options,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
@@ -2446,6 +2447,25 @@ def internal_deposit_address_stats(request):
             raise DjangoValidationError("Options batch exceeds configured maximum size")
 
         results = get_deposit_address_pool_stats(
+            actor=actor,
+            option_rows=option_rows,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+
+    return JsonResponse({"results": results})
+
+@csrf_exempt
+@require_POST
+def internal_deposit_watchlist(request):
+    try:
+        actor, payload = authenticate_internal_deposit_request(request)
+        option_rows = _parse_required_list(payload, "options")
+        results = list_active_deposit_watch_targets(
             actor=actor,
             option_rows=option_rows,
         )

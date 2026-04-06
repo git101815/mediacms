@@ -7,11 +7,16 @@
       "token_contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
       "display_label": "Ethereum · USDT",
       "account_xpub": "REPLACE_WITH_ACCOUNT_LEVEL_XPUB",
+      "rpc_url": "https://REPLACE_ETHEREUM_RPC",
       "start_index": 0,
       "target_available": 20,
       "required_confirmations": 12,
       "min_amount": 100,
-      "session_ttl_seconds": 3600
+      "session_ttl_seconds": 3600,
+      "start_block": 0,
+      "reorg_backtrack_blocks": 12,
+      "scan_chunk_size": 1000,
+      "poa_compatible": false
     },
     {
       "key": "bsc-usdt",
@@ -20,11 +25,16 @@
       "token_contract_address": "0x55d398326f99059ff775485246999027b3197955",
       "display_label": "BSC · USDT",
       "account_xpub": "REPLACE_WITH_ACCOUNT_LEVEL_XPUB",
+      "rpc_url": "https://REPLACE_BSC_RPC",
       "start_index": 0,
       "target_available": 20,
       "required_confirmations": 12,
       "min_amount": 100,
-      "session_ttl_seconds": 3600
+      "session_ttl_seconds": 3600,
+      "start_block": 0,
+      "reorg_backtrack_blocks": 20,
+      "scan_chunk_size": 1000,
+      "poa_compatible": true
     }
   ]
 }
