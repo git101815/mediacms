@@ -23,6 +23,8 @@ services:
       ADMIN_PASSWORD: 'admin'
       LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
       LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
+      LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME: sweeper-service
+      LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET}
     restart: on-failure
     depends_on:
       redis:
@@ -48,6 +50,8 @@ services:
       DEVELOPMENT_MODE: True
       LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
       LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
+      LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME: sweeper-service
+      LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET}
     ports:
       - "80:80"
     volumes:
@@ -69,6 +73,23 @@ services:
     volumes:
       - ./deposit_service/config:/app/config:ro
       - ./deposit_service/data:/data
+    depends_on:
+      - web
+    restart: unless-stopped
+  sweeper_service:
+    build:
+      context: .
+      dockerfile: ./sweeper_service/Dockerfile
+    environment:
+      MEDIACMS_INTERNAL_BASE_URL: http://web
+      MEDIACMS_INTERNAL_SERVICE: sweeper-service
+      MEDIACMS_INTERNAL_SHARED_SECRET: ${LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET}
+      SWEEPER_SERVICE_CONFIG_PATH: /app/config/sweeper-service.json
+      SWEEPER_SERVICE_POLL_INTERVAL_SECONDS: 30
+      SWEEPER_SERVICE_CLAIM_BATCH_SIZE: 20
+    volumes:
+      - ./sweeper_service/config:/app/config:ro
+      - ./sweeper_service/data:/data
     depends_on:
       - web
     restart: unless-stopped
