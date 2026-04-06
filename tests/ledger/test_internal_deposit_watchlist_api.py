@@ -10,7 +10,11 @@ from ledger.internal_api import build_internal_request_signature
 from ledger.models import DepositSession
 from ledger.services import create_deposit_session
 from .base import BaseLedgerTestCase
-
+from deposit_service.app.erc20_logs import (
+    address_to_topic,
+    decode_address_from_topic,
+    decode_uint256,
+)
 
 @override_settings(
     LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME="deposit-service",
@@ -87,3 +91,24 @@ class TestInternalDepositWatchlistAPI(BaseLedgerTestCase):
             data["results"][0]["targets"][0]["deposit_address"],
             "0x1111111111111111111111111111111111111111",
         )
+
+class TestErc20LogHelpers(BaseLedgerTestCase):
+    def test_address_to_topic_left_pads_address(self):
+        topic = address_to_topic("0x1111111111111111111111111111111111111111")
+
+        self.assertEqual(
+            topic,
+            "0x0000000000000000000000001111111111111111111111111111111111111111",
+        )
+
+    def test_decode_address_from_topic_returns_lowercase_address(self):
+        topic = "0x0000000000000000000000001111111111111111111111111111111111111111"
+
+        decoded = decode_address_from_topic(topic)
+
+        self.assertEqual(decoded, "0x1111111111111111111111111111111111111111")
+
+    def test_decode_uint256_decodes_hex_value(self):
+        value = decode_uint256("0x00000000000000000000000000000000000000000000000000000000000000ff")
+
+        self.assertEqual(value, 255)
