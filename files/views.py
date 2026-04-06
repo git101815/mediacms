@@ -557,7 +557,7 @@ def wallet_deposit_request(request):
             wallet=wallet_obj,
             option_key=option_key,
         )
-    except ValidationError as exc:
+    except DjangoValidationError as exc:
         messages.add_message(request, messages.ERROR, str(exc))
         query = urlencode({"tab": return_tab, "status": return_status})
         return redirect(f"{reverse('wallet')}?{query}")
@@ -2373,7 +2373,7 @@ def internal_deposit_observation(request):
         )
     except DjangoPermissionDenied as exc:
         return JsonResponse({"error": str(exc)}, status=403)
-    except ValidationError as exc:
+    except DjangoValidationError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except ImproperlyConfigured as exc:
         return JsonResponse({"error": str(exc)}, status=503)
