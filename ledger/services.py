@@ -1126,6 +1126,8 @@ def record_onchain_observation(
 
     chain = _normalize_chain(chain)
     txid = (txid or "").strip().lower()
+    log_index = int(log_index)
+    block_number = None if block_number is None else int(block_number)
     token_contract_address = _normalize_evm_address(token_contract_address)
     from_address = _normalize_evm_address(from_address)
     to_address = _normalize_evm_address(to_address)
@@ -1133,13 +1135,22 @@ def record_onchain_observation(
     amount = int(amount)
     confirmations = int(confirmations)
 
+    if log_index < 0:
+        raise ValidationError("Log index cannot be negative")
+
+    if block_number is not None and block_number < 0:
+        raise ValidationError("Block number cannot be negative")
+
     if amount <= 0:
         raise ValidationError("Observed amount must be positive")
 
     if confirmations < 0:
         raise ValidationError("Confirmations cannot be negative")
 
-    if deposit_session.status in {DepositSession.STATUS_EXPIRED, DepositSession.STATUS_FAILED}:
+    if deposit_session.status in {
+        DepositSession.STATUS_EXPIRED,
+        DepositSession.STATUS_FAILED,
+    }:
         raise ValidationError("Cannot record an observation for a closed deposit session")
 
     if chain != deposit_session.chain:
@@ -1154,12 +1165,16 @@ def record_onchain_observation(
     if to_address != deposit_session.deposit_address:
         raise ValidationError("Observed destination address does not match deposit session address")
 
-    event_key = build_evm_event_key(chain=chain, txid=txid, log_index=log_index)
+    event_key = build_evm_event_key(
+        chain=chain,
+        txid=txid,
+        log_index=log_index,
+    )
 
     defaults = {
         "chain": chain,
         "txid": txid,
-        "log_index": int(log_index),
+        "log_index": log_index,
         "block_number": block_number,
         "from_address": from_address,
         "to_address": to_address,
@@ -1181,7 +1196,7 @@ def record_onchain_observation(
         immutable_mismatch = (
             observed.chain != chain
             or observed.txid != txid
-            or observed.log_index != int(log_index)
+            or observed.log_index != log_index
             or observed.to_address != to_address
             or observed.token_contract_address != token_contract_address
             or observed.asset_code != asset_code
@@ -1194,43 +1209,109 @@ def record_onchain_observation(
             raise ValidationError("Observed event already linked to another deposit session")
 
         update_fields = []
+
         if block_number is not None and observed.block_number != block_number:
             observed.block_number = block_number
             update_fields.append("block_number")
+
         if confirmations > observed.confirmations:
             observed.confirmations = confirmations
             update_fields.append("confirmations")
+
         if raw_payload and observed.raw_payload != raw_payload:
             observed.raw_payload = raw_payload
             update_fields.append("raw_payload")
+
         if update_fields:
             update_fields.append("updated_at")
             observed.save(update_fields=update_fields)
 
-    if observed.confirmations >= deposit_session.required_confirmations:
-        observed.status = ObservedOnchainTransfer.STATUS_CONFIRMED
-        observed.confirmed_at = observed.confirmed_at or timezone.now()
-        observed.save(update_fields=["status", "confirmed_at", "updated_at"])
-        new_session_status = DepositSession.STATUS_CONFIRMING
-    else:
-        observed.status = ObservedOnchainTransfer.STATUS_CONFIRMING if observed.confirmations > 0 else ObservedOnchainTransfer.STATUS_OBSERVED
-        observed.save(update_fields=["status", "updated_at"])
-        new_session_status = DepositSession.STATUS_SEEN_ONCHAIN if observed.confirmations == 0 else DepositSession.STATUS_CONFIRMING
+    if deposit_session.status == DepositSession.STATUS_CREDITED:
+        if observed.status != ObservedOnchainTransfer.STATUS_CREDITED:
+            raise ValidationError(
+                "Credited deposit session is linked to a non-credited observed transfer"
+            )
 
-    deposit_session.observed_txid = observed.txid
-    deposit_session.observed_amount = observed.amount
-    deposit_session.confirmations = observed.confirmations
+    if observed.status == ObservedOnchainTransfer.STATUS_CREDITED:
+        if deposit_session.status != DepositSession.STATUS_CREDITED:
+            raise ValidationError(
+                "Credited observed transfer is linked to a non-credited deposit session"
+            )
+
+        session_update_fields = []
+
+        if deposit_session.observed_txid != observed.txid:
+            deposit_session.observed_txid = observed.txid
+            session_update_fields.append("observed_txid")
+
+        if deposit_session.observed_amount != observed.amount:
+            deposit_session.observed_amount = observed.amount
+            session_update_fields.append("observed_amount")
+
+        max_confirmations = max(deposit_session.confirmations, observed.confirmations)
+        if deposit_session.confirmations != max_confirmations:
+            deposit_session.confirmations = max_confirmations
+            session_update_fields.append("confirmations")
+
+        if session_update_fields:
+            session_update_fields.append("updated_at")
+            deposit_session.save(update_fields=session_update_fields)
+
+        return observed
+
+    if observed.confirmations >= deposit_session.required_confirmations:
+        desired_observed_status = ObservedOnchainTransfer.STATUS_CONFIRMED
+        desired_session_status = DepositSession.STATUS_CONFIRMING
+        desired_confirmed_at = observed.confirmed_at or timezone.now()
+    else:
+        desired_observed_status = (
+            ObservedOnchainTransfer.STATUS_CONFIRMING
+            if observed.confirmations > 0
+            else ObservedOnchainTransfer.STATUS_OBSERVED
+        )
+        desired_session_status = (
+            DepositSession.STATUS_CONFIRMING
+            if observed.confirmations > 0
+            else DepositSession.STATUS_SEEN_ONCHAIN
+        )
+        desired_confirmed_at = observed.confirmed_at
+
+    observed_update_fields = []
+
+    if observed.status != desired_observed_status:
+        observed.status = desired_observed_status
+        observed_update_fields.append("status")
+
+    if observed.confirmed_at != desired_confirmed_at:
+        observed.confirmed_at = desired_confirmed_at
+        observed_update_fields.append("confirmed_at")
+
+    if observed_update_fields:
+        observed_update_fields.append("updated_at")
+        observed.save(update_fields=observed_update_fields)
+
+    session_update_fields = []
+
+    if deposit_session.observed_txid != observed.txid:
+        deposit_session.observed_txid = observed.txid
+        session_update_fields.append("observed_txid")
+
+    if deposit_session.observed_amount != observed.amount:
+        deposit_session.observed_amount = observed.amount
+        session_update_fields.append("observed_amount")
+
+    if deposit_session.confirmations != observed.confirmations:
+        deposit_session.confirmations = observed.confirmations
+        session_update_fields.append("confirmations")
+
     if deposit_session.status != DepositSession.STATUS_CREDITED:
-        deposit_session.status = new_session_status
-    deposit_session.save(
-        update_fields=[
-            "observed_txid",
-            "observed_amount",
-            "confirmations",
-            "status",
-            "updated_at",
-        ]
-    )
+        if deposit_session.status != desired_session_status:
+            deposit_session.status = desired_session_status
+            session_update_fields.append("status")
+
+    if session_update_fields:
+        session_update_fields.append("updated_at")
+        deposit_session.save(update_fields=session_update_fields)
 
     return observed
 

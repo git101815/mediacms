@@ -2350,6 +2350,15 @@ def custom_login_view(request):
         login_options.append({'url': option.url, 'title': option.title})
     return render(request, 'account/custom_login_selector.html', {'login_options': login_options})
 
+def _parse_required_int(payload, key):
+    value = payload.get(key)
+    if isinstance(value, bool):
+        raise DjangoValidationError(f"Invalid integer field: {key}")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise DjangoValidationError(f"Invalid integer field: {key}") from exc
+
 @csrf_exempt
 @require_POST
 def internal_deposit_observation(request):
@@ -2361,14 +2370,14 @@ def internal_deposit_observation(request):
             session_public_id=payload.get("session_public_id"),
             chain=payload.get("chain", ""),
             txid=payload.get("txid", ""),
-            log_index=payload.get("log_index"),
-            block_number=payload.get("block_number"),
+            log_index=_parse_required_int(payload, "log_index"),
+            block_number=None if payload.get("block_number") is None else _parse_required_int(payload, "block_number"),
             from_address=payload.get("from_address", ""),
             to_address=payload.get("deposit_address", ""),
             token_contract_address=payload.get("token_contract_address", ""),
             asset_code=payload.get("asset_code", ""),
-            amount=payload.get("amount"),
-            confirmations=payload.get("confirmations", 0),
+            amount=_parse_required_int(payload, "amount"),
+            confirmations=_parse_required_int(payload, "confirmations"),
             raw_payload=payload.get("raw_payload") or payload,
         )
     except DjangoPermissionDenied as exc:
