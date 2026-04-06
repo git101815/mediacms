@@ -1,0 +1,15 @@
+{
+  "options": [
+    { "chain": "ethereum", "asset_code": "USDT", "token_contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7" },
+    { "chain": "ethereum", "asset_code": "USDC", "token_contract_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
+
+    { "chain": "arbitrum", "asset_code": "USDT", "token_contract_address": "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9" },
+    { "chain": "arbitrum", "asset_code": "USDC", "token_contract_address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" },
+
+    { "chain": "base", "asset_code": "USDT", "token_contract_address": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2" },
+    { "chain": "base", "asset_code": "USDC", "token_contract_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
+
+    { "chain": "bsc", "asset_code": "USDT", "token_contract_address": "0x55d398326f99059fF775485246999027B3197955" },
+    { "chain": "bsc", "asset_code": "USDC", "token_contract_address": "0x8ac76a51cc950d9822D68b83fE1Ad97B32Cd580d" }
+  ]
+}
