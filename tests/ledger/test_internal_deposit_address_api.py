@@ -1,6 +1,5 @@
 import json
 from unittest.mock import patch
-
 from django.test import override_settings
 from django.urls import reverse
 from datetime import datetime, timezone as dt_timezone
@@ -184,7 +183,7 @@ class TestInternalDepositAddressAPI(BaseLedgerTestCase):
 
     @patch("ledger.internal_api.timezone.now")
     def test_pool_stats_falls_back_to_derivation_ref_when_index_is_null(self, mocked_now):
-        mocked_now.return_value = timezone.datetime(2026, 4, 6, 12, 0, 0, tzinfo=timezone.utc)
+        mocked_now.return_value = datetime(2026, 4, 6, 12, 0, 0, tzinfo=dt_timezone.utc)
 
         DepositAddress.objects.create(
             chain="ethereum",

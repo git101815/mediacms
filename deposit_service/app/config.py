@@ -46,6 +46,10 @@ def load_config() -> ServiceConfig:
     if not isinstance(raw_options, list) or not raw_options:
         raise RuntimeError("Deposit service config must contain a non-empty 'options' list")
 
+    provision_batch_size = int(os.environ.get("DEPOSIT_SERVICE_PROVISION_BATCH_SIZE", "100"))
+    if provision_batch_size <= 0:
+        raise RuntimeError("DEPOSIT_SERVICE_PROVISION_BATCH_SIZE must be greater than 0")
+
     options = []
     for item in raw_options:
         options.append(
@@ -71,5 +75,5 @@ def load_config() -> ServiceConfig:
         state_path=_require_env("DEPOSIT_SERVICE_STATE_PATH"),
         poll_interval_seconds=int(os.environ.get("DEPOSIT_SERVICE_POLL_INTERVAL_SECONDS", "30")),
         options=options,
-        provision_batch_size=int(os.environ.get("DEPOSIT_SERVICE_PROVISION_BATCH_SIZE", "100")),
+        provision_batch_size = provision_batch_size,
     )
