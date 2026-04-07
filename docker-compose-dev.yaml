@@ -97,6 +97,10 @@ services:
       SWEEPER_SERVICE_CONFIG_PATH: /app/config/sweeper-service.json
       SWEEPER_SERVICE_POLL_INTERVAL_SECONDS: 30
       SWEEPER_SERVICE_CLAIM_BATCH_SIZE: 20
+      ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
+      ARBITRUM_RPC_URL: ${ARBITRUM_RPC_URL}
+      BASE_RPC_URL: ${BASE_RPC_URL}
+      BSC_RPC_URL: ${BSC_RPC_URL}
     secrets:
       - source: sweeper_evm_mnemonic
         target: sweeper_evm_mnemonic

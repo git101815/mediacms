@@ -12,4 +12,8 @@ pytest-django==4.9.0
 pytest-factoryboy==2.7.0
 Faker==35.2.0
 django-cors-headers==4.7.0
+httpx==0.28.1
+eth-account==0.13.7
+web3==7.8.0
+bip-utils==2.9.3
 
