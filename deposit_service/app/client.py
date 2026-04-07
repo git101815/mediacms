@@ -27,7 +27,10 @@ class MediaCMSInternalClient:
             payload=payload,
         )
         response = self._client.post(f"{self._base_url}{path}", content=body, headers=headers)
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Internal API error {response.status_code} for {path}: {response.text}"
+            )
         return response.json()
 
     def get_pool_stats(self, options: list[dict]) -> list[dict]:

@@ -46,6 +46,11 @@ services:
   web:
     image: mediacms/mediacms-dev:latest
     command: "python manage.py runserver 0.0.0.0:80"
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/')\" >/dev/null 2>&1 || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     environment:
       DEVELOPMENT_MODE: True
       LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
@@ -79,7 +84,8 @@ services:
       - ./deposit_service/config:/app/config:ro
       - ./deposit_service/data:/data
     depends_on:
-      - web
+      web:
+        condition: service_healthy
     restart: unless-stopped
   sweeper_service:
     build:
@@ -96,7 +102,8 @@ services:
       - ./sweeper_service/config:/app/config:ro
       - ./sweeper_service/data:/data
     depends_on:
-      - web
+      web:
+        condition: service_healthy
     restart: unless-stopped
   db:
     image: postgres:17.2-alpine
