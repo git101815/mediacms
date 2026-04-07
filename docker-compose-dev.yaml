@@ -70,6 +70,11 @@ services:
       DEPOSIT_SERVICE_STATE_PATH: /data/state.json
       DEPOSIT_SERVICE_POLL_INTERVAL_SECONDS: 30
       DEPOSIT_SERVICE_PROVISION_BATCH_SIZE: 100
+      DEPOSIT_EVM_ACCOUNT_XPUB: ${DEPOSIT_EVM_ACCOUNT_XPUB}
+      ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
+      ARBITRUM_RPC_URL: ${ARBITRUM_RPC_URL}
+      BASE_RPC_URL: ${BASE_RPC_URL}
+      BSC_RPC_URL: ${BSC_RPC_URL}
     volumes:
       - ./deposit_service/config:/app/config:ro
       - ./deposit_service/data:/data
@@ -104,7 +109,7 @@ services:
       POSTGRES_DB: mediacms
       TZ: Europe/London
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}", "--host=db", "--dbname=$POSTGRES_DB", "--username=$POSTGRES_USER"]
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}", "--host=db", "--dbname=$$POSTGRES_DB", "--username=$$POSTGRES_USER"]
       interval: 10s
       timeout: 5s
       retries: 5

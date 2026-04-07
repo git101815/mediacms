@@ -67,32 +67,33 @@ def load_config() -> ServiceConfig:
 
     options = []
     for item in raw_options:
-        options.append(
-            DepositOptionConfig(
-                key=item["key"],
-                chain=item["chain"],
-                asset_code=item["asset_code"],
-                token_contract_address=item.get("token_contract_address", ""),
-                display_label=item["display_label"],
-                account_xpub=_resolve_env_placeholder(item["account_xpub"]),
-                start_index=int(item.get("start_index", 0)),
-                target_available=int(item["target_available"]),
-                required_confirmations=int(item["required_confirmations"]),
-                min_amount=int(item["min_amount"]),
-                session_ttl_seconds=int(item["session_ttl_seconds"]),
-                rpc_url=_resolve_env_placeholder(item["rpc_url"]),
-                start_block=int(item.get("start_block", 0)),
-                reorg_backtrack_blocks=int(item.get("reorg_backtrack_blocks", 12)),
-                scan_chunk_size=int(item.get("scan_chunk_size", 1000)),
-                poa_compatible=bool(item.get("poa_compatible", False)),
-            )
+        option = DepositOptionConfig(
+            key=item["key"],
+            chain=item["chain"],
+            asset_code=item["asset_code"],
+            token_contract_address=item.get("token_contract_address", ""),
+            display_label=item["display_label"],
+            account_xpub=_resolve_env_placeholder(item["account_xpub"]),
+            start_index=int(item.get("start_index", 0)),
+            target_available=int(item["target_available"]),
+            required_confirmations=int(item["required_confirmations"]),
+            min_amount=int(item["min_amount"]),
+            session_ttl_seconds=int(item["session_ttl_seconds"]),
+            rpc_url=_resolve_env_placeholder(item["rpc_url"]),
+            start_block=int(item.get("start_block", 0)),
+            reorg_backtrack_blocks=int(item.get("reorg_backtrack_blocks", 12)),
+            scan_chunk_size=int(item.get("scan_chunk_size", 1000)),
+            poa_compatible=bool(item.get("poa_compatible", False)),
         )
-    if option.start_block < 0:
-        raise RuntimeError(f"start_block must be >= 0 for option {option.key}")
-    if option.reorg_backtrack_blocks < 0:
-        raise RuntimeError(f"reorg_backtrack_blocks must be >= 0 for option {option.key}")
-    if option.scan_chunk_size <= 0:
-        raise RuntimeError(f"scan_chunk_size must be > 0 for option {option.key}")
+
+        if option.start_block < 0:
+            raise RuntimeError(f"start_block must be >= 0 for option {option.key}")
+        if option.reorg_backtrack_blocks < 0:
+            raise RuntimeError(f"reorg_backtrack_blocks must be >= 0 for option {option.key}")
+        if option.scan_chunk_size <= 0:
+            raise RuntimeError(f"scan_chunk_size must be > 0 for option {option.key}")
+
+        options.append(option)
 
     return ServiceConfig(
         mediacms_base_url=_require_env("MEDIACMS_INTERNAL_BASE_URL").rstrip("/"),

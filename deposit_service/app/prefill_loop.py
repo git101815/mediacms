@@ -18,9 +18,7 @@ def _build_option_selector(option):
         "chain": option.chain,
         "asset_code": option.asset_code,
         "token_contract_address": option.token_contract_address,
-        "start_index": option.start_index,
     }
-
 
 def _build_address_row(option, address: str, index: int) -> dict:
     return {
