@@ -24,7 +24,7 @@ if [ X"$ENABLE_MIGRATIONS" = X"yes" ]; then
 
     fi
     echo "RUNNING COLLECTSTATIC"
-
+    python manage.py ensure_internal_service_actors
     python manage.py collectstatic --noinput
 
     # echo "Updating hostname ..."
@@ -69,33 +69,3 @@ if [ X"$ENABLE_CELERY_LONG" = X"yes" ] ; then
     cp deploy/docker/supervisord/supervisord-celery_long.conf /etc/supervisor/conf.d/supervisord-celery_long.conf
     rm /var/run/mediacms/* -f # remove any stale id, so that on forced restarts of celery workers there are no stale processes that prevent new ones
 fi
-python manage.py shell <<'PY'
-from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission
-
-User = get_user_model()
-
-def ensure_service_user(username: str, email: str):
-    user, _ = User.objects.get_or_create(
-        username=username,
-        defaults={"email": email, "is_active": True},
-    )
-    user.is_active = True
-    user.set_unusable_password()
-    user.save()
-    return user
-
-deposit_user = ensure_service_user("deposit-service", "deposit-service@localhost")
-sweeper_user = ensure_service_user("sweeper-service", "sweeper-service@localhost")
-
-deposit_perms = [
-    ("ledger", "can_manage_deposit_addresses"),
-    ("ledger", "can_view_deposit_sessions"),
-]
-
-for app_label, codename in deposit_perms:
-    perm = Permission.objects.get(content_type__app_label=app_label, codename=codename)
-    deposit_user.user_permissions.add(perm)
-
-print("Internal service actors ensured.")
-PY

@@ -13,11 +13,19 @@ def _build_option_selector(option):
 
 
 def observe_once(*, client, state, options):
-    for option in options:
-        watchlist_rows = client.get_watchlist([_build_option_selector(option)])
-        watch = watchlist_rows[0]
-        targets = watch["targets"]
+    if not options:
+        return
 
+    selectors = [_build_option_selector(option) for option in options]
+    watchlist_rows = client.get_watchlist(selectors)
+
+    if len(watchlist_rows) != len(options):
+        raise RuntimeError(
+            f"Unexpected watchlist result count: expected {len(options)}, got {len(watchlist_rows)}"
+        )
+
+    for option, watch in zip(options, watchlist_rows):
+        targets = watch["targets"]
         if not targets:
             continue
 
@@ -37,7 +45,6 @@ def observe_once(*, client, state, options):
 
         while from_block <= to_block_limit:
             to_block = min(from_block + option.scan_chunk_size - 1, to_block_limit)
-
             logs = w3.eth.get_logs(
                 {
                     "fromBlock": from_block,
@@ -58,7 +65,6 @@ def observe_once(*, client, state, options):
                     continue
 
                 confirmations = int(latest_block - int(log["blockNumber"]) + 1)
-
                 payload = {
                     "session_public_id": target["session_public_id"],
                     "chain": option.chain,
@@ -82,7 +88,6 @@ def observe_once(*, client, state, options):
                         "removed": bool(getattr(log, "removed", False)),
                     },
                 }
-
                 client.post_signed("/api/internal/ledger/deposit-observations", payload)
 
             state.set_scan_cursor(option.key, to_block + 1)

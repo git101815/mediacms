@@ -81,6 +81,7 @@ services:
       BASE_RPC_URL: ${BASE_RPC_URL}
       BSC_RPC_URL: ${BSC_RPC_URL}
     volumes:
+      - ./deposit_service/app:/app/app
       - ./deposit_service/config:/app/config:ro
       - ./deposit_service/data:/data
     depends_on:
@@ -101,6 +102,7 @@ services:
     volumes:
       - ./sweeper_service/config:/app/config:ro
       - ./sweeper_service/data:/data
+      - ./sweeper_service/app:/app/app
     depends_on:
       web:
         condition: service_healthy

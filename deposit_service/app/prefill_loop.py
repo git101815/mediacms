@@ -53,8 +53,18 @@ def _iter_chunks(total_count: int, chunk_size: int):
         remaining -= current
 
 def run_once(*, client: MediaCMSInternalClient, state: StateStore, options, config) -> None:
-    for option in options:
-        stats = client.get_pool_stats([_build_option_selector(option)])[0]
+    if not options:
+        return
+
+    selectors = [_build_option_selector(option) for option in options]
+    stats_results = client.get_pool_stats(selectors)
+
+    if len(stats_results) != len(options):
+        raise RuntimeError(
+            f"Unexpected stats result count: expected {len(options)}, got {len(stats_results)}"
+        )
+
+    for option, stats in zip(options, stats_results):
         available_count = int(stats["available_count"])
         needed = max(0, option.target_available - available_count)
 
@@ -84,7 +94,6 @@ def run_once(*, client: MediaCMSInternalClient, state: StateStore, options, conf
 
         for current_batch_size in _iter_chunks(needed, config.provision_batch_size):
             rows = []
-
             for _ in range(current_batch_size):
                 address = derive_evm_address(
                     chain=option.chain,
@@ -95,10 +104,8 @@ def run_once(*, client: MediaCMSInternalClient, state: StateStore, options, conf
                 next_index += 1
 
             result = client.provision_addresses(rows)
-
             total_created += int(result.get("created_count", 0))
             total_existing += int(result.get("existing_count", 0))
-
             state.set_next_index(option.key, next_index)
 
         logging.info(
