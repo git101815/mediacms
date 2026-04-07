@@ -1,5 +1,3 @@
-version: "3"
-
 services:
   migrations:
     build:
@@ -99,6 +97,19 @@ services:
       SWEEPER_SERVICE_CONFIG_PATH: /app/config/sweeper-service.json
       SWEEPER_SERVICE_POLL_INTERVAL_SECONDS: 30
       SWEEPER_SERVICE_CLAIM_BATCH_SIZE: 20
+    secrets:
+      - source: sweeper_evm_mnemonic
+        target: sweeper_evm_mnemonic
+      - source: sweeper_evm_mnemonic_passphrase
+        target: sweeper_evm_mnemonic_passphrase
+      - source: ethereum_sweeper_funding_private_key
+        target: ethereum_sweeper_funding_private_key
+      - source: arbitrum_sweeper_funding_private_key
+        target: arbitrum_sweeper_funding_private_key
+      - source: base_sweeper_funding_private_key
+        target: base_sweeper_funding_private_key
+      - source: bsc_sweeper_funding_private_key
+        target: bsc_sweeper_funding_private_key
     volumes:
       - ./sweeper_service/config:/app/config:ro
       - ./sweeper_service/data:/data
@@ -144,3 +155,16 @@ services:
       DEVELOPMENT_MODE: True
     depends_on:
       - web
+secrets:
+  sweeper_evm_mnemonic:
+    file: ../mediacms-secrets/sweeper/evm_mnemonic.txt
+  sweeper_evm_mnemonic_passphrase:
+    file: ../mediacms-secrets/sweeper/evm_mnemonic_passphrase.txt
+  ethereum_sweeper_funding_private_key:
+    file: ../mediacms-secrets/sweeper/ethereum_funding_private_key.txt
+  arbitrum_sweeper_funding_private_key:
+    file: ../mediacms-secrets/sweeper/arbitrum_funding_private_key.txt
+  base_sweeper_funding_private_key:
+    file: ../mediacms-secrets/sweeper/base_funding_private_key.txt
+  bsc_sweeper_funding_private_key:
+    file: ../mediacms-secrets/sweeper/bsc_funding_private_key.txt
