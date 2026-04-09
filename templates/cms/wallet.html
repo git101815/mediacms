@@ -364,51 +364,89 @@
   data-wallet-modal-backdrop="deposit"
   {% if wallet_open_modal != 'deposit' %}hidden{% endif %}
 >
-<h2 id="wallet-deposit-modal-title" class="wallet-modal__title">Start deposit</h2>
-<p class="wallet-modal__subtitle">
-  Choose a supported network. A dedicated deposit address will be allocated to this session.
-</p>
+  <div class="wallet-modal wallet-modal--deposit-mock" role="dialog" aria-modal="true" aria-labelledby="wallet-deposit-modal-title">
+    <div class="wallet-modal__header wallet-modal__header--deposit-mock">
+      <button
+        type="button"
+        class="wallet-modal__close wallet-modal__close--deposit-mock"
+        data-wallet-modal-close="deposit"
+        aria-label="Close"
+      >
+        <i class="material-icons" aria-hidden="true">close</i>
+      </button>
 
-{% if deposit_options %}
-<form method="post" action="{{ wallet_deposit_request_url }}" class="wallet-form">
-  {% csrf_token %}
-  <input type="hidden" name="return_tab" value="{{ active_tab }}">
-  <input type="hidden" name="return_status" value="{{ active_status }}">
+      <div class="wallet-deposit-route-picker__hero">
+        <div class="wallet-deposit-route-picker__hero-badge" aria-hidden="true">
+          <i class="material-icons">south_west</i>
+        </div>
 
-  <label class="wallet-form__field">
-    <span class="wallet-form__label">Network</span>
-    <select class="wallet-form__input" name="deposit_option_key" required>
-      {% for option in deposit_options %}
-      <option value="{{ option.key }}">
-        {{ option.label }} · {{ option.required_confirmations }} confirmations · Min {{ option.min_amount }}
-      </option>
-      {% endfor %}
-    </select>
-  </label>
+        <h2 id="wallet-deposit-modal-title" class="wallet-modal__title wallet-modal__title--deposit-mock">
+          Select a network
+        </h2>
 
-  <div class="wallet-form__field">
-    <div class="wallet-request-item__meta">
-      Send only the exact asset shown for the selected network. Unsupported assets or networks are not credited automatically.
+        <p class="wallet-modal__subtitle wallet-modal__subtitle--deposit-mock">
+          Make sure the network you choose matches the asset and route you are going to send.
+        </p>
+      </div>
+    </div>
+
+    <div class="wallet-modal__body wallet-modal__body--deposit-mock">
+      {% if deposit_options %}
+        <form method="post" action="{{ wallet_deposit_request_url }}">
+          {% csrf_token %}
+          <input type="hidden" name="return_tab" value="{{ active_tab }}">
+          <input type="hidden" name="return_status" value="{{ active_status }}">
+
+          <div class="wallet-deposit-route-picker__list" role="radiogroup" aria-label="Deposit routes">
+            {% for option in deposit_options %}
+              <label class="wallet-deposit-route" data-route-key="{{ option.key }}">
+                <input
+                  class="wallet-deposit-route__input"
+                  type="radio"
+                  name="deposit_option_key"
+                  value="{{ option.key }}"
+                  {% if forloop.first %}checked{% endif %}
+                  onchange="this.form.submit()"
+                  required
+                >
+
+                <span class="wallet-deposit-route__card">
+                  <span class="wallet-deposit-route__badge" aria-hidden="true"></span>
+
+                  <span class="wallet-deposit-route__body">
+                    <span class="wallet-deposit-route__title">{{ option.label }}</span>
+                    <span class="wallet-deposit-route__subtitle">
+                      Minimum deposit: {{ option.min_amount }} · {{ option.required_confirmations }} confirmations
+                    </span>
+                  </span>
+
+                  <span class="wallet-deposit-route__check" aria-hidden="true"></span>
+                </span>
+              </label>
+            {% endfor %}
+          </div>
+
+          <div class="wallet-deposit-route-picker__notice">
+            Send only the exact asset shown for the selected network. Unsupported assets or networks are not credited automatically.
+          </div>
+
+          <noscript>
+            <div class="wallet-form__actions" style="margin-top: 16px;">
+              <button type="submit" class="wallet-form__button wallet-form__button--primary">Continue</button>
+            </div>
+          </noscript>
+        </form>
+      {% else %}
+        <div class="wallet-empty-state wallet-empty-state--compact">
+          <div class="wallet-empty-state__title">Deposits are temporarily unavailable</div>
+          <div class="wallet-empty-state__text">
+            No deposit address is currently available for any supported network.
+          </div>
+        </div>
+      {% endif %}
     </div>
   </div>
-
-  <div class="wallet-form__actions">
-    <button type="button" class="wallet-form__button wallet-form__button--secondary" data-wallet-modal-close="deposit">
-      Cancel
-    </button>
-    <button type="submit" class="wallet-form__button wallet-form__button--primary">
-      Continue
-    </button>
-  </div>
-</form>
-{% else %}
-<div class="wallet-empty-state wallet-empty-state--compact">
-  <div class="wallet-empty-state__title">Deposits are temporarily unavailable</div>
-  <div class="wallet-empty-state__text">
-    No deposit address is currently available for any supported network.
-  </div>
 </div>
-{% endif %}
 
 <div
   class="wallet-modal-backdrop{% if wallet_open_modal == 'withdraw' %} wallet-modal-backdrop--open{% endif %}"
