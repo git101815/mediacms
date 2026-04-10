@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from datetime import datetime, timedelta
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied, ValidationError as DjangoValidationError
 from django.views.decorators.http import require_POST
@@ -264,6 +265,74 @@ def _format_token_amount(value: int, *, signed: bool = False) -> str:
         return f"{prefix}{formatted}"
     return formatted
 
+NETWORK_DISPLAY_LABELS = {
+    "ethereum": "Ethereum",
+    "arbitrum": "Arbitrum One",
+    "base": "Base",
+    "bsc": "BNB Chain",
+}
+
+ROUTE_DISPLAY_DECIMALS = {
+    ("ethereum", "USDT"): 6,
+    ("ethereum", "USDC"): 6,
+    ("arbitrum", "USDT"): 6,
+    ("arbitrum", "USDC"): 6,
+    ("base", "USDT"): 6,
+    ("base", "USDC"): 6,
+    ("bsc", "USDT"): 18,
+    ("bsc", "USDC"): 18,
+}
+
+
+def _get_network_display_label(chain: str) -> str:
+    normalized_chain = (chain or "").strip().lower()
+    return NETWORK_DISPLAY_LABELS.get(normalized_chain, (chain or "").strip())
+
+
+def _format_route_amount(value, *, chain: str, asset_code: str) -> str:
+    if value in (None, ""):
+        return ""
+
+    normalized_value = int(value)
+    normalized_chain = (chain or "").strip().lower()
+    normalized_asset = (asset_code or "").strip().upper()
+    decimals = ROUTE_DISPLAY_DECIMALS.get((normalized_chain, normalized_asset))
+
+    if decimals is None:
+        return _format_token_amount(normalized_value)
+
+    scaled = Decimal(normalized_value) / (Decimal(10) ** decimals)
+    text = format(scaled, "f")
+
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+
+    return text or "0"
+
+
+def _build_wallet_deposit_options() -> list[dict]:
+    options = []
+
+    for option in list_available_deposit_options():
+        chain = option["chain"]
+        asset_code = option["asset_code"]
+        network_display = _get_network_display_label(chain)
+        route_label = f"{network_display} · {asset_code}"
+
+        options.append(
+            {
+                **option,
+                "network_display": network_display,
+                "route_label": route_label,
+                "min_amount_display": _format_route_amount(
+                    option["min_amount"],
+                    chain=chain,
+                    asset_code=asset_code,
+                ),
+            }
+        )
+
+    return options
 
 def _normalize_wallet_tab(value: str) -> str:
     if value in WALLET_TAB_LABELS:
@@ -528,20 +597,37 @@ def _build_recent_deposit_session_rows(wallet):
     return rows
 
 def _build_deposit_session_payload(session: DepositSession) -> dict:
-    display_label = session.metadata.get("display_label") or f"{session.asset_code} on {session.chain}"
+    network_display = _get_network_display_label(session.chain)
+    route_label = f"{network_display} · {session.asset_code}"
+
     return {
         "public_id": str(session.public_id),
         "status": session.status,
         "status_label": DEPOSIT_SESSION_STATUS_LABELS.get(session.status, session.status),
         "status_icon": DEPOSIT_SESSION_STATUS_ICONS.get(session.status, "schedule"),
         "chain": session.chain,
+        "network_display": network_display,
         "asset_code": session.asset_code,
-        "display_label": display_label,
+        "display_label": route_label,
+        "route_label": route_label,
         "deposit_address": session.deposit_address,
         "required_confirmations": session.required_confirmations,
         "confirmations": session.confirmations,
+        "min_amount_display": _format_route_amount(
+            session.min_amount,
+            chain=session.chain,
+            asset_code=session.asset_code,
+        ),
         "observed_txid": session.observed_txid,
-        "observed_amount_display": _format_token_amount(session.observed_amount) if session.observed_amount else "",
+        "observed_amount_display": (
+            _format_route_amount(
+                session.observed_amount,
+                chain=session.chain,
+                asset_code=session.asset_code,
+            )
+            if session.observed_amount is not None
+            else ""
+        ),
         "expires_at_iso": session.expires_at.isoformat(),
         "is_terminal": session.status in DEPOSIT_SESSION_TERMINAL_STATUSES,
         "wallet_url": reverse("wallet"),
@@ -652,6 +738,7 @@ def wallet_deposit_session_status(request, public_id):
             "deposit_address",
             "required_confirmations",
             "confirmations",
+            "min_amount",
             "observed_txid",
             "observed_amount",
             "expires_at",
@@ -710,7 +797,7 @@ def wallet(request):
         tab=active_tab,
         status=active_status,
     )
-    deposit_options = list_available_deposit_options()
+    deposit_options = _build_wallet_deposit_options()
 
     context = {
         "wallet": wallet_obj,

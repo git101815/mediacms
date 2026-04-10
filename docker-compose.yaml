@@ -7,14 +7,14 @@ services:
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
-      ENABLE_UWSGI: 'no'
-      ENABLE_NGINX: 'no'
-      ENABLE_CELERY_SHORT: 'no'
-      ENABLE_CELERY_LONG: 'no'
-      ENABLE_CELERY_BEAT: 'no'
-      ADMIN_USER: 'admin'
-      ADMIN_EMAIL: 'admin@localhost'
-      # ADMIN_PASSWORD: 'uncomment_and_set_password_here'
+      ENABLE_UWSGI: "no"
+      ENABLE_NGINX: "no"
+      ENABLE_CELERY_SHORT: "no"
+      ENABLE_CELERY_LONG: "no"
+      ENABLE_CELERY_BEAT: "no"
+      ADMIN_USER: "admin"
+      ADMIN_EMAIL: "admin@localhost"
+      # ADMIN_PASSWORD: "uncomment_and_set_password_here"
       LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
       LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
       LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME: sweeper-service
@@ -26,6 +26,7 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
+
   web:
     build: .
     image: mediacms/mediacms:latest
@@ -36,16 +37,31 @@ services:
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
-      ENABLE_CELERY_BEAT: 'no'
-      ENABLE_CELERY_SHORT: 'no'
-      ENABLE_CELERY_LONG: 'no'
-      ENABLE_MIGRATIONS: 'no'
+      ENABLE_CELERY_BEAT: "no"
+      ENABLE_CELERY_SHORT: "no"
+      ENABLE_CELERY_LONG: "no"
+      ENABLE_MIGRATIONS: "no"
       LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
       LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
       LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME: sweeper-service
       LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET}
     depends_on:
-      - migrations
+      migrations:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/')\" >/dev/null 2>&1 || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   deposit_service:
     build:
       context: .
@@ -67,8 +83,12 @@ services:
       - ./deposit_service/config:/app/config:ro
       - ./deposit_service/data:/data
     depends_on:
-      - web
+      web:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
     restart: unless-stopped
+
   sweeper_service:
     build:
       context: .
@@ -101,21 +121,32 @@ services:
       - ./sweeper_service/config:/app/config:ro
       - ./sweeper_service/data:/data
     depends_on:
-      - web
+      web:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
     restart: unless-stopped
+
   celery_beat:
     build: .
     image: mediacms/mediacms:latest
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
-      ENABLE_UWSGI: 'no'
-      ENABLE_NGINX: 'no'
-      ENABLE_CELERY_SHORT: 'no'
-      ENABLE_CELERY_LONG: 'no'
-      ENABLE_MIGRATIONS: 'no'
+      ENABLE_UWSGI: "no"
+      ENABLE_NGINX: "no"
+      ENABLE_CELERY_SHORT: "no"
+      ENABLE_CELERY_LONG: "no"
+      ENABLE_MIGRATIONS: "no"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   celery_worker:
     build: .
     image: mediacms/mediacms:latest
@@ -124,12 +155,20 @@ services:
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
-      ENABLE_UWSGI: 'no'
-      ENABLE_NGINX: 'no'
-      ENABLE_CELERY_BEAT: 'no'
-      ENABLE_MIGRATIONS: 'no'
+      ENABLE_UWSGI: "no"
+      ENABLE_NGINX: "no"
+      ENABLE_CELERY_BEAT: "no"
+      ENABLE_MIGRATIONS: "no"
     depends_on:
-      - migrations
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      web:
+        condition: service_healthy
+    restart: unless-stopped
   db:
     image: postgres:17.2-alpine
     volumes:
@@ -149,7 +188,7 @@ services:
     image: "redis:alpine"
     restart: always
     healthcheck:
-      test: ["CMD", "redis-cli","ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3

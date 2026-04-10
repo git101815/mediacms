@@ -392,7 +392,7 @@
 
     <div class="wallet-modal__body wallet-modal__body--deposit-mock">
       {% if deposit_options %}
-        <form method="post" action="{{ wallet_deposit_request_url }}">
+        <form method="post" action="{{ wallet_deposit_request_url }}" class="wallet-deposit-route-picker__form">
           {% csrf_token %}
           <input type="hidden" name="return_tab" value="{{ active_tab }}">
           <input type="hidden" name="return_status" value="{{ active_status }}">
@@ -406,7 +406,6 @@
                   name="deposit_option_key"
                   value="{{ option.key }}"
                   {% if forloop.first %}checked{% endif %}
-                  onchange="this.form.submit()"
                   required
                 >
 
@@ -414,9 +413,12 @@
                   <span class="wallet-deposit-route__badge" aria-hidden="true"></span>
 
                   <span class="wallet-deposit-route__body">
-                    <span class="wallet-deposit-route__title">{{ option.label }}</span>
+                    <span class="wallet-deposit-route__title">{{ option.route_label }}</span>
                     <span class="wallet-deposit-route__subtitle">
-                      Minimum deposit: {{ option.min_amount }} · {{ option.required_confirmations }} confirmations
+                      {% if option.min_amount_display %}
+                        Minimum deposit: {{ option.min_amount_display }} {{ option.asset_code }} ·
+                      {% endif %}
+                      {{ option.required_confirmations }} confirmations
                     </span>
                   </span>
 
@@ -430,11 +432,11 @@
             Send only the exact asset shown for the selected network. Unsupported assets or networks are not credited automatically.
           </div>
 
-          <noscript>
-            <div class="wallet-form__actions" style="margin-top: 16px;">
-              <button type="submit" class="wallet-form__button wallet-form__button--primary">Continue</button>
-            </div>
-          </noscript>
+          <div class="wallet-deposit-route-picker__actions">
+            <button type="submit" class="wallet-deposit-route-picker__continue">
+              Continue
+            </button>
+          </div>
         </form>
       {% else %}
         <div class="wallet-empty-state wallet-empty-state--compact">

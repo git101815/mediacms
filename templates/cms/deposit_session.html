@@ -36,7 +36,7 @@
                 <div class="deposit-mock-page__field-control" aria-disabled="true">
                   <div class="deposit-mock-page__field-value">
                     <span class="deposit-mock-page__chain-badge deposit-mock-page__chain-badge--{{ deposit_session.chain|lower }}" aria-hidden="true"></span>
-                    <span data-deposit-label>{{ deposit_session.display_label }}</span>
+                    <span data-deposit-route-label>{{ deposit_session.route_label }}</span>
                   </div>
 
                   <i class="material-icons" aria-hidden="true">expand_more</i>
@@ -54,7 +54,14 @@
               <section class="deposit-mock-page__details">
                 <div class="deposit-mock-page__detail-row">
                   <span class="deposit-mock-page__detail-label">Deposit Network</span>
-                  <span class="deposit-mock-page__detail-value">{{ deposit_session.chain }}</span>
+                  <span class="deposit-mock-page__detail-value">{{ deposit_session.network_display }}</span>
+                </div>
+
+                <div class="deposit-mock-page__detail-row">
+                  <span class="deposit-mock-page__detail-label">Minimum deposit</span>
+                  <span class="deposit-mock-page__detail-value">
+                    {{ deposit_session.min_amount_display }} {{ deposit_session.asset_code }}
+                  </span>
                 </div>
 
                 <div class="deposit-mock-page__detail-row">
@@ -108,9 +115,8 @@
 
                   <a
                     href="{{ wallet_url }}"
-                    class="wallet-action-button"
+                    class="wallet-action-button deposit-mock-page__return"
                     data-deposit-return-link
-                    {% if not deposit_session.is_terminal %}hidden{% endif %}
                   >
                     Return to wallet
                   </a>
@@ -144,10 +150,9 @@
       const confirmationsNode = root.querySelector('[data-deposit-confirmations]');
       const observedAmountNode = root.querySelector('[data-deposit-observed-amount]');
       const txidNode = root.querySelector('[data-deposit-txid]');
-      const returnLink = root.querySelector('[data-deposit-return-link]');
       const shareButton = root.querySelector('[data-share-deposit-details]');
       const refreshButton = root.querySelector('[data-deposit-refresh]');
-      const displayLabelNode = root.querySelector('[data-deposit-label]');
+      const routeLabelNode = root.querySelector('[data-deposit-route-label]');
       let pollTimer = null;
       let shareResetTimer = null;
 
@@ -168,19 +173,19 @@
 
       if (shareButton) {
         shareButton.addEventListener('click', async function () {
-          const label = displayLabelNode ? displayLabelNode.textContent.trim() : '';
-          const address = addressNode ? addressNode.textContent.trim() : '';
-          const txid = txidNode ? txidNode.textContent.trim() : '';
+          const routeLabel = routeLabelNode ? routeLabelNode.textContent.trim() : "";
+          const address = addressNode ? addressNode.textContent.trim() : "";
+          const txid = txidNode ? txidNode.textContent.trim() : "";
           const text = [
-            label,
-            address ? 'Address: ' + address : '',
-            txid && txid !== '—' ? 'Transaction: ' + txid : ''
-          ].filter(Boolean).join('\n');
+            routeLabel,
+            address ? "Address: " + address : "",
+            txid && txid !== "—" ? "Transaction: " + txid : "",
+          ].filter(Boolean).join("\n");
 
           if (navigator.share) {
             try {
               await navigator.share({
-                title: label || 'Deposit details',
+                title: routeLabel || "Deposit details",
                 text: text,
               });
               return;
@@ -194,22 +199,22 @@
             return;
           }
 
-          shareButton.textContent = 'Details copied';
+          shareButton.textContent = "Details copied";
 
           if (shareResetTimer) {
             window.clearTimeout(shareResetTimer);
           }
 
           shareResetTimer = window.setTimeout(function () {
-            shareButton.textContent = 'Share deposit details';
+            shareButton.textContent = "Share deposit details";
           }, 1400);
         });
       }
 
       async function refreshStatus() {
         const response = await fetch(statusUrl, {
-          headers: { 'X-Requested-With': 'XMLHttpRequest' },
-          credentials: 'same-origin',
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+          credentials: "same-origin",
         });
 
         if (!response.ok) {
@@ -218,17 +223,13 @@
 
         const payload = await response.json();
 
-        statusPill.className = 'wallet-status-pill wallet-status-pill--' + payload.status + ' deposit-mock-page__status';
+        statusPill.className = "wallet-status-pill wallet-status-pill--" + payload.status + " deposit-mock-page__status";
         statusIcon.textContent = payload.status_icon;
         statusLabel.textContent = payload.status_label;
         statusText.textContent = payload.status_label;
         confirmationsNode.textContent = payload.confirmations;
-        observedAmountNode.textContent = payload.observed_amount_display || '0';
-        txidNode.textContent = payload.observed_txid || '—';
-
-        if (payload.is_terminal && returnLink) {
-          returnLink.hidden = false;
-        }
+        observedAmountNode.textContent = payload.observed_amount_display || "0";
+        txidNode.textContent = payload.observed_txid || "—";
 
         if (!payload.is_terminal) {
           pollTimer = window.setTimeout(refreshStatus, 5000);
@@ -236,7 +237,7 @@
       }
 
       if (refreshButton) {
-        refreshButton.addEventListener('click', function () {
+        refreshButton.addEventListener("click", function () {
           if (pollTimer) {
             window.clearTimeout(pollTimer);
           }
