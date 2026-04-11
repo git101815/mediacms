@@ -4,124 +4,122 @@
 
 {% block innercontent %}
   <div
-    class="wallet-page deposit-mock-page"
+    class="wallet-page wallet-page--deposit-dfans"
     data-deposit-session-root
     data-status-url="{{ wallet_deposit_session_status_url }}"
     data-current-status="{{ deposit_session.status }}"
   >
     <div class="wallet-page__layout">
       <main class="wallet-page__main">
-        <section class="wallet-panel wallet-panel--main">
-          <header class="wallet-panel__header wallet-panel__header--deposit-mock-page">
+        <section class="wallet-panel wallet-panel--main wallet-panel--deposit-dfans">
+          <header class="wallet-panel__header wallet-panel__header--deposit-dfans">
             <div class="wallet-panel__header-left">
               <a href="{{ wallet_url }}" class="wallet-panel__back-button" aria-label="Back to wallet">←</a>
-
-              <div>
-                <div class="deposit-mock-page__eyebrow">Deposit</div>
-                <h1 class="wallet-panel__title wallet-panel__title--deposit-mock">Deposit {{ deposit_session.asset_code }}</h1>
-              </div>
+              <h1 class="wallet-panel__title wallet-panel__title--deposit-dfans">
+                Deposit {{ deposit_session.asset_code }}
+              </h1>
             </div>
 
-            <span class="wallet-status-pill wallet-status-pill--{{ deposit_session.status }} deposit-mock-page__status" data-deposit-status-pill>
+            <span class="wallet-status-pill wallet-status-pill--{{ deposit_session.status }}" data-deposit-status-pill>
               <i class="material-icons wallet-status-pill__icon" aria-hidden="true" data-deposit-status-icon>{{ deposit_session.status_icon }}</i>
               <span data-deposit-status-label>{{ deposit_session.status_label }}</span>
             </span>
           </header>
 
-          <div class="deposit-mock-page__body">
-            <div class="deposit-mock-page__stack">
-              <section>
-                <div class="deposit-mock-page__field-label">Network</div>
+          <div class="wallet-deposit-page">
+            <div class="wallet-deposit-page__hero">
+              <div class="wallet-deposit-page__asset-icon" aria-hidden="true">
+                {% if deposit_session.chain == "bsc" %}
+                  <span>BNB</span>
+                {% elif deposit_session.chain == "ethereum" %}
+                  <span>Ξ</span>
+                {% elif deposit_session.chain == "arbitrum" %}
+                  <span>ARB</span>
+                {% elif deposit_session.chain == "base" %}
+                  <span>BASE</span>
+                {% else %}
+                  <span>{{ deposit_session.asset_code }}</span>
+                {% endif %}
+              </div>
 
-                <div class="deposit-mock-page__field-control" aria-disabled="true">
-                  <div class="deposit-mock-page__field-value">
-                    <span class="deposit-mock-page__chain-badge deposit-mock-page__chain-badge--{{ deposit_session.chain|lower }}" aria-hidden="true"></span>
-                    <span data-deposit-route-label>{{ deposit_session.route_label }}</span>
-                  </div>
+              <div class="wallet-deposit-page__hero-title">
+                {{ deposit_session.metadata.route_label|default:deposit_session.metadata.display_label|default:deposit_session.asset_code }}
+              </div>
+            </div>
 
-                  <i class="material-icons" aria-hidden="true">expand_more</i>
-                </div>
-              </section>
+            <div class="wallet-deposit-page__address-box">
+              <div class="wallet-deposit-page__address" data-deposit-address>{{ deposit_session.deposit_address }}</div>
+              <button type="button" class="wallet-deposit-page__copy" data-copy-deposit-address aria-label="Copy deposit address">
+                <i class="material-icons" aria-hidden="true">content_copy</i>
+              </button>
+            </div>
 
-              <section class="deposit-mock-page__address-card">
-                <div class="deposit-mock-page__address" data-deposit-address>{{ deposit_session.deposit_address }}</div>
+            <div class="wallet-deposit-page__details-card">
+              <div class="wallet-deposit-page__detail-row">
+                <span class="wallet-deposit-page__detail-label">Deposit Network</span>
+                <span class="wallet-deposit-page__detail-value">
+                  {{ deposit_session.metadata.network_label|default:deposit_session.chain }}
+                </span>
+              </div>
 
-                <button type="button" class="deposit-mock-page__copy" data-copy-deposit-address aria-label="Copy deposit address">
-                  <i class="material-icons" aria-hidden="true">content_copy</i>
+              <div class="wallet-deposit-page__detail-row">
+                <span class="wallet-deposit-page__detail-label">Minimum deposit</span>
+                <span class="wallet-deposit-page__detail-value">
+                  {{ deposit_session.metadata.min_amount_display|default:deposit_session.min_amount }} {{ deposit_session.asset_code }}
+                </span>
+              </div>
+            </div>
+
+            <div class="wallet-deposit-page__warning">
+              <i class="material-icons" aria-hidden="true">warning</i>
+              <div>
+                The current address only supports depositing {{ deposit_session.asset_code }} on
+                {{ deposit_session.metadata.network_label|default:deposit_session.chain }}.
+                Depositing other assets will result in loss.
+              </div>
+            </div>
+
+            <div class="wallet-deposit-page__balance-row">
+              <div class="wallet-deposit-page__balance-label">Current Balance</div>
+              <div class="wallet-deposit-page__balance-value">
+                <span data-deposit-observed-amount>{{ deposit_session.observed_amount_display|default:"0" }}</span>
+                <span>{{ deposit_session.asset_code }}</span>
+
+                <button type="button" class="wallet-deposit-page__refresh" data-deposit-refresh aria-label="Refresh deposit status">
+                  <i class="material-icons" aria-hidden="true">refresh</i>
                 </button>
-              </section>
+              </div>
+            </div>
 
-              <section class="deposit-mock-page__details">
-                <div class="deposit-mock-page__detail-row">
-                  <span class="deposit-mock-page__detail-label">Deposit Network</span>
-                  <span class="deposit-mock-page__detail-value">{{ deposit_session.network_display }}</span>
-                </div>
+            <div class="wallet-deposit-page__meta-card">
+              <div class="wallet-deposit-page__detail-row">
+                <span class="wallet-deposit-page__detail-label">Confirmations</span>
+                <span class="wallet-deposit-page__detail-value">
+                  <span data-deposit-confirmations>{{ deposit_session.confirmations }}</span> / {{ deposit_session.required_confirmations }}
+                </span>
+              </div>
 
-                <div class="deposit-mock-page__detail-row">
-                  <span class="deposit-mock-page__detail-label">Minimum deposit</span>
-                  <span class="deposit-mock-page__detail-value">
-                    {{ deposit_session.min_amount_display }} {{ deposit_session.asset_code }}
-                  </span>
-                </div>
+              <div class="wallet-deposit-page__detail-row">
+                <span class="wallet-deposit-page__detail-label">Transaction</span>
+                <span class="wallet-deposit-page__detail-value wallet-deposit-page__detail-value--mono" data-deposit-txid>
+                  {{ deposit_session.observed_txid|default:"—" }}
+                </span>
+              </div>
+            </div>
 
-                <div class="deposit-mock-page__detail-row">
-                  <span class="deposit-mock-page__detail-label">Required confirmations</span>
-                  <span class="deposit-mock-page__detail-value">
-                    <span data-deposit-confirmations>{{ deposit_session.confirmations }}</span> / {{ deposit_session.required_confirmations }}
-                  </span>
-                </div>
-
-                <div class="deposit-mock-page__detail-row">
-                  <span class="deposit-mock-page__detail-label">Status</span>
-                  <span class="deposit-mock-page__detail-value" data-deposit-status-text>{{ deposit_session.status_label }}</span>
-                </div>
-
-                <div class="deposit-mock-page__detail-row">
-                  <span class="deposit-mock-page__detail-label">Transaction</span>
-                  <span class="deposit-mock-page__detail-value deposit-mock-page__detail-value--mono" data-deposit-txid>
-                    {{ deposit_session.observed_txid|default:"—" }}
-                  </span>
-                </div>
-              </section>
-
-              <section class="deposit-mock-page__warning">
-                <i class="material-icons" aria-hidden="true">info</i>
-                <div>
-                  The current address only supports the exact asset and network shown above. Sending a different asset or using the wrong network can result in loss.
-                </div>
-              </section>
-
-              <section class="deposit-mock-page__footer">
-                <div class="deposit-mock-page__footer-summary">
-                  <span class="deposit-mock-page__footer-label">Observed amount</span>
-
-                  <div class="deposit-mock-page__footer-value-wrap">
-                    <strong class="deposit-mock-page__footer-value" data-deposit-observed-amount>
-                      {{ deposit_session.observed_amount_display|default:"0" }}
-                    </strong>
-
-                    <span class="deposit-mock-page__footer-asset">{{ deposit_session.asset_code }}</span>
-
-                    <button type="button" class="deposit-mock-page__refresh" data-deposit-refresh aria-label="Refresh deposit status">
-                      <i class="material-icons" aria-hidden="true">refresh</i>
-                    </button>
-                  </div>
-                </div>
-
-                <div class="deposit-mock-page__footer-actions">
-                  <button type="button" class="deposit-mock-page__share" data-share-deposit-details>
-                    Share deposit details
+            <div class="wallet-deposit-page__actions">
+              {% if deposit_session.status == "awaiting_payment" and not deposit_session.observed_txid %}
+                <form method="post" action="{% url 'wallet_deposit_session_cancel' public_id=deposit_session.public_id %}" class="wallet-deposit-page__cancel-form">
+                  {% csrf_token %}
+                  <button type="submit" class="wallet-deposit-page__cancel">
+                    Cancel deposit
                   </button>
+                </form>
+              {% endif %}
 
-                  <a
-                    href="{{ wallet_url }}"
-                    class="wallet-action-button deposit-mock-page__return"
-                    data-deposit-return-link
-                  >
-                    Return to wallet
-                  </a>
-                </div>
-              </section>
+              <button type="button" class="wallet-deposit-page__share" data-share-deposit-details>
+                Share deposit detail
+              </button>
             </div>
           </div>
         </section>
@@ -135,7 +133,6 @@
   <script>
     (function () {
       const root = document.querySelector('[data-deposit-session-root]');
-
       if (!root) {
         return;
       }
@@ -146,13 +143,11 @@
       const statusPill = root.querySelector('[data-deposit-status-pill]');
       const statusIcon = root.querySelector('[data-deposit-status-icon]');
       const statusLabel = root.querySelector('[data-deposit-status-label]');
-      const statusText = root.querySelector('[data-deposit-status-text]');
       const confirmationsNode = root.querySelector('[data-deposit-confirmations]');
       const observedAmountNode = root.querySelector('[data-deposit-observed-amount]');
       const txidNode = root.querySelector('[data-deposit-txid]');
       const shareButton = root.querySelector('[data-share-deposit-details]');
       const refreshButton = root.querySelector('[data-deposit-refresh]');
-      const routeLabelNode = root.querySelector('[data-deposit-route-label]');
       let pollTimer = null;
       let shareResetTimer = null;
 
@@ -173,19 +168,17 @@
 
       if (shareButton) {
         shareButton.addEventListener('click', async function () {
-          const routeLabel = routeLabelNode ? routeLabelNode.textContent.trim() : "";
-          const address = addressNode ? addressNode.textContent.trim() : "";
-          const txid = txidNode ? txidNode.textContent.trim() : "";
+          const address = addressNode ? addressNode.textContent.trim() : '';
+          const txid = txidNode ? txidNode.textContent.trim() : '';
           const text = [
-            routeLabel,
-            address ? "Address: " + address : "",
-            txid && txid !== "—" ? "Transaction: " + txid : "",
-          ].filter(Boolean).join("\n");
+            address ? 'Address: ' + address : '',
+            txid && txid !== '—' ? 'Transaction: ' + txid : ''
+          ].filter(Boolean).join('\n');
 
           if (navigator.share) {
             try {
               await navigator.share({
-                title: routeLabel || "Deposit details",
+                title: 'Deposit details',
                 text: text,
               });
               return;
@@ -194,27 +187,26 @@
           }
 
           const copied = await copyText(text);
-
           if (!copied) {
             return;
           }
 
-          shareButton.textContent = "Details copied";
+          shareButton.textContent = 'Details copied';
 
           if (shareResetTimer) {
             window.clearTimeout(shareResetTimer);
           }
 
           shareResetTimer = window.setTimeout(function () {
-            shareButton.textContent = "Share deposit details";
+            shareButton.textContent = 'Share deposit detail';
           }, 1400);
         });
       }
 
       async function refreshStatus() {
         const response = await fetch(statusUrl, {
-          headers: { "X-Requested-With": "XMLHttpRequest" },
-          credentials: "same-origin",
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          credentials: 'same-origin',
         });
 
         if (!response.ok) {
@@ -223,13 +215,12 @@
 
         const payload = await response.json();
 
-        statusPill.className = "wallet-status-pill wallet-status-pill--" + payload.status + " deposit-mock-page__status";
+        statusPill.className = 'wallet-status-pill wallet-status-pill--' + payload.status;
         statusIcon.textContent = payload.status_icon;
         statusLabel.textContent = payload.status_label;
-        statusText.textContent = payload.status_label;
         confirmationsNode.textContent = payload.confirmations;
-        observedAmountNode.textContent = payload.observed_amount_display || "0";
-        txidNode.textContent = payload.observed_txid || "—";
+        observedAmountNode.textContent = payload.observed_amount_display || '0';
+        txidNode.textContent = payload.observed_txid || '—';
 
         if (!payload.is_terminal) {
           pollTimer = window.setTimeout(refreshStatus, 5000);
@@ -237,11 +228,10 @@
       }
 
       if (refreshButton) {
-        refreshButton.addEventListener("click", function () {
+        refreshButton.addEventListener('click', function () {
           if (pollTimer) {
             window.clearTimeout(pollTimer);
           }
-
           refreshStatus();
         });
       }

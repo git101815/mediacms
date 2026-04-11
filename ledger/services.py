@@ -232,6 +232,79 @@ def _clear_sweep_job_claim(job: DepositSweepJob) -> None:
     job.claimed_by_service = ""
     job.claim_expires_at = None
 
+from decimal import Decimal
+
+DEPOSIT_SESSION_STATUS_CANCELED = getattr(DepositSession, "STATUS_CANCELED", "canceled")
+
+NETWORK_DISPLAY_LABELS = {
+    "ethereum": "Ethereum",
+    "arbitrum": "Arbitrum One",
+    "base": "Base",
+    "bsc": "BNB Chain",
+    "polygon": "Polygon",
+}
+
+DISPLAY_DECIMALS_BY_ROUTE = {
+    ("ethereum", "USDT"): 6,
+    ("ethereum", "USDC"): 6,
+    ("arbitrum", "USDT"): 6,
+    ("arbitrum", "USDC"): 6,
+    ("base", "USDT"): 6,
+    ("base", "USDC"): 6,
+    ("bsc", "USDT"): 18,
+    ("bsc", "USDC"): 18,
+    ("polygon", "USDT"): 6,
+    ("polygon", "USDC"): 6,
+}
+
+
+def _get_network_display_label(chain: str) -> str:
+    normalized_chain = _normalize_chain(chain)
+    return NETWORK_DISPLAY_LABELS.get(normalized_chain, (chain or "").strip() or "Unknown")
+
+
+def _get_deposit_display_decimals(*, chain: str, asset_code: str) -> int | None:
+    normalized_chain = _normalize_chain(chain)
+    normalized_asset = (asset_code or "").strip().upper()
+    return DISPLAY_DECIMALS_BY_ROUTE.get((normalized_chain, normalized_asset))
+
+
+def _format_deposit_display_amount(*, raw_amount: int, chain: str, asset_code: str) -> str:
+    normalized_raw = int(raw_amount)
+    decimals = _get_deposit_display_decimals(chain=chain, asset_code=asset_code)
+    if decimals is None:
+        return str(normalized_raw)
+
+    scaled = Decimal(normalized_raw) / (Decimal(10) ** int(decimals))
+    text = format(scaled, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _build_route_label(*, chain: str, asset_code: str, display_label: str = "") -> str:
+    explicit = (display_label or "").strip()
+    if explicit:
+        return explicit
+    return f"{_get_network_display_label(chain)} · {(asset_code or '').strip().upper()}"
+
+
+def _abandon_open_sweep_jobs_for_session(*, deposit_session: DepositSession) -> int:
+    return DepositSweepJob.objects.filter(
+        deposit_session=deposit_session,
+        status__in=[
+            DepositSweepJob.STATUS_PENDING,
+            DepositSweepJob.STATUS_READY_TO_SWEEP,
+            DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+            DepositSweepJob.STATUS_SWEEP_BROADCASTED,
+        ],
+    ).update(
+        status=DepositSweepJob.STATUS_ABANDONED,
+        claimed_by_service="",
+        claim_expires_at=None,
+        updated_at=timezone.now(),
+    )
+
 def build_evm_event_key(*, chain: str, txid: str, log_index: int) -> str:
     normalized_chain = _normalize_chain(chain)
     normalized_txid = (txid or "").strip().lower()
@@ -1176,31 +1249,26 @@ def record_onchain_observation(
 
     if log_index < 0:
         raise ValidationError("Log index cannot be negative")
-
     if block_number is not None and block_number < 0:
         raise ValidationError("Block number cannot be negative")
-
     if amount <= 0:
         raise ValidationError("Observed amount must be positive")
-
     if confirmations < 0:
         raise ValidationError("Confirmations cannot be negative")
 
     if deposit_session.status in {
         DepositSession.STATUS_EXPIRED,
         DepositSession.STATUS_FAILED,
+        DEPOSIT_SESSION_STATUS_CANCELED,
     }:
         raise ValidationError("Cannot record an observation for a closed deposit session")
 
     if chain != deposit_session.chain:
         raise ValidationError("Observed chain does not match deposit session chain")
-
     if asset_code != deposit_session.asset_code:
         raise ValidationError("Observed asset does not match deposit session asset")
-
     if token_contract_address != deposit_session.token_contract_address:
         raise ValidationError("Observed token contract does not match deposit session token contract")
-
     if to_address != deposit_session.deposit_address:
         raise ValidationError("Observed destination address does not match deposit session address")
 
@@ -1382,8 +1450,13 @@ def credit_confirmed_deposit_session(
             raise ValidationError("Credited session missing linked ledger transaction")
         return deposit_session.credited_ledger_txn
 
+    if deposit_session.status == DEPOSIT_SESSION_STATUS_CANCELED:
+        raise ValidationError("Canceled deposit sessions cannot be credited")
+
+    first_seen_at = getattr(observed_transfer, "first_seen_at", None) or getattr(observed_transfer, "created_at", None)
     if deposit_session.expires_at <= timezone.now():
-        raise ValidationError("Deposit session has expired")
+        if first_seen_at is None or first_seen_at > deposit_session.expires_at:
+            raise ValidationError("Deposit session has expired")
 
     if observed_transfer.status not in {
         ObservedOnchainTransfer.STATUS_CONFIRMED,
@@ -1468,6 +1541,7 @@ def credit_confirmed_deposit_session(
             "updated_at",
         ]
     )
+
     enqueue_deposit_sweep_job(
         actor=actor,
         deposit_session=deposit_session,
@@ -1515,16 +1589,32 @@ def list_available_deposit_options() -> list[dict]:
             asset_code=row["asset_code"],
             token_contract_address=row["token_contract_address"],
         )
+        route_label = _build_route_label(
+            chain=row["chain"],
+            asset_code=row["asset_code"],
+            display_label=row["display_label"],
+        )
+        network_label = _get_network_display_label(row["chain"])
+        min_amount_display = _format_deposit_display_amount(
+            raw_amount=row["min_amount"],
+            chain=row["chain"],
+            asset_code=row["asset_code"],
+        )
+
         options.append(
             {
                 "key": option_key,
                 "label": row["display_label"],
+                "route_label": route_label,
+                "network_label": network_label,
                 "chain": row["chain"],
                 "asset_code": row["asset_code"],
                 "token_contract_address": row["token_contract_address"],
                 "required_confirmations": row["required_confirmations"],
                 "min_amount": row["min_amount"],
+                "min_amount_display": min_amount_display,
                 "session_ttl_seconds": row["session_ttl_seconds"],
+                "network_slug": _normalize_chain(row["chain"]),
             }
         )
     return options
@@ -1572,6 +1662,17 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
         raise ValidationError("No deposit address is currently available for this asset")
 
     expires_at = timezone.now() + timedelta(seconds=int(address_row.session_ttl_seconds))
+    route_label = _build_route_label(
+        chain=address_row.chain,
+        asset_code=address_row.asset_code,
+        display_label=address_row.display_label,
+    )
+    network_label = _get_network_display_label(address_row.chain)
+    min_amount_display = _format_deposit_display_amount(
+        raw_amount=address_row.min_amount,
+        chain=address_row.chain,
+        asset_code=address_row.asset_code,
+    )
 
     session = create_deposit_session(
         actor=actor,
@@ -1586,6 +1687,10 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
         min_amount=address_row.min_amount,
         metadata={
             "display_label": address_row.display_label,
+            "route_label": route_label,
+            "network_label": network_label,
+            "network_slug": _normalize_chain(address_row.chain),
+            "min_amount_display": min_amount_display,
             "address_pool_id": address_row.id,
             "allocation_source": "app_pool",
         },
@@ -1926,6 +2031,7 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
         raise ValidationError("Options payload must be a non-empty list")
 
     results = []
+    now = timezone.now()
 
     for row in option_rows:
         if not isinstance(row, dict):
@@ -1944,6 +2050,7 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
                 asset_code=asset_code,
                 token_contract_address=token_contract_address,
                 status__in=ACTIVE_DEPOSIT_WATCH_STATUSES,
+                expires_at__gt=now,
             )
             .order_by("id")
             .values(
@@ -2311,3 +2418,59 @@ def mark_sweep_job_failed(
         ]
     )
     return job
+@transaction.atomic
+def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> DepositSession:
+    actor = _require_authenticated_actor(actor)
+
+    deposit_session = (
+        DepositSession.objects.select_for_update()
+        .select_related("wallet")
+        .get(id=deposit_session.id)
+    )
+
+    if deposit_session.wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
+        raise PermissionDenied("Cannot cancel another user's deposit session")
+
+    if deposit_session.status == DepositSession.STATUS_CREDITED:
+        raise ValidationError("Cannot cancel a credited deposit session")
+
+    if deposit_session.status in {
+        DepositSession.STATUS_EXPIRED,
+        DepositSession.STATUS_FAILED,
+        DEPOSIT_SESSION_STATUS_CANCELED,
+    }:
+        return deposit_session
+
+    if deposit_session.observed_txid:
+        raise ValidationError("Cannot cancel a deposit session that already has an observed transaction")
+
+    deposit_session.status = DEPOSIT_SESSION_STATUS_CANCELED
+    deposit_session.save(update_fields=["status", "updated_at"])
+
+    _abandon_open_sweep_jobs_for_session(deposit_session=deposit_session)
+    return deposit_session
+
+
+@transaction.atomic
+def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
+    _require_perm(actor, "ledger.can_manage_deposit_sessions")
+
+    now = timezone.now()
+    expired_count = 0
+
+    sessions = (
+        DepositSession.objects.select_for_update(skip_locked=True)
+        .filter(
+            status__in=ACTIVE_DEPOSIT_SESSION_STATUSES,
+            expires_at__lte=now,
+        )
+        .order_by("id")[: int(limit)]
+    )
+
+    for session in sessions:
+        session.status = DepositSession.STATUS_EXPIRED
+        session.save(update_fields=["status", "updated_at"])
+        _abandon_open_sweep_jobs_for_session(deposit_session=session)
+        expired_count += 1
+
+    return expired_count
