@@ -9,488 +9,335 @@
 {% endblock headermeta %}
 
 {% block innercontent %}
-<div class="wallet-page">
-  <div class="wallet-page__layout">
-    <main class="wallet-page__main">
-      <section class="wallet-panel wallet-panel--main">
-        <header class="wallet-panel__header">
-          <div class="wallet-panel__header-left">
-            <button type="button" class="wallet-panel__back-button" onclick="history.back()">←</button>
-            <h1 class="wallet-panel__title">My Wallet</h1>
-          </div>
-        </header>
+<div class="wallet-dfans-page" data-wallet-root>
+  <div class="wallet-dfans-shell">
+    <header class="wallet-dfans-header">
+      <button type="button" class="wallet-dfans-header__back" onclick="history.back()" aria-label="Back">
+        <i class="material-icons" aria-hidden="true">arrow_back</i>
+      </button>
+      <h1 class="wallet-dfans-header__title">MY WALLET</h1>
+      <div class="wallet-dfans-header__spacer"></div>
+    </header>
 
-        {% if wallet_banner %}
-        <div class="wallet-notice wallet-notice--{{ wallet_banner.tone }}">
-          <strong class="wallet-notice__title">{{ wallet_banner.title }}</strong>
-          <p class="wallet-notice__text">{{ wallet_banner.message }}</p>
-          {% if can_view_risk_reason and wallet.risk_reason %}
-          <p class="wallet-notice__reason">{{ wallet.risk_reason }}</p>
-          {% endif %}
-        </div>
-        {% endif %}
-
-        {% if messages %}
-        <div class="wallet-flash-stack">
-          {% for message in messages %}
-          <div class="wallet-flash wallet-flash--{{ message.tags|default:'info' }}">
-            {{ message }}
-          </div>
-          {% endfor %}
-        </div>
-        {% endif %}
-
-        <section class="wallet-balance">
-          <div class="wallet-balance__heading">Available Balance</div>
-          <div class="wallet-balance__value">{{ available_balance_display }}</div>
-
-          <div class="wallet-balance__actions">
-            <button
-              type="button"
-              class="wallet-action-button wallet-action-button--primary"
-              data-wallet-modal-open="deposit"
-              {% if not wallet_actions.can_deposit %}disabled{% endif %}
-            >
-              <i class="material-icons" aria-hidden="true">add_circle</i>
-              <span>Deposit</span>
-            </button>
-
-            <button
-              type="button"
-              class="wallet-action-button"
-              data-wallet-modal-open="withdraw"
-              {% if not wallet_actions.can_withdraw %}disabled{% endif %}
-            >
-              <i class="material-icons" aria-hidden="true">north_east</i>
-              <span>Withdraw</span>
-            </button>
-          </div>
-
-          {% if wallet_actions.hint %}
-          <p class="wallet-balance__actions-hint">{{ wallet_actions.hint }}</p>
-          {% endif %}
-
-          <div class="wallet-balance__divider">
-            <div class="wallet-balance__diamond"></div>
-          </div>
-
-          <div class="wallet-balance__stats">
-            <div class="wallet-stat">
-              <span class="wallet-stat__label">Total balance</span>
-              <strong class="wallet-stat__value">{{ total_balance_display }}</strong>
-            </div>
-            <div class="wallet-stat">
-              <span class="wallet-stat__label">Available</span>
-              <strong class="wallet-stat__value">{{ available_balance_display }}</strong>
-            </div>
-            <div class="wallet-stat">
-              <span class="wallet-stat__label">On hold</span>
-              <strong class="wallet-stat__value">{{ held_balance_display }}</strong>
-            </div>
-          </div>
-        </section>
-
-        <div class="wallet-panel__separator"></div>
-        <section class="wallet-section">
-  <div class="wallet-section__header">
-    <h2 class="wallet-section__title">Recent Deposit Sessions</h2>
-  </div>
-
-  {% if recent_deposit_session_rows %}
-  <div class="wallet-request-list">
-    {% for row in recent_deposit_session_rows %}
-    <article class="wallet-request-item">
-      <div class="wallet-request-item__main">
-        <div class="wallet-request-item__top">
-          <span class="wallet-request-item__date">{{ row.created_at|date:"M d, Y H:i" }}</span>
-          <div class="wallet-request-item__badges">
-            <span class="wallet-kind-pill">
-              <i class="material-icons wallet-kind-pill__icon" aria-hidden="true">south_west</i>
-              <span>{{ row.label }}</span>
-            </span>
-            <span class="wallet-status-pill wallet-status-pill--{{ row.status }}">
-              <i class="material-icons wallet-status-pill__icon" aria-hidden="true">{{ row.status_icon }}</i>
-              <span>{{ row.status_label }}</span>
-            </span>
-          </div>
-        </div>
-
-        <div class="wallet-request-item__body">
-          <div class="wallet-request-item__meta">Address {{ row.deposit_address }}</div>
-          <div class="wallet-request-item__meta"><a href="{{ row.url }}">Open session</a></div>
-        </div>
+    <div class="wallet-dfans-body">
+      {% if wallet_banner %}
+      <div class="wallet-dfans-banner wallet-dfans-banner--{{ wallet_banner.tone }}">
+        <strong>{{ wallet_banner.title }}</strong>
+        <span>{{ wallet_banner.message }}</span>
       </div>
-    </article>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="wallet-empty-state wallet-empty-state--compact">
-    <div class="wallet-empty-state__title">No deposit session yet</div>
-    <div class="wallet-empty-state__text">Your recent deposit sessions will appear here.</div>
-  </div>
-  {% endif %}
-</section>
-        <section class="wallet-section">
-          <div class="wallet-section__header">
-            <h2 class="wallet-section__title">Recent Withdrawal Requests</h2>
-          </div>
+      {% endif %}
 
-          {% if recent_request_rows %}
-          <div class="wallet-request-list">
-            {% for row in recent_request_rows %}
-            <article class="wallet-request-item">
-              <div class="wallet-request-item__main">
-                <div class="wallet-request-item__top">
-                  <span class="wallet-request-item__date">{{ row.created_at|date:"M d, Y H:i" }}</span>
-                  <div class="wallet-request-item__badges">
-                    <span class="wallet-kind-pill">
-                      <i class="material-icons wallet-kind-pill__icon" aria-hidden="true">{{ row.request_type_icon }}</i>
-                      <span>{{ row.request_type_label }}</span>
-                    </span>
-                    <span class="wallet-status-pill wallet-status-pill--{{ row.status }}">
-                      <i class="material-icons wallet-status-pill__icon" aria-hidden="true">{{ row.status_icon }}</i>
-                      <span>{{ row.status_label }}</span>
-                    </span>
-                  </div>
-                </div>
+      {% if messages %}
+      <div class="wallet-dfans-flashes">
+        {% for message in messages %}
+        <div class="wallet-dfans-flash wallet-dfans-flash--{{ message.tags|default:'info' }}">
+          {{ message }}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
 
-                <div class="wallet-request-item__body">
-                  {% if row.notes %}
-                  <div class="wallet-request-item__description">{{ row.notes }}</div>
-                  {% endif %}
+      <section class="wallet-dfans-balance">
+        <div class="wallet-dfans-balance__label">Available Balance</div>
+        <div class="wallet-dfans-balance__value">{{ available_balance_display }}</div>
 
-                  {% if row.destination_address %}
-                  <div class="wallet-request-item__meta">Destination {{ row.destination_address }}</div>
-                  {% endif %}
+        <div class="wallet-dfans-balance__actions">
+          <button
+            type="button"
+            class="wallet-dfans-pill wallet-dfans-pill--primary"
+            data-modal-open="deposit"
+            {% if not wallet_actions.can_deposit %}disabled{% endif %}
+          >
+            <i class="material-icons" aria-hidden="true">add_circle</i>
+            <span>Deposit</span>
+          </button>
 
-                  {% if row.hold_amount_display %}
-                  <div class="wallet-request-item__meta">Reserved {{ row.hold_amount_display }}</div>
-                  {% endif %}
-
-                  <div class="wallet-request-item__meta">Ref {{ row.reference }}</div>
-                </div>
-              </div>
-
-              <div class="wallet-request-item__side">
-                <div class="wallet-request-item__amount">{{ row.amount_display }}</div>
-              </div>
-            </article>
-            {% endfor %}
-          </div>
-          {% else %}
-          <div class="wallet-empty-state wallet-empty-state--compact">
-            <div class="wallet-empty-state__title">No request yet</div>
-            <div class="wallet-empty-state__text">Deposit and withdrawal requests will appear here.</div>
-          </div>
-          {% endif %}
-        </section>
-
-        <div class="wallet-panel__separator"></div>
-
-        <section class="wallet-section">
-          <div class="wallet-section__header">
-            <h2 class="wallet-section__title">Recent Activity</h2>
-          </div>
-
-          <div class="wallet-section__toolbar">
-            <div class="wallet-section__filters">
-              {% for item in tab_items %}
-              <a
-                href="{{ item.url }}"
-                class="wallet-filter-pill{% if item.is_active %} wallet-filter-pill--active{% endif %}"
-                data-wallet-nav
-              >
-                {{ item.label }}
-              </a>
-              {% endfor %}
-            </div>
-
-            <form method="get" action="{{ wallet_base_url }}" class="wallet-status-filter-form" data-wallet-status-form>
-              <input type="hidden" name="tab" value="{{ active_tab }}">
-              <label for="wallet-status-filter" class="wallet-status-filter-form__label">Status</label>
-              <div class="wallet-status-filter-form__field">
-                <select id="wallet-status-filter" name="status" class="wallet-status-filter-form__select" data-wallet-status-select>
-                  {% for option in status_select_options %}
-                  <option value="{{ option.key }}"{% if option.key == active_status %} selected{% endif %}>{{ option.label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <noscript>
-                <button type="submit" class="wallet-status-filter-form__submit">Apply</button>
-              </noscript>
-            </form>
-          </div>
-
-          {% if transaction_rows %}
-          <div class="wallet-activity-list">
-            {% for row in transaction_rows %}
-            <article class="wallet-activity-item">
-              <div class="wallet-activity-item__main">
-                <div class="wallet-activity-item__top">
-                  <span class="wallet-activity-item__date">{{ row.created_at|date:"M d, Y H:i" }}</span>
-                  <div class="wallet-activity-item__badges">
-                    <span class="wallet-kind-pill">{{ row.kind }}</span>
-                    <span class="wallet-status-pill wallet-status-pill--{{ row.status }}">
-                      <i class="material-icons wallet-status-pill__icon" aria-hidden="true">{{ row.status_icon }}</i>
-                      <span>{{ row.status_label }}</span>
-                    </span>
-                  </div>
-                </div>
-
-                <div class="wallet-activity-item__body">
-                  <div class="wallet-activity-item__description">
-                    {% if row.memo %}
-                    {{ row.memo }}
-                    {% else %}
-                    {{ row.kind }}
-                    {% endif %}
-                  </div>
-
-                  {% if row.counterparty != "—" %}
-                  <div class="wallet-activity-item__meta">{{ row.counterparty }}</div>
-                  {% endif %}
-
-                  <div class="wallet-activity-item__meta">Ref #{{ row.txn_id }}</div>
-                </div>
-              </div>
-
-              <div class="wallet-activity-item__side">
-                <div class="wallet-activity-item__amount wallet-activity-item__amount--{{ row.direction }}">
-                  {{ row.delta_display }}
-                </div>
-                <div class="wallet-activity-item__balance">Balance {{ row.balance_after_display }}</div>
-              </div>
-            </article>
-            {% endfor %}
-          </div>
-
-          {% if page_obj.has_other_pages %}
-          <nav class="wallet-pagination" aria-label="Wallet activity pagination">
-            {% if page_obj.has_previous %}
-            <a
-              href="{{ wallet_base_url }}?tab={{ active_tab }}&status={{ active_status }}&page={{ page_obj.previous_page_number }}"
-              class="wallet-pagination__button"
-              data-wallet-nav
-            >
-              Previous
-            </a>
-            {% else %}
-            <span class="wallet-pagination__button wallet-pagination__button--disabled">Previous</span>
-            {% endif %}
-
-            <span class="wallet-pagination__summary">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
-
-            {% if page_obj.has_next %}
-            <a
-              href="{{ wallet_base_url }}?tab={{ active_tab }}&status={{ active_status }}&page={{ page_obj.next_page_number }}"
-              class="wallet-pagination__button"
-              data-wallet-nav
-            >
-              Next
-            </a>
-            {% else %}
-            <span class="wallet-pagination__button wallet-pagination__button--disabled">Next</span>
-            {% endif %}
-          </nav>
-          {% endif %}
-          {% else %}
-          <div class="wallet-empty-state">
-            <div class="wallet-empty-state__title">{{ empty_state_title }}</div>
-            <div class="wallet-empty-state__text">{{ empty_state_text }}</div>
-          </div>
-          {% endif %}
-        </section>
-      </section>
-    </main>
-
-    <aside class="wallet-page__sidebar">
-      <section class="wallet-panel wallet-sidebar-card">
-        <div class="wallet-sidebar-card__top">
-          <div class="wallet-sidebar-card__amount">{{ available_balance_display }}</div>
-          <div class="wallet-sidebar-card__label">Available Balance</div>
+          <button
+            type="button"
+            class="wallet-dfans-pill"
+            data-modal-open="withdraw"
+            {% if not wallet_actions.can_withdraw %}disabled{% endif %}
+          >
+            <i class="material-icons" aria-hidden="true">north_east</i>
+            <span>Withdraw</span>
+          </button>
         </div>
 
-        <div class="wallet-sidebar-card__rows">
-          <div class="wallet-sidebar-card__row">
+        <div class="wallet-dfans-balance__stats">
+          <div class="wallet-dfans-stat">
             <span>Total balance</span>
             <strong>{{ total_balance_display }}</strong>
           </div>
-          <div class="wallet-sidebar-card__row">
+          <div class="wallet-dfans-stat">
             <span>Available</span>
             <strong>{{ available_balance_display }}</strong>
           </div>
-          <div class="wallet-sidebar-card__row">
+          <div class="wallet-dfans-stat">
             <span>On hold</span>
             <strong>{{ held_balance_display }}</strong>
-          </div>
-          <div class="wallet-sidebar-card__row">
-            <span>Status</span>
-            <strong>{{ wallet_status_display }}</strong>
           </div>
         </div>
       </section>
 
-      <section class="wallet-panel wallet-sidebar-card">
-        <div class="wallet-section__header wallet-section__header--sidebar">
-          <h2 class="wallet-section__title">Active Holds</h2>
+      <section class="wallet-dfans-section">
+        <div class="wallet-dfans-section__head">
+          <h2>Recent Deposit Sessions</h2>
         </div>
 
-        {% if active_holds %}
-        <div class="wallet-hold-list">
-          {% for hold in active_holds %}
-          <article class="wallet-hold-item">
-            <div class="wallet-hold-item__top">
-              <strong>{{ hold.amount_display }}</strong>
-              <span>{{ hold.created_at|date:"M d, Y H:i" }}</span>
+        {% if recent_deposit_session_rows %}
+        <div class="wallet-dfans-list">
+          {% for row in recent_deposit_session_rows %}
+          <article class="wallet-dfans-card">
+            <div class="wallet-dfans-card__main">
+              <div class="wallet-dfans-card__top">
+                <span class="wallet-dfans-card__date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                <span class="wallet-dfans-status wallet-dfans-status--{{ row.status }}">
+                  <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
+                  <span>{{ row.status_label }}</span>
+                </span>
+              </div>
+
+              <div class="wallet-dfans-card__title">{{ row.label }}</div>
+              <div class="wallet-dfans-card__meta">{{ row.deposit_address }}</div>
+              <div class="wallet-dfans-card__meta"><a href="{{ row.url }}">Open session</a></div>
             </div>
-            <div class="wallet-hold-item__reason">{{ hold.reason }}</div>
-            <div class="wallet-hold-item__meta">By {{ hold.created_by }}</div>
           </article>
           {% endfor %}
         </div>
         {% else %}
-        <div class="wallet-empty-state wallet-empty-state--compact">
-          <div class="wallet-empty-state__title">No active hold</div>
-          <div class="wallet-empty-state__text">Your balance is fully available.</div>
+        <div class="wallet-dfans-empty">
+          <div class="wallet-dfans-empty__title">No deposit session yet</div>
+          <div class="wallet-dfans-empty__text">Your recent deposit sessions will appear here.</div>
         </div>
         {% endif %}
       </section>
-    </aside>
-  </div>
-</div>
 
-<div
-  class="wallet-modal-backdrop{% if wallet_open_modal == 'deposit' %} wallet-modal-backdrop--open{% endif %}"
-  data-wallet-modal-backdrop="deposit"
-  {% if wallet_open_modal != 'deposit' %}hidden{% endif %}
->
-  <div class="wallet-modal wallet-modal--dfans-deposit" role="dialog" aria-modal="true" aria-labelledby="wallet-deposit-modal-title">
-    <div class="wallet-modal__header wallet-modal__header--dfans-deposit">
-      <button
-        type="button"
-        class="wallet-modal__close wallet-modal__close--dfans-deposit"
-        data-wallet-modal-close="deposit"
-        aria-label="Close"
-      >
-        <i class="material-icons" aria-hidden="true">close</i>
-      </button>
-
-      <div class="wallet-deposit-dialog__hero">
-        <div class="wallet-deposit-dialog__hero-icon" aria-hidden="true">
-          <i class="material-icons">south_west</i>
+      <section class="wallet-dfans-section">
+        <div class="wallet-dfans-section__head">
+          <h2>Recent Withdrawal Requests</h2>
         </div>
-        <h2 id="wallet-deposit-modal-title" class="wallet-deposit-dialog__title">Select a Network</h2>
-        <p class="wallet-deposit-dialog__subtitle">
-          Ensure the network you choose to deposit matches the asset and route exactly, or assets may be lost.
-        </p>
-      </div>
-    </div>
 
-    <div class="wallet-modal__body wallet-modal__body--dfans-deposit">
-      {% if deposit_options %}
-        <form method="post" action="{{ wallet_deposit_request_url }}" class="wallet-deposit-dialog__form">
-          {% csrf_token %}
-          <input type="hidden" name="return_tab" value="{{ active_tab }}">
-          <input type="hidden" name="return_status" value="{{ active_status }}">
-
-          <div class="wallet-deposit-dialog__options" role="radiogroup" aria-label="Deposit routes">
-            {% for option in deposit_options %}
-              <label class="wallet-deposit-route-card wallet-deposit-route-card--{{ option.network_slug|default:option.chain }}">
-                <input
-                  class="wallet-deposit-route-card__input"
-                  type="radio"
-                  name="deposit_option_key"
-                  value="{{ option.key }}"
-                  {% if forloop.first %}checked{% endif %}
-                  required
-                >
-
-                <span class="wallet-deposit-route-card__inner">
-                  <span class="wallet-deposit-route-card__icon" aria-hidden="true">
-                    {% if option.network_slug == "bsc" %}
-                      <span class="wallet-deposit-route-card__icon-text">BNB</span>
-                    {% elif option.network_slug == "ethereum" %}
-                      <span class="wallet-deposit-route-card__icon-text">Ξ</span>
-                    {% elif option.network_slug == "arbitrum" %}
-                      <span class="wallet-deposit-route-card__icon-text">ARB</span>
-                    {% elif option.network_slug == "base" %}
-                      <span class="wallet-deposit-route-card__icon-text">BASE</span>
-                    {% else %}
-                      <span class="wallet-deposit-route-card__icon-text">{{ option.asset_code }}</span>
-                    {% endif %}
-                  </span>
-
-                  <span class="wallet-deposit-route-card__content">
-                    <span class="wallet-deposit-route-card__title">
-                      {{ option.network_label|default:option.chain }}
-                    </span>
-                    <span class="wallet-deposit-route-card__subtitle">
-                      Minimum deposit: {{ option.min_amount_display|default:option.min_amount }} {{ option.asset_code }}
-                    </span>
-                  </span>
-
-                  <span class="wallet-deposit-route-card__radio" aria-hidden="true"></span>
+        {% if recent_request_rows %}
+        <div class="wallet-dfans-list">
+          {% for row in recent_request_rows %}
+          <article class="wallet-dfans-card">
+            <div class="wallet-dfans-card__main">
+              <div class="wallet-dfans-card__top">
+                <span class="wallet-dfans-card__date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                <span class="wallet-dfans-status wallet-dfans-status--{{ row.status }}">
+                  <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
+                  <span>{{ row.status_label }}</span>
                 </span>
-              </label>
+              </div>
+
+              {% if row.notes %}
+              <div class="wallet-dfans-card__title">{{ row.notes }}</div>
+              {% endif %}
+              {% if row.destination_address %}
+              <div class="wallet-dfans-card__meta">Destination {{ row.destination_address }}</div>
+              {% endif %}
+              <div class="wallet-dfans-card__meta">Ref {{ row.reference }}</div>
+            </div>
+
+            <div class="wallet-dfans-card__side">
+              <strong>{{ row.amount_display }}</strong>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="wallet-dfans-empty">
+          <div class="wallet-dfans-empty__title">No request yet</div>
+          <div class="wallet-dfans-empty__text">Deposit and withdrawal requests will appear here.</div>
+        </div>
+        {% endif %}
+      </section>
+
+      <section class="wallet-dfans-section">
+        <div class="wallet-dfans-section__head">
+          <h2>Recent Activity</h2>
+        </div>
+
+        <div class="wallet-dfans-toolbar">
+          <div class="wallet-dfans-tabs">
+            {% for item in tab_items %}
+            <a href="{{ item.url }}" class="wallet-dfans-tab{% if item.is_active %} wallet-dfans-tab--active{% endif %}">
+              {{ item.label }}
+            </a>
             {% endfor %}
           </div>
 
-          <button type="submit" class="wallet-deposit-dialog__submit">
-            Continue
-          </button>
-        </form>
-      {% else %}
-        <div class="wallet-empty-state wallet-empty-state--compact">
-          <div class="wallet-empty-state__title">Deposits are temporarily unavailable</div>
-          <div class="wallet-empty-state__text">
-            No deposit route is currently available.
-          </div>
+          <form method="get" action="{{ wallet_base_url }}" class="wallet-dfans-filter">
+            <input type="hidden" name="tab" value="{{ active_tab }}">
+            <label for="wallet-status-filter">Status</label>
+            <div class="wallet-dfans-filter__selectwrap">
+              <select id="wallet-status-filter" name="status" class="wallet-dfans-filter__select" onchange="this.form.submit()">
+                {% for option in status_select_options %}
+                <option value="{{ option.key }}"{% if option.key == active_status %} selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+              </select>
+              <i class="material-icons" aria-hidden="true">expand_more</i>
+            </div>
+          </form>
         </div>
-      {% endif %}
+
+        {% if transaction_rows %}
+        <div class="wallet-dfans-list">
+          {% for row in transaction_rows %}
+          <article class="wallet-dfans-card">
+            <div class="wallet-dfans-card__main">
+              <div class="wallet-dfans-card__top">
+                <span class="wallet-dfans-card__date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                <span class="wallet-dfans-status wallet-dfans-status--{{ row.status }}">
+                  <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
+                  <span>{{ row.status_label }}</span>
+                </span>
+              </div>
+
+              <div class="wallet-dfans-card__title">
+                {% if row.memo %}{{ row.memo }}{% else %}{{ row.kind }}{% endif %}
+              </div>
+
+              {% if row.counterparty != "—" %}
+              <div class="wallet-dfans-card__meta">{{ row.counterparty }}</div>
+              {% endif %}
+              <div class="wallet-dfans-card__meta">Ref #{{ row.txn_id }}</div>
+            </div>
+
+            <div class="wallet-dfans-card__side">
+              <strong class="wallet-dfans-delta wallet-dfans-delta--{{ row.direction }}">{{ row.delta_display }}</strong>
+              <span>Balance {{ row.balance_after_display }}</span>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="wallet-dfans-empty">
+          <div class="wallet-dfans-empty__title">{{ empty_state_title }}</div>
+          <div class="wallet-dfans-empty__text">{{ empty_state_text }}</div>
+        </div>
+        {% endif %}
+      </section>
     </div>
   </div>
 </div>
 
-<div
-  class="wallet-modal-backdrop{% if wallet_open_modal == 'withdraw' %} wallet-modal-backdrop--open{% endif %}"
-  data-wallet-modal-backdrop="withdraw"
-  {% if wallet_open_modal != 'withdraw' %}hidden{% endif %}
->
-  <div class="wallet-modal" role="dialog" aria-modal="true" aria-labelledby="wallet-withdraw-modal-title">
-    <div class="wallet-modal__header">
-      <div>
-        <h2 id="wallet-withdraw-modal-title" class="wallet-modal__title">Request withdrawal</h2>
-        <p class="wallet-modal__subtitle">The requested amount is reserved from your available balance immediately.</p>
-      </div>
-      <button type="button" class="wallet-modal__close" data-wallet-modal-close="withdraw">
-        <i class="material-icons" aria-hidden="true">close</i>
-      </button>
+<div class="wallet-dfans-overlay" data-modal="deposit" hidden>
+  <div class="wallet-dfans-dialog wallet-dfans-dialog--deposit" role="dialog" aria-modal="true" aria-labelledby="wallet-deposit-modal-title">
+    <button type="button" class="wallet-dfans-dialog__close" data-modal-close="deposit" aria-label="Close">
+      <i class="material-icons" aria-hidden="true">close</i>
+    </button>
+
+    <div class="wallet-dfans-dialog__heroicon" aria-hidden="true">
+      <i class="material-icons">south_west</i>
     </div>
 
-    <form method="post" action="{{ wallet_withdrawal_request_url }}" class="wallet-form">
+    <h2 id="wallet-deposit-modal-title" class="wallet-dfans-dialog__title">Select a network</h2>
+    <p class="wallet-dfans-dialog__subtitle">
+      Make sure the network you choose matches the asset and route you are going to send.
+    </p>
+
+    {% if deposit_options %}
+    <form method="post" action="{{ wallet_deposit_request_url }}" class="wallet-dfans-routeform">
       {% csrf_token %}
       <input type="hidden" name="return_tab" value="{{ active_tab }}">
       <input type="hidden" name="return_status" value="{{ active_status }}">
 
-      <label class="wallet-form__field">
-        <span class="wallet-form__label">Amount</span>
-        <input class="wallet-form__input" type="number" name="amount" min="1" step="1" required>
-      </label>
+      <div class="wallet-dfans-routes" role="radiogroup" aria-label="Deposit routes">
+        {% for option in deposit_options %}
+        <label class="wallet-dfans-route">
+          <input
+            class="wallet-dfans-route__input"
+            type="radio"
+            name="deposit_option_key"
+            value="{{ option.key }}"
+            {% if forloop.first %}checked{% endif %}
+            required
+          >
+          <span class="wallet-dfans-route__inner">
+            <span class="wallet-dfans-route__icon" aria-hidden="true">
+              {% if option.network_slug == "bsc" %}
+              <span>BNB</span>
+              {% elif option.network_slug == "arbitrum" %}
+              <span>ARB</span>
+              {% elif option.network_slug == "base" %}
+              <span>BASE</span>
+              {% elif option.network_slug == "ethereum" %}
+              <span>Ξ</span>
+              {% else %}
+              <span>{{ option.asset_code }}</span>
+              {% endif %}
+            </span>
 
-      <label class="wallet-form__field">
-        <span class="wallet-form__label">Destination address</span>
-        <input class="wallet-form__input" type="text" name="destination_address" maxlength="255" required>
-      </label>
+            <span class="wallet-dfans-route__content">
+              <span class="wallet-dfans-route__title">{{ option.network_label|default:option.chain }}</span>
+              <span class="wallet-dfans-route__subtitle">
+                Minimum deposit: {{ option.min_amount_display|default:option.min_amount }} {{ option.asset_code }}
+              </span>
+            </span>
 
-      <label class="wallet-form__field">
-        <span class="wallet-form__label">Note</span>
-        <textarea class="wallet-form__textarea" name="notes" rows="3" placeholder="Optional note"></textarea>
-      </label>
-
-      <div class="wallet-form__actions">
-        <button type="button" class="wallet-form__button wallet-form__button--secondary" data-wallet-modal-close="withdraw">Cancel</button>
-        <button type="submit" class="wallet-form__button wallet-form__button--primary">Request withdrawal</button>
+            <span class="wallet-dfans-route__radio" aria-hidden="true"></span>
+          </span>
+        </label>
+        {% endfor %}
       </div>
+
+      <div class="wallet-dfans-routeform__note">
+        Send only the exact asset shown for the selected network.
+        Unsupported assets or networks are not credited automatically.
+      </div>
+
+      <button type="submit" class="wallet-dfans-routeform__submit">Continue</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="wallet-dfans-overlay" data-modal="withdraw" hidden>
+  <div class="wallet-dfans-dialog wallet-dfans-dialog--withdraw" role="dialog" aria-modal="true" aria-labelledby="wallet-withdraw-modal-title">
+    <div class="wallet-dfans-withdraw__head">
+      <div>
+        <h2 id="wallet-withdraw-modal-title" class="wallet-dfans-withdraw__title">Request withdrawal</h2>
+        <p class="wallet-dfans-withdraw__subtitle">The requested amount is reserved from your available balance immediately.</p>
+      </div>
+      <button type="button" class="wallet-dfans-dialog__close wallet-dfans-dialog__close--inline" data-modal-close="withdraw" aria-label="Close">
+        <i class="material-icons" aria-hidden="true">close</i>
+      </button>
+    </div>
+
+    <form method="post" action="{{ wallet_withdrawal_request_url }}" class="wallet-dfans-withdraw__form">
+      {% csrf_token %}
+      <input type="hidden" name="return_tab" value="{{ active_tab }}">
+      <input type="hidden" name="return_status" value="{{ active_status }}">
+
+      <label class="wallet-dfans-field">
+        <span class="wallet-dfans-field__label">Network</span>
+        <div class="wallet-dfans-field__selectwrap">
+          <select name="network" class="wallet-dfans-field__select" required>
+            {% for option in withdrawal_network_options %}
+            <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+          <i class="material-icons" aria-hidden="true">expand_more</i>
+        </div>
+      </label>
+
+      <label class="wallet-dfans-field">
+        <span class="wallet-dfans-field__label">Destination address</span>
+        <input type="text" name="destination_address" class="wallet-dfans-field__input" maxlength="255" required>
+      </label>
+
+      <label class="wallet-dfans-field">
+        <span class="wallet-dfans-field__label">Amount</span>
+        <input type="number" name="amount" min="1" step="1" class="wallet-dfans-field__input" required>
+      </label>
+
+      <label class="wallet-dfans-field">
+        <span class="wallet-dfans-field__label">Notes</span>
+        <textarea name="notes" rows="4" class="wallet-dfans-field__textarea"></textarea>
+      </label>
+
+      <button type="submit" class="wallet-dfans-withdraw__submit">Submit request</button>
     </form>
   </div>
 </div>
@@ -500,160 +347,55 @@
 {{ block.super }}
 <script>
 (function () {
-  if (window.__walletPageEnhancementLoaded) {
+  const root = document.querySelector('[data-wallet-root]');
+  if (!root) {
     return;
   }
-  window.__walletPageEnhancementLoaded = true;
 
-  const ROOT_SELECTOR = '.wallet-page';
-  const OPEN_MODAL_CLASS = 'wallet-modal-backdrop--open';
-  const HTML_MODAL_CLASS = 'wallet-modal-open';
-
-  function getWalletModalBackdrop(name) {
-    return document.querySelector('[data-wallet-modal-backdrop="' + name + '"]');
-  }
-
-  function syncWalletModalState() {
-    const hasOpenModal = !!document.querySelector('.wallet-modal-backdrop.' + OPEN_MODAL_CLASS);
-    document.documentElement.classList.toggle(HTML_MODAL_CLASS, hasOpenModal);
-  }
-
-  function openWalletModal(name) {
-    const backdrop = getWalletModalBackdrop(name);
-    if (!backdrop) {
-      return;
-    }
-
-    backdrop.hidden = false;
-    requestAnimationFrame(function () {
-      backdrop.classList.add(OPEN_MODAL_CLASS);
-      syncWalletModalState();
+  function openModal(name) {
+    document.querySelectorAll('.wallet-dfans-overlay[data-modal]').forEach(function (node) {
+      node.hidden = node.getAttribute('data-modal') !== name;
     });
+    document.documentElement.classList.add('wallet-modal-open');
+    document.body.classList.add('wallet-modal-open');
   }
 
-  function closeWalletModal(name) {
-    const backdrop = getWalletModalBackdrop(name);
-    if (!backdrop) {
+  function closeModal(name) {
+    const node = document.querySelector('.wallet-dfans-overlay[data-modal="' + name + '"]');
+    if (!node) {
       return;
     }
+    node.hidden = true;
 
-    backdrop.classList.remove(OPEN_MODAL_CLASS);
-    window.setTimeout(function () {
-      if (!backdrop.classList.contains(OPEN_MODAL_CLASS)) {
-        backdrop.hidden = true;
-      }
-      syncWalletModalState();
-    }, 160);
-  }
+    const stillOpen = Array.from(document.querySelectorAll('.wallet-dfans-overlay[data-modal]')).some(function (item) {
+      return !item.hidden;
+    });
 
-  async function replaceWalletPage(url, pushState) {
-    const currentRoot = document.querySelector(ROOT_SELECTOR);
-    if (!currentRoot) {
-      return;
-    }
-
-    currentRoot.classList.add('wallet-page--loading');
-
-    try {
-      const response = await fetch(url, {
-        credentials: 'same-origin',
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Wallet request failed');
-      }
-
-      const html = await response.text();
-      const parser = new DOMParser();
-      const nextDocument = parser.parseFromString(html, 'text/html');
-      const nextRoot = nextDocument.querySelector(ROOT_SELECTOR);
-
-      if (!nextRoot) {
-        window.location.href = url;
-        return;
-      }
-
-      currentRoot.replaceWith(nextRoot);
-      syncWalletModalState();
-
-      if (nextDocument.title) {
-        document.title = nextDocument.title;
-      }
-
-      if (pushState) {
-        window.history.pushState({ walletPage: true }, '', url);
-      }
-    } catch (error) {
-      window.location.href = url;
+    if (!stillOpen) {
+      document.documentElement.classList.remove('wallet-modal-open');
+      document.body.classList.remove('wallet-modal-open');
     }
   }
 
   document.addEventListener('click', function (event) {
-    const openModalButton = event.target.closest('[data-wallet-modal-open]');
-    if (openModalButton) {
+    const openButton = event.target.closest('[data-modal-open]');
+    if (openButton) {
       event.preventDefault();
-      openWalletModal(openModalButton.getAttribute('data-wallet-modal-open'));
+      openModal(openButton.getAttribute('data-modal-open'));
       return;
     }
 
-    const closeModalButton = event.target.closest('[data-wallet-modal-close]');
-    if (closeModalButton) {
+    const closeButton = event.target.closest('[data-modal-close]');
+    if (closeButton) {
       event.preventDefault();
-      closeWalletModal(closeModalButton.getAttribute('data-wallet-modal-close'));
+      closeModal(closeButton.getAttribute('data-modal-close'));
       return;
     }
 
-    const modalBackdrop = event.target.closest('.wallet-modal-backdrop');
-    if (modalBackdrop && event.target === modalBackdrop) {
-      const modalName = modalBackdrop.getAttribute('data-wallet-modal-backdrop');
-      closeWalletModal(modalName);
-      return;
+    const overlay = event.target.closest('.wallet-dfans-overlay[data-modal]');
+    if (overlay && event.target === overlay) {
+      closeModal(overlay.getAttribute('data-modal'));
     }
-
-    const link = event.target.closest('a[data-wallet-nav]');
-    if (!link) {
-      return;
-    }
-
-    if (
-      event.defaultPrevented ||
-      event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    ) {
-      return;
-    }
-
-    event.preventDefault();
-    replaceWalletPage(link.href, true);
-  });
-
-  document.addEventListener('change', function (event) {
-    const select = event.target.closest('[data-wallet-status-select]');
-    if (!select) {
-      return;
-    }
-
-    const form = select.closest('form[data-wallet-status-form]');
-    if (!form) {
-      return;
-    }
-
-    const url = new URL(form.action || window.location.href, window.location.origin);
-    const formData = new FormData(form);
-
-    for (const [key, value] of formData.entries()) {
-      url.searchParams.set(key, String(value));
-    }
-
-    url.searchParams.delete('page');
-
-    replaceWalletPage(url.toString(), true);
   });
 
   document.addEventListener('keydown', function (event) {
@@ -661,21 +403,13 @@
       return;
     }
 
-    const openBackdrop = document.querySelector('.wallet-modal-backdrop.' + OPEN_MODAL_CLASS);
-    if (!openBackdrop) {
+    const openOverlay = document.querySelector('.wallet-dfans-overlay[data-modal]:not([hidden])');
+    if (!openOverlay) {
       return;
     }
 
-    closeWalletModal(openBackdrop.getAttribute('data-wallet-modal-backdrop'));
+    closeModal(openOverlay.getAttribute('data-modal'));
   });
-
-  window.addEventListener('popstate', function () {
-    if (document.querySelector(ROOT_SELECTOR)) {
-      replaceWalletPage(window.location.href, false);
-    }
-  });
-
-  syncWalletModalState();
 })();
 </script>
 {% endblock %}
