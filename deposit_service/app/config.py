@@ -21,6 +21,7 @@ class DepositOptionConfig:
     reorg_backtrack_blocks: int
     scan_chunk_size: int
     poa_compatible: bool
+    tx_lookup_lookback_blocks: int
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,7 @@ def load_config() -> ServiceConfig:
             reorg_backtrack_blocks=int(item.get("reorg_backtrack_blocks", 12)),
             scan_chunk_size=int(item.get("scan_chunk_size", 1000)),
             poa_compatible=bool(item.get("poa_compatible", False)),
+            tx_lookup_lookback_blocks=int(item.get("tx_lookup_lookback_blocks", 5000)),
         )
 
         if option.start_block < 0:
@@ -118,6 +120,8 @@ def load_config() -> ServiceConfig:
             raise RuntimeError(f"reorg_backtrack_blocks must be >= 0 for option {option.key}")
         if option.scan_chunk_size <= 0:
             raise RuntimeError(f"scan_chunk_size must be > 0 for option {option.key}")
+        if option.tx_lookup_lookback_blocks <= 0:
+            raise RuntimeError(f"tx_lookup_lookback_blocks must be > 0 for option {option.key}")
 
         options.append(option)
 

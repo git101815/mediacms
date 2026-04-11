@@ -656,6 +656,7 @@ class DepositSession(models.Model):
     STATUS_CREDITED = "credited"
     STATUS_EXPIRED = "expired"
     STATUS_FAILED = "failed"
+    STATUS_CANCELED = "canceled"
 
     STATUS_CHOICES = (
         (STATUS_AWAITING_PAYMENT, "Awaiting payment"),
@@ -664,6 +665,7 @@ class DepositSession(models.Model):
         (STATUS_CREDITED, "Credited"),
         (STATUS_EXPIRED, "Expired"),
         (STATUS_FAILED, "Failed"),
+        (STATUS_CANCELED, "canceled")
     )
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True)

@@ -16,6 +16,7 @@
       "start_block": 0,
       "reorg_backtrack_blocks": 20,
       "scan_chunk_size": 1000,
+      "tx_lookup_lookback_blocks": 15000,
       "poa_compatible": true
     }
   ]

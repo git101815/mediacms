@@ -185,6 +185,7 @@ DEPOSIT_SESSION_TERMINAL_STATUSES = {
     DepositSession.STATUS_CREDITED,
     DepositSession.STATUS_EXPIRED,
     DepositSession.STATUS_FAILED,
+    DepositSession.STATUS_CANCELED,
 }
 
 DEPOSIT_SESSION_STATUS_LABELS = {
@@ -194,6 +195,7 @@ DEPOSIT_SESSION_STATUS_LABELS = {
     DepositSession.STATUS_CREDITED: "Credited",
     DepositSession.STATUS_EXPIRED: "Expired",
     DepositSession.STATUS_FAILED: "Failed",
+    DepositSession.STATUS_CANCELED: "Canceled",
 }
 
 DEPOSIT_SESSION_STATUS_ICONS = {
@@ -203,6 +205,7 @@ DEPOSIT_SESSION_STATUS_ICONS = {
     DepositSession.STATUS_CREDITED: "check_circle",
     DepositSession.STATUS_EXPIRED: "event_busy",
     DepositSession.STATUS_FAILED: "error",
+    DepositSession.STATUS_CANCELED: "block",
 }
 
 def about(request):
@@ -645,6 +648,32 @@ def _parse_required_string(payload, key):
         raise DjangoValidationError(f"Missing required field: {key}")
     return value
 
+def _find_existing_active_deposit_session(*, user, wallet, option_key):
+    option = next(
+        (item for item in list_available_deposit_options() if item["key"] == option_key),
+        None,
+    )
+    if option is None:
+        raise DjangoValidationError("Invalid deposit option")
+
+    active_statuses = [
+        DepositSession.STATUS_AWAITING_PAYMENT,
+        DepositSession.STATUS_SEEN_ONCHAIN,
+        DepositSession.STATUS_CONFIRMING,
+    ]
+
+    return (
+        DepositSession.objects.filter(
+            user=user,
+            wallet=wallet,
+            chain=option["chain"],
+            asset_code=option["asset_code"],
+            status__in=active_statuses,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
 @login_required
 @require_POST
 def wallet_deposit_request(request):
@@ -661,6 +690,14 @@ def wallet_deposit_request(request):
     return_status = (request.POST.get("return_status") or WALLET_STATUS_ALL).strip()
 
     try:
+        existing_session = _find_existing_active_deposit_session(
+            user=request.user,
+            wallet=wallet_obj,
+            option_key=option_key,
+        )
+        if existing_session is not None:
+            return redirect("wallet_deposit_session", public_id=existing_session.public_id)
+
         session = open_user_deposit_session(
             actor=request.user,
             wallet=wallet_obj,
@@ -2759,3 +2796,38 @@ def internal_sweep_job_failed(request, public_id):
             "last_error": job.last_error,
         }
     )
+@login_required
+@require_POST
+def wallet_deposit_session_cancel(request, public_id):
+    session = get_object_or_404(
+        DepositSession.objects.select_related("wallet"),
+        public_id=public_id,
+        user=request.user,
+    )
+
+    if session.status not in {
+        DepositSession.STATUS_AWAITING_PAYMENT,
+        DepositSession.STATUS_SEEN_ONCHAIN,
+        DepositSession.STATUS_CONFIRMING,
+    }:
+        messages.add_message(request, messages.ERROR, "This deposit session cannot be canceled.")
+        return redirect("wallet_deposit_session", public_id=session.public_id)
+
+    if session.observed_txid:
+        messages.add_message(request, messages.ERROR, "This deposit session already has an on-chain observation.")
+        return redirect("wallet_deposit_session", public_id=session.public_id)
+
+    session.status = DepositSession.STATUS_CANCELED
+    session.save(update_fields=["status", "updated_at"])
+
+    DepositSweepJob.objects.filter(
+        deposit_session=session,
+        status__in=[
+            DepositSweepJob.STATUS_PENDING,
+            DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+            DepositSweepJob.STATUS_READY_TO_SWEEP,
+        ],
+    ).update(status=DepositSweepJob.STATUS_ABANDONED)
+
+    messages.add_message(request, messages.INFO, "Deposit session canceled.")
+    return redirect("wallet")
