@@ -649,6 +649,35 @@ class LedgerHold(models.Model):
     def __str__(self):
         return f"Hold #{self.id} wallet={self.wallet_id} amount={self.amount} released={self.released}"
 
+class DepositRouteCounter(models.Model):
+    route_key = models.CharField(max_length=96, unique=True)
+    chain = models.CharField(max_length=32, db_index=True)
+    asset_code = models.CharField(max_length=32, db_index=True)
+    token_contract_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    next_derivation_index = models.PositiveBigIntegerField(default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["chain", "asset_code"]),
+            models.Index(fields=["chain", "asset_code", "token_contract_address"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(next_derivation_index__gte=0),
+                name="depositroutecounter_next_derivation_index_gte_0",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"DepositRouteCounter #{self.id} "
+            f"{self.chain}/{self.asset_code} next={self.next_derivation_index}"
+        )
+
 class DepositSession(models.Model):
     STATUS_AWAITING_PAYMENT = "awaiting_payment"
     STATUS_SEEN_ONCHAIN = "seen_onchain"
@@ -688,6 +717,11 @@ class DepositSession(models.Model):
     chain = models.CharField(max_length=32, db_index=True)
     asset_code = models.CharField(max_length=32, db_index=True)
     token_contract_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
+
+    route_key = models.CharField(max_length=96, db_index=True, default="")
+    display_label = models.CharField(max_length=64, blank=True, default="")
+    derivation_index = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
+    derivation_path = models.CharField(max_length=255, blank=True, default="")
 
     deposit_address = models.CharField(max_length=128, unique=True)
     address_derivation_ref = models.CharField(max_length=128, unique=True)
@@ -737,6 +771,8 @@ class DepositSession(models.Model):
             models.Index(fields=["chain", "asset_code", "status"]),
             models.Index(fields=["expires_at", "status"]),
             models.Index(fields=["status", "swept_at"]),
+            models.Index(fields=["route_key", "status", "-created_at"]),
+            models.Index(fields=["route_key", "derivation_index"]),
         ]
         constraints = [
             models.CheckConstraint(
@@ -754,6 +790,10 @@ class DepositSession(models.Model):
             models.CheckConstraint(
                 condition=models.Q(observed_amount__isnull=True) | models.Q(observed_amount__gt=0),
                 name="depositsession_observed_amount_gt_0_if_present",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(derivation_index__isnull=True) | models.Q(derivation_index__gte=0),
+                name="depositsession_derivation_index_gte_0_if_present",
             ),
         ]
         permissions = [

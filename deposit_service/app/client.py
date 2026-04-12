@@ -28,27 +28,9 @@ class MediaCMSInternalClient:
         )
         response = self._client.post(f"{self._base_url}{path}", content=body, headers=headers)
         if response.status_code >= 400:
-            raise RuntimeError(
-                f"Internal API error {response.status_code} for {path}: {response.text}"
-            )
+            raise RuntimeError(f"Internal API error {response.status_code} for {path}: {response.text}")
         return response.json()
 
-    def get_pool_stats(self, options: list[dict]) -> list[dict]:
-        result = self.post_signed(
-            "/api/internal/ledger/deposit-addresses/stats",
-            {"options": options},
-        )
-        return result["results"]
-
-    def provision_addresses(self, addresses: list[dict]) -> dict:
-        return self.post_signed(
-            "/api/internal/ledger/deposit-addresses/provision",
-            {"addresses": addresses},
-        )
-
     def get_watchlist(self, options: list[dict]) -> list[dict]:
-        result = self.post_signed(
-            "/api/internal/ledger/deposit-watchlist",
-            {"options": options},
-        )
+        result = self.post_signed("/api/internal/ledger/deposit-watchlist", {"options": options})
         return result["results"]

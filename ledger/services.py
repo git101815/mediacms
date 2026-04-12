@@ -25,6 +25,7 @@ from .models import (
     SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING,
     DepositAddress,
     DepositSweepJob,
+    DepositRouteCounter,
 )
 import uuid
 import hashlib
@@ -32,7 +33,9 @@ import json
 from django.utils import timezone
 from datetime import timedelta
 from django.db.models import Q
-
+import os
+from bip_utils import Bip44, Bip44Changes, Bip44Coins
+from django.conf import settings
 ACTIVE_DEPOSIT_SESSION_STATUSES = {
     DepositSession.STATUS_AWAITING_PAYMENT,
     DepositSession.STATUS_SEEN_ONCHAIN,
@@ -288,6 +291,168 @@ def _build_route_label(*, chain: str, asset_code: str, display_label: str = "") 
         return explicit
     return f"{_get_network_display_label(chain)} · {(asset_code or '').strip().upper()}"
 
+SUPPORTED_EVM_DEPOSIT_CHAINS = {
+    "ethereum",
+    "bsc",
+    "arbitrum",
+    "base",
+}
+
+
+def _build_deposit_route_key(*, chain: str, asset_code: str, token_contract_address: str) -> str:
+    normalized_chain = _normalize_chain(chain)
+    normalized_asset_code = (asset_code or "").strip().upper()
+    normalized_token_contract_address = _normalize_evm_address(token_contract_address)
+    return f"{normalized_chain}:{normalized_asset_code}:{normalized_token_contract_address}"
+
+
+def _get_deposit_evm_account_xpub() -> str:
+    env_value = (os.environ.get("DEPOSIT_EVM_ACCOUNT_XPUB") or "").strip()
+    if env_value:
+        return env_value
+
+    settings_value = (getattr(settings, "DEPOSIT_EVM_ACCOUNT_XPUB", "") or "").strip()
+    if settings_value:
+        return settings_value
+
+    raise ValidationError("DEPOSIT_EVM_ACCOUNT_XPUB is not configured")
+
+
+def _derive_session_deposit_address(*, chain: str, derivation_index: int) -> tuple[str, str]:
+    normalized_chain = _normalize_chain(chain)
+    if normalized_chain not in SUPPORTED_EVM_DEPOSIT_CHAINS:
+        raise ValidationError(f"Unsupported deposit derivation chain: {chain}")
+
+    account_xpub = _get_deposit_evm_account_xpub()
+    ctx = Bip44.FromExtendedKey(account_xpub, Bip44Coins.ETHEREUM)
+    addr_ctx = ctx.Change(Bip44Changes.CHAIN_EXT).AddressIndex(int(derivation_index))
+
+    address = addr_ctx.PublicKey().ToAddress().lower()
+    derivation_path = f"m/44'/60'/0'/0/{int(derivation_index)}"
+    return address, derivation_path
+
+
+def _get_route_template(*, chain: str, asset_code: str, token_contract_address: str) -> DepositAddress:
+    normalized_chain = _normalize_chain(chain)
+    normalized_asset_code = (asset_code or "").strip().upper()
+    normalized_token_contract_address = _normalize_evm_address(token_contract_address)
+
+    template = (
+        DepositAddress.objects.filter(
+            chain=normalized_chain,
+            asset_code=normalized_asset_code,
+            token_contract_address=normalized_token_contract_address,
+        )
+        .order_by("id")
+        .first()
+    )
+    if template is None:
+        raise ValidationError(
+            f"No deposit route template found for {normalized_chain}/{normalized_asset_code}"
+        )
+    return template
+
+
+def _find_reusable_active_session(
+    *,
+    wallet: TokenWallet,
+    chain: str,
+    asset_code: str,
+    token_contract_address: str,
+):
+    return (
+        DepositSession.objects.select_for_update()
+        .filter(
+            wallet=wallet,
+            chain=_normalize_chain(chain),
+            asset_code=(asset_code or "").strip().upper(),
+            token_contract_address=_normalize_evm_address(token_contract_address),
+            status__in=ACTIVE_DEPOSIT_SESSION_STATUSES,
+            expires_at__gt=timezone.now(),
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def _get_or_create_route_counter_for_update(
+    *,
+    chain: str,
+    asset_code: str,
+    token_contract_address: str,
+) -> DepositRouteCounter:
+    normalized_chain = _normalize_chain(chain)
+    normalized_asset_code = (asset_code or "").strip().upper()
+    normalized_token_contract_address = _normalize_evm_address(token_contract_address)
+    route_key = _build_deposit_route_key(
+        chain=normalized_chain,
+        asset_code=normalized_asset_code,
+        token_contract_address=normalized_token_contract_address,
+    )
+
+    counter = (
+        DepositRouteCounter.objects.select_for_update()
+        .filter(route_key=route_key)
+        .first()
+    )
+    if counter is not None:
+        return counter
+
+    max_session_index = (
+        DepositSession.objects.filter(route_key=route_key)
+        .aggregate(value=Max("derivation_index"))
+        .get("value")
+    )
+    max_legacy_index = (
+        DepositAddress.objects.filter(
+            chain=normalized_chain,
+            asset_code=normalized_asset_code,
+            token_contract_address=normalized_token_contract_address,
+        )
+        .aggregate(value=Max("derivation_index"))
+        .get("value")
+    )
+
+    max_index = max(
+        -1 if max_session_index is None else int(max_session_index),
+        -1 if max_legacy_index is None else int(max_legacy_index),
+    )
+
+    created_counter = DepositRouteCounter.objects.create(
+        route_key=route_key,
+        chain=normalized_chain,
+        asset_code=normalized_asset_code,
+        token_contract_address=normalized_token_contract_address,
+        next_derivation_index=max_index + 1,
+        metadata={
+            "seeded_from": "legacy_deposit_addresses",
+        },
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+    return DepositRouteCounter.objects.select_for_update().get(id=created_counter.id)
+
+
+def _allocate_session_address(
+    *,
+    chain: str,
+    asset_code: str,
+    token_contract_address: str,
+) -> tuple[str, int, str]:
+    counter = _get_or_create_route_counter_for_update(
+        chain=chain,
+        asset_code=asset_code,
+        token_contract_address=token_contract_address,
+    )
+    derivation_index = int(counter.next_derivation_index)
+    address, derivation_path = _derive_session_deposit_address(
+        chain=chain,
+        derivation_index=derivation_index,
+    )
+
+    counter.next_derivation_index = derivation_index + 1
+    counter.save(update_fields=["next_derivation_index", "updated_at"])
+
+    return address, derivation_index, derivation_path
 
 def _abandon_open_sweep_jobs_for_session(*, deposit_session: DepositSession) -> int:
     return DepositSweepJob.objects.filter(
@@ -304,31 +469,6 @@ def _abandon_open_sweep_jobs_for_session(*, deposit_session: DepositSession) -> 
         claim_expires_at=None,
         updated_at=timezone.now(),
     )
-def _get_allocated_address_for_session(*, deposit_session: DepositSession):
-    return DepositAddress.objects.filter(
-        allocated_deposit_session=deposit_session
-    ).first()
-
-
-def _finalize_address_after_terminal_session(*, deposit_session: DepositSession) -> None:
-    address_row = _get_allocated_address_for_session(deposit_session=deposit_session)
-    if address_row is None:
-        return
-
-    if deposit_session.status == DepositSession.STATUS_CANCELED and not deposit_session.observed_txid:
-        address_row.status = DepositAddress.STATUS_AVAILABLE
-        address_row.allocated_deposit_session = None
-        address_row.save(update_fields=["status", "allocated_deposit_session", "updated_at"])
-        return
-
-    if deposit_session.status == DepositSession.STATUS_EXPIRED and not deposit_session.observed_txid:
-        address_row.status = DepositAddress.STATUS_AVAILABLE
-        address_row.allocated_deposit_session = None
-        address_row.save(update_fields=["status", "allocated_deposit_session", "updated_at"])
-        return
-
-    address_row.status = DepositAddress.STATUS_RETIRED
-    address_row.save(update_fields=["status", "updated_at"])
 
 def build_evm_event_key(*, chain: str, txid: str, log_index: int) -> str:
     normalized_chain = _normalize_chain(chain)
@@ -1504,8 +1644,7 @@ def parse_deposit_option_key(option_key: str) -> tuple[str, str, str]:
 
 def list_available_deposit_options() -> list[dict]:
     rows = (
-        DepositAddress.objects.filter(status=DepositAddress.STATUS_AVAILABLE)
-        .values(
+        DepositAddress.objects.values(
             "display_label",
             "chain",
             "asset_code",
@@ -1567,61 +1706,64 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
 
     chain, asset_code, token_contract_address = parse_deposit_option_key(option_key)
 
-    existing_session = (
-        DepositSession.objects.select_for_update()
-        .filter(
-            wallet=wallet,
-            chain=chain,
-            asset_code=asset_code,
-            token_contract_address=token_contract_address,
-            status__in=ACTIVE_DEPOSIT_SESSION_STATUSES,
-            expires_at__gt=timezone.now(),
-        )
-        .order_by("-created_at")
-        .first()
+    existing_session = _find_reusable_active_session(
+        wallet=wallet,
+        chain=chain,
+        asset_code=asset_code,
+        token_contract_address=token_contract_address,
     )
-    if existing_session:
+    if existing_session is not None:
         return existing_session
 
-    address_row = (
-        DepositAddress.objects.select_for_update()
-        .filter(
-            status=DepositAddress.STATUS_AVAILABLE,
-            chain=chain,
-            asset_code=asset_code,
-            token_contract_address=token_contract_address,
-        )
-        .order_by("id")
-        .first()
+    template = _get_route_template(
+        chain=chain,
+        asset_code=asset_code,
+        token_contract_address=token_contract_address,
     )
-    if address_row is None:
-        raise ValidationError("No deposit address is currently available for this asset")
 
-    expires_at = timezone.now() + timedelta(seconds=int(address_row.session_ttl_seconds))
+    deposit_address, derivation_index, derivation_path = _allocate_session_address(
+        chain=chain,
+        asset_code=asset_code,
+        token_contract_address=token_contract_address,
+    )
 
-    session = create_deposit_session(
-        actor=actor,
+    expires_at = timezone.now() + timedelta(seconds=int(template.session_ttl_seconds))
+    route_key = _build_deposit_route_key(
+        chain=chain,
+        asset_code=asset_code,
+        token_contract_address=token_contract_address,
+    )
+    display_label = _build_route_label(
+        chain=template.chain,
+        asset_code=template.asset_code,
+        display_label=template.display_label,
+    )
+
+    return DepositSession.objects.create(
+        user=wallet.user,
         wallet=wallet,
-        chain=address_row.chain,
-        asset_code=address_row.asset_code,
-        token_contract_address=address_row.token_contract_address,
-        deposit_address=address_row.address,
-        address_derivation_ref=address_row.address_derivation_ref,
+        chain=template.chain,
+        asset_code=template.asset_code,
+        token_contract_address=template.token_contract_address,
+        route_key=route_key,
+        display_label=display_label,
+        deposit_address=deposit_address,
+        address_derivation_ref=derivation_path,
+        derivation_index=derivation_index,
+        derivation_path=derivation_path,
+        status=DepositSession.STATUS_AWAITING_PAYMENT,
+        min_amount=int(template.min_amount),
+        required_confirmations=int(template.required_confirmations),
         expires_at=expires_at,
-        required_confirmations=address_row.required_confirmations,
-        min_amount=address_row.min_amount,
+        created_by=actor,
         metadata={
-            "display_label": address_row.display_label,
-            "allocation_source": "address_pool",
-            "address_pool_id": address_row.id,
+            "display_label": template.display_label,
+            "allocation_source": "session_derivation",
+            "route_template_id": template.id,
+            "chain_family": "evm",
         },
+        metadata_version=LEDGER_METADATA_VERSION,
     )
-
-    address_row.status = DepositAddress.STATUS_ALLOCATED
-    address_row.allocated_deposit_session = session
-    address_row.save(update_fields=["status", "allocated_deposit_session", "updated_at"])
-
-    return session
 
 @transaction.atomic
 def ingest_deposit_observation_event(
@@ -1898,47 +2040,36 @@ def get_deposit_address_pool_stats(*, actor, option_rows):
         chain = _normalize_chain(row.get("chain", ""))
         asset_code = (row.get("asset_code", "") or "").strip().upper()
         token_contract_address = _normalize_evm_address(row.get("token_contract_address", ""))
-        start_index = int(row.get("start_index", 0))
-        if start_index < 0:
-            raise ValidationError("start_index cannot be negative")
+
         if not chain or not asset_code:
             raise ValidationError("Each option requires chain and asset_code")
 
-        qs = DepositAddress.objects.filter(
+        route_key = _build_deposit_route_key(
             chain=chain,
             asset_code=asset_code,
             token_contract_address=token_contract_address,
         )
-        known_indexes = []
 
-        for derivation_index, address_derivation_ref in qs.values_list(
-            "derivation_index",
-            "address_derivation_ref",
-        ):
-            if derivation_index is not None:
-                known_indexes.append(int(derivation_index))
-                continue
+        counter = DepositRouteCounter.objects.filter(route_key=route_key).first()
+        active_sessions = DepositSession.objects.filter(
+            route_key=route_key,
+            status__in=ACTIVE_DEPOSIT_SESSION_STATUSES,
+        ).count()
+        total_sessions = DepositSession.objects.filter(route_key=route_key).count()
 
-            parsed = _parse_derivation_index_from_ref(address_derivation_ref)
-            if parsed is not None:
-                known_indexes.append(parsed)
-
-        max_derivation_index = max(known_indexes) if known_indexes else None
-        next_derivation_index = (
-            max(start_index, max_derivation_index + 1)
-            if max_derivation_index is not None
-            else start_index
-        )
         results.append(
             {
                 "chain": chain,
                 "asset_code": asset_code,
                 "token_contract_address": token_contract_address,
-                "available_count": qs.filter(status=DepositAddress.STATUS_AVAILABLE).count(),
-                "allocated_count": qs.filter(status=DepositAddress.STATUS_ALLOCATED).count(),
-                "retired_count": qs.filter(status=DepositAddress.STATUS_RETIRED).count(),
-                "max_derivation_index": max_derivation_index,
-                "next_derivation_index": next_derivation_index,
+                "route_key": route_key,
+                "next_derivation_index": (
+                    int(counter.next_derivation_index)
+                    if counter is not None
+                    else 0
+                ),
+                "active_session_count": active_sessions,
+                "total_session_count": total_sessions,
             }
         )
 
@@ -2021,7 +2152,9 @@ def enqueue_deposit_sweep_job(*, actor, deposit_session: DepositSession, observe
     if observed_transfer.status != ObservedOnchainTransfer.STATUS_CREDITED:
         raise ValidationError("Cannot enqueue sweep for a non-credited observed transfer")
 
-    derivation_index = _parse_derivation_index_from_ref(deposit_session.address_derivation_ref)
+    derivation_index = deposit_session.derivation_index
+    if derivation_index is None:
+        derivation_index = _parse_derivation_index_from_ref(deposit_session.address_derivation_ref)
 
     job, created = DepositSweepJob.objects.get_or_create(
         observed_transfer=observed_transfer,
@@ -2360,42 +2493,26 @@ def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> De
     if deposit_session.wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
         raise PermissionDenied("Cannot cancel another user's deposit session")
 
-    if deposit_session.status in {
-        DepositSession.STATUS_CREDITED,
-        getattr(DepositSession, "STATUS_SWEPT", "swept"),
-    }:
-        raise ValidationError("Cannot cancel a funded deposit session")
-
-    canceled_status = getattr(DepositSession, "STATUS_CANCELED", "canceled")
-
-    if deposit_session.status in {
+    terminal_statuses = {
         DepositSession.STATUS_EXPIRED,
         DepositSession.STATUS_FAILED,
-        canceled_status,
-    }:
+        getattr(DepositSession, "STATUS_CANCELED", "canceled"),
+        getattr(DepositSession, "STATUS_SWEPT", "swept"),
+    }
+    if deposit_session.status in terminal_statuses:
         return deposit_session
+
+    if deposit_session.status == DepositSession.STATUS_CREDITED:
+        raise ValidationError("Cannot cancel a credited deposit session")
 
     if deposit_session.observed_txid:
         raise ValidationError("Cannot cancel a deposit session that already has an observed transaction")
 
+    canceled_status = getattr(DepositSession, "STATUS_CANCELED", "canceled")
     deposit_session.status = canceled_status
     deposit_session.save(update_fields=["status", "updated_at"])
 
-    DepositSweepJob.objects.filter(
-        deposit_session=deposit_session,
-        status__in=[
-            DepositSweepJob.STATUS_PENDING,
-            DepositSweepJob.STATUS_READY_TO_SWEEP,
-            DepositSweepJob.STATUS_FUNDING_BROADCASTED,
-            DepositSweepJob.STATUS_SWEEP_BROADCASTED,
-        ],
-    ).update(
-        status=DepositSweepJob.STATUS_ABANDONED,
-        claimed_by_service="",
-        claim_expires_at=None,
-        updated_at=timezone.now(),
-    )
-
+    _abandon_open_sweep_jobs_for_session(deposit_session=deposit_session)
     _finalize_address_after_terminal_session(deposit_session=deposit_session)
     return deposit_session
 
@@ -2508,21 +2625,8 @@ def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
         session.status = DepositSession.STATUS_EXPIRED
         session.save(update_fields=["status", "updated_at"])
 
-        DepositSweepJob.objects.filter(
-            deposit_session=session,
-            status__in=[
-                DepositSweepJob.STATUS_PENDING,
-                DepositSweepJob.STATUS_READY_TO_SWEEP,
-                DepositSweepJob.STATUS_FUNDING_BROADCASTED,
-                DepositSweepJob.STATUS_SWEEP_BROADCASTED,
-            ],
-        ).update(
-            status=DepositSweepJob.STATUS_ABANDONED,
-            claimed_by_service="",
-            claim_expires_at=None,
-            updated_at=timezone.now(),
-        )
-
+        _abandon_open_sweep_jobs_for_session(deposit_session=session)
+        _finalize_address_after_terminal_session(deposit_session=session)
         expired_count += 1
 
     return expired_count
