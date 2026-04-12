@@ -654,6 +654,7 @@ class DepositSession(models.Model):
     STATUS_SEEN_ONCHAIN = "seen_onchain"
     STATUS_CONFIRMING = "confirming"
     STATUS_CREDITED = "credited"
+    STATUS_SWEPT = "swept"
     STATUS_EXPIRED = "expired"
     STATUS_FAILED = "failed"
     STATUS_CANCELED = "canceled"
@@ -663,9 +664,10 @@ class DepositSession(models.Model):
         (STATUS_SEEN_ONCHAIN, "Seen on-chain"),
         (STATUS_CONFIRMING, "Confirming"),
         (STATUS_CREDITED, "Credited"),
+        (STATUS_SWEPT, "Swept"),
         (STATUS_EXPIRED, "Expired"),
         (STATUS_FAILED, "Failed"),
-        (STATUS_CANCELED, "canceled")
+        (STATUS_CANCELED, "Canceled"),
     )
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True)
@@ -726,6 +728,7 @@ class DepositSession(models.Model):
 
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
+    swept_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         indexes = [
@@ -733,6 +736,7 @@ class DepositSession(models.Model):
             models.Index(fields=["wallet", "status", "-created_at"]),
             models.Index(fields=["chain", "asset_code", "status"]),
             models.Index(fields=["expires_at", "status"]),
+            models.Index(fields=["status", "swept_at"]),
         ]
         constraints = [
             models.CheckConstraint(

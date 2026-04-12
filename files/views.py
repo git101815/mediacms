@@ -113,6 +113,9 @@ from ledger.services import (
     mark_sweep_job_funding_broadcasted,
     mark_sweep_job_ready_to_sweep,
     mark_sweep_job_sweep_broadcasted,
+    cancel_user_deposit_session,
+    delete_user_deposit_session,
+    expire_stale_deposit_sessions,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
@@ -183,6 +186,7 @@ WALLET_REQUEST_TYPE_ICON_MAP = {
 }
 DEPOSIT_SESSION_TERMINAL_STATUSES = {
     DepositSession.STATUS_CREDITED,
+    getattr(DepositSession, "STATUS_SWEPT", "swept"),
     DepositSession.STATUS_EXPIRED,
     DepositSession.STATUS_FAILED,
     DepositSession.STATUS_CANCELED,
@@ -193,6 +197,7 @@ DEPOSIT_SESSION_STATUS_LABELS = {
     DepositSession.STATUS_SEEN_ONCHAIN: "Seen on-chain",
     DepositSession.STATUS_CONFIRMING: "Confirming",
     DepositSession.STATUS_CREDITED: "Credited",
+    getattr(DepositSession, "STATUS_SWEPT", "swept"): "Swept",
     DepositSession.STATUS_EXPIRED: "Expired",
     DepositSession.STATUS_FAILED: "Failed",
     DepositSession.STATUS_CANCELED: "Canceled",
@@ -203,6 +208,7 @@ DEPOSIT_SESSION_STATUS_ICONS = {
     DepositSession.STATUS_SEEN_ONCHAIN: "visibility",
     DepositSession.STATUS_CONFIRMING: "hourglass_top",
     DepositSession.STATUS_CREDITED: "check_circle",
+    getattr(DepositSession, "STATUS_SWEPT", "swept"): "outbox",
     DepositSession.STATUS_EXPIRED: "event_busy",
     DepositSession.STATUS_FAILED: "error",
     DepositSession.STATUS_CANCELED: "block",
@@ -2830,4 +2836,24 @@ def wallet_deposit_session_cancel(request, public_id):
     ).update(status=DepositSweepJob.STATUS_ABANDONED)
 
     messages.add_message(request, messages.INFO, "Deposit session canceled.")
+    return redirect("wallet")
+
+@login_required
+@require_POST
+def wallet_deposit_session_cancel(request, public_id):
+    session = get_object_or_404(
+        DepositSession.objects.select_related("wallet"),
+        public_id=public_id,
+        user=request.user,
+    )
+
+    try:
+        cancel_user_deposit_session(
+            actor=request.user,
+            deposit_session=session,
+        )
+        messages.success(request, "Deposit session canceled.")
+    except (DjangoValidationError, DjangoPermissionDenied) as exc:
+        messages.error(request, _extract_wallet_form_error(exc))
+
     return redirect("wallet")

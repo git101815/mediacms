@@ -304,6 +304,31 @@ def _abandon_open_sweep_jobs_for_session(*, deposit_session: DepositSession) -> 
         claim_expires_at=None,
         updated_at=timezone.now(),
     )
+def _get_allocated_address_for_session(*, deposit_session: DepositSession):
+    return DepositAddress.objects.filter(
+        allocated_deposit_session=deposit_session
+    ).first()
+
+
+def _finalize_address_after_terminal_session(*, deposit_session: DepositSession) -> None:
+    address_row = _get_allocated_address_for_session(deposit_session=deposit_session)
+    if address_row is None:
+        return
+
+    if deposit_session.status == DepositSession.STATUS_CANCELED and not deposit_session.observed_txid:
+        address_row.status = DepositAddress.STATUS_AVAILABLE
+        address_row.allocated_deposit_session = None
+        address_row.save(update_fields=["status", "allocated_deposit_session", "updated_at"])
+        return
+
+    if deposit_session.status == DepositSession.STATUS_EXPIRED and not deposit_session.observed_txid:
+        address_row.status = DepositAddress.STATUS_AVAILABLE
+        address_row.allocated_deposit_session = None
+        address_row.save(update_fields=["status", "allocated_deposit_session", "updated_at"])
+        return
+
+    address_row.status = DepositAddress.STATUS_RETIRED
+    address_row.save(update_fields=["status", "updated_at"])
 
 def build_evm_event_key(*, chain: str, txid: str, log_index: int) -> str:
     normalized_chain = _normalize_chain(chain)
@@ -2269,6 +2294,14 @@ def mark_sweep_job_confirmed(
             "updated_at",
         ]
     )
+
+    session = DepositSession.objects.select_for_update().get(id=job.deposit_session_id)
+    if session.status != DepositSession.STATUS_SWEPT:
+        session.status = DepositSession.STATUS_SWEPT
+        session.swept_at = timezone.now()
+        session.save(update_fields=["status", "swept_at", "updated_at"])
+        _finalize_address_after_terminal_session(deposit_session=session)
+
     return job
 
 
@@ -2327,23 +2360,43 @@ def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> De
     if deposit_session.wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
         raise PermissionDenied("Cannot cancel another user's deposit session")
 
-    if deposit_session.status == DepositSession.STATUS_CREDITED:
-        raise ValidationError("Cannot cancel a credited deposit session")
+    if deposit_session.status in {
+        DepositSession.STATUS_CREDITED,
+        getattr(DepositSession, "STATUS_SWEPT", "swept"),
+    }:
+        raise ValidationError("Cannot cancel a funded deposit session")
+
+    canceled_status = getattr(DepositSession, "STATUS_CANCELED", "canceled")
 
     if deposit_session.status in {
         DepositSession.STATUS_EXPIRED,
         DepositSession.STATUS_FAILED,
-        DEPOSIT_SESSION_STATUS_CANCELED,
+        canceled_status,
     }:
         return deposit_session
 
     if deposit_session.observed_txid:
         raise ValidationError("Cannot cancel a deposit session that already has an observed transaction")
 
-    deposit_session.status = DEPOSIT_SESSION_STATUS_CANCELED
+    deposit_session.status = canceled_status
     deposit_session.save(update_fields=["status", "updated_at"])
 
-    _abandon_open_sweep_jobs_for_session(deposit_session=deposit_session)
+    DepositSweepJob.objects.filter(
+        deposit_session=deposit_session,
+        status__in=[
+            DepositSweepJob.STATUS_PENDING,
+            DepositSweepJob.STATUS_READY_TO_SWEEP,
+            DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+            DepositSweepJob.STATUS_SWEEP_BROADCASTED,
+        ],
+    ).update(
+        status=DepositSweepJob.STATUS_ABANDONED,
+        claimed_by_service="",
+        claim_expires_at=None,
+        updated_at=timezone.now(),
+    )
+
+    _finalize_address_after_terminal_session(deposit_session=deposit_session)
     return deposit_session
 
 
@@ -2366,7 +2419,23 @@ def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
     for session in sessions:
         session.status = DepositSession.STATUS_EXPIRED
         session.save(update_fields=["status", "updated_at"])
-        _abandon_open_sweep_jobs_for_session(deposit_session=session)
+
+        DepositSweepJob.objects.filter(
+            deposit_session=session,
+            status__in=[
+                DepositSweepJob.STATUS_PENDING,
+                DepositSweepJob.STATUS_READY_TO_SWEEP,
+                DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+                DepositSweepJob.STATUS_SWEEP_BROADCASTED,
+            ],
+        ).update(
+            status=DepositSweepJob.STATUS_ABANDONED,
+            claimed_by_service="",
+            claim_expires_at=None,
+            updated_at=timezone.now(),
+        )
+
+        _finalize_address_after_terminal_session(deposit_session=session)
         expired_count += 1
 
     return expired_count
@@ -2457,3 +2526,29 @@ def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
         expired_count += 1
 
     return expired_count
+
+@transaction.atomic
+def delete_user_deposit_session(*, actor, deposit_session: DepositSession) -> None:
+    actor = _require_authenticated_actor(actor)
+
+    deposit_session = (
+        DepositSession.objects.select_for_update()
+        .select_related("wallet")
+        .get(id=deposit_session.id)
+    )
+
+    if deposit_session.wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
+        raise PermissionDenied("Cannot delete another user's deposit session")
+
+    allowed_statuses = {
+        DepositSession.STATUS_AWAITING_PAYMENT,
+        getattr(DepositSession, "STATUS_CANCELED", "canceled"),
+    }
+    if deposit_session.status not in allowed_statuses:
+        raise ValidationError("Only pending or canceled deposit sessions can be deleted")
+
+    if deposit_session.observed_txid:
+        raise ValidationError("Cannot delete a deposit session that already observed a transaction")
+
+    _finalize_address_after_terminal_session(deposit_session=deposit_session)
+    deposit_session.delete()

@@ -10,6 +10,7 @@ class DepositOptionConfig:
     asset_code: str
     token_contract_address: str
     display_label: str
+    account_xpub: str
     rpc_url: str
     required_confirmations: int
     min_amount: int
@@ -26,6 +27,8 @@ class ServiceConfig:
     shared_secret: str
     state_path: str
     poll_interval_seconds: int
+    provision_batch_size: int
+    evm_account_xpub: str
     options: list[DepositOptionConfig]
 
 
@@ -75,6 +78,8 @@ def load_config() -> ServiceConfig:
     if not isinstance(raw_options, list) or not raw_options:
         raise RuntimeError("Deposit service config must contain a non-empty 'options' list")
 
+    evm_account_xpub = _require_env("DEPOSIT_EVM_ACCOUNT_XPUB")
+
     options: list[DepositOptionConfig] = []
 
     for item in raw_options:
@@ -88,6 +93,7 @@ def load_config() -> ServiceConfig:
                 asset_code=item["asset_code"],
                 raw_value=item.get("display_label"),
             ),
+            account_xpub=_resolve_env_placeholder(item.get("account_xpub", evm_account_xpub)),
             rpc_url=_resolve_env_placeholder(item["rpc_url"]),
             required_confirmations=int(item["required_confirmations"]),
             min_amount=int(item["min_amount"]),
@@ -114,11 +120,17 @@ def load_config() -> ServiceConfig:
     if global_poll_interval <= 0:
         raise RuntimeError("DEPOSIT_SERVICE_POLL_INTERVAL_SECONDS must be > 0")
 
+    provision_batch_size = int(os.environ.get("DEPOSIT_SERVICE_PROVISION_BATCH_SIZE", "100"))
+    if provision_batch_size <= 0:
+        raise RuntimeError("DEPOSIT_SERVICE_PROVISION_BATCH_SIZE must be > 0")
+
     return ServiceConfig(
         mediacms_base_url=_require_env("MEDIACMS_INTERNAL_BASE_URL").rstrip("/"),
         service_name=os.environ.get("MEDIACMS_INTERNAL_SERVICE", "deposit-service").strip() or "deposit-service",
         shared_secret=_require_env("MEDIACMS_INTERNAL_SHARED_SECRET"),
         state_path=_require_env("DEPOSIT_SERVICE_STATE_PATH"),
         poll_interval_seconds=global_poll_interval,
+        provision_batch_size=provision_batch_size,
+        evm_account_xpub=evm_account_xpub,
         options=options,
     )

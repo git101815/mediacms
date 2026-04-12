@@ -28,6 +28,11 @@ urlpatterns = [
     re_path(r"^wallet/withdrawal-request$", views.wallet_withdrawal_request, name="wallet_withdrawal_request"),
     re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/$", views.wallet_deposit_session,name="wallet_deposit_session"),
     re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/status/$", views.wallet_deposit_session_status,name="wallet_deposit_session_status"),
+    re_path(
+        r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/cancel/$",
+        views.wallet_deposit_session_cancel,
+        name="wallet_deposit_session_cancel",
+    ),
     re_path(r"^wallet$", views.wallet, name="wallet"),
     re_path(
         r"^api/internal/ledger/deposit-observations$",

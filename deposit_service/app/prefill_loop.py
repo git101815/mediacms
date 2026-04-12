@@ -39,10 +39,10 @@ def _build_address_row(option, address: str, index: int) -> dict:
         },
     }
 
-def _resolve_next_index(*, option, state: StateStore, stats: dict) -> int:
-    state_next_index = state.get_next_index(option.key, option.start_index)
-    server_next_index = int(stats.get("next_derivation_index", option.start_index))
-    return max(option.start_index, state_next_index, server_next_index)
+def _resolve_next_index(*, option, state, stats):
+    stats_next_index = int(stats["next_derivation_index"])
+    state_next_index = int(state.get_next_index(option.key, 0))
+    return max(stats_next_index, state_next_index)
 
 
 def _iter_chunks(total_count: int, chunk_size: int):
@@ -66,7 +66,7 @@ def run_once(*, client: MediaCMSInternalClient, state: StateStore, options, conf
 
     for option, stats in zip(options, stats_results):
         available_count = int(stats["available_count"])
-        needed = max(0, option.target_available - available_count)
+        needed = max(0, config.provision_batch_size - available_count)
 
         if needed <= 0:
             logging.info(
@@ -75,17 +75,18 @@ def run_once(*, client: MediaCMSInternalClient, state: StateStore, options, conf
                 option.chain,
                 option.asset_code,
                 available_count,
-                option.target_available,
+                config.provision_batch_size,
             )
             continue
 
         next_index = _resolve_next_index(option=option, state=state, stats=stats)
 
-        if next_index > state.get_next_index(option.key, option.start_index):
+        state_next_index = int(state.get_next_index(option.key, 0))
+        if next_index > state_next_index:
             logging.warning(
                 "option=%s action=resync old_state_next_index=%s server_next_index=%s",
                 option.key,
-                state.get_next_index(option.key, option.start_index),
+                state_next_index,
                 next_index,
             )
 
