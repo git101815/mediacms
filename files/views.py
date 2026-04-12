@@ -103,7 +103,7 @@ from ledger.services import (
     create_wallet_withdrawal_request,
     open_user_deposit_session,
     ingest_deposit_observation_event,
-    get_deposit_address_pool_stats,
+    get_deposit_stats,
     provision_deposit_addresses_batch,
     list_active_deposit_watch_targets,
     list_available_deposit_options,
@@ -2590,7 +2590,7 @@ def internal_deposit_address_stats(request):
         if len(option_rows) > settings.LEDGER_INTERNAL_ADDRESS_STATS_MAX_SIZE:
             raise DjangoValidationError("Options batch exceeds configured maximum size")
 
-        results = get_deposit_address_pool_stats(
+        results = get_deposit_stats(
             actor=actor,
             option_rows=option_rows,
         )
@@ -2802,41 +2802,6 @@ def internal_sweep_job_failed(request, public_id):
             "last_error": job.last_error,
         }
     )
-@login_required
-@require_POST
-def wallet_deposit_session_cancel(request, public_id):
-    session = get_object_or_404(
-        DepositSession.objects.select_related("wallet"),
-        public_id=public_id,
-        user=request.user,
-    )
-
-    if session.status not in {
-        DepositSession.STATUS_AWAITING_PAYMENT,
-        DepositSession.STATUS_SEEN_ONCHAIN,
-        DepositSession.STATUS_CONFIRMING,
-    }:
-        messages.add_message(request, messages.ERROR, "This deposit session cannot be canceled.")
-        return redirect("wallet_deposit_session", public_id=session.public_id)
-
-    if session.observed_txid:
-        messages.add_message(request, messages.ERROR, "This deposit session already has an on-chain observation.")
-        return redirect("wallet_deposit_session", public_id=session.public_id)
-
-    session.status = DepositSession.STATUS_CANCELED
-    session.save(update_fields=["status", "updated_at"])
-
-    DepositSweepJob.objects.filter(
-        deposit_session=session,
-        status__in=[
-            DepositSweepJob.STATUS_PENDING,
-            DepositSweepJob.STATUS_FUNDING_BROADCASTED,
-            DepositSweepJob.STATUS_READY_TO_SWEEP,
-        ],
-    ).update(status=DepositSweepJob.STATUS_ABANDONED)
-
-    messages.add_message(request, messages.INFO, "Deposit session canceled.")
-    return redirect("wallet")
 
 @login_required
 @require_POST

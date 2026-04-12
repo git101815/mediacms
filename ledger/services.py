@@ -28,11 +28,8 @@ from .models import (
     DepositRouteCounter,
 )
 import uuid
-import hashlib
-import json
 from django.utils import timezone
 from datetime import timedelta
-from django.db.models import Q
 import os
 from bip_utils import Bip44, Bip44Changes, Bip44Coins
 from django.conf import settings
@@ -161,6 +158,54 @@ def _floor_window_start(now, window_seconds: int):
     floored = ts - (ts % window_seconds)
     return timezone.datetime.fromtimestamp(floored, tz=now.tzinfo)
 
+def record_wallet_velocity(*, wallet: TokenWallet, action: str, amount: int):
+    now = timezone.now()
+
+    for window_seconds in [3600, 86400]:
+        window_start = _floor_window_start(now, window_seconds)
+        obj, _ = LedgerVelocityWindow.objects.select_for_update().get_or_create(
+            wallet=wallet,
+            action=action,
+            window_seconds=window_seconds,
+            window_start=window_start,
+            defaults={"amount": 0, "count": 0},
+        )
+        obj.amount += int(amount)
+        obj.count += 1
+        obj.save(update_fields=["amount", "count", "updated_at"])
+
+
+def get_wallet_velocity_amount(*, wallet: TokenWallet, action: str, window_seconds: int) -> int:
+    now = timezone.now()
+    window_start = _floor_window_start(now, window_seconds)
+    obj = LedgerVelocityWindow.objects.filter(
+        wallet=wallet,
+        action=action,
+        window_seconds=window_seconds,
+        window_start=window_start,
+    ).first()
+    return int(obj.amount) if obj else 0
+
+
+def enforce_wallet_velocity_limits(*, wallet: TokenWallet, action: str, amount: int):
+    if amount <= 0:
+        return
+
+    hourly_current = get_wallet_velocity_amount(wallet=wallet, action=action, window_seconds=3600)
+    daily_current = get_wallet_velocity_amount(wallet=wallet, action=action, window_seconds=86400)
+
+    if action in [LEDGER_ACTION_WITHDRAWAL, LEDGER_ACTION_TRANSFER, LEDGER_ACTION_PURCHASE]:
+        if wallet.hourly_outflow_limit is not None and hourly_current + amount > wallet.hourly_outflow_limit:
+            raise ValidationError("Hourly outflow limit exceeded")
+        if wallet.daily_outflow_limit is not None and daily_current + amount > wallet.daily_outflow_limit:
+            raise ValidationError("Daily outflow limit exceeded")
+
+    if action == LEDGER_ACTION_DEPOSIT:
+        if wallet.hourly_inflow_limit is not None and hourly_current + amount > wallet.hourly_inflow_limit:
+            raise ValidationError("Hourly inflow limit exceeded")
+        if wallet.daily_inflow_limit is not None and daily_current + amount > wallet.daily_inflow_limit:
+            raise ValidationError("Daily inflow limit exceeded")
+
 def get_stale_compensating_sagas(*, actor, older_than_seconds: int = 900, limit: int = 100):
     _require_perm(actor, "ledger.can_manage_ledger_sagas")
 
@@ -207,7 +252,7 @@ def _parse_derivation_index_from_ref(address_derivation_ref: str):
     if not raw_value:
         return None
 
-    tail = raw_value.rsplit(":", 1)[-1]
+    tail = raw_value.rsplit("/", 1)[-1].rsplit(":", 1)[-1]
     try:
         parsed = int(tail)
     except (TypeError, ValueError):
@@ -244,7 +289,6 @@ NETWORK_DISPLAY_LABELS = {
     "arbitrum": "Arbitrum One",
     "base": "Base",
     "bsc": "BNB Chain",
-    "polygon": "Polygon",
 }
 
 DISPLAY_DECIMALS_BY_ROUTE = {
@@ -256,10 +300,14 @@ DISPLAY_DECIMALS_BY_ROUTE = {
     ("base", "USDC"): 6,
     ("bsc", "USDT"): 18,
     ("bsc", "USDC"): 18,
-    ("polygon", "USDT"): 6,
-    ("polygon", "USDC"): 6,
 }
 
+SUPPORTED_EVM_DEPOSIT_CHAINS = {
+    "ethereum",
+    "bsc",
+    "arbitrum",
+    "base",
+}
 
 def _get_network_display_label(chain: str) -> str:
     normalized_chain = _normalize_chain(chain)
@@ -291,19 +339,30 @@ def _build_route_label(*, chain: str, asset_code: str, display_label: str = "") 
         return explicit
     return f"{_get_network_display_label(chain)} · {(asset_code or '').strip().upper()}"
 
-SUPPORTED_EVM_DEPOSIT_CHAINS = {
-    "ethereum",
-    "bsc",
-    "arbitrum",
-    "base",
-}
-
 
 def _build_deposit_route_key(*, chain: str, asset_code: str, token_contract_address: str) -> str:
     normalized_chain = _normalize_chain(chain)
     normalized_asset_code = (asset_code or "").strip().upper()
     normalized_token_contract_address = _normalize_evm_address(token_contract_address)
     return f"{normalized_chain}:{normalized_asset_code}:{normalized_token_contract_address}"
+
+
+def build_deposit_option_key(*, chain: str, asset_code: str, token_contract_address: str) -> str:
+    normalized_chain = _normalize_chain(chain)
+    normalized_asset = (asset_code or "").strip().upper()
+    normalized_contract = _normalize_evm_address(token_contract_address)
+    contract_part = normalized_contract or "native"
+    return f"{normalized_chain}:{normalized_asset}:{contract_part}"
+
+
+def parse_deposit_option_key(option_key: str) -> tuple[str, str, str]:
+    raw_value = (option_key or "").strip()
+    parts = raw_value.split(":", 2)
+    if len(parts) != 3:
+        raise ValidationError("Invalid deposit option")
+    chain, asset_code, contract_part = parts
+    token_contract_address = "" if contract_part == "native" else contract_part
+    return _normalize_chain(chain), asset_code.strip().upper(), _normalize_evm_address(token_contract_address)
 
 
 def _get_deposit_evm_account_xpub() -> str:
@@ -359,7 +418,7 @@ def _find_reusable_active_session(
     chain: str,
     asset_code: str,
     token_contract_address: str,
-):
+) -> DepositSession | None:
     return (
         DepositSession.objects.select_for_update()
         .filter(
@@ -390,13 +449,13 @@ def _get_or_create_route_counter_for_update(
         token_contract_address=normalized_token_contract_address,
     )
 
-    counter = (
+    existing = (
         DepositRouteCounter.objects.select_for_update()
         .filter(route_key=route_key)
         .first()
     )
-    if counter is not None:
-        return counter
+    if existing is not None:
+        return existing
 
     max_session_index = (
         DepositSession.objects.filter(route_key=route_key)
@@ -418,18 +477,21 @@ def _get_or_create_route_counter_for_update(
         -1 if max_legacy_index is None else int(max_legacy_index),
     )
 
-    created_counter = DepositRouteCounter.objects.create(
-        route_key=route_key,
-        chain=normalized_chain,
-        asset_code=normalized_asset_code,
-        token_contract_address=normalized_token_contract_address,
-        next_derivation_index=max_index + 1,
-        metadata={
-            "seeded_from": "legacy_deposit_addresses",
-        },
-        metadata_version=LEDGER_METADATA_VERSION,
-    )
-    return DepositRouteCounter.objects.select_for_update().get(id=created_counter.id)
+    try:
+        created = DepositRouteCounter.objects.create(
+            route_key=route_key,
+            chain=normalized_chain,
+            asset_code=normalized_asset_code,
+            token_contract_address=normalized_token_contract_address,
+            next_derivation_index=max_index + 1,
+            metadata={
+                "seeded_from": "legacy_deposit_addresses",
+            },
+            metadata_version=LEDGER_METADATA_VERSION,
+        )
+        return DepositRouteCounter.objects.select_for_update().get(id=created.id)
+    except IntegrityError:
+        return DepositRouteCounter.objects.select_for_update().get(route_key=route_key)
 
 
 def _allocate_session_address(
@@ -475,12 +537,12 @@ def build_evm_event_key(*, chain: str, txid: str, log_index: int) -> str:
     normalized_txid = (txid or "").strip().lower()
     return f"{normalized_chain}:{normalized_txid}:{int(log_index)}"
 
-
 def get_external_asset_clearing_wallet() -> TokenWallet:
     return get_system_wallet(
         TokenWallet.SYSTEM_EXTERNAL_ASSET_CLEARING,
         allow_negative=True,
     )
+
 
 @transaction.atomic
 def create_wallet_deposit_request(
@@ -500,6 +562,12 @@ def create_wallet_deposit_request(
     _require_wallet_not_blocked(wallet)
 
     normalized_amount = _normalize_wallet_request_amount(amount)
+    enforce_wallet_velocity_limits(
+        wallet=wallet,
+        action=LEDGER_ACTION_DEPOSIT,
+        amount=normalized_amount,
+    )
+
     reference = _build_wallet_request_reference("dep")
 
     wallet_request = WalletRequest.objects.create(
@@ -539,6 +607,12 @@ def create_wallet_withdrawal_request(
     destination_address = (destination_address or "").strip()
     if not destination_address:
         raise ValidationError("Destination address is required")
+
+    enforce_wallet_velocity_limits(
+        wallet=wallet,
+        action=LEDGER_ACTION_WITHDRAWAL,
+        amount=normalized_amount,
+    )
 
     available_balance = get_wallet_available_balance(wallet)
     if not wallet.allow_negative and normalized_amount > available_balance:
@@ -580,1067 +654,188 @@ def create_wallet_withdrawal_request(
     return wallet_request
 
 @transaction.atomic
-def create_pending_ledger_transaction(*, actor, kind: str, created_by=None, external_id=None, memo="", metadata=None):
-    _require_perm(actor, "ledger.can_create_pending_ledger_transaction")
-    created_by = _resolve_created_by(actor=actor, created_by=created_by)
-
-    if metadata is None:
-        metadata = {}
-
-    request_hash = None
-    if external_id:
-        payload = {
-            "kind": kind,
-            "memo": memo,
-            "entries": [],
-            "metadata": metadata,
-            "status": LedgerTransaction.STATUS_PENDING,
-        }
-        payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        request_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
-
-    if external_id:
-        try:
-            with transaction.atomic():
-                txn = LedgerTransaction.objects.create(
-                    kind=kind,
-                    status=LedgerTransaction.STATUS_PENDING,
-                    external_id=external_id,
-                    request_hash=request_hash,
-                    created_by=created_by,
-                    memo=memo,
-                    metadata=metadata,
-                    metadata_version=LEDGER_METADATA_VERSION,
-                )
-        except IntegrityError:
-            existing = LedgerTransaction.objects.get(external_id=external_id)
-            if existing.request_hash and existing.request_hash != request_hash:
-                raise ValidationError("Idempotency key reused with different payload")
-            return existing
-    else:
-        txn = LedgerTransaction.objects.create(
-            kind=kind,
-            status=LedgerTransaction.STATUS_PENDING,
-            external_id=None,
-            created_by=created_by,
-            memo=memo,
-            request_hash=None,
-            metadata=metadata,
-            metadata_version=LEDGER_METADATA_VERSION,
-        )
-
-    _create_outbox_event(
-        txn=txn,
-        topic="ledger.transaction.pending",
-        payload={
-            "txn_id": txn.id,
-            "kind": txn.kind,
-            "status": txn.status,
-            "external_id": txn.external_id,
-            "created_by_id": txn.created_by_id,
-            "metadata": txn.metadata,
-        },
-        metadata_version=txn.metadata_version,
-    )
-    return txn
-
-@transaction.atomic
-def apply_ledger_transaction(*, actor, kind: str, entries: list, created_by=None, external_id=None, memo="", metadata=None):
-    """
-    entries: list[tuple[TokenWallet, int]] signed delta.
-    """
-
-    _require_perm(actor, "ledger.can_apply_raw_ledger_transaction")
-    created_by = _resolve_created_by(actor=actor, created_by=created_by)
-
-    if metadata is None:
-        metadata = {}
-
-    if not entries:
-        raise ValidationError("No entries")
-
-    # agrégation par wallet
-    aggregated = {}
-    for wallet, delta in entries:
-        if wallet.id is None:
-            raise ValidationError("Unsaved wallet in entries")
-        aggregated[wallet.id] = aggregated.get(wallet.id, 0) + int(delta)
-
-    normalized_entries = [[wallet_id, delta] for wallet_id, delta in aggregated.items() if delta != 0]
-    normalized_entries.sort(key=lambda x: (x[0], x[1]))
-
-    if len(normalized_entries) < 2:
-        raise ValidationError("A ledger transaction must have at least two balanced entries")
-
-    if sum(delta for _, delta in normalized_entries) != 0:
-        raise ValidationError("Ledger transaction is not balanced")
-
-    payload = {
-        "kind": kind,
-        "memo": memo,
-        "entries": normalized_entries,
-        "metadata": metadata,
-        "status": LedgerTransaction.STATUS_POSTED,
-    }
-    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    request_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
-
-    # Idempotence (exactly-once)
-    if external_id:
-        try:
-            with transaction.atomic():
-                txn = LedgerTransaction.objects.create(
-                    kind=kind,
-                    external_id=external_id,
-                    request_hash=request_hash,
-                    created_by=created_by,
-                    memo=memo,
-                    metadata=metadata,
-                    status=LedgerTransaction.STATUS_POSTED,
-                    metadata_version=LEDGER_METADATA_VERSION,
-                )
-        except IntegrityError:
-            existing = LedgerTransaction.objects.get(external_id=external_id)
-            if existing.request_hash and existing.request_hash != request_hash:
-                raise ValidationError("Idempotency key reused with different payload")
-            return existing
-    else:
-        txn = LedgerTransaction.objects.create(
-            kind=kind,
-            external_id=None,
-            created_by=created_by,
-            memo=memo,
-            request_hash=None,
-            metadata=metadata,
-            status=LedgerTransaction.STATUS_POSTED,
-            metadata_version=LEDGER_METADATA_VERSION,
-        )
-    # Lock wallets (stable order, unique request)
-    wallet_ids = [wallet_id for wallet_id, _ in normalized_entries]
-    if any(wid is None for wid in wallet_ids):
-        raise ValidationError("Unsaved wallet in entries")
-
-    locked_wallets = (
-        TokenWallet.objects.select_for_update()
-        .filter(id__in=wallet_ids)
-        .order_by("id")
-    )
-    locked = {w.id: w for w in locked_wallets}
-    if len(locked) != len(wallet_ids):
-        raise ValidationError("Unknown wallet in entries")
-    action = _infer_action_from_kind(kind)
-
-    for wallet_id, delta in normalized_entries:
-        w = locked[wallet_id]
-
-        _require_wallet_not_blocked(w)
-
-        if delta < 0:
-            enforce_wallet_velocity_limits(
-                wallet=w,
-                action=action,
-                amount=abs(delta),
-            )
-
-        new_balance = w.balance + delta
-        available_after = new_balance - int(w.held_balance)
-
-        if not w.allow_negative and available_after < 0:
-            raise ValidationError("Insufficient available funds")
-
-        w.balance = new_balance
-        w.save(update_fields=["balance", "updated_at"])
-
-        LedgerEntry.objects.create(
-            txn=txn,
-            wallet=w,
-            delta=delta,
-            balance_after=new_balance,
-        )
-
-        if delta < 0:
-            record_wallet_velocity(
-                wallet=w,
-                action=action,
-                amount=abs(delta),
-            )
-        elif delta > 0 and action == LEDGER_ACTION_DEPOSIT:
-            record_wallet_velocity(
-                wallet=w,
-                action=LEDGER_ACTION_DEPOSIT,
-                amount=abs(delta),
-            )
-    _create_outbox_event(
-        txn=txn,
-        topic="ledger.transaction.posted",
-        payload={
-            "txn_id": txn.id,
-            "kind": txn.kind,
-            "status": txn.status,
-            "external_id": txn.external_id,
-            "created_by_id": txn.created_by_id,
-            "entry_count": len(normalized_entries),
-            "metadata": txn.metadata,
-        },
-        metadata_version=txn.metadata_version,
-    )
-    return txn
-
-@transaction.atomic
-def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, created_by=None, external_id=None, memo="", metadata=None):
-    _require_perm(actor, "ledger.can_reverse_ledger_transaction")
-    created_by = _resolve_created_by(actor=actor, created_by=created_by)
-
-    if metadata is None:
-        metadata = {}
-
-    if original_txn.status != LedgerTransaction.STATUS_POSTED:
-        raise ValidationError("Only posted transactions can be reversed")
-
-    if hasattr(original_txn, "reversal_txn"):
-        return original_txn.reversal_txn
-
-    original_entries = list(original_txn.entries.select_related("wallet").order_by("id"))
-    if not original_entries:
-        raise ValidationError("Cannot reverse a transaction without ledger entries")
-
-    payload_metadata = {
-        **metadata,
-        "reversal_of_txn_id": original_txn.id,
-        "reversal_of_external_id": original_txn.external_id,
-    }
-
-    request_hash = None
-    if external_id:
-        payload = {
-            "kind": f"{original_txn.kind}_reversal",
-            "memo": memo,
-            "entries": [[entry.wallet_id, -entry.delta] for entry in original_entries],
-            "metadata": payload_metadata,
-            "status": LedgerTransaction.STATUS_REVERSED,
-            "reversal_of": original_txn.id,
-        }
-        payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        request_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
-
-    if external_id:
-        try:
-            with transaction.atomic():
-                txn = LedgerTransaction.objects.create(
-                    kind=f"{original_txn.kind}_reversal",
-                    status=LedgerTransaction.STATUS_REVERSED,
-                    reversal_of=original_txn,
-                    external_id=external_id,
-                    request_hash=request_hash,
-                    created_by=created_by,
-                    memo=memo,
-                    metadata=payload_metadata,
-                    metadata_version=LEDGER_METADATA_VERSION
-                )
-        except IntegrityError:
-            existing = LedgerTransaction.objects.get(external_id=external_id)
-            if existing.request_hash and existing.request_hash != request_hash:
-                raise ValidationError("Idempotency key reused with different payload")
-            return existing
-    else:
-        txn = LedgerTransaction.objects.create(
-            kind=f"{original_txn.kind}_reversal",
-            status=LedgerTransaction.STATUS_REVERSED,
-            reversal_of=original_txn,
-            external_id=None,
-            created_by=created_by,
-            memo=memo,
-            request_hash=None,
-            metadata=payload_metadata,
-            metadata_version=LEDGER_METADATA_VERSION
-        )
-
-    wallet_ids = [entry.wallet_id for entry in original_entries]
-    locked_wallets = (
-        TokenWallet.objects.select_for_update()
-        .filter(id__in=wallet_ids)
-        .order_by("id")
-    )
-    locked = {w.id: w for w in locked_wallets}
-    if len(locked) != len(wallet_ids):
-        raise ValidationError("Unknown wallet in reversal entries")
-
-    for entry in original_entries:
-        w = locked[entry.wallet_id]
-        delta = -entry.delta
-        new_balance = w.balance + delta
-
-        if not w.allow_negative and new_balance < 0:
-            raise ValidationError("Insufficient funds")
-
-        w.balance = new_balance
-        w.save(update_fields=["balance", "updated_at"])
-
-        LedgerEntry.objects.create(
-            txn=txn,
-            wallet=w,
-            delta=delta,
-            balance_after=new_balance,
-        )
-    _create_outbox_event(
-        txn=txn,
-        topic="ledger.transaction.reversed",
-        payload={
-            "txn_id": txn.id,
-            "kind": txn.kind,
-            "status": txn.status,
-            "external_id": txn.external_id,
-            "created_by_id": txn.created_by_id,
-            "reversal_of_id": txn.reversal_of_id,
-            "metadata": txn.metadata,
-        },
-        metadata_version=txn.metadata_version,
-    )
-    return txn
-
-def mark_outbox_event_dispatched(*, actor, event: LedgerOutbox) -> LedgerOutbox:
-    _require_perm(actor, "ledger.can_manage_ledger_outbox")
-    now = timezone.now()
-    event.status = LedgerOutbox.STATUS_DISPATCHED
-    event.dispatched_at = now
-    event.last_attempt_at = now
-    event.next_retry_at = None
-    event.save(update_fields=["status", "dispatched_at", "last_attempt_at", "next_retry_at"])
-    return event
-
-
-def mark_outbox_event_failed(*, actor, event: LedgerOutbox, error_message: str) -> LedgerOutbox:
-    _require_perm(actor, "ledger.can_manage_ledger_outbox")
-
-    now = timezone.now()
-    event.fail_count += 1
-    event.last_error = error_message[:2000]
-    event.last_attempt_at = now
-
-    if event.fail_count >= LEDGER_OUTBOX_MAX_RETRIES:
-        event.status = LedgerOutbox.STATUS_DEAD_LETTERED
-        event.dead_lettered_at = now
-        event.dead_letter_reason = error_message[:2000]
-        event.next_retry_at = None
-        event.save(
-            update_fields=[
-                "status",
-                "fail_count",
-                "last_error",
-                "last_attempt_at",
-                "dead_lettered_at",
-                "dead_letter_reason",
-                "next_retry_at",
-            ]
-        )
-        return event
-
-    event.status = LedgerOutbox.STATUS_FAILED
-    event.next_retry_at = _compute_next_retry_at()
-    event.save(
-        update_fields=[
-            "status",
-            "fail_count",
-            "last_error",
-            "last_attempt_at",
-            "next_retry_at",
-        ]
-    )
-    return event
-
-def move_outbox_event_to_dlq(*, actor, event: LedgerOutbox, reason: str) -> LedgerOutbox:
-    _require_perm(actor, "ledger.can_manage_ledger_outbox")
-
-    now = timezone.now()
-    event.status = LedgerOutbox.STATUS_DEAD_LETTERED
-    event.dead_lettered_at = now
-    event.dead_letter_reason = reason[:2000]
-    event.last_error = reason[:2000]
-    event.next_retry_at = None
-    event.save(
-        update_fields=[
-            "status",
-            "dead_lettered_at",
-            "dead_letter_reason",
-            "last_error",
-            "next_retry_at",
-        ]
-    )
-    return event
-
-def get_dispatchable_outbox_events(*, actor, limit: int = 100):
-    _require_perm(actor, "ledger.can_manage_ledger_outbox")
-
-    now = timezone.now()
-    return LedgerOutbox.objects.filter(
-        Q(status=LedgerOutbox.STATUS_PENDING)
-        | Q(
-            status=LedgerOutbox.STATUS_FAILED,
-            next_retry_at__isnull=False,
-            next_retry_at__lte=now,
-        )
-    ).order_by("created_at")[:limit]
-
-@transaction.atomic
-def create_ledger_saga(*, actor, saga_type: str, created_by=None, external_id=None, metadata=None) -> LedgerSaga:
-    _require_perm(actor, "ledger.can_manage_ledger_sagas")
-    created_by = _resolve_created_by(actor=actor, created_by=created_by)
-    if metadata is None:
-        metadata = {}
-
-    if external_id:
-        try:
-            with transaction.atomic():
-                return LedgerSaga.objects.create(
-                    saga_type=saga_type,
-                    external_id=external_id,
-                    status=LedgerSaga.STATUS_PENDING,
-                    created_by=created_by,
-                    metadata=metadata,
-                    metadata_version=LEDGER_METADATA_VERSION,
-                )
-        except IntegrityError:
-            return LedgerSaga.objects.get(external_id=external_id)
-
-    return LedgerSaga.objects.create(
-        saga_type=saga_type,
-        external_id=None,
-        status=LedgerSaga.STATUS_PENDING,
-        created_by=created_by,
-        metadata=metadata,
-        metadata_version=LEDGER_METADATA_VERSION,
-    )
-
-@transaction.atomic
-def add_saga_step(*, actor, saga: LedgerSaga, step_key: str, step_order: int, payload=None) -> LedgerSagaStep:
-    _require_perm(actor, "ledger.can_manage_ledger_sagas")
-    if payload is None:
-        payload = {}
-
-    return LedgerSagaStep.objects.create(
-        saga=saga,
-        step_key=step_key,
-        step_order=step_order,
-        status=LedgerSagaStep.STATUS_PENDING,
-        payload=payload,
-        metadata_version=LEDGER_METADATA_VERSION,
-    )
-
-@transaction.atomic
-def start_ledger_saga(*, actor, saga: LedgerSaga) -> LedgerSaga:
-    _require_perm(actor, "ledger.can_manage_ledger_sagas")
-    if saga.status != LedgerSaga.STATUS_PENDING:
-        return saga
-
-    saga.status = LedgerSaga.STATUS_RUNNING
-    saga.started_at = timezone.now()
-    saga.save(update_fields=["status", "started_at"])
-    return saga
-
-@transaction.atomic
-def start_saga_step(*, actor, step: LedgerSagaStep) -> LedgerSagaStep:
-    _require_perm(actor, "ledger.can_manage_ledger_sagas")
-    if step.status != LedgerSagaStep.STATUS_PENDING:
-        return step
-
-    step.status = LedgerSagaStep.STATUS_RUNNING
-    step.started_at = timezone.now()
-    step.save(update_fields=["status", "started_at"])
-    return step
-
-@transaction.atomic
-def complete_saga_step(*, actor, step: LedgerSagaStep, txn: LedgerTransaction = None) -> LedgerSagaStep:
-    _require_perm(actor, "ledger.can_manage_ledger_sagas")
-    step.status = LedgerSagaStep.STATUS_COMPLETED
-    step.completed_at = timezone.now()
-    if txn is not None:
-        step.txn = txn
-        step.save(update_fields=["status", "completed_at", "txn"])
-    else:
-        step.save(update_fields=["status", "completed_at"])
-    return step
-
-@transaction.atomic
-def fail_saga_step(*, actor, step: LedgerSagaStep, error_message: str) -> LedgerSagaStep:
-    _require_perm(actor, "ledger.can_manage_ledger_sagas")
-    step.status = LedgerSagaStep.STATUS_FAILED
-    step.failed_at = timezone.now()
-    step.last_error = error_message[:2000]
-    step.save(update_fields=["status", "failed_at", "last_error"])
-
-    saga = step.saga
-    saga.status = LedgerSaga.STATUS_FAILED
-    saga.failed_at = timezone.now()
-    saga.last_error = error_message[:2000]
-    saga.save(update_fields=["status", "failed_at", "last_error"])
-
-    return step
-
-@transaction.atomic
-def complete_ledger_saga(*, actor, saga: LedgerSaga) -> LedgerSaga:
-    _require_perm(actor, "ledger.can_manage_ledger_sagas")
-    if saga.steps.filter(
-        status__in=[
-            LedgerSagaStep.STATUS_PENDING,
-            LedgerSagaStep.STATUS_RUNNING,
-            LedgerSagaStep.STATUS_FAILED,
-        ]
-    ).exists():
-        raise ValidationError("Cannot complete saga with unfinished or failed steps")
-
-    saga.status = LedgerSaga.STATUS_COMPLETED
-    saga.completed_at = timezone.now()
-    saga.save(update_fields=["status", "completed_at"])
-    return saga
-
-@transaction.atomic
-def compensate_ledger_saga(*, actor, saga: LedgerSaga, created_by=None, reason: str = "") -> LedgerSaga:
-    _require_perm(actor, "ledger.can_compensate_ledger_sagas")
-    created_by = _resolve_created_by(actor=actor, created_by=created_by)
-    if saga.status not in [LedgerSaga.STATUS_FAILED, LedgerSaga.STATUS_COMPENSATING]:
-        raise ValidationError("Only failed or compensating sagas can be compensated")
-
-    saga.status = LedgerSaga.STATUS_COMPENSATING
-    saga.save(update_fields=["status"])
-
-    steps = list(
-        saga.steps.select_related("txn").order_by("-step_order", "-id")
-    )
-
-    for step in steps:
-        if step.status not in [
-            LedgerSagaStep.STATUS_COMPLETED,
-            LedgerSagaStep.STATUS_FAILED,
-        ]:
-            continue
-
-        if step.txn and step.txn.status == LedgerTransaction.STATUS_POSTED:
-            compensation_txn = reverse_ledger_transaction(
-                actor=actor,
-                original_txn=step.txn,
-                created_by=created_by,
-                external_id=f"saga-comp-{saga.id}-{step.id}",
-                memo=reason or f"Compensation for saga {saga.id} step {step.step_key}",
-            )
-            step.compensation_txn = compensation_txn
-            step.status = LedgerSagaStep.STATUS_COMPENSATED
-            step.compensated_at = timezone.now()
-            step.save(update_fields=["status", "compensated_at", "compensation_txn"])
-        elif step.status == LedgerSagaStep.STATUS_COMPLETED:
-            step.status = LedgerSagaStep.STATUS_COMPENSATED
-            step.compensated_at = timezone.now()
-            step.save(update_fields=["status", "compensated_at"])
-
-        step.status = LedgerSagaStep.STATUS_COMPENSATED
-        step.compensated_at = timezone.now()
-        if step.compensation_txn_id:
-            step.save(update_fields=["status", "compensated_at", "compensation_txn"])
-        else:
-            step.save(update_fields=["status", "compensated_at"])
-
-    saga.status = LedgerSaga.STATUS_COMPENSATED
-    saga.compensated_at = timezone.now()
-    saga.save(update_fields=["status", "compensated_at"])
-    return saga
-
-def replay_failed_outbox_event(*, actor, event: LedgerOutbox) -> LedgerOutbox:
-    _require_perm(actor, "ledger.can_manage_ledger_outbox")
-
-    if event.status != LedgerOutbox.STATUS_FAILED:
-        raise ValidationError("Only failed outbox events can be replayed")
-
-    event.status = LedgerOutbox.STATUS_PENDING
-    event.next_retry_at = None
-    event.save(update_fields=["status", "next_retry_at"])
-    return event
-
-def redrive_dead_lettered_outbox_event(*, actor, event: LedgerOutbox) -> LedgerOutbox:
-    _require_perm(actor, "ledger.can_manage_ledger_outbox")
-
-    if event.status != LedgerOutbox.STATUS_DEAD_LETTERED:
-        raise ValidationError("Only dead-lettered outbox events can be redriven")
-
-    now = timezone.now()
-    event.status = LedgerOutbox.STATUS_PENDING
-    event.redrive_count += 1
-    event.last_redriven_at = now
-    event.dead_lettered_at = None
-    event.dead_letter_reason = ""
-    event.next_retry_at = None
-    event.save(
-        update_fields=[
-            "status",
-            "redrive_count",
-            "last_redriven_at",
-            "dead_lettered_at",
-            "dead_letter_reason",
-            "next_retry_at",
-        ]
-    )
-    return event
-
-@transaction.atomic
-def create_wallet_hold(*, actor, wallet: TokenWallet, amount: int, reason: str = "", metadata=None) -> LedgerHold:
-    _require_perm(actor, "ledger.can_manage_wallet_holds")
-
-    if metadata is None:
-        metadata = {}
-
-    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
-    if amount <= 0:
-        raise ValidationError("Hold amount must be > 0")
-
-    available_balance = get_wallet_available_balance(wallet)
-    if not wallet.allow_negative and amount > available_balance:
-        raise ValidationError("Insufficient available balance for hold")
-
-    wallet.held_balance += int(amount)
-    wallet.save(update_fields=["held_balance", "updated_at"])
-
-    return LedgerHold.objects.create(
-        wallet=wallet,
-        amount=int(amount),
-        reason=reason,
-        created_by=actor,
-        metadata=metadata,
-        metadata_version=LEDGER_METADATA_VERSION,
-    )
-
-@transaction.atomic
-def release_wallet_hold(*, actor, hold: LedgerHold, reason: str = "") -> LedgerHold:
-    _require_perm(actor, "ledger.can_manage_wallet_holds")
-
-    hold = LedgerHold.objects.select_for_update().select_related("wallet").get(id=hold.id)
-    if hold.released:
-        return hold
-
-    wallet = TokenWallet.objects.select_for_update().get(id=hold.wallet_id)
-    wallet.held_balance -= int(hold.amount)
-    if wallet.held_balance < 0:
-        raise ValidationError("Wallet held balance cannot be negative")
-
-    wallet.save(update_fields=["held_balance", "updated_at"])
-
-    hold.released = True
-    hold.released_by = actor
-    hold.released_at = timezone.now()
-    if reason:
-        hold.reason = reason
-    hold.save(update_fields=["released", "released_by", "released_at", "reason"])
-    return hold
-
-@transaction.atomic
-def record_wallet_velocity(*, wallet: TokenWallet, action: str, amount: int):
-    now = timezone.now()
-
-    for window_seconds in [3600, 86400]:
-        window_start = _floor_window_start(now, window_seconds)
-        obj, _ = LedgerVelocityWindow.objects.select_for_update().get_or_create(
-            wallet=wallet,
-            action=action,
-            window_seconds=window_seconds,
-            window_start=window_start,
-            defaults={"amount": 0, "count": 0},
-        )
-        obj.amount += int(amount)
-        obj.count += 1
-        obj.save(update_fields=["amount", "count", "updated_at"])
-
-def get_wallet_velocity_amount(*, wallet: TokenWallet, action: str, window_seconds: int) -> int:
-    now = timezone.now()
-    window_start = _floor_window_start(now, window_seconds)
-    obj = LedgerVelocityWindow.objects.filter(
-        wallet=wallet,
-        action=action,
-        window_seconds=window_seconds,
-        window_start=window_start,
-    ).first()
-    return int(obj.amount) if obj else 0
-
-def enforce_wallet_velocity_limits(*, wallet: TokenWallet, action: str, amount: int):
-    if amount <= 0:
-        return
-
-    hourly_current = get_wallet_velocity_amount(wallet=wallet, action=action, window_seconds=3600)
-    daily_current = get_wallet_velocity_amount(wallet=wallet, action=action, window_seconds=86400)
-
-    if action in [LEDGER_ACTION_WITHDRAWAL, LEDGER_ACTION_TRANSFER, LEDGER_ACTION_PURCHASE]:
-        if wallet.hourly_outflow_limit is not None and hourly_current + amount > wallet.hourly_outflow_limit:
-            raise ValidationError("Hourly outflow limit exceeded")
-        if wallet.daily_outflow_limit is not None and daily_current + amount > wallet.daily_outflow_limit:
-            raise ValidationError("Daily outflow limit exceeded")
-
-    if action == LEDGER_ACTION_DEPOSIT:
-        if wallet.hourly_inflow_limit is not None and hourly_current + amount > wallet.hourly_inflow_limit:
-            raise ValidationError("Hourly inflow limit exceeded")
-        if wallet.daily_inflow_limit is not None and daily_current + amount > wallet.daily_inflow_limit:
-            raise ValidationError("Daily inflow limit exceeded")
-
-@transaction.atomic
-def set_wallet_risk_status(*, actor, wallet: TokenWallet, risk_status: str, reason: str = "", review_required: bool = False) -> TokenWallet:
-    _require_perm(actor, "ledger.can_manage_wallet_risk")
-
-    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
-    wallet.risk_status = risk_status
-    wallet.risk_reason = reason
-    wallet.review_required = review_required
-    wallet.save(update_fields=["risk_status", "risk_reason", "review_required", "updated_at"])
-    return wallet
-
-@transaction.atomic
-def set_wallet_velocity_limits(
+def provision_deposit_address(
     *,
     actor,
-    wallet: TokenWallet,
-    hourly_outflow_limit=None,
-    daily_outflow_limit=None,
-    hourly_inflow_limit=None,
-    daily_inflow_limit=None,
-) -> TokenWallet:
-    _require_perm(actor, "ledger.can_manage_wallet_risk")
-
-    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
-    wallet.hourly_outflow_limit = hourly_outflow_limit
-    wallet.daily_outflow_limit = daily_outflow_limit
-    wallet.hourly_inflow_limit = hourly_inflow_limit
-    wallet.daily_inflow_limit = daily_inflow_limit
-    wallet.save(
-        update_fields=[
-            "hourly_outflow_limit",
-            "daily_outflow_limit",
-            "hourly_inflow_limit",
-            "daily_inflow_limit",
-            "updated_at",
-        ]
-    )
-    return wallet
-
-@transaction.atomic
-def create_deposit_session(
-    *,
-    actor,
-    wallet: TokenWallet,
     chain: str,
     asset_code: str,
     token_contract_address: str,
-    deposit_address: str,
+    display_label: str,
+    address: str,
     address_derivation_ref: str,
-    expires_at,
-    required_confirmations: int = 1,
-    min_amount: int = 1,
+    required_confirmations,
+    min_amount,
+    session_ttl_seconds,
     metadata=None,
-) -> DepositSession:
-    actor = _require_authenticated_actor(actor)
+    derivation_index=None,
+):
+    _require_perm(actor, "ledger.can_manage_deposit_addresses")
 
     if metadata is None:
         metadata = {}
 
-    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
-
-    if wallet.wallet_type != TokenWallet.TYPE_USER:
-        raise ValidationError("Deposit sessions can only target user wallets")
-
-    if wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
-        raise PermissionDenied("Cannot create a deposit session for another user's wallet")
-
-    if expires_at <= timezone.now():
-        raise ValidationError("Deposit session expiry must be in the future")
-
     chain = _normalize_chain(chain)
+    asset_code = (asset_code or "").strip().upper()
     token_contract_address = _normalize_evm_address(token_contract_address)
-    deposit_address = _normalize_evm_address(deposit_address)
+    address = _normalize_evm_address(address)
+    address_derivation_ref = (address_derivation_ref or "").strip()
+    display_label = (display_label or "").strip()
 
-    if min_amount <= 0:
-        raise ValidationError("Minimum amount must be positive")
+    try:
+        required_confirmations = int(required_confirmations)
+        min_amount = int(min_amount)
+        session_ttl_seconds = int(session_ttl_seconds)
+        derivation_index = int(derivation_index)
+    except (TypeError, ValueError):
+        raise ValidationError("Invalid deposit address configuration")
 
+    if not chain:
+        raise ValidationError("Chain is required")
+    if not asset_code:
+        raise ValidationError("Asset code is required")
+    if not address:
+        raise ValidationError("Address is required")
+    if not address_derivation_ref:
+        raise ValidationError("Address derivation ref is required")
+    if derivation_index < 0:
+        raise ValidationError("Derivation index cannot be negative")
     if required_confirmations < 1:
         raise ValidationError("Required confirmations must be at least 1")
+    if min_amount <= 0:
+        raise ValidationError("Minimum amount must be positive")
+    if session_ttl_seconds <= 0:
+        raise ValidationError("Session TTL must be positive")
 
-    return DepositSession.objects.create(
-        user=wallet.user,
-        wallet=wallet,
+    existing_by_address = (
+        DepositAddress.objects.select_for_update()
+        .filter(address=address)
+        .first()
+    )
+    existing_by_ref = (
+        DepositAddress.objects.select_for_update()
+        .filter(address_derivation_ref=address_derivation_ref)
+        .first()
+    )
+    existing_by_index = (
+        DepositAddress.objects.select_for_update()
+        .filter(
+            chain=chain,
+            asset_code=asset_code,
+            token_contract_address=token_contract_address,
+            derivation_index=derivation_index,
+        )
+        .first()
+    )
+
+    candidate_ids = {
+        obj.id
+        for obj in (existing_by_address, existing_by_ref, existing_by_index)
+        if obj is not None
+    }
+
+    if len(candidate_ids) > 1:
+        raise ValidationError(
+            "Address, derivation reference, and derivation index already belong to different rows"
+        )
+
+    existing = None
+    if existing_by_address is not None:
+        existing = existing_by_address
+    elif existing_by_ref is not None:
+        existing = existing_by_ref
+    else:
+        existing = existing_by_index
+
+    if existing is not None:
+        immutable_mismatch = (
+            existing.chain != chain
+            or existing.asset_code != asset_code
+            or existing.token_contract_address != token_contract_address
+            or existing.display_label != display_label
+            or existing.address != address
+            or existing.address_derivation_ref != address_derivation_ref
+            or existing.derivation_index != derivation_index
+            or int(existing.required_confirmations) != required_confirmations
+            or int(existing.min_amount) != min_amount
+            or int(existing.session_ttl_seconds) != session_ttl_seconds
+        )
+        if immutable_mismatch:
+            raise ValidationError("Deposit address already exists with different immutable fields")
+
+        return existing, False
+
+    created = DepositAddress.objects.create(
         chain=chain,
-        asset_code=(asset_code or "").strip().upper(),
+        asset_code=asset_code,
         token_contract_address=token_contract_address,
-        deposit_address=deposit_address,
-        address_derivation_ref=(address_derivation_ref or "").strip(),
-        status=DepositSession.STATUS_AWAITING_PAYMENT,
-        min_amount=int(min_amount),
-        required_confirmations=int(required_confirmations),
-        expires_at=expires_at,
-        created_by=actor,
+        display_label=display_label,
+        address=address,
+        address_derivation_ref=address_derivation_ref,
+        derivation_index=derivation_index,
+        required_confirmations=required_confirmations,
+        min_amount=min_amount,
+        session_ttl_seconds=session_ttl_seconds,
+        status=DepositAddress.STATUS_AVAILABLE,
         metadata=metadata,
         metadata_version=LEDGER_METADATA_VERSION,
     )
+    return created, True
+
 
 @transaction.atomic
-def record_onchain_observation(
-    *,
-    actor,
-    deposit_session: DepositSession,
-    chain: str,
-    txid: str,
-    log_index: int,
-    block_number: int | None,
-    from_address: str,
-    to_address: str,
-    token_contract_address: str,
-    asset_code: str,
-    amount: int,
-    confirmations: int,
-    raw_payload=None,
-) -> ObservedOnchainTransfer:
-    _require_perm(actor, "ledger.can_record_onchain_observations")
+def provision_deposit_addresses_batch(*, actor, address_rows):
+    _require_perm(actor, "ledger.can_manage_deposit_addresses")
 
-    if raw_payload is None:
-        raw_payload = {}
+    if not isinstance(address_rows, list) or not address_rows:
+        raise ValidationError("Addresses payload must be a non-empty list")
 
-    deposit_session = (
-        DepositSession.objects.select_for_update()
-        .select_related("wallet")
-        .get(id=deposit_session.id)
-    )
+    created_count = 0
+    existing_count = 0
+    rows = []
 
-    chain = _normalize_chain(chain)
-    txid = (txid or "").strip().lower()
-    log_index = int(log_index)
-    block_number = None if block_number is None else int(block_number)
-    token_contract_address = _normalize_evm_address(token_contract_address)
-    from_address = _normalize_evm_address(from_address)
-    to_address = _normalize_evm_address(to_address)
-    asset_code = (asset_code or "").strip().upper()
-    amount = int(amount)
-    confirmations = int(confirmations)
+    for row in address_rows:
+        if not isinstance(row, dict):
+            raise ValidationError("Each address row must be an object")
 
-    if amount <= 0:
-        raise ValidationError("Observed amount must be positive")
-    if confirmations < 0:
-        raise ValidationError("Confirmations cannot be negative")
+        address_obj, created = provision_deposit_address(
+            actor=actor,
+            chain=row.get("chain", ""),
+            asset_code=row.get("asset_code", ""),
+            token_contract_address=row.get("token_contract_address", ""),
+            display_label=row.get("display_label", ""),
+            address=row.get("address", ""),
+            address_derivation_ref=row.get("address_derivation_ref", ""),
+            required_confirmations=row.get("required_confirmations"),
+            min_amount=row.get("min_amount"),
+            session_ttl_seconds=row.get("session_ttl_seconds"),
+            metadata=row.get("metadata") or {},
+            derivation_index=row.get("derivation_index"),
+        )
 
-    if deposit_session.status in {
-        DepositSession.STATUS_EXPIRED,
-        DepositSession.STATUS_FAILED,
-        getattr(DepositSession, "STATUS_CANCELED", "canceled"),
-    }:
-        raise ValidationError("Cannot record an observation for a closed deposit session")
+        if created:
+            created_count += 1
+        else:
+            existing_count += 1
 
-    if chain != deposit_session.chain:
-        raise ValidationError("Observed chain does not match deposit session chain")
-    if asset_code != deposit_session.asset_code:
-        raise ValidationError("Observed asset does not match deposit session asset")
-    if token_contract_address != deposit_session.token_contract_address:
-        raise ValidationError("Observed token contract does not match deposit session token contract")
-    if to_address != deposit_session.deposit_address:
-        raise ValidationError("Observed destination address does not match deposit session address")
+        rows.append(
+            {
+                "id": address_obj.id,
+                "chain": address_obj.chain,
+                "asset_code": address_obj.asset_code,
+                "token_contract_address": address_obj.token_contract_address,
+                "address": address_obj.address,
+                "address_derivation_ref": address_obj.address_derivation_ref,
+                "status": address_obj.status,
+                "created": created,
+                "derivation_index": address_obj.derivation_index,
+            }
+        )
 
-    event_key = build_evm_event_key(chain=chain, txid=txid, log_index=log_index)
-
-    defaults = {
-        "chain": chain,
-        "txid": txid,
-        "log_index": log_index,
-        "block_number": block_number,
-        "from_address": from_address,
-        "to_address": to_address,
-        "token_contract_address": token_contract_address,
-        "asset_code": asset_code,
-        "amount": amount,
-        "confirmations": confirmations,
-        "deposit_session": deposit_session,
-        "raw_payload": raw_payload,
-        "metadata_version": LEDGER_METADATA_VERSION,
+    return {
+        "created_count": created_count,
+        "existing_count": existing_count,
+        "rows": rows,
     }
-
-    observed, created = ObservedOnchainTransfer.objects.get_or_create(
-        event_key=event_key,
-        defaults=defaults,
-    )
-
-    if not created:
-        if observed.deposit_session_id != deposit_session.id:
-            raise ValidationError("Observed event already linked to another deposit session")
-
-        update_fields = []
-        if block_number is not None and observed.block_number != block_number:
-            observed.block_number = block_number
-            update_fields.append("block_number")
-        if confirmations > observed.confirmations:
-            observed.confirmations = confirmations
-            update_fields.append("confirmations")
-        if raw_payload and observed.raw_payload != raw_payload:
-            observed.raw_payload = raw_payload
-            update_fields.append("raw_payload")
-
-        if update_fields:
-            update_fields.append("updated_at")
-            observed.save(update_fields=update_fields)
-
-    if observed.confirmations >= deposit_session.required_confirmations:
-        desired_observed_status = ObservedOnchainTransfer.STATUS_CONFIRMED
-        desired_session_status = DepositSession.STATUS_CONFIRMING
-        desired_confirmed_at = observed.confirmed_at or timezone.now()
-    else:
-        desired_observed_status = (
-            ObservedOnchainTransfer.STATUS_CONFIRMING
-            if observed.confirmations > 0
-            else ObservedOnchainTransfer.STATUS_OBSERVED
-        )
-        desired_session_status = (
-            DepositSession.STATUS_CONFIRMING
-            if observed.confirmations > 0
-            else DepositSession.STATUS_SEEN_ONCHAIN
-        )
-        desired_confirmed_at = observed.confirmed_at
-
-    observed.status = desired_observed_status
-    observed.confirmed_at = desired_confirmed_at
-    observed.save(update_fields=["status", "confirmed_at", "updated_at"])
-
-    deposit_session.observed_txid = observed.txid
-    deposit_session.observed_amount = observed.amount
-    deposit_session.confirmations = observed.confirmations
-    if deposit_session.status != DepositSession.STATUS_CREDITED:
-        deposit_session.status = desired_session_status
-    deposit_session.save(
-        update_fields=[
-            "observed_txid",
-            "observed_amount",
-            "confirmations",
-            "status",
-            "updated_at",
-        ]
-    )
-
-    return observed
-
-@transaction.atomic
-def credit_confirmed_deposit_session(
-    *,
-    actor,
-    deposit_session: DepositSession,
-    observed_transfer: ObservedOnchainTransfer,
-    created_by=None,
-) -> LedgerTransaction:
-    _require_perm(actor, "ledger.can_credit_confirmed_deposits")
-    created_by = _resolve_created_by(actor=actor, created_by=created_by)
-
-    deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
-    observed_transfer = ObservedOnchainTransfer.objects.select_for_update().get(id=observed_transfer.id)
-
-    wallet = TokenWallet.objects.select_for_update().get(id=deposit_session.wallet_id)
-    deposit_session.wallet = wallet
-
-    if deposit_session.status == DepositSession.STATUS_CREDITED:
-        if not deposit_session.credited_ledger_txn_id:
-            raise ValidationError("Credited session missing linked ledger transaction")
-        return deposit_session.credited_ledger_txn
-
-    if deposit_session.status == getattr(DepositSession, "STATUS_CANCELED", "canceled"):
-        raise ValidationError("Canceled deposit sessions cannot be credited")
-
-    first_seen_at = getattr(observed_transfer, "first_seen_at", None) or getattr(observed_transfer, "created_at", None)
-    if deposit_session.expires_at <= timezone.now():
-        if first_seen_at is None or first_seen_at > deposit_session.expires_at:
-            raise ValidationError("Deposit session has expired")
-
-    if observed_transfer.deposit_session_id != deposit_session.id:
-        raise ValidationError("Observed transfer does not belong to this deposit session")
-
-    if observed_transfer.status not in {
-        ObservedOnchainTransfer.STATUS_CONFIRMED,
-        ObservedOnchainTransfer.STATUS_CREDITED,
-    }:
-        raise ValidationError("Observed transfer is not confirmed")
-
-    if int(observed_transfer.amount) < int(deposit_session.min_amount):
-        raise ValidationError("Observed amount is below deposit minimum")
-
-    if int(observed_transfer.confirmations) < int(deposit_session.required_confirmations):
-        raise ValidationError("Observed transfer does not have enough confirmations")
-
-    clearing_wallet = get_external_asset_clearing_wallet()
-    external_id = f"deposit-credit:{observed_transfer.event_key}"
-
-    txn = apply_ledger_transaction(
-        actor=actor,
-        kind="deposit",
-        entries=[
-            (clearing_wallet, -int(observed_transfer.amount)),
-            (deposit_session.wallet, int(observed_transfer.amount)),
-        ],
-        created_by=created_by,
-        external_id=external_id,
-        memo=f"Confirmed on-chain deposit {observed_transfer.txid}",
-        metadata={
-            "source": "onchain_deposit",
-            "deposit_session_id": deposit_session.id,
-            "deposit_session_public_id": str(deposit_session.public_id),
-            "observed_transfer_id": observed_transfer.id,
-            "event_key": observed_transfer.event_key,
-            "chain": deposit_session.chain,
-            "asset_code": deposit_session.asset_code,
-            "token_contract_address": deposit_session.token_contract_address,
-            "deposit_address": deposit_session.deposit_address,
-            "txid": observed_transfer.txid,
-            "log_index": observed_transfer.log_index,
-            "block_number": observed_transfer.block_number,
-            "confirmations": observed_transfer.confirmations,
-            "amount": observed_transfer.amount,
-        },
-    )
-
-    deposit_session.observed_txid = observed_transfer.txid
-    deposit_session.observed_amount = observed_transfer.amount
-    deposit_session.confirmations = observed_transfer.confirmations
-    deposit_session.status = DepositSession.STATUS_CREDITED
-    deposit_session.credited_ledger_txn = txn
-    deposit_session.save(
-        update_fields=[
-            "observed_txid",
-            "observed_amount",
-            "confirmations",
-            "status",
-            "credited_ledger_txn",
-            "updated_at",
-        ]
-    )
-
-    observed_transfer.status = ObservedOnchainTransfer.STATUS_CREDITED
-    observed_transfer.credited_ledger_txn = txn
-    if observed_transfer.confirmed_at is None:
-        observed_transfer.confirmed_at = timezone.now()
-    observed_transfer.save(
-        update_fields=[
-            "status",
-            "credited_ledger_txn",
-            "confirmed_at",
-            "updated_at",
-        ]
-    )
-
-    enqueue_deposit_sweep_job(
-        actor=actor,
-        deposit_session=deposit_session,
-        observed_transfer=observed_transfer,
-    )
-    return txn
-
-def build_deposit_option_key(*, chain: str, asset_code: str, token_contract_address: str) -> str:
-    normalized_chain = _normalize_chain(chain)
-    normalized_asset = (asset_code or "").strip().upper()
-    normalized_contract = _normalize_evm_address(token_contract_address)
-    contract_part = normalized_contract or "native"
-    return f"{normalized_chain}:{normalized_asset}:{contract_part}"
-
-
-def parse_deposit_option_key(option_key: str) -> tuple[str, str, str]:
-    raw_value = (option_key or "").strip()
-    parts = raw_value.split(":", 2)
-    if len(parts) != 3:
-        raise ValidationError("Invalid deposit option")
-    chain, asset_code, contract_part = parts
-    token_contract_address = "" if contract_part == "native" else contract_part
-    return _normalize_chain(chain), asset_code.strip().upper(), _normalize_evm_address(token_contract_address)
 
 def list_available_deposit_options() -> list[dict]:
     rows = (
@@ -1826,207 +1021,8 @@ def ingest_deposit_observation_event(
         "ledger_txn": ledger_txn,
     }
 
-@transaction.atomic
-def provision_deposit_address(
-    *,
-    actor,
-    chain: str,
-    asset_code: str,
-    token_contract_address: str,
-    display_label: str,
-    address: str,
-    address_derivation_ref: str,
-    derivation_index,
-    required_confirmations: int,
-    min_amount: int,
-    session_ttl_seconds: int,
-    metadata=None,
-):
-    _require_perm(actor, "ledger.can_manage_deposit_addresses")
 
-    if metadata is None:
-        metadata = {}
-
-    chain = _normalize_chain(chain)
-    asset_code = (asset_code or "").strip().upper()
-    token_contract_address = _normalize_evm_address(token_contract_address)
-    address = _normalize_evm_address(address)
-    address_derivation_ref = (address_derivation_ref or "").strip()
-    display_label = (display_label or "").strip()
-
-    required_confirmations = int(required_confirmations)
-    min_amount = int(min_amount)
-    session_ttl_seconds = int(session_ttl_seconds)
-
-    if derivation_index is None:
-        derivation_index = _parse_derivation_index_from_ref(address_derivation_ref)
-    else:
-        derivation_index = int(derivation_index)
-
-    if not chain:
-        raise ValidationError("Chain is required")
-
-    if not asset_code:
-        raise ValidationError("Asset code is required")
-
-    if not display_label:
-        raise ValidationError("Display label is required")
-
-    if not address:
-        raise ValidationError("Address is required")
-
-    if not address_derivation_ref:
-        raise ValidationError("Address derivation reference is required")
-
-    if derivation_index is None:
-        raise ValidationError("Derivation index is required")
-
-    if derivation_index < 0:
-        raise ValidationError("Derivation index cannot be negative")
-
-    if required_confirmations < 1:
-        raise ValidationError("Required confirmations must be at least 1")
-
-    if min_amount <= 0:
-        raise ValidationError("Minimum amount must be positive")
-
-    if session_ttl_seconds <= 0:
-        raise ValidationError("Session TTL must be positive")
-
-    existing_by_address = (
-        DepositAddress.objects.select_for_update()
-        .filter(address=address)
-        .first()
-    )
-    existing_by_ref = (
-        DepositAddress.objects.select_for_update()
-        .filter(address_derivation_ref=address_derivation_ref)
-        .first()
-    )
-    existing_by_index = (
-        DepositAddress.objects.select_for_update()
-        .filter(
-            chain=chain,
-            asset_code=asset_code,
-            token_contract_address=token_contract_address,
-            derivation_index=derivation_index,
-        )
-        .first()
-    )
-
-    candidate_ids = {
-        obj.id
-        for obj in (existing_by_address, existing_by_ref, existing_by_index)
-        if obj is not None
-    }
-
-    if len(candidate_ids) > 1:
-        raise ValidationError(
-            "Address, derivation reference, and derivation index already belong to different rows"
-        )
-
-    existing = None
-    if existing_by_address is not None:
-        existing = existing_by_address
-    elif existing_by_ref is not None:
-        existing = existing_by_ref
-    else:
-        existing = existing_by_index
-
-    if existing is not None:
-        immutable_mismatch = (
-            existing.chain != chain
-            or existing.asset_code != asset_code
-            or existing.token_contract_address != token_contract_address
-            or existing.display_label != display_label
-            or existing.address != address
-            or existing.address_derivation_ref != address_derivation_ref
-            or existing.derivation_index != derivation_index
-            or int(existing.required_confirmations) != required_confirmations
-            or int(existing.min_amount) != min_amount
-            or int(existing.session_ttl_seconds) != session_ttl_seconds
-        )
-        if immutable_mismatch:
-            raise ValidationError("Deposit address already exists with different immutable fields")
-
-        if existing.status != DepositAddress.STATUS_AVAILABLE:
-            raise ValidationError("Deposit address already exists in a non-available state")
-
-        return existing, False
-
-    created = DepositAddress.objects.create(
-        chain=chain,
-        asset_code=asset_code,
-        token_contract_address=token_contract_address,
-        display_label=display_label,
-        address=address,
-        address_derivation_ref=address_derivation_ref,
-        derivation_index=derivation_index,
-        required_confirmations=required_confirmations,
-        min_amount=min_amount,
-        session_ttl_seconds=session_ttl_seconds,
-        status=DepositAddress.STATUS_AVAILABLE,
-        metadata=metadata,
-        metadata_version=LEDGER_METADATA_VERSION,
-    )
-    return created, True
-
-@transaction.atomic
-def provision_deposit_addresses_batch(*, actor, address_rows):
-    _require_perm(actor, "ledger.can_manage_deposit_addresses")
-
-    if not isinstance(address_rows, list) or not address_rows:
-        raise ValidationError("Addresses payload must be a non-empty list")
-
-    created_count = 0
-    existing_count = 0
-    rows = []
-
-    for row in address_rows:
-        if not isinstance(row, dict):
-            raise ValidationError("Each address row must be an object")
-
-        address_obj, created = provision_deposit_address(
-            actor=actor,
-            chain=row.get("chain", ""),
-            asset_code=row.get("asset_code", ""),
-            token_contract_address=row.get("token_contract_address", ""),
-            display_label=row.get("display_label", ""),
-            address=row.get("address", ""),
-            address_derivation_ref=row.get("address_derivation_ref", ""),
-            required_confirmations=row.get("required_confirmations"),
-            min_amount=row.get("min_amount"),
-            session_ttl_seconds=row.get("session_ttl_seconds"),
-            metadata=row.get("metadata") or {},
-            derivation_index=row.get("derivation_index"),
-        )
-
-        if created:
-            created_count += 1
-        else:
-            existing_count += 1
-
-        rows.append(
-            {
-                "id": address_obj.id,
-                "chain": address_obj.chain,
-                "asset_code": address_obj.asset_code,
-                "token_contract_address": address_obj.token_contract_address,
-                "address": address_obj.address,
-                "address_derivation_ref": address_obj.address_derivation_ref,
-                "status": address_obj.status,
-                "created": created,
-                "derivation_index": address_obj.derivation_index,
-            }
-        )
-
-    return {
-        "created_count": created_count,
-        "existing_count": existing_count,
-        "rows": rows,
-    }
-
-def get_deposit_address_pool_stats(*, actor, option_rows):
+def get_deposit_stats(*, actor, option_rows):
     _require_perm(actor, "ledger.can_manage_deposit_addresses")
 
     if not isinstance(option_rows, list) or not option_rows:
@@ -2063,11 +1059,7 @@ def get_deposit_address_pool_stats(*, actor, option_rows):
                 "asset_code": asset_code,
                 "token_contract_address": token_contract_address,
                 "route_key": route_key,
-                "next_derivation_index": (
-                    int(counter.next_derivation_index)
-                    if counter is not None
-                    else 0
-                ),
+                "next_derivation_index": int(counter.next_derivation_index) if counter is not None else 0,
                 "active_session_count": active_sessions,
                 "total_session_count": total_sessions,
             }
@@ -2227,13 +1219,11 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
                     DepositSweepJob.STATUS_SWEEP_BROADCASTED,
                 ],
             )
-            .filter(
-                Q(claim_expires_at__isnull=True) | Q(claim_expires_at__lt=now)
-            )
+            .filter(Q(claim_expires_at__isnull=True) | Q(claim_expires_at__lt=now))
             .order_by("id")
         )
 
-        for job in qs[:limit - len(claimed)]:
+        for job in qs[: limit - len(claimed)]:
             job.claimed_by_service = service_name
             job.claim_expires_at = claim_until
             job.attempt_count += 1
@@ -2287,10 +1277,7 @@ def mark_sweep_job_funding_broadcasted(
     )
 
     if job.status == DepositSweepJob.STATUS_FUNDING_BROADCASTED:
-        if (
-            job.gas_funding_txid == gas_funding_txid
-            and job.destination_address == destination_address
-        ):
+        if job.gas_funding_txid == gas_funding_txid and job.destination_address == destination_address:
             return job
         raise ValidationError("Sweep job already has a different gas funding txid")
 
@@ -2365,10 +1352,7 @@ def mark_sweep_job_sweep_broadcasted(
     )
 
     if job.status == DepositSweepJob.STATUS_SWEEP_BROADCASTED:
-        if (
-            job.sweep_txid == sweep_txid
-            and job.destination_address == destination_address
-        ):
+        if job.sweep_txid == sweep_txid and job.destination_address == destination_address:
             return job
         raise ValidationError("Sweep job already has a different sweep txid")
 
@@ -2398,14 +1382,18 @@ def mark_sweep_job_confirmed(
     public_id,
     service_name: str,
 ) -> DepositSweepJob:
-    job = _get_claimed_sweep_job_for_update(
-        actor=actor,
-        public_id=public_id,
-        service_name=service_name,
-    )
+    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+
+    job = DepositSweepJob.objects.select_for_update().get(public_id=public_id)
 
     if job.status == DepositSweepJob.STATUS_CONFIRMED:
         return job
+
+    if job.claimed_by_service != service_name:
+        raise ValidationError("Sweep job is not claimed by this service")
+
+    if job.claim_expires_at is None or job.claim_expires_at <= timezone.now():
+        raise ValidationError("Sweep job claim has expired")
 
     if job.status != DepositSweepJob.STATUS_SWEEP_BROADCASTED:
         raise ValidationError("Sweep job cannot transition to confirmed from its current status")
@@ -2433,7 +1421,6 @@ def mark_sweep_job_confirmed(
         session.status = DepositSession.STATUS_SWEPT
         session.swept_at = timezone.now()
         session.save(update_fields=["status", "swept_at", "updated_at"])
-        _finalize_address_after_terminal_session(deposit_session=session)
 
     return job
 
@@ -2446,20 +1433,23 @@ def mark_sweep_job_failed(
     service_name: str,
     error: str,
 ) -> DepositSweepJob:
+    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
     error = (error or "").strip()
     if not error:
         raise ValidationError("Failure reason is required")
 
-    job = _get_claimed_sweep_job_for_update(
-        actor=actor,
-        public_id=public_id,
-        service_name=service_name,
-    )
+    job = DepositSweepJob.objects.select_for_update().get(public_id=public_id)
 
     if job.status == DepositSweepJob.STATUS_FAILED:
         if job.last_error == error:
             return job
         raise ValidationError("Sweep job is already failed with a different error")
+
+    if job.claimed_by_service != service_name:
+        raise ValidationError("Sweep job is not claimed by this service")
+
+    if job.claim_expires_at is None or job.claim_expires_at <= timezone.now():
+        raise ValidationError("Sweep job claim has expired")
 
     if job.status in {
         DepositSweepJob.STATUS_CONFIRMED,
@@ -2480,6 +1470,7 @@ def mark_sweep_job_failed(
         ]
     )
     return job
+
 @transaction.atomic
 def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> DepositSession:
     actor = _require_authenticated_actor(actor)
@@ -2496,7 +1487,7 @@ def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> De
     terminal_statuses = {
         DepositSession.STATUS_EXPIRED,
         DepositSession.STATUS_FAILED,
-        getattr(DepositSession, "STATUS_CANCELED", "canceled"),
+        DEPOSIT_SESSION_STATUS_CANCELED,
         getattr(DepositSession, "STATUS_SWEPT", "swept"),
     }
     if deposit_session.status in terminal_statuses:
@@ -2508,102 +1499,12 @@ def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> De
     if deposit_session.observed_txid:
         raise ValidationError("Cannot cancel a deposit session that already has an observed transaction")
 
-    canceled_status = getattr(DepositSession, "STATUS_CANCELED", "canceled")
-    deposit_session.status = canceled_status
+    deposit_session.status = DEPOSIT_SESSION_STATUS_CANCELED
     deposit_session.save(update_fields=["status", "updated_at"])
 
     _abandon_open_sweep_jobs_for_session(deposit_session=deposit_session)
-    _finalize_address_after_terminal_session(deposit_session=deposit_session)
     return deposit_session
 
-
-@transaction.atomic
-def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
-    _require_perm(actor, "ledger.can_manage_deposit_sessions")
-
-    now = timezone.now()
-    expired_count = 0
-
-    sessions = (
-        DepositSession.objects.select_for_update(skip_locked=True)
-        .filter(
-            status__in=ACTIVE_DEPOSIT_SESSION_STATUSES,
-            expires_at__lte=now,
-        )
-        .order_by("id")[: int(limit)]
-    )
-
-    for session in sessions:
-        session.status = DepositSession.STATUS_EXPIRED
-        session.save(update_fields=["status", "updated_at"])
-
-        DepositSweepJob.objects.filter(
-            deposit_session=session,
-            status__in=[
-                DepositSweepJob.STATUS_PENDING,
-                DepositSweepJob.STATUS_READY_TO_SWEEP,
-                DepositSweepJob.STATUS_FUNDING_BROADCASTED,
-                DepositSweepJob.STATUS_SWEEP_BROADCASTED,
-            ],
-        ).update(
-            status=DepositSweepJob.STATUS_ABANDONED,
-            claimed_by_service="",
-            claim_expires_at=None,
-            updated_at=timezone.now(),
-        )
-
-        _finalize_address_after_terminal_session(deposit_session=session)
-        expired_count += 1
-
-    return expired_count
-
-@transaction.atomic
-def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> DepositSession:
-    actor = _require_authenticated_actor(actor)
-
-    deposit_session = (
-        DepositSession.objects.select_for_update()
-        .select_related("wallet")
-        .get(id=deposit_session.id)
-    )
-
-    if deposit_session.wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
-        raise PermissionDenied("Cannot cancel another user's deposit session")
-
-    if deposit_session.status == DepositSession.STATUS_CREDITED:
-        raise ValidationError("Cannot cancel a credited deposit session")
-
-    canceled_status = getattr(DepositSession, "STATUS_CANCELED", "canceled")
-
-    if deposit_session.status in {
-        DepositSession.STATUS_EXPIRED,
-        DepositSession.STATUS_FAILED,
-        canceled_status,
-    }:
-        return deposit_session
-
-    if deposit_session.observed_txid:
-        raise ValidationError("Cannot cancel a deposit session that already has an observed transaction")
-
-    deposit_session.status = canceled_status
-    deposit_session.save(update_fields=["status", "updated_at"])
-
-    DepositSweepJob.objects.filter(
-        deposit_session=deposit_session,
-        status__in=[
-            DepositSweepJob.STATUS_PENDING,
-            DepositSweepJob.STATUS_READY_TO_SWEEP,
-            DepositSweepJob.STATUS_FUNDING_BROADCASTED,
-            DepositSweepJob.STATUS_SWEEP_BROADCASTED,
-        ],
-    ).update(
-        status=DepositSweepJob.STATUS_ABANDONED,
-        claimed_by_service="",
-        claim_expires_at=None,
-        updated_at=timezone.now(),
-    )
-
-    return deposit_session
 
 @transaction.atomic
 def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
@@ -2626,7 +1527,6 @@ def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
         session.save(update_fields=["status", "updated_at"])
 
         _abandon_open_sweep_jobs_for_session(deposit_session=session)
-        _finalize_address_after_terminal_session(deposit_session=session)
         expired_count += 1
 
     return expired_count
@@ -2646,7 +1546,7 @@ def delete_user_deposit_session(*, actor, deposit_session: DepositSession) -> No
 
     allowed_statuses = {
         DepositSession.STATUS_AWAITING_PAYMENT,
-        getattr(DepositSession, "STATUS_CANCELED", "canceled"),
+        DEPOSIT_SESSION_STATUS_CANCELED,
     }
     if deposit_session.status not in allowed_statuses:
         raise ValidationError("Only pending or canceled deposit sessions can be deleted")
@@ -2654,5 +1554,4 @@ def delete_user_deposit_session(*, actor, deposit_session: DepositSession) -> No
     if deposit_session.observed_txid:
         raise ValidationError("Cannot delete a deposit session that already observed a transaction")
 
-    _finalize_address_after_terminal_session(deposit_session=deposit_session)
     deposit_session.delete()
