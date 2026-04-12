@@ -1186,6 +1186,8 @@ def enqueue_deposit_sweep_job(*, actor, deposit_session: DepositSession, observe
 
 @transaction.atomic
 def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: int, lease_seconds: int):
+    if not isinstance(option_rows, list) or not option_rows:
+        raise ValidationError("Options payload must be a non-empty list")
     _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
 
     limit = int(limit)
@@ -1202,9 +1204,13 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
     claimed = []
 
     for row in option_rows:
+        if not isinstance(row, dict):
+            raise ValidationError("Each option row must be an object")
         chain = _normalize_chain(row.get("chain", ""))
         asset_code = (row.get("asset_code", "") or "").strip().upper()
         token_contract_address = _normalize_evm_address(row.get("token_contract_address", ""))
+        if not chain or not asset_code:
+            raise ValidationError("Each option requires chain and asset_code")
 
         qs = (
             DepositSweepJob.objects.select_for_update(skip_locked=True)

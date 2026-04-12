@@ -24,3 +24,7 @@ pysubs2==1.8.0
 sentry-sdk[django]==2.23.1
 django-storages[amazon]==1.14.2
 boto3==1.34.82
+httpx==0.28.1
+eth-account==0.13.7
+web3==7.8.0
+bip-utils==2.9.3

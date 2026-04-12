@@ -622,12 +622,14 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "deposit_address": session.deposit_address,
         "required_confirmations": session.required_confirmations,
         "confirmations": session.confirmations,
+        "min_amount": session.min_amount,
         "min_amount_display": _format_route_amount(
             session.min_amount,
             chain=session.chain,
             asset_code=session.asset_code,
         ),
         "observed_txid": session.observed_txid,
+        "observed_amount": session.observed_amount,
         "observed_amount_display": (
             _format_route_amount(
                 session.observed_amount,
@@ -637,6 +639,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
             if session.observed_amount is not None
             else ""
         ),
+        "expires_at": session.expires_at,
         "expires_at_iso": session.expires_at.isoformat(),
         "is_terminal": session.status in DEPOSIT_SESSION_TERMINAL_STATUSES,
         "wallet_url": reverse("wallet"),
@@ -674,7 +677,9 @@ def _find_existing_active_deposit_session(*, user, wallet, option_key):
             wallet=wallet,
             chain=option["chain"],
             asset_code=option["asset_code"],
+            token_contract_address=option["token_contract_address"],
             status__in=active_statuses,
+            expires_at__gt=timezone.now(),
         )
         .order_by("-created_at")
         .first()
@@ -2628,7 +2633,10 @@ def internal_sweep_jobs_claim(request):
     try:
         actor, payload, service_name = authenticate_internal_sweeper_request(request)
         option_rows = _parse_required_list(payload, "options")
-        limit = int(payload.get("limit", settings.LEDGER_SWEEP_JOB_CLAIM_MAX_BATCH))
+        limit = _parse_required_int(
+            {"limit": payload.get("limit", settings.LEDGER_SWEEP_JOB_CLAIM_MAX_BATCH)},
+            "limit",
+        )
         limit = min(limit, settings.LEDGER_SWEEP_JOB_CLAIM_MAX_BATCH)
 
         results = claim_deposit_sweep_jobs(
