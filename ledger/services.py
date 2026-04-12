@@ -1247,10 +1247,6 @@ def record_onchain_observation(
     amount = int(amount)
     confirmations = int(confirmations)
 
-    if log_index < 0:
-        raise ValidationError("Log index cannot be negative")
-    if block_number is not None and block_number < 0:
-        raise ValidationError("Block number cannot be negative")
     if amount <= 0:
         raise ValidationError("Observed amount must be positive")
     if confirmations < 0:
@@ -1259,7 +1255,7 @@ def record_onchain_observation(
     if deposit_session.status in {
         DepositSession.STATUS_EXPIRED,
         DepositSession.STATUS_FAILED,
-        DEPOSIT_SESSION_STATUS_CANCELED,
+        getattr(DepositSession, "STATUS_CANCELED", "canceled"),
     }:
         raise ValidationError("Cannot record an observation for a closed deposit session")
 
@@ -1272,11 +1268,7 @@ def record_onchain_observation(
     if to_address != deposit_session.deposit_address:
         raise ValidationError("Observed destination address does not match deposit session address")
 
-    event_key = build_evm_event_key(
-        chain=chain,
-        txid=txid,
-        log_index=log_index,
-    )
+    event_key = build_evm_event_key(chain=chain, txid=txid, log_index=log_index)
 
     defaults = {
         "chain": chain,
@@ -1300,31 +1292,16 @@ def record_onchain_observation(
     )
 
     if not created:
-        immutable_mismatch = (
-            observed.chain != chain
-            or observed.txid != txid
-            or observed.log_index != log_index
-            or observed.to_address != to_address
-            or observed.token_contract_address != token_contract_address
-            or observed.asset_code != asset_code
-            or int(observed.amount) != amount
-        )
-        if immutable_mismatch:
-            raise ValidationError("On-chain event key reused with different payload")
-
         if observed.deposit_session_id != deposit_session.id:
             raise ValidationError("Observed event already linked to another deposit session")
 
         update_fields = []
-
         if block_number is not None and observed.block_number != block_number:
             observed.block_number = block_number
             update_fields.append("block_number")
-
         if confirmations > observed.confirmations:
             observed.confirmations = confirmations
             update_fields.append("confirmations")
-
         if raw_payload and observed.raw_payload != raw_payload:
             observed.raw_payload = raw_payload
             update_fields.append("raw_payload")
@@ -1332,39 +1309,6 @@ def record_onchain_observation(
         if update_fields:
             update_fields.append("updated_at")
             observed.save(update_fields=update_fields)
-
-    if deposit_session.status == DepositSession.STATUS_CREDITED:
-        if observed.status != ObservedOnchainTransfer.STATUS_CREDITED:
-            raise ValidationError(
-                "Credited deposit session is linked to a non-credited observed transfer"
-            )
-
-    if observed.status == ObservedOnchainTransfer.STATUS_CREDITED:
-        if deposit_session.status != DepositSession.STATUS_CREDITED:
-            raise ValidationError(
-                "Credited observed transfer is linked to a non-credited deposit session"
-            )
-
-        session_update_fields = []
-
-        if deposit_session.observed_txid != observed.txid:
-            deposit_session.observed_txid = observed.txid
-            session_update_fields.append("observed_txid")
-
-        if deposit_session.observed_amount != observed.amount:
-            deposit_session.observed_amount = observed.amount
-            session_update_fields.append("observed_amount")
-
-        max_confirmations = max(deposit_session.confirmations, observed.confirmations)
-        if deposit_session.confirmations != max_confirmations:
-            deposit_session.confirmations = max_confirmations
-            session_update_fields.append("confirmations")
-
-        if session_update_fields:
-            session_update_fields.append("updated_at")
-            deposit_session.save(update_fields=session_update_fields)
-
-        return observed
 
     if observed.confirmations >= deposit_session.required_confirmations:
         desired_observed_status = ObservedOnchainTransfer.STATUS_CONFIRMED
@@ -1383,42 +1327,24 @@ def record_onchain_observation(
         )
         desired_confirmed_at = observed.confirmed_at
 
-    observed_update_fields = []
+    observed.status = desired_observed_status
+    observed.confirmed_at = desired_confirmed_at
+    observed.save(update_fields=["status", "confirmed_at", "updated_at"])
 
-    if observed.status != desired_observed_status:
-        observed.status = desired_observed_status
-        observed_update_fields.append("status")
-
-    if observed.confirmed_at != desired_confirmed_at:
-        observed.confirmed_at = desired_confirmed_at
-        observed_update_fields.append("confirmed_at")
-
-    if observed_update_fields:
-        observed_update_fields.append("updated_at")
-        observed.save(update_fields=observed_update_fields)
-
-    session_update_fields = []
-
-    if deposit_session.observed_txid != observed.txid:
-        deposit_session.observed_txid = observed.txid
-        session_update_fields.append("observed_txid")
-
-    if deposit_session.observed_amount != observed.amount:
-        deposit_session.observed_amount = observed.amount
-        session_update_fields.append("observed_amount")
-
-    if deposit_session.confirmations != observed.confirmations:
-        deposit_session.confirmations = observed.confirmations
-        session_update_fields.append("confirmations")
-
+    deposit_session.observed_txid = observed.txid
+    deposit_session.observed_amount = observed.amount
+    deposit_session.confirmations = observed.confirmations
     if deposit_session.status != DepositSession.STATUS_CREDITED:
-        if deposit_session.status != desired_session_status:
-            deposit_session.status = desired_session_status
-            session_update_fields.append("status")
-
-    if session_update_fields:
-        session_update_fields.append("updated_at")
-        deposit_session.save(update_fields=session_update_fields)
+        deposit_session.status = desired_session_status
+    deposit_session.save(
+        update_fields=[
+            "observed_txid",
+            "observed_amount",
+            "confirmations",
+            "status",
+            "updated_at",
+        ]
+    )
 
     return observed
 
@@ -1439,18 +1365,12 @@ def credit_confirmed_deposit_session(
     wallet = TokenWallet.objects.select_for_update().get(id=deposit_session.wallet_id)
     deposit_session.wallet = wallet
 
-    if observed_transfer.credited_ledger_txn_id and deposit_session.status != DepositSession.STATUS_CREDITED:
-        raise ValidationError("Observed transfer already linked to a credited ledger transaction")
-
-    if observed_transfer.deposit_session_id != deposit_session.id:
-        raise ValidationError("Observed transfer does not belong to this deposit session")
-
     if deposit_session.status == DepositSession.STATUS_CREDITED:
         if not deposit_session.credited_ledger_txn_id:
             raise ValidationError("Credited session missing linked ledger transaction")
         return deposit_session.credited_ledger_txn
 
-    if deposit_session.status == DEPOSIT_SESSION_STATUS_CANCELED:
+    if deposit_session.status == getattr(DepositSession, "STATUS_CANCELED", "canceled"):
         raise ValidationError("Canceled deposit sessions cannot be credited")
 
     first_seen_at = getattr(observed_transfer, "first_seen_at", None) or getattr(observed_transfer, "created_at", None)
@@ -1458,23 +1378,14 @@ def credit_confirmed_deposit_session(
         if first_seen_at is None or first_seen_at > deposit_session.expires_at:
             raise ValidationError("Deposit session has expired")
 
+    if observed_transfer.deposit_session_id != deposit_session.id:
+        raise ValidationError("Observed transfer does not belong to this deposit session")
+
     if observed_transfer.status not in {
         ObservedOnchainTransfer.STATUS_CONFIRMED,
         ObservedOnchainTransfer.STATUS_CREDITED,
     }:
         raise ValidationError("Observed transfer is not confirmed")
-
-    if observed_transfer.chain != deposit_session.chain:
-        raise ValidationError("Observed chain does not match deposit session chain")
-
-    if observed_transfer.asset_code != deposit_session.asset_code:
-        raise ValidationError("Observed asset does not match deposit session asset")
-
-    if observed_transfer.token_contract_address != deposit_session.token_contract_address:
-        raise ValidationError("Observed token contract does not match deposit session token contract")
-
-    if observed_transfer.to_address != deposit_session.deposit_address:
-        raise ValidationError("Observed destination address does not match deposit session address")
 
     if int(observed_transfer.amount) < int(deposit_session.min_amount):
         raise ValidationError("Observed amount is below deposit minimum")
@@ -1662,17 +1573,6 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
         raise ValidationError("No deposit address is currently available for this asset")
 
     expires_at = timezone.now() + timedelta(seconds=int(address_row.session_ttl_seconds))
-    route_label = _build_route_label(
-        chain=address_row.chain,
-        asset_code=address_row.asset_code,
-        display_label=address_row.display_label,
-    )
-    network_label = _get_network_display_label(address_row.chain)
-    min_amount_display = _format_deposit_display_amount(
-        raw_amount=address_row.min_amount,
-        chain=address_row.chain,
-        asset_code=address_row.asset_code,
-    )
 
     session = create_deposit_session(
         actor=actor,
@@ -1687,12 +1587,8 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
         min_amount=address_row.min_amount,
         metadata={
             "display_label": address_row.display_label,
-            "route_label": route_label,
-            "network_label": network_label,
-            "network_slug": _normalize_chain(address_row.chain),
-            "min_amount_display": min_amount_display,
+            "allocation_source": "address_pool",
             "address_pool_id": address_row.id,
-            "allocation_source": "app_pool",
         },
     )
 
@@ -2471,6 +2367,93 @@ def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
         session.status = DepositSession.STATUS_EXPIRED
         session.save(update_fields=["status", "updated_at"])
         _abandon_open_sweep_jobs_for_session(deposit_session=session)
+        expired_count += 1
+
+    return expired_count
+
+@transaction.atomic
+def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> DepositSession:
+    actor = _require_authenticated_actor(actor)
+
+    deposit_session = (
+        DepositSession.objects.select_for_update()
+        .select_related("wallet")
+        .get(id=deposit_session.id)
+    )
+
+    if deposit_session.wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
+        raise PermissionDenied("Cannot cancel another user's deposit session")
+
+    if deposit_session.status == DepositSession.STATUS_CREDITED:
+        raise ValidationError("Cannot cancel a credited deposit session")
+
+    canceled_status = getattr(DepositSession, "STATUS_CANCELED", "canceled")
+
+    if deposit_session.status in {
+        DepositSession.STATUS_EXPIRED,
+        DepositSession.STATUS_FAILED,
+        canceled_status,
+    }:
+        return deposit_session
+
+    if deposit_session.observed_txid:
+        raise ValidationError("Cannot cancel a deposit session that already has an observed transaction")
+
+    deposit_session.status = canceled_status
+    deposit_session.save(update_fields=["status", "updated_at"])
+
+    DepositSweepJob.objects.filter(
+        deposit_session=deposit_session,
+        status__in=[
+            DepositSweepJob.STATUS_PENDING,
+            DepositSweepJob.STATUS_READY_TO_SWEEP,
+            DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+            DepositSweepJob.STATUS_SWEEP_BROADCASTED,
+        ],
+    ).update(
+        status=DepositSweepJob.STATUS_ABANDONED,
+        claimed_by_service="",
+        claim_expires_at=None,
+        updated_at=timezone.now(),
+    )
+
+    return deposit_session
+
+@transaction.atomic
+def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
+    _require_perm(actor, "ledger.can_manage_deposit_sessions")
+
+    now = timezone.now()
+    expired_count = 0
+
+    sessions = (
+        DepositSession.objects.select_for_update(skip_locked=True)
+        .filter(
+            status__in=ACTIVE_DEPOSIT_SESSION_STATUSES,
+            expires_at__lte=now,
+        )
+        .order_by("id")[: int(limit)]
+    )
+
+    for session in sessions:
+        session.status = DepositSession.STATUS_EXPIRED
+        session.save(update_fields=["status", "updated_at"])
+
+        DepositSweepJob.objects.filter(
+            deposit_session=session,
+            status__in=[
+                DepositSweepJob.STATUS_PENDING,
+                DepositSweepJob.STATUS_READY_TO_SWEEP,
+                DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+                DepositSweepJob.STATUS_SWEEP_BROADCASTED,
+            ],
+        ).update(
+            status=DepositSweepJob.STATUS_ABANDONED,
+            claimed_by_service="",
+            claim_expires_at=None,
+            updated_at=timezone.now(),
+        )
+
         expired_count += 1
 
     return expired_count

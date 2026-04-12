@@ -5,18 +5,13 @@
       "chain": "bsc",
       "asset_code": "USDT",
       "token_contract_address": "0x55d398326f99059ff775485246999027b3197955",
-      "display_label": "BSC · USDT",
-      "account_xpub": "${DEPOSIT_EVM_ACCOUNT_XPUB}",
+      "display_label": "BNB Chain · USDT",
       "rpc_url": "${BSC_RPC_URL}",
-      "start_index": 600000,
-      "target_available": 20,
       "required_confirmations": 12,
       "min_amount": 1000000000000000000,
       "session_ttl_seconds": 3600,
-      "start_block": 0,
-      "reorg_backtrack_blocks": 20,
-      "scan_chunk_size": 1000,
-      "tx_lookup_lookback_blocks": 15000,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 2000,
       "poa_compatible": true
     }
   ]

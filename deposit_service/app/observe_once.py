@@ -2,7 +2,6 @@ import logging
 
 from web3 import Web3
 
-from .erc20_logs import TRANSFER_TOPIC0, address_to_topic, decode_address_from_topic
 from .evm_rpc import build_web3
 
 
@@ -26,26 +25,30 @@ def _build_option_selector(option):
     }
 
 
-def _resolve_lookback_blocks(option) -> int:
-    value = int(getattr(option, "tx_lookup_lookback_blocks", 5000) or 5000)
-    if value <= 0:
-        raise RuntimeError(f"tx_lookup_lookback_blocks must be > 0 for option {option.key}")
-    return value
+def _transfer_topic() -> str:
+    return Web3.keccak(text="Transfer(address,address,uint256)").hex()
+
+
+def _address_topic(address: str) -> str:
+    checksum = Web3.to_checksum_address(address)
+    return "0x" + ("0" * 24) + checksum[2:].lower()
+
+
+def _decode_topic_address(topic_hex: str) -> str:
+    return Web3.to_checksum_address("0x" + topic_hex[-40:])
 
 
 def _find_latest_incoming_transfer(*, w3, contract_address, deposit_address, latest_block, lookback_blocks):
-    target_topic = address_to_topic(deposit_address)
     from_block = max(0, int(latest_block) - int(lookback_blocks))
-
     logs = w3.eth.get_logs(
         {
             "fromBlock": from_block,
             "toBlock": latest_block,
-            "address": contract_address,
+            "address": Web3.to_checksum_address(contract_address),
             "topics": [
-                TRANSFER_TOPIC0,
+                _transfer_topic(),
                 None,
-                [target_topic],
+                [_address_topic(deposit_address)],
             ],
         }
     )
@@ -55,13 +58,17 @@ def _find_latest_incoming_transfer(*, w3, contract_address, deposit_address, lat
 
     logs = sorted(
         logs,
-        key=lambda item: (int(item["blockNumber"]), int(item["transactionIndex"]), int(item["logIndex"])),
+        key=lambda item: (
+            int(item["blockNumber"]),
+            int(item["transactionIndex"]),
+            int(item["logIndex"]),
+        ),
         reverse=True,
     )
     return logs[0]
 
 
-def _observe_option(*, client, option, watch):
+def _observe_token_option(*, client, option, watch):
     targets = watch["targets"]
     if not targets:
         logging.info(
@@ -74,15 +81,17 @@ def _observe_option(*, client, option, watch):
 
     w3 = build_web3(rpc_url=option.rpc_url, poa_compatible=option.poa_compatible)
     latest_block = int(w3.eth.block_number)
-    contract_address = Web3.to_checksum_address(option.token_contract_address)
-    contract = w3.eth.contract(address=contract_address, abi=ERC20_ABI)
-    lookback_blocks = _resolve_lookback_blocks(option)
 
-    seen_events = set()
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address(option.token_contract_address),
+        abi=ERC20_ABI,
+    )
 
     for target in targets:
-        deposit_address = target["deposit_address"]
         session_public_id = target["session_public_id"]
+        deposit_address = target["deposit_address"]
+        required_confirmations = int(target["required_confirmations"])
+        min_amount = int(target["min_amount"])
 
         try:
             checksum_deposit_address = Web3.to_checksum_address(deposit_address)
@@ -99,45 +108,49 @@ def _observe_option(*, client, option, watch):
             current_balance = int(contract.functions.balanceOf(checksum_deposit_address).call())
         except Exception:
             logging.exception(
-                "balance lookup failed option=%s session=%s address=%s",
+                "balanceOf failed option=%s session=%s address=%s",
                 option.key,
                 session_public_id,
-                deposit_address,
+                checksum_deposit_address,
             )
             continue
 
         if current_balance <= 0:
             continue
 
+        if current_balance < min_amount:
+            logging.info(
+                "balance below minimum option=%s session=%s address=%s balance=%s min_amount=%s",
+                option.key,
+                session_public_id,
+                checksum_deposit_address,
+                current_balance,
+                min_amount,
+            )
+            continue
+
         latest_incoming = _find_latest_incoming_transfer(
             w3=w3,
-            contract_address=contract_address,
-            deposit_address=deposit_address,
+            contract_address=option.token_contract_address,
+            deposit_address=checksum_deposit_address,
             latest_block=latest_block,
-            lookback_blocks=lookback_blocks,
+            lookback_blocks=option.lookback_blocks,
         )
 
         if latest_incoming is None:
             logging.warning(
-                "positive balance but no recent incoming transfer found option=%s session=%s address=%s balance=%s latest_block=%s",
+                "positive balance but no recent incoming transfer option=%s session=%s address=%s balance=%s",
                 option.key,
                 session_public_id,
-                deposit_address,
+                checksum_deposit_address,
                 current_balance,
-                latest_block,
             )
             continue
 
-        txid = latest_incoming["transactionHash"].hex()
-        log_index = int(latest_incoming["logIndex"])
-        event_key = f"{option.chain}:{txid}:{log_index}"
-
-        if event_key in seen_events:
-            continue
-        seen_events.add(event_key)
-
         block_number = int(latest_incoming["blockNumber"])
         confirmations = int(latest_block - block_number + 1)
+        txid = latest_incoming["transactionHash"].hex()
+        log_index = int(latest_incoming["logIndex"])
 
         payload = {
             "session_public_id": session_public_id,
@@ -145,21 +158,18 @@ def _observe_option(*, client, option, watch):
             "txid": txid,
             "log_index": log_index,
             "block_number": block_number,
-            "from_address": decode_address_from_topic(latest_incoming["topics"][1].hex()),
-            "deposit_address": deposit_address,
+            "from_address": _decode_topic_address(latest_incoming["topics"][1].hex()),
+            "deposit_address": checksum_deposit_address,
             "token_contract_address": option.token_contract_address,
             "asset_code": option.asset_code,
             "amount": current_balance,
             "confirmations": confirmations,
+            "required_confirmations": required_confirmations,
             "raw_payload": {
-                "address": latest_incoming["address"],
-                "topics": [topic.hex() for topic in latest_incoming["topics"]],
-                "data": latest_incoming["data"].hex(),
-                "block_hash": latest_incoming["blockHash"].hex(),
                 "transaction_hash": txid,
+                "block_hash": latest_incoming["blockHash"].hex(),
                 "transaction_index": int(latest_incoming["transactionIndex"]),
                 "log_index": log_index,
-                "removed": bool(getattr(latest_incoming, "removed", False)),
                 "balance_snapshot": str(current_balance),
             },
         }
@@ -167,10 +177,9 @@ def _observe_option(*, client, option, watch):
         client.post_signed("/api/internal/ledger/deposit-observations", payload)
 
         logging.info(
-            "deposit observed option=%s session=%s address=%s txid=%s confirmations=%s balance=%s",
+            "deposit observed option=%s session=%s txid=%s confirmations=%s amount=%s",
             option.key,
             session_public_id,
-            deposit_address,
             txid,
             confirmations,
             current_balance,
@@ -191,7 +200,7 @@ def observe_once(*, client, state, options):
 
     for option, watch in zip(options, watchlist_rows):
         try:
-            _observe_option(
+            _observe_token_option(
                 client=client,
                 option=option,
                 watch=watch,
