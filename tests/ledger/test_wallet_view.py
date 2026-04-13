@@ -10,6 +10,8 @@ from ledger.services import (
 )
 
 from .base import BaseLedgerTestCase
+from unittest.mock import patch
+from django.test import override_settings
 
 
 class TestWalletView(BaseLedgerTestCase):
@@ -317,3 +319,97 @@ class TestWalletView(BaseLedgerTestCase):
 
         self.w1.refresh_from_db()
         self.assertEqual(self.w1.held_balance, 0)
+
+    @override_settings(
+        DEPOSIT_EVM_ACCOUNT_XPUB="xpub661MyMwAqRbcFjYWxP2b6Z5wD4n2i7i7r5x2sKf7iJ6J8x2LQmY8u8m8wF7x8Yd1P6QxTtK8kXQq8z5Kf9d6b2L3Qq4r7u2w3y4z5")
+    @patch("ledger.services._derive_session_deposit_address")
+    def test_wallet_deposit_request_redirects_to_existing_active_session(self, mocked_derive):
+        mocked_derive.return_value = (
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "m/44'/60'/0'/0/1",
+        )
+
+        DepositAddress.objects.create(
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            display_label="Ethereum · USDT",
+            address="0x1111111111111111111111111111111111111111",
+            address_derivation_ref="m/44'/60'/0'/0/10",
+            derivation_index=10,
+            required_confirmations=12,
+            min_amount=100,
+            session_ttl_seconds=3600,
+        )
+
+        self.client.force_login(self.u1)
+
+        first = self.client.post(
+            reverse("wallet_deposit_request"),
+            {
+                "deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "return_tab": "all",
+                "return_status": "all",
+            },
+        )
+        second = self.client.post(
+            reverse("wallet_deposit_request"),
+            {
+                "deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "return_tab": "all",
+                "return_status": "all",
+            },
+        )
+
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(second.status_code, 302)
+        self.assertEqual(DepositSession.objects.filter(wallet=self.w1).count(), 1)
+
+    def test_wallet_deposit_session_status_json_contains_min_amount(self):
+        session = DepositSession.objects.create(
+            user=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            deposit_address="0x1212121212121212121212121212121212121212",
+            address_derivation_ref="m/44'/60'/0'/0/15",
+            expires_at=timezone.now() + timedelta(hours=1),
+            status=DepositSession.STATUS_AWAITING_PAYMENT,
+            required_confirmations=12,
+            min_amount=100,
+        )
+
+        self.client.force_login(self.u1)
+        response = self.client.get(
+            reverse("wallet_deposit_session_status", kwargs={"public_id": session.public_id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["min_amount"], 100)
+        self.assertIn("min_amount_display", payload)
+
+    def test_wallet_deposit_session_cancel_marks_session_canceled(self):
+        session = DepositSession.objects.create(
+            user=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            deposit_address="0x1313131313131313131313131313131313131313",
+            address_derivation_ref="m/44'/60'/0'/0/16",
+            expires_at=timezone.now() + timedelta(hours=1),
+            status=DepositSession.STATUS_AWAITING_PAYMENT,
+            required_confirmations=12,
+            min_amount=100,
+        )
+
+        self.client.force_login(self.u1)
+        response = self.client.post(
+            reverse("wallet_deposit_session_cancel", kwargs={"public_id": session.public_id})
+        )
+
+        self.assertEqual(response.status_code, 302)
+        session.refresh_from_db()
+        self.assertEqual(session.status, getattr(DepositSession, "STATUS_CANCELED", "canceled"))

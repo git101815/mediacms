@@ -1,46 +1,133 @@
 from datetime import timedelta
+from unittest.mock import patch
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.test import override_settings
 from django.utils import timezone
 
-from ledger.models import DepositSession, ObservedOnchainTransfer, TokenWallet
+from ledger.models import DepositAddress, DepositSession, DepositSweepJob, ObservedOnchainTransfer
 from ledger.services import (
+    cancel_user_deposit_session,
     create_deposit_session,
-    record_onchain_observation,
     credit_confirmed_deposit_session,
+    delete_user_deposit_session,
+    enqueue_deposit_sweep_job,
+    expire_stale_deposit_sessions,
     get_external_asset_clearing_wallet,
+    open_user_deposit_session,
+    record_onchain_observation,
 )
+
 from .base import BaseLedgerTestCase
 
 
+@override_settings(DEPOSIT_EVM_ACCOUNT_XPUB="xpub661MyMwAqRbcFjYWxP2b6Z5wD4n2i7i7r5x2sKf7iJ6J8x2LQmY8u8m8wF7x8Yd1P6QxTtK8kXQq8z5Kf9d6b2L3Qq4r7u2w3y4z5")
 class TestDepositSessions(BaseLedgerTestCase):
     def setUp(self):
         super().setUp()
         self.grant_perm(self.operator, "can_record_onchain_observations")
         self.grant_perm(self.operator, "can_credit_confirmed_deposits")
         self.grant_perm(self.operator, "can_manage_deposit_sweep_jobs")
-    def test_create_deposit_session_creates_unique_address_session(self):
-        session = create_deposit_session(
-            actor=self.u1,
-            wallet=self.w1,
+        self.grant_perm(self.operator, "can_manage_deposit_sessions")
+
+        self.route = DepositAddress.objects.create(
             chain="ethereum",
             asset_code="USDT",
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
-            deposit_address="0x1111111111111111111111111111111111111111",
-            address_derivation_ref="m/44'/60'/0'/0/1",
-            expires_at=timezone.now() + timedelta(hours=1),
+            display_label="Ethereum · USDT",
+            address="0x1111111111111111111111111111111111111111",
+            address_derivation_ref="m/44'/60'/0'/0/0",
+            derivation_index=0,
             required_confirmations=12,
             min_amount=100,
-            metadata={"source": "test"},
+            session_ttl_seconds=3600,
         )
 
-        self.assertEqual(session.user_id, self.u1.id)
+    @patch("ledger.services._derive_session_deposit_address")
+    def test_open_user_deposit_session_creates_session_with_derivation_fields(self, mocked_derive):
+        mocked_derive.return_value = (
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "m/44'/60'/0'/0/42",
+        )
+
+        session = open_user_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+        )
+
         self.assertEqual(session.wallet_id, self.w1.id)
         self.assertEqual(session.status, DepositSession.STATUS_AWAITING_PAYMENT)
-        self.assertEqual(session.chain, "ethereum")
-        self.assertEqual(session.asset_code, "USDT")
+        self.assertEqual(session.route_key, "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7")
+        self.assertEqual(session.deposit_address, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        self.assertEqual(session.derivation_index, 0)
+        self.assertEqual(session.derivation_path, "m/44'/60'/0'/0/42")
+        self.assertEqual(session.address_derivation_ref, "m/44'/60'/0'/0/42")
         self.assertEqual(session.required_confirmations, 12)
         self.assertEqual(session.min_amount, 100)
+
+    @patch("ledger.services._derive_session_deposit_address")
+    def test_open_user_deposit_session_reuses_existing_active_session(self, mocked_derive):
+        mocked_derive.return_value = (
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "m/44'/60'/0'/0/1",
+        )
+
+        first = open_user_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+        )
+        second = open_user_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+        )
+
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(DepositSession.objects.count(), 1)
+
+    @patch("ledger.services._derive_session_deposit_address")
+    def test_open_user_deposit_session_does_not_reuse_expired_session(self, mocked_derive):
+        mocked_derive.side_effect = [
+            ("0xcccccccccccccccccccccccccccccccccccccccc", "m/44'/60'/0'/0/2"),
+            ("0xdddddddddddddddddddddddddddddddddddddddd", "m/44'/60'/0'/0/3"),
+        ]
+
+        first = open_user_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+        )
+        DepositSession.objects.filter(id=first.id).update(
+            expires_at=timezone.now() - timedelta(seconds=1)
+        )
+
+        second = open_user_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+        )
+
+        self.assertNotEqual(first.id, second.id)
+        self.assertEqual(DepositSession.objects.count(), 2)
+
+    def test_open_user_deposit_session_rejects_wallet_of_another_user(self):
+        with self.assertRaises(PermissionDenied):
+            open_user_deposit_session(
+                actor=self.u1,
+                wallet=self.w2,
+                option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+            )
+
+    @override_settings(DEPOSIT_EVM_ACCOUNT_XPUB="")
+    def test_open_user_deposit_session_rejects_missing_xpub(self):
+        with self.assertRaises(ValidationError):
+            open_user_deposit_session(
+                actor=self.u1,
+                wallet=self.w1,
+                option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+            )
 
     def test_record_onchain_observation_is_idempotent_by_event_key(self):
         session = create_deposit_session(
@@ -161,7 +248,7 @@ class TestDepositSessions(BaseLedgerTestCase):
         self.w1.refresh_from_db()
         self.assertEqual(self.w1.balance, 250)
 
-    def test_credit_confirmed_deposit_session_rejects_contract_mismatch(self):
+    def test_cancel_user_deposit_session_rejects_observed_transaction(self):
         session = create_deposit_session(
             actor=self.u1,
             wallet=self.w1,
@@ -175,19 +262,150 @@ class TestDepositSessions(BaseLedgerTestCase):
             min_amount=100,
         )
 
+        record_onchain_observation(
+            actor=self.operator,
+            deposit_session=session,
+            chain="ethereum",
+            txid="0x987",
+            log_index=1,
+            block_number=1,
+            from_address="0xcccccccccccccccccccccccccccccccccccccccc",
+            to_address="0x4444444444444444444444444444444444444444",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            asset_code="USDT",
+            amount=250,
+            confirmations=1,
+            raw_payload={},
+        )
+
         with self.assertRaises(ValidationError):
-            record_onchain_observation(
-                actor=self.operator,
-                deposit_session=session,
-                chain="ethereum",
-                txid="0x987",
-                log_index=1,
-                block_number=1,
-                from_address="0xcccccccccccccccccccccccccccccccccccccccc",
-                to_address="0x4444444444444444444444444444444444444444",
-                token_contract_address="0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                asset_code="USDT",
-                amount=250,
-                confirmations=6,
-                raw_payload={},
-            )
+            cancel_user_deposit_session(actor=self.u1, deposit_session=session)
+
+    def test_expire_stale_deposit_sessions_expires_only_active_stale_ones(self):
+        stale = create_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            deposit_address="0x5555555555555555555555555555555555555555",
+            address_derivation_ref="m/44'/60'/0'/0/5",
+            expires_at=timezone.now() - timedelta(minutes=5),
+            required_confirmations=6,
+            min_amount=100,
+        )
+        fresh = create_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            deposit_address="0x6666666666666666666666666666666666666666",
+            address_derivation_ref="m/44'/60'/0'/0/6",
+            expires_at=timezone.now() + timedelta(minutes=5),
+            required_confirmations=6,
+            min_amount=100,
+        )
+
+        count = expire_stale_deposit_sessions(actor=self.operator, limit=100)
+
+        stale.refresh_from_db()
+        fresh.refresh_from_db()
+
+        self.assertEqual(count, 1)
+        self.assertEqual(stale.status, DepositSession.STATUS_EXPIRED)
+        self.assertEqual(fresh.status, DepositSession.STATUS_AWAITING_PAYMENT)
+
+    def test_delete_user_deposit_session_allows_pending_or_canceled_without_observation(self):
+        session = create_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            deposit_address="0x7777777777777777777777777777777777777777",
+            address_derivation_ref="m/44'/60'/0'/0/7",
+            expires_at=timezone.now() + timedelta(hours=1),
+            required_confirmations=6,
+            min_amount=100,
+        )
+
+        cancel_user_deposit_session(actor=self.u1, deposit_session=session)
+        delete_user_deposit_session(actor=self.u1, deposit_session=session)
+
+        self.assertFalse(DepositSession.objects.filter(id=session.id).exists())
+
+    def test_delete_user_deposit_session_rejects_when_observation_exists(self):
+        session = create_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            deposit_address="0x8888888888888888888888888888888888888888",
+            address_derivation_ref="m/44'/60'/0'/0/8",
+            expires_at=timezone.now() + timedelta(hours=1),
+            required_confirmations=6,
+            min_amount=100,
+        )
+
+        record_onchain_observation(
+            actor=self.operator,
+            deposit_session=session,
+            chain="ethereum",
+            txid="0x654",
+            log_index=2,
+            block_number=2,
+            from_address="0xdddddddddddddddddddddddddddddddddddddddd",
+            to_address="0x8888888888888888888888888888888888888888",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            asset_code="USDT",
+            amount=250,
+            confirmations=1,
+            raw_payload={},
+        )
+
+        with self.assertRaises(ValidationError):
+            delete_user_deposit_session(actor=self.u1, deposit_session=session)
+
+    def test_mark_sweep_job_confirmed_path_marks_session_swept(self):
+        session = create_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            deposit_address="0x9999999999999999999999999999999999999999",
+            address_derivation_ref="m/44'/60'/0'/0/100",
+            expires_at=timezone.now() + timedelta(hours=1),
+            required_confirmations=6,
+            min_amount=100,
+        )
+
+        observed = record_onchain_observation(
+            actor=self.operator,
+            deposit_session=session,
+            chain="ethereum",
+            txid="0xabc123",
+            log_index=7,
+            block_number=123456,
+            from_address="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            to_address="0x9999999999999999999999999999999999999999",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            asset_code="USDT",
+            amount=250,
+            confirmations=6,
+            raw_payload={"txid": "0xabc123", "log_index": 7},
+        )
+
+        credit_confirmed_deposit_session(
+            actor=self.operator,
+            deposit_session=session,
+            observed_transfer=observed,
+            created_by=self.u1,
+        )
+
+        job = DepositSweepJob.objects.get(observed_transfer=observed)
+        self.assertEqual(job.status, DepositSweepJob.STATUS_PENDING)
+
+        self.assertEqual(session.status, DepositSession.STATUS_CREDITED)
