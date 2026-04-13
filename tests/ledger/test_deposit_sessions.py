@@ -407,4 +407,5 @@ class TestDepositSessions(BaseLedgerTestCase):
         job = DepositSweepJob.objects.get(observed_transfer=observed)
         self.assertEqual(job.status, DepositSweepJob.STATUS_PENDING)
 
+        session.refresh_from_db()
         self.assertEqual(session.status, DepositSession.STATUS_CREDITED)

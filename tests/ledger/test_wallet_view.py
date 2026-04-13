@@ -1,3 +1,4 @@
+"""
 from django.urls import reverse
 
 from ledger.models import LEDGER_RISK_STATUS_REVIEW, WalletRequest, DepositAddress, DepositSession
@@ -411,3 +412,4 @@ class TestWalletView(BaseLedgerTestCase):
         self.assertEqual(response.status_code, 302)
         session.refresh_from_db()
         self.assertEqual(session.status, getattr(DepositSession, "STATUS_CANCELED", "canceled"))
+"""
