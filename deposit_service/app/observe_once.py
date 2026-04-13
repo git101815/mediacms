@@ -30,7 +30,7 @@ def _is_native_option(option) -> bool:
 
 
 def _transfer_topic() -> str:
-    return Web3.keccak(text="Transfer(address,address,uint256)").hex()
+    return "0x" + Web3.keccak(text="Transfer(address,address,uint256)").hex()
 
 
 def _address_topic(address: str) -> str:
