@@ -11,6 +11,7 @@ from ledger.services import (
     create_deposit_session,
     credit_confirmed_deposit_session,
     delete_user_deposit_session,
+    list_active_deposit_watch_targets,
     enqueue_deposit_sweep_job,
     expire_stale_deposit_sessions,
     get_external_asset_clearing_wallet,
@@ -409,3 +410,120 @@ class TestDepositSessions(BaseLedgerTestCase):
 
         session.refresh_from_db()
         self.assertEqual(session.status, DepositSession.STATUS_CREDITED)
+
+    @patch("ledger.services._derive_session_deposit_address")
+    def test_session_first_credit_flow_creates_pending_sweep_job_and_updates_watchlist(self, mocked_derive):
+        self.grant_perm(self.operator, "can_view_deposit_sessions")
+
+        mocked_derive.return_value = (
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "m/44'/60'/0'/0/0",
+        )
+
+        session = open_user_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+        )
+
+        self.assertEqual(session.status, DepositSession.STATUS_AWAITING_PAYMENT)
+        self.assertEqual(session.route_key, "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7")
+        self.assertEqual(session.derivation_index, 0)
+        self.assertEqual(session.derivation_path, "m/44'/60'/0'/0/0")
+        self.assertEqual(session.deposit_address, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+        option_rows = [
+            {
+                "chain": "ethereum",
+                "asset_code": "USDT",
+                "token_contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+            }
+        ]
+
+        watch_targets = list_active_deposit_watch_targets(
+            actor=self.operator,
+            option_rows=option_rows,
+        )
+        self.assertEqual(len(watch_targets), 1)
+        self.assertEqual(len(watch_targets[0]["targets"]), 1)
+        self.assertEqual(
+            watch_targets[0]["targets"][0]["session_public_id"],
+            str(session.public_id),
+        )
+        self.assertEqual(
+            watch_targets[0]["targets"][0]["deposit_address"],
+            session.deposit_address,
+        )
+
+        observed = record_onchain_observation(
+            actor=self.operator,
+            deposit_session=session,
+            chain="ethereum",
+            txid="0xsmoketest0001",
+            log_index=1,
+            block_number=123456,
+            from_address="0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            to_address=session.deposit_address,
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            asset_code="USDT",
+            amount=250,
+            confirmations=session.required_confirmations,
+            raw_payload={"source": "integration-test", "txid": "0xsmoketest0001"},
+        )
+
+        credit_confirmed_deposit_session(
+            actor=self.operator,
+            deposit_session=session,
+            observed_transfer=observed,
+            created_by=self.u1,
+        )
+
+        session.refresh_from_db()
+        self.assertEqual(session.status, DepositSession.STATUS_CREDITED)
+        self.assertEqual(session.observed_txid, "0xsmoketest0001")
+        self.assertEqual(session.confirmations, session.required_confirmations)
+
+        job = DepositSweepJob.objects.get(observed_transfer=observed)
+        self.assertEqual(job.deposit_session_id, session.id)
+        self.assertEqual(job.status, DepositSweepJob.STATUS_PENDING)
+
+        watch_targets_after_credit = list_active_deposit_watch_targets(
+            actor=self.operator,
+            option_rows=option_rows,
+        )
+        self.assertEqual(len(watch_targets_after_credit), 1)
+        self.assertEqual(watch_targets_after_credit[0]["targets"], [])
+
+    @patch("ledger.services._derive_session_deposit_address")
+    def test_session_first_reopen_after_expiration_allocates_new_session_and_new_index(self, mocked_derive):
+        mocked_derive.side_effect = [
+            ("0xcccccccccccccccccccccccccccccccccccccccc", "m/44'/60'/0'/0/0"),
+            ("0xdddddddddddddddddddddddddddddddddddddddd", "m/44'/60'/0'/0/1"),
+        ]
+
+        first = open_user_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+        )
+        self.assertEqual(first.derivation_index, 0)
+        self.assertEqual(first.deposit_address, "0xcccccccccccccccccccccccccccccccccccccccc")
+
+        DepositSession.objects.filter(id=first.id).update(
+            expires_at=timezone.now() - timedelta(seconds=1)
+        )
+
+        second = open_user_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+        )
+
+        self.assertNotEqual(first.id, second.id)
+        self.assertEqual(second.derivation_index, 1)
+        self.assertEqual(second.derivation_path, "m/44'/60'/0'/0/1")
+        self.assertEqual(second.deposit_address, "0xdddddddddddddddddddddddddddddddddddddddd")
+        self.assertEqual(second.status, DepositSession.STATUS_AWAITING_PAYMENT)
+
+        first.refresh_from_db()
+        self.assertLessEqual(first.expires_at, timezone.now())

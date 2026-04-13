@@ -5,7 +5,8 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from ledger.models import DepositAddress, DepositSession
+from ledger.models import DepositAddress, DepositSession, DepositSweepJob
+from ledger.services import credit_confirmed_deposit_session, record_onchain_observation
 
 from .base import BaseLedgerTestCase
 
@@ -153,3 +154,63 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         self.assertEqual(payload["min_amount"], 100)
         self.assertIn("expires_at", payload)
         self.assertIn("expires_at_iso", payload)
+
+    @patch("ledger.services._derive_session_deposit_address")
+    def test_wallet_deposit_status_json_reflects_credit_after_observation(self, mocked_derive):
+        self.grant_perm(self.operator, "can_record_onchain_observations")
+        self.grant_perm(self.operator, "can_credit_confirmed_deposits")
+        self.grant_perm(self.operator, "can_manage_deposit_sweep_jobs")
+
+        mocked_derive.return_value = (
+            "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "m/44'/60'/0'/0/0",
+        )
+
+        self.client.force_login(self.u1)
+
+        response = self.client.post(
+            reverse("wallet_deposit_request"),
+            {"deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7"},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        session = DepositSession.objects.get(wallet=self.w1)
+
+        observed = record_onchain_observation(
+            actor=self.operator,
+            deposit_session=session,
+            chain="ethereum",
+            txid="0xviewflow0001",
+            log_index=1,
+            block_number=987654,
+            from_address="0xffffffffffffffffffffffffffffffffffffffff",
+            to_address=session.deposit_address,
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            asset_code="USDT",
+            amount=250,
+            confirmations=session.required_confirmations,
+            raw_payload={"source": "view-integration-test", "txid": "0xviewflow0001"},
+        )
+
+        credit_confirmed_deposit_session(
+            actor=self.operator,
+            deposit_session=session,
+            observed_transfer=observed,
+            created_by=self.u1,
+        )
+
+        session.refresh_from_db()
+        self.assertEqual(session.status, DepositSession.STATUS_CREDITED)
+
+        status_response = self.client.get(
+            reverse("wallet_deposit_session_status", kwargs={"public_id": session.public_id}),
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(status_response.status_code, 200)
+        payload = status_response.json()
+
+        self.assertEqual(payload["status"], DepositSession.STATUS_CREDITED)
+        self.assertEqual(payload["observed_txid"], "0xviewflow0001")
+        self.assertEqual(payload["confirmations"], session.required_confirmations)
+        self.assertTrue(payload["is_terminal"])
