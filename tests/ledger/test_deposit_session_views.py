@@ -10,7 +10,6 @@ from ledger.models import DepositAddress, DepositSession
 from .base import BaseLedgerTestCase
 
 
-@override_settings(DEPOSIT_EVM_ACCOUNT_XPUB="xpub661MyMwAqRbcFjYWxP2b6Z5wD4n2i7i7r5x2sKf7iJ6J8x2LQmY8u8m8wF7x8Yd1P6QxTtK8kXQq8z5Kf9d6b2L3Qq4r7u2w3y4z5")
 class TestDepositSessionViews(BaseLedgerTestCase):
     def setUp(self):
         super().setUp()

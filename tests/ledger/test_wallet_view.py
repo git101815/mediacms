@@ -320,8 +320,6 @@ class TestWalletView(BaseLedgerTestCase):
         self.w1.refresh_from_db()
         self.assertEqual(self.w1.held_balance, 0)
 
-    @override_settings(
-        DEPOSIT_EVM_ACCOUNT_XPUB="xpub661MyMwAqRbcFjYWxP2b6Z5wD4n2i7i7r5x2sKf7iJ6J8x2LQmY8u8m8wF7x8Yd1P6QxTtK8kXQq8z5Kf9d6b2L3Qq4r7u2w3y4z5")
     @patch("ledger.services._derive_session_deposit_address")
     def test_wallet_deposit_request_redirects_to_existing_active_session(self, mocked_derive):
         mocked_derive.return_value = (
