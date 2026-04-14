@@ -1,0 +1,106 @@
+<script>
+(function () {
+  if (!window.mcPopAdsRuntime || !window.mcPopAdsConfig) {
+    return;
+  }
+
+  if (window.mcPopAdsRuntime.chosenProvider !== "partner") {
+    return;
+  }
+
+  if (window.__mcPartnerPopadsBooted) {
+    return;
+  }
+  window.__mcPartnerPopadsBooted = true;
+
+  var runtime = window.mcPopAdsRuntime;
+  var config = window.mcPopAdsConfig;
+
+  function randomId() {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === "function") {
+        return window.crypto.randomUUID();
+      }
+    } catch (error) {
+      // ignore
+    }
+    return String(Date.now()) + "-" + String(Math.random()).slice(2);
+  }
+
+  function chooseOffer() {
+    var offers = config.partner.offers || [];
+    if (!offers.length) {
+      return null;
+    }
+    var index = Math.floor(Math.random() * offers.length);
+    return offers[index];
+  }
+
+  function buildUrl(offer) {
+    var clickId = randomId();
+    return offer.urlTemplate.replace(/CLICKID/g, encodeURIComponent(clickId));
+  }
+
+  function openDestination(url) {
+    var popup = null;
+    try {
+      popup = window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      popup = null;
+    }
+    return !!popup;
+  }
+
+  function plausibleSafe(eventName, props) {
+    if (typeof window.plausible !== "function") {
+      return;
+    }
+    try {
+      window.plausible(eventName, props ? { props: props } : undefined);
+    } catch (error) {
+      // ignore
+    }
+  }
+
+  function maybeTriggerPartnerPop() {
+    if (!runtime.canRun()) {
+      return;
+    }
+
+    if (Date.now() < runtime.delayReadyAt) {
+      return;
+    }
+
+    runtime.clickCount += 1;
+    if (runtime.clickCount <= config.capping.skipClicks) {
+      return;
+    }
+
+    var offer = chooseOffer();
+    if (!offer) {
+      return;
+    }
+
+    var url = buildUrl(offer);
+    var opened = openDestination(url);
+
+    if (opened) {
+      runtime.markOpen();
+      plausibleSafe("popunder_open", {
+        provider: "partner",
+        offer: offer.key
+      });
+    } else {
+      plausibleSafe("popunder_blocked", {
+        provider: "partner",
+        offer: offer.key
+      });
+    }
+  }
+
+  document.addEventListener("pointerdown", maybeTriggerPartnerPop, {
+    capture: true,
+    passive: true
+  });
+})();
+</script>

@@ -1,1 +1,26 @@
-<script src="https://36707.phidonatome.com/4/js/259141" async></script>
+<script>
+(function () {
+  if (!window.mcPopAdsRuntime || !window.mcPopAdsConfig) {
+    return;
+  }
+
+  if (window.mcPopAdsRuntime.chosenProvider !== "clickaine") {
+    return;
+  }
+
+  if (window.__mcClickaineBooted) {
+    return;
+  }
+  window.__mcClickaineBooted = true;
+
+  function bootClickaine() {
+    var script = document.createElement("script");
+    script.src = "https://36707.phidonatome.com/4/js/259141";
+    script.async = true;
+    script.dataset.mcProvider = "clickaine";
+    document.body.appendChild(script);
+  }
+
+  bootClickaine();
+})();
+</script>

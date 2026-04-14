@@ -147,9 +147,11 @@
 {% block bottomimports %}
 {% if not GOOGLEBOT_DEBUG_COMMENT %}
 <script src="{% static "js/media.js" %}"></script>
-{% if SHOW_TABUNDER %}
-{% include "ads/popunder_tracking.html" %}
-{% include "ads/popunder_clickaine.html" %}
-{% endif %}
+  {% if SHOW_TABUNDER %}
+    {% include "ads/popunder_rotation.html" %}
+    {% include "ads/popunder_tracking.html" %}
+    {% include "ads/popunder_clickaine.html" %}
+    {% include "ads/partner_popads.html" %}
+  {% endif %}
 {% endif %}
 {% endblock bottomimports %}

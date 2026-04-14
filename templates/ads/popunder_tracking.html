@@ -1,21 +1,69 @@
 <script>
+(function () {
+  if (window.__mcPopTrackingInit) {
+    return;
+  }
+  window.__mcPopTrackingInit = true;
 
-!function(){
+  var fired = false;
 
-var f=0;addEventListener("pointerdown",function h(){removeEventListener("pointerdown",h,!0);
+  function plausibleSafe(eventName, props) {
+    if (fired || typeof window.plausible !== "function") {
+      return;
+    }
+    fired = true;
+    try {
+      window.plausible(eventName, props ? { props: props } : undefined);
+    } catch (error) {
+      // ignore
+    }
+  }
 
-var a=navigator.sendBeacon,o=window.open,b=window.top&&window.top.open,c=0,d=0,u="coreadness.com";
+  addEventListener("pointerdown", function handler() {
+    removeEventListener("pointerdown", handler, true);
 
-navigator.sendBeacon=function(x,y){try{if(!c&&x&&x.indexOf(u)>-1)c=1}catch(e){}return a.apply(this,arguments)};
+    var originalOpen = window.open;
+    var originalTopOpen = window.top && window.top.open;
+    var beaconDetected = false;
+    var popupDetected = false;
+    var originalBeacon = navigator.sendBeacon;
 
-window.open=function(){var w=o.apply(this,arguments);if(w&&"closed"in w)d=1;return w};
+    navigator.sendBeacon = function () {
+      beaconDetected = true;
+      return originalBeacon.apply(this, arguments);
+    };
 
-if(b&&b!==o)window.top.open=function(){var w=b.apply(this,arguments);if(w&&"closed"in w)d=1;return w};
+    window.open = function () {
+      var openedWindow = originalOpen.apply(this, arguments);
+      if (openedWindow && "closed" in openedWindow) {
+        popupDetected = true;
+      }
+      return openedWindow;
+    };
 
-setTimeout(function(){navigator.sendBeacon=a;window.open=o;if(b&&b!==o)window.top.open=b;if((c||d)&&!f&&typeof plausible=="function"){f=1;plausible("e1")}},400);
+    if (originalTopOpen && originalTopOpen !== originalOpen) {
+      window.top.open = function () {
+        var openedWindow = originalTopOpen.apply(this, arguments);
+        if (openedWindow && "closed" in openedWindow) {
+          popupDetected = true;
+        }
+        return openedWindow;
+      };
+    }
 
-},{capture:!0,once:!0});
+    setTimeout(function () {
+      navigator.sendBeacon = originalBeacon;
+      window.open = originalOpen;
+      if (originalTopOpen && originalTopOpen !== originalOpen) {
+        window.top.open = originalTopOpen;
+      }
 
-}();
-
+      if (beaconDetected || popupDetected) {
+        plausibleSafe("popunder_detected", {
+          provider: window.mcPopAdsRuntime ? window.mcPopAdsRuntime.chosenProvider : "unknown"
+        });
+      }
+    }, 400);
+  }, { capture: true, once: true });
+})();
 </script>

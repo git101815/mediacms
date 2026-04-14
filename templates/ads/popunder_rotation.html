@@ -1,0 +1,176 @@
+<script>
+(function () {
+  if (window.__mcPopRotationInit) {
+    return;
+  }
+  window.__mcPopRotationInit = true;
+
+  var config = {
+    enabled: {{ SHOW_TABUNDER|yesno:"true,false" }},
+    providers: {
+      clickaine: {
+        weight: 0
+      },
+      partner: {
+        weight: 100
+      }
+    },
+    capping: {
+      frequencySeconds: 24 * 60 * 60,
+      limitPerPage: 1,
+      limitPerSession: 1,
+      skipClicks: 0,
+      delayMs: 0
+    },
+    partner: {
+      mode: "tab",
+      offers: [
+        {
+          key: "cams",
+          urlTemplate: "https://track.gpsecureads.com/556564ae-1588-4c3a-a795-4684cf4d1da0?var1=celebfakessodaigr&var2=tab&var3=CLICKID"
+        },
+        {
+          key: "dating",
+          urlTemplate: "https://www.instabang.com/tours/?t=best&id=celebfakesgpigr&cmp=tab&ad_id=CLICKID"
+        }
+      ]
+    },
+    storagePrefix: "mc_pop_rotation_v1"
+  };
+
+  window.mcPopAdsConfig = config;
+
+  function getLocalStorageSafe() {
+    try {
+      return window.localStorage;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function getSessionStorageSafe() {
+    try {
+      return window.sessionStorage;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function readJson(storage, key, fallbackValue) {
+    if (!storage) {
+      return fallbackValue;
+    }
+    try {
+      var raw = storage.getItem(key);
+      return raw ? JSON.parse(raw) : fallbackValue;
+    } catch (error) {
+      return fallbackValue;
+    }
+  }
+
+  function writeJson(storage, key, value) {
+    if (!storage) {
+      return;
+    }
+    try {
+      storage.setItem(key, JSON.stringify(value));
+    } catch (error) {
+      // ignore
+    }
+  }
+
+  function nowSeconds() {
+    return Math.floor(Date.now() / 1000);
+  }
+
+  function getState() {
+    var localStorageSafe = getLocalStorageSafe();
+    var sessionStorageSafe = getSessionStorageSafe();
+
+    var globalState = readJson(localStorageSafe, config.storagePrefix + ":global", {
+      lastOpenTs: 0
+    });
+
+    var sessionState = readJson(sessionStorageSafe, config.storagePrefix + ":session", {
+      opens: 0
+    });
+
+    return {
+      localStorageSafe: localStorageSafe,
+      sessionStorageSafe: sessionStorageSafe,
+      globalState: globalState,
+      sessionState: sessionState
+    };
+  }
+
+  function markOpen() {
+    var state = getState();
+    state.globalState.lastOpenTs = nowSeconds();
+    state.sessionState.opens += 1;
+    writeJson(state.localStorageSafe, config.storagePrefix + ":global", state.globalState);
+    writeJson(state.sessionStorageSafe, config.storagePrefix + ":session", state.sessionState);
+    window.mcPopPageOpens = (window.mcPopPageOpens || 0) + 1;
+  }
+
+  function canRun() {
+    if (!config.enabled) {
+      return false;
+    }
+
+    var state = getState();
+    var pageOpens = window.mcPopPageOpens || 0;
+
+    if (config.capping.limitPerPage > 0 && pageOpens >= config.capping.limitPerPage) {
+      return false;
+    }
+
+    if (config.capping.limitPerSession > 0 && state.sessionState.opens >= config.capping.limitPerSession) {
+      return false;
+    }
+
+    if (
+      config.capping.frequencySeconds > 0 &&
+      state.globalState.lastOpenTs > 0 &&
+      (nowSeconds() - state.globalState.lastOpenTs) < config.capping.frequencySeconds
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function chooseWeightedProvider() {
+    var totalWeight = 0;
+    var names = Object.keys(config.providers);
+
+    names.forEach(function (name) {
+      totalWeight += Math.max(0, Number(config.providers[name].weight || 0));
+    });
+
+    if (totalWeight <= 0) {
+      return "clickaine";
+    }
+
+    var bucket = Math.random() * totalWeight;
+    var cursor = 0;
+
+    for (var i = 0; i < names.length; i += 1) {
+      var name = names[i];
+      cursor += Math.max(0, Number(config.providers[name].weight || 0));
+      if (bucket < cursor) {
+        return name;
+      }
+    }
+
+    return "clickaine";
+  }
+
+  window.mcPopAdsRuntime = {
+    chosenProvider: chooseWeightedProvider(),
+    canRun: canRun,
+    markOpen: markOpen,
+    clickCount: 0,
+    delayReadyAt: Date.now() + config.capping.delayMs
+  };
+})();
+</script>
