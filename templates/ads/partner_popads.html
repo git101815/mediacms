@@ -95,32 +95,6 @@
     }, 250);
   }
 
-  function navigateCurrentTabToAd(adUrl) {
-    var originalHref = String(window.location.href || "");
-
-    setTimeout(function () {
-      try {
-        window.location.replace(adUrl);
-      } catch (error) {
-        try {
-          window.location.assign(adUrl);
-        } catch (innerError) {
-          // ignore
-        }
-      }
-
-      setTimeout(function () {
-        try {
-          if (String(window.location.href || "") === originalHref) {
-            window.location.assign(adUrl);
-          }
-        } catch (error) {
-          // ignore
-        }
-      }, 80);
-    }, 0);
-  }
-
   function markAttempt(offer, mode) {
     window.mcPopLastAttempt = {
       provider: "partner",
@@ -160,7 +134,7 @@
     });
   }
 
-  function openTrueTabunder(offer, event) {
+  function openTrueTabunder(offer, event, triggerEventName) {
     var mode = "tabunder";
     var adUrl = buildAdUrl(offer);
     var cloneUrl = String(window.location.href || "");
@@ -179,7 +153,9 @@
       // ignore
     }
 
-    installNextClickBlocker();
+    if (triggerEventName !== "click") {
+      installNextClickBlocker();
+    }
 
     var cloneHandle = openCloneTab(cloneUrl);
     if (!looksUsable(cloneHandle)) {
@@ -187,7 +163,16 @@
       return null;
     }
 
-    navigateCurrentTabToAd(adUrl);
+    try {
+      window.location.replace(adUrl);
+    } catch (error) {
+      try {
+        window.location.assign(adUrl);
+      } catch (innerError) {
+        markBlocked(offer, mode);
+        return null;
+      }
+    }
 
     markSuccess(offer, mode);
     return {
@@ -216,7 +201,7 @@
     return false;
   }
 
-  function handleTrigger(event) {
+  function handleTrigger(event, triggerEventName) {
     if (isTriggerLocked) {
       return;
     }
@@ -245,7 +230,7 @@
 
     isTriggerLocked = true;
 
-    var result = openTrueTabunder(offer, event);
+    var result = openTrueTabunder(offer, event, triggerEventName);
     if (!result) {
       setTimeout(function () {
         isTriggerLocked = false;
@@ -277,8 +262,15 @@
       "height:" + rect.height + "px"
     ].join(";");
 
-    overlay.addEventListener("pointerdown", function (event) {
-      handleTrigger(event);
+    overlay.addEventListener("mousedown", function (event) {
+      handleTrigger(event, "mousedown");
+    }, { capture: true, passive: false });
+
+    overlay.addEventListener("click", function (event) {
+      var ua = String(navigator.userAgent || "").toLowerCase();
+      if (ua.indexOf("firefox") !== -1) {
+        handleTrigger(event, "click");
+      }
     }, { capture: true, passive: false });
 
     document.body.appendChild(overlay);
@@ -320,23 +312,33 @@
     }
   }
 
-  document.addEventListener("pointerdown", function (event) {
-    handleTrigger(event);
-  }, { capture: true, passive: false });
+  var ua = String(navigator.userAgent || "").toLowerCase();
+  var isFirefox = ua.indexOf("firefox") !== -1;
+  var isMobile = /android|iphone|ipad|ipod|mobile/.test(ua) || window.innerWidth < 900;
 
-  document.addEventListener("touchstart", function () {
-    pointerMoved = false;
-  }, { capture: true, passive: true });
+  if (isMobile) {
+    document.addEventListener("touchstart", function () {
+      pointerMoved = false;
+    }, { capture: true, passive: true });
 
-  document.addEventListener("touchmove", function () {
-    pointerMoved = true;
-  }, { capture: true, passive: true });
+    document.addEventListener("touchmove", function () {
+      pointerMoved = true;
+    }, { capture: true, passive: true });
 
-  document.addEventListener("touchend", function (event) {
-    if (!pointerMoved) {
-      handleTrigger(event);
-    }
-  }, { capture: true, passive: false });
+    document.addEventListener("touchend", function (event) {
+      if (!pointerMoved) {
+        handleTrigger(event, "touchend");
+      }
+    }, { capture: true, passive: false });
+  } else if (isFirefox) {
+    document.addEventListener("click", function (event) {
+      handleTrigger(event, "click");
+    }, { capture: true, passive: false });
+  } else {
+    document.addEventListener("mousedown", function (event) {
+      handleTrigger(event, "mousedown");
+    }, { capture: true, passive: false });
+  }
 
   refreshOverlays();
   setInterval(refreshOverlays, 1000);
