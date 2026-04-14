@@ -5,10 +5,6 @@
   }
   window.__mcPopRotationInit = true;
 
-  /*
-    Replace the values below with your existing Django settings/context vars.
-    I am not naming them from local_settings.py because I could not read that file publicly.
-  */
   var config = {
     enabled: {{ SHOW_TABUNDER|yesno:"true,false" }},
 
@@ -50,8 +46,8 @@
       ],
 
       engine: {
-        fallbackOrderDesktop: ["tabunder", "popunder", "tabup", "popup"],
-        fallbackOrderMobile: ["tabup", "popup"],
+        preferredModeDesktop: "tabunder",
+        preferredModeMobile: "tabup",
         popupWidthDesktop: 1000,
         popupHeightDesktop: 700,
         popupWidthMobileRatio: 0.92,
@@ -171,21 +167,21 @@
     var state = getState();
 
     if (Number(config.capping.delaySeconds || 0) > 0 && state.globalState.lastOpenTs > 0) {
-      if ((nowTs - state.globalState.lastOpenTs) < Number(config.capping.delaySeconds)) {
+      if ((nowTs - state.globalState.lastOpenTs) < Number(config.capping.delaySeconds || 0)) {
         return false;
       }
     }
 
     if (
       Number(config.capping.limitPerPage || 0) > 0 &&
-      Number(state.pageState.opens || 0) >= Number(config.capping.limitPerPage)
+      Number(state.pageState.opens || 0) >= Number(config.capping.limitPerPage || 0)
     ) {
       return false;
     }
 
     if (
       Number(config.capping.limitPerSession || 0) > 0 &&
-      Number(state.sessionState.opens || 0) >= Number(config.capping.limitPerSession)
+      Number(state.sessionState.opens || 0) >= Number(config.capping.limitPerSession || 0)
     ) {
       return false;
     }
@@ -194,7 +190,7 @@
 
     if (
       Number(config.capping.limitTotal || 0) > 0 &&
-      frequencyWindow.length >= Number(config.capping.limitTotal)
+      frequencyWindow.length >= Number(config.capping.limitTotal || 0)
     ) {
       return false;
     }
@@ -202,7 +198,7 @@
     if (
       Number(config.capping.frequencySeconds || 0) > 0 &&
       Number(state.globalState.lastOpenTs || 0) > 0 &&
-      (nowTs - Number(state.globalState.lastOpenTs)) < Number(config.capping.frequencySeconds)
+      (nowTs - Number(state.globalState.lastOpenTs || 0)) < Number(config.capping.frequencySeconds || 0)
     ) {
       return false;
     }
@@ -249,6 +245,7 @@
 
     var bucket = Math.random() * totalWeight;
     var cursor = 0;
+
     for (var i = 0; i < normalized.length; i += 1) {
       cursor += normalized[i].weight;
       if (bucket < cursor) {
@@ -264,22 +261,71 @@
       return null;
     }
 
-    var items = {};
+    var totalWeight = 0;
     for (var i = 0; i < offers.length; i += 1) {
-      items[String(i)] = { weight: Number(offers[i].weight || 0) };
+      totalWeight += Math.max(0, Number(offers[i].weight || 0));
     }
 
-    var chosenIndex = chooseWeightedKey(items, "0");
-    var parsedIndex = parseInt(chosenIndex, 10);
-    if (isNaN(parsedIndex) || !offers[parsedIndex]) {
+    if (totalWeight <= 0) {
       return offers[0];
     }
-    return offers[parsedIndex];
+
+    var bucket = Math.random() * totalWeight;
+    var cursor = 0;
+
+    for (var j = 0; j < offers.length; j += 1) {
+      cursor += Math.max(0, Number(offers[j].weight || 0));
+      if (bucket < cursor) {
+        return offers[j];
+      }
+    }
+
+    return offers[0];
   }
 
   function isMobileLike() {
     var ua = String(navigator.userAgent || "").toLowerCase();
     return /android|iphone|ipad|ipod|mobile/.test(ua) || window.innerWidth < 900;
+  }
+
+  function detectBrowserEnv() {
+    var ua = String(navigator.userAgent || "").toLowerCase();
+    var isTop = false;
+
+    try {
+      isTop = window.top === window.self;
+    } catch (error) {
+      isTop = false;
+    }
+
+    return {
+      isMobile: isMobileLike(),
+      isFirefox: ua.indexOf("firefox") !== -1,
+      isSafari: ua.indexOf("safari") !== -1 && ua.indexOf("chrome") === -1 && ua.indexOf("chromium") === -1,
+      isTop: isTop
+    };
+  }
+
+  function resolvePreferredMode() {
+    var env = detectBrowserEnv();
+    var engine = config.partner && config.partner.engine ? config.partner.engine : {};
+    var mode = env.isMobile
+      ? (engine.preferredModeMobile || "tabup")
+      : (engine.preferredModeDesktop || "tabunder");
+
+    if (mode === "popunder" && (env.isFirefox || env.isSafari)) {
+      mode = "tabunder";
+    }
+
+    if (mode === "tabunder" && !env.isTop) {
+      mode = "popup";
+    }
+
+    if (env.isMobile && (mode === "tabunder" || mode === "popunder" || mode === "popup")) {
+      mode = "tabup";
+    }
+
+    return mode;
   }
 
   window.mcPopAdsRuntime = {
@@ -288,7 +334,9 @@
     canRun: canRun,
     markOpen: markOpen,
     clickCount: 0,
-    deviceClass: isMobileLike() ? "mobile" : "desktop"
+    deviceClass: isMobileLike() ? "mobile" : "desktop",
+    detectBrowserEnv: detectBrowserEnv,
+    resolvePreferredMode: resolvePreferredMode
   };
 })();
 </script>
