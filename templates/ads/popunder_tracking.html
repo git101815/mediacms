@@ -1,73 +1,87 @@
 <script>
 !function(){
+var sent=0;
 
-var f=0;addEventListener("pointerdown",function h(){removeEventListener("pointerdown",h,!0);
+addEventListener("pointerdown",function handler(){
+  removeEventListener("pointerdown",handler,!0);
 
-var a=navigator.sendBeacon,
-    o=window.open,
-    b=window.top&&window.top.open,
-    c=0,
-    d=0,
-    p=window.plausible,
-    domains=["coreadness.com"];
+  var originalBeacon=navigator.sendBeacon,
+      originalOpen=window.open,
+      originalTopOpen=window.top&&window.top.open,
+      beaconDetected=0,
+      popupDetected=0,
+      plausible=window.plausible,
+      beaconDomains=["coreadness.com"];
 
-try{
-  if(window.mcPopAdsConfig && window.mcPopAdsConfig.tracking && Array.isArray(window.mcPopAdsConfig.tracking.beaconDomains)){
-    domains=window.mcPopAdsConfig.tracking.beaconDomains.slice();
-  }
-}catch(e){}
-
-navigator.sendBeacon=function(x,y){
   try{
-    if(!c && x){
-      for(var i=0;i<domains.length;i++){
-        if(domains[i] && String(x).indexOf(domains[i])>-1){
-          c=1;
-          break;
-        }
-      }
+    if(
+      window.mcPopAdsConfig &&
+      window.mcPopAdsConfig.tracking &&
+      Array.isArray(window.mcPopAdsConfig.tracking.beaconDomains)
+    ){
+      beaconDomains=window.mcPopAdsConfig.tracking.beaconDomains.slice();
     }
   }catch(e){}
-  return a.apply(this,arguments)
-};
 
-window.open=function(){
-  var w=o.apply(this,arguments);
-  if(w&&"closed"in w)d=1;
-  return w
-};
+  navigator.sendBeacon=function(url,data){
+    try{
+      if(!beaconDetected && url){
+        var s=String(url);
+        for(var i=0;i<beaconDomains.length;i++){
+          if(beaconDomains[i] && s.indexOf(beaconDomains[i])>-1){
+            beaconDetected=1;
+            break;
+          }
+        }
+      }
+    }catch(e){}
+    return originalBeacon.apply(this,arguments);
+  };
 
-if(b&&b!==o)window.top.open=function(){
-  var w=b.apply(this,arguments);
-  if(w&&"closed"in w)d=1;
-  return w
-};
+  window.open=function(){
+    var w=originalOpen.apply(this,arguments);
+    if(w && "closed" in w) popupDetected=1;
+    return w;
+  };
 
-setTimeout(function(){
-  navigator.sendBeacon=a;
-  window.open=o;
-  if(b&&b!==o)window.top.open=b;
+  if(originalTopOpen && originalTopOpen!==originalOpen){
+    window.top.open=function(){
+      var w=originalTopOpen.apply(this,arguments);
+      if(w && "closed" in w) popupDetected=1;
+      return w;
+    };
+  }
 
-  if(!f && typeof p=="function"){
+  setTimeout(function(){
+    navigator.sendBeacon=originalBeacon;
+    window.open=originalOpen;
+    if(originalTopOpen && originalTopOpen!==originalOpen){
+      window.top.open=originalTopOpen;
+    }
+
+    if(sent || typeof plausible!=="function"){
+      return;
+    }
+
     var attempt=window.mcPopLastAttempt||{},
         success=window.mcPopLastSuccess||{},
         consumed=window.mcPopLastConsumedOpen||{},
         provider=success.provider||consumed.provider||attempt.provider||"",
         offer=success.offer||consumed.offer||attempt.offer||"",
-        blocked=(c||d)?"0":(attempt.provider?"1":"");
+        blocked=(beaconDetected||popupDetected) ? "0" : (attempt.provider ? "1" : "");
 
-    if(c||d||attempt.provider){
-      f=1;
-      p("e1",{props:{
-        provider:provider,
-        offer:offer,
-        blocked:blocked
-      }});
+    if(beaconDetected || popupDetected || attempt.provider){
+      sent=1;
+      plausible("e1", {
+        props: {
+          provider: provider,
+          offer: offer,
+          blocked: blocked
+        }
+      });
     }
-  }
-},400);
+  }, 400);
 
 },{capture:!0,once:!0});
-
 }();
 </script>
