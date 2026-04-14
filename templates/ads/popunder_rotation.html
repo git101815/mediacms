@@ -5,37 +5,65 @@
   }
   window.__mcPopRotationInit = true;
 
+  /*
+    Replace the values below with your existing Django settings/context vars.
+    I am not naming them from local_settings.py because I could not read that file publicly.
+  */
   var config = {
     enabled: {{ SHOW_TABUNDER|yesno:"true,false" }},
+
     providers: {
       clickaine: {
-        weight: 0
+        weight: 80
       },
       partner: {
-        weight: 100
+        weight: 20
       }
     },
+
     capping: {
-      frequencySeconds: 24 * 60 * 60,
+      delaySeconds: 0,
+      frequencySeconds: 86400,
+      limitTotal: 1,
       limitPerPage: 1,
       limitPerSession: 1,
-      skipClicks: 0,
-      delayMs: 0
+      skipClicks: 0
     },
+
+    tracking: {
+      enabled: true
+    },
+
     partner: {
-      mode: "tab",
       offers: [
         {
           key: "cams",
+          weight: 50,
           urlTemplate: "https://track.gpsecureads.com/556564ae-1588-4c3a-a795-4684cf4d1da0?var1=celebfakessodaigr&var2=tab&var3=CLICKID"
         },
         {
           key: "dating",
+          weight: 50,
           urlTemplate: "https://www.instabang.com/tours/?t=best&id=celebfakesgpigr&cmp=tab&ad_id=CLICKID"
         }
-      ]
+      ],
+
+      engine: {
+        fallbackOrderDesktop: ["tabunder", "popunder", "tabup", "popup"],
+        fallbackOrderMobile: ["tabup", "popup"],
+        popupWidthDesktop: 1000,
+        popupHeightDesktop: 700,
+        popupWidthMobileRatio: 0.92,
+        popupHeightMobileRatio: 0.88,
+        enableCoverOverlays: true,
+        coverSelectors: ["iframe", "object", "embed", "video"],
+        bindTo: "",
+        ignoreTo: "a[href^='#'], .no-popunder, [data-no-popunder='1']",
+        openTargetBlank: true
+      }
     },
-    storagePrefix: "mc_pop_rotation_v1"
+
+    storagePrefix: "mc_pop_v3"
   };
 
   window.mcPopAdsConfig = config;
@@ -83,33 +111,54 @@
     return Math.floor(Date.now() / 1000);
   }
 
+  function getPageUrl() {
+    return String(window.location.href || "");
+  }
+
   function getState() {
     var localStorageSafe = getLocalStorageSafe();
     var sessionStorageSafe = getSessionStorageSafe();
 
     var globalState = readJson(localStorageSafe, config.storagePrefix + ":global", {
-      lastOpenTs: 0
+      lastOpenTs: 0,
+      openTimestamps: []
     });
 
     var sessionState = readJson(sessionStorageSafe, config.storagePrefix + ":session", {
       opens: 0
     });
 
+    var pageState = readJson(sessionStorageSafe, config.storagePrefix + ":page", {
+      url: "",
+      opens: 0
+    });
+
+    var currentUrl = getPageUrl();
+    if (pageState.url !== currentUrl) {
+      pageState = {
+        url: currentUrl,
+        opens: 0
+      };
+      writeJson(sessionStorageSafe, config.storagePrefix + ":page", pageState);
+    }
+
     return {
       localStorageSafe: localStorageSafe,
       sessionStorageSafe: sessionStorageSafe,
       globalState: globalState,
-      sessionState: sessionState
+      sessionState: sessionState,
+      pageState: pageState
     };
   }
 
-  function markOpen() {
-    var state = getState();
-    state.globalState.lastOpenTs = nowSeconds();
-    state.sessionState.opens += 1;
-    writeJson(state.localStorageSafe, config.storagePrefix + ":global", state.globalState);
-    writeJson(state.sessionStorageSafe, config.storagePrefix + ":session", state.sessionState);
-    window.mcPopPageOpens = (window.mcPopPageOpens || 0) + 1;
+  function pruneFrequencyWindow(openTimestamps, nowTs) {
+    var frequencySeconds = Number(config.capping.frequencySeconds || 0);
+    if (!frequencySeconds || !Array.isArray(openTimestamps)) {
+      return Array.isArray(openTimestamps) ? openTimestamps : [];
+    }
+    return openTimestamps.filter(function (ts) {
+      return (nowTs - ts) < frequencySeconds;
+    });
   }
 
   function canRun() {
@@ -117,21 +166,42 @@
       return false;
     }
 
+    var nowTs = nowSeconds();
     var state = getState();
-    var pageOpens = window.mcPopPageOpens || 0;
 
-    if (config.capping.limitPerPage > 0 && pageOpens >= config.capping.limitPerPage) {
-      return false;
+    if (Number(config.capping.delaySeconds || 0) > 0 && state.globalState.lastOpenTs > 0) {
+      if ((nowTs - state.globalState.lastOpenTs) < Number(config.capping.delaySeconds)) {
+        return false;
+      }
     }
 
-    if (config.capping.limitPerSession > 0 && state.sessionState.opens >= config.capping.limitPerSession) {
+    if (
+      Number(config.capping.limitPerPage || 0) > 0 &&
+      Number(state.pageState.opens || 0) >= Number(config.capping.limitPerPage)
+    ) {
       return false;
     }
 
     if (
-      config.capping.frequencySeconds > 0 &&
-      state.globalState.lastOpenTs > 0 &&
-      (nowSeconds() - state.globalState.lastOpenTs) < config.capping.frequencySeconds
+      Number(config.capping.limitPerSession || 0) > 0 &&
+      Number(state.sessionState.opens || 0) >= Number(config.capping.limitPerSession)
+    ) {
+      return false;
+    }
+
+    var frequencyWindow = pruneFrequencyWindow(state.globalState.openTimestamps || [], nowTs);
+
+    if (
+      Number(config.capping.limitTotal || 0) > 0 &&
+      frequencyWindow.length >= Number(config.capping.limitTotal)
+    ) {
+      return false;
+    }
+
+    if (
+      Number(config.capping.frequencySeconds || 0) > 0 &&
+      Number(state.globalState.lastOpenTs || 0) > 0 &&
+      (nowTs - Number(state.globalState.lastOpenTs)) < Number(config.capping.frequencySeconds)
     ) {
       return false;
     }
@@ -139,38 +209,85 @@
     return true;
   }
 
-  function chooseWeightedProvider() {
-    var totalWeight = 0;
-    var names = Object.keys(config.providers);
+  function markOpen(meta) {
+    var nowTs = nowSeconds();
+    var state = getState();
 
-    names.forEach(function (name) {
-      totalWeight += Math.max(0, Number(config.providers[name].weight || 0));
+    state.globalState.lastOpenTs = nowTs;
+    state.globalState.openTimestamps = pruneFrequencyWindow(state.globalState.openTimestamps || [], nowTs);
+    state.globalState.openTimestamps.push(nowTs);
+
+    state.sessionState.opens = Number(state.sessionState.opens || 0) + 1;
+    state.pageState.opens = Number(state.pageState.opens || 0) + 1;
+
+    writeJson(state.localStorageSafe, config.storagePrefix + ":global", state.globalState);
+    writeJson(state.sessionStorageSafe, config.storagePrefix + ":session", state.sessionState);
+    writeJson(state.sessionStorageSafe, config.storagePrefix + ":page", state.pageState);
+
+    window.mcPopLastConsumedOpen = {
+      provider: meta && meta.provider ? meta.provider : null,
+      offer: meta && meta.offer ? meta.offer : null,
+      mode: meta && meta.mode ? meta.mode : null,
+      ts: Date.now()
+    };
+  }
+
+  function chooseWeightedKey(items, fallbackKey) {
+    var totalWeight = 0;
+    var normalized = [];
+
+    Object.keys(items || {}).forEach(function (key) {
+      var weight = Math.max(0, Number((items[key] && items[key].weight) || 0));
+      normalized.push({ key: key, weight: weight });
+      totalWeight += weight;
     });
 
     if (totalWeight <= 0) {
-      return "clickaine";
+      return fallbackKey;
     }
 
     var bucket = Math.random() * totalWeight;
     var cursor = 0;
-
-    for (var i = 0; i < names.length; i += 1) {
-      var name = names[i];
-      cursor += Math.max(0, Number(config.providers[name].weight || 0));
+    for (var i = 0; i < normalized.length; i += 1) {
+      cursor += normalized[i].weight;
       if (bucket < cursor) {
-        return name;
+        return normalized[i].key;
       }
     }
 
-    return "clickaine";
+    return fallbackKey;
+  }
+
+  function chooseWeightedOffer(offers) {
+    if (!Array.isArray(offers) || !offers.length) {
+      return null;
+    }
+
+    var items = {};
+    for (var i = 0; i < offers.length; i += 1) {
+      items[String(i)] = { weight: Number(offers[i].weight || 0) };
+    }
+
+    var chosenIndex = chooseWeightedKey(items, "0");
+    var parsedIndex = parseInt(chosenIndex, 10);
+    if (isNaN(parsedIndex) || !offers[parsedIndex]) {
+      return offers[0];
+    }
+    return offers[parsedIndex];
+  }
+
+  function isMobileLike() {
+    var ua = String(navigator.userAgent || "").toLowerCase();
+    return /android|iphone|ipad|ipod|mobile/.test(ua) || window.innerWidth < 900;
   }
 
   window.mcPopAdsRuntime = {
-    chosenProvider: chooseWeightedProvider(),
+    chosenProvider: chooseWeightedKey(config.providers, "clickaine"),
+    chooseWeightedOffer: chooseWeightedOffer,
     canRun: canRun,
     markOpen: markOpen,
     clickCount: 0,
-    delayReadyAt: Date.now() + config.capping.delayMs
+    deviceClass: isMobileLike() ? "mobile" : "desktop"
   };
 })();
 </script>

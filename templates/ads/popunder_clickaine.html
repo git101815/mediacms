@@ -1,6 +1,6 @@
 <script>
 (function () {
-  if (!window.mcPopAdsRuntime || !window.mcPopAdsConfig) {
+  if (!window.mcPopAdsRuntime) {
     return;
   }
 
@@ -13,14 +13,17 @@
   }
   window.__mcClickaineBooted = true;
 
-  function bootClickaine() {
-    var script = document.createElement("script");
-    script.src = "https://36707.phidonatome.com/4/js/259141";
-    script.async = true;
-    script.dataset.mcProvider = "clickaine";
-    document.body.appendChild(script);
-  }
+  window.mcPopLastAttempt = {
+    provider: "clickaine",
+    offer: "clickaine",
+    mode: "third_party",
+    ts: Date.now()
+  };
 
-  bootClickaine();
+  var script = document.createElement("script");
+  script.src = "https://36707.phidonatome.com/4/js/259141";
+  script.async = true;
+  script.dataset.mcProvider = "clickaine";
+  document.body.appendChild(script);
 })();
 </script>

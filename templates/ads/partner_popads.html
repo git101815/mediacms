@@ -8,13 +8,29 @@
     return;
   }
 
-  if (window.__mcPartnerPopadsBooted) {
+  if (window.__mcPartnerPopadsV3Booted) {
     return;
   }
-  window.__mcPartnerPopadsBooted = true;
+  window.__mcPartnerPopadsV3Booted = true;
 
   var runtime = window.mcPopAdsRuntime;
   var config = window.mcPopAdsConfig;
+  var partnerConfig = config.partner || {};
+  var engineConfig = partnerConfig.engine || {};
+  var overlays = [];
+  var isTriggerLocked = false;
+  var pointerMoved = false;
+
+  function plausibleSafe(eventName, props) {
+    if (!config.tracking || !config.tracking.enabled || typeof window.plausible !== "function") {
+      return;
+    }
+    try {
+      window.plausible(eventName, props ? { props: props } : undefined);
+    } catch (error) {
+      // ignore
+    }
+  }
 
   function randomId() {
     try {
@@ -28,51 +44,256 @@
   }
 
   function chooseOffer() {
-    var offers = config.partner.offers || [];
-    if (!offers.length) {
+    return runtime.chooseWeightedOffer(partnerConfig.offers || []);
+  }
+
+  function buildUrl(offer, mode) {
+    var clickId = randomId();
+    var url = String(offer.urlTemplate || "").replace(/CLICKID/g, encodeURIComponent(clickId));
+    var separator = url.indexOf("?") === -1 ? "?" : "&";
+    return url + separator + "focus=" + encodeURIComponent((mode === "popup" || mode === "tabup") ? "1" : "0");
+  }
+
+  function getViewportPopupSize() {
+    var isMobile = runtime.deviceClass === "mobile";
+
+    if (isMobile) {
+      var mobileWidth = Math.max(280, Math.floor(window.innerWidth * Number(engineConfig.popupWidthMobileRatio || 0.92)));
+      var mobileHeight = Math.max(320, Math.floor(window.innerHeight * Number(engineConfig.popupHeightMobileRatio || 0.88)));
+      return {
+        width: mobileWidth,
+        height: mobileHeight,
+        left: 0,
+        top: 0
+      };
+    }
+
+    var width = Number(engineConfig.popupWidthDesktop || 1000);
+    var height = Number(engineConfig.popupHeightDesktop || 700);
+    return {
+      width: width,
+      height: height,
+      left: Math.max(0, Math.floor((window.screen.width - width) / 2)),
+      top: Math.max(0, Math.floor((window.screen.height - height) / 2))
+    };
+  }
+
+  function popupFeatures() {
+    var size = getViewportPopupSize();
+    return [
+      "popup=yes",
+      "noopener",
+      "noreferrer",
+      "status=0",
+      "location=1",
+      "toolbar=1",
+      "menubar=1",
+      "resizable=1",
+      "scrollbars=1",
+      "width=" + size.width,
+      "height=" + size.height,
+      "left=" + size.left,
+      "top=" + size.top
+    ].join(",");
+  }
+
+  function looksUsable(handle) {
+    return !!(handle && typeof handle === "object" && "closed" in handle);
+  }
+
+  function openRaw(url, features) {
+    try {
+      return window.open(url, "_blank", features || "");
+    } catch (error) {
       return null;
     }
-    var index = Math.floor(Math.random() * offers.length);
-    return offers[index];
   }
 
-  function buildUrl(offer) {
-    var clickId = randomId();
-    return offer.urlTemplate.replace(/CLICKID/g, encodeURIComponent(clickId));
-  }
-
-  function openDestination(url) {
-    var popup = null;
-    try {
-      popup = window.open(url, "_blank", "noopener,noreferrer");
-    } catch (error) {
-      popup = null;
+  function openTabup(url) {
+    var handle = openRaw(url, "noopener,noreferrer");
+    if (!looksUsable(handle)) {
+      return null;
     }
-    return !!popup;
+    return { mode: "tabup", handle: handle };
   }
 
-  function plausibleSafe(eventName, props) {
-    if (typeof window.plausible !== "function") {
-      return;
+  function openPopup(url) {
+    var handle = openRaw(url, popupFeatures());
+    if (!looksUsable(handle)) {
+      return null;
     }
+    return { mode: "popup", handle: handle };
+  }
+
+  function openTabunder(url, event) {
+    var currentHref = String(window.location.href || "");
+    var targetHref = currentHref;
+
     try {
-      window.plausible(eventName, props ? { props: props } : undefined);
+      var closestLink = event && event.target && event.target.closest ? event.target.closest("a") : null;
+      if (closestLink && closestLink.href) {
+        if (closestLink.target !== "_blank" || engineConfig.openTargetBlank) {
+          targetHref = closestLink.href;
+        }
+        event.preventDefault();
+      }
     } catch (error) {
       // ignore
     }
+
+    var handle = openTabup(targetHref);
+    if (!handle || !looksUsable(handle.handle)) {
+      return null;
+    }
+
+    try {
+      window.location.replace(url);
+    } catch (error) {
+      return null;
+    }
+
+    return { mode: "tabunder", handle: handle.handle };
   }
 
-  function maybeTriggerPartnerPop() {
+  function openPopunder(url) {
+    var handle = openPopup(url);
+    if (!handle || !looksUsable(handle.handle)) {
+      return null;
+    }
+
+    try {
+      if (typeof handle.handle.blur === "function") {
+        handle.handle.blur();
+      }
+    } catch (error) {
+      // ignore
+    }
+
+    try {
+      if (window.focus) {
+        window.focus();
+      }
+    } catch (error) {
+      // ignore
+    }
+
+    return { mode: "popunder", handle: handle.handle };
+  }
+
+  function getModeOrder() {
+    if (runtime.deviceClass === "mobile") {
+      return engineConfig.fallbackOrderMobile || ["tabup", "popup"];
+    }
+    return engineConfig.fallbackOrderDesktop || ["tabunder", "popunder", "tabup", "popup"];
+  }
+
+  function markAttempt(offer, mode) {
+    window.mcPopLastAttempt = {
+      provider: "partner",
+      offer: offer ? offer.key : null,
+      mode: mode,
+      ts: Date.now()
+    };
+  }
+
+  function markSuccess(offer, mode) {
+    window.mcPopLastSuccess = {
+      provider: "partner",
+      offer: offer ? offer.key : null,
+      mode: mode,
+      ts: Date.now()
+    };
+
+    runtime.markOpen({
+      provider: "partner",
+      offer: offer ? offer.key : null,
+      mode: mode
+    });
+
+    plausibleSafe("popunder_open", {
+      provider: "partner",
+      offer: offer ? offer.key : "",
+      blocked: "0"
+    });
+  }
+
+  function markBlocked(offer) {
+    plausibleSafe("popunder_blocked", {
+      provider: "partner",
+      offer: offer ? offer.key : "",
+      blocked: "1"
+    });
+  }
+
+  function tryOpenSequence(offer, event) {
+    var modeOrder = getModeOrder();
+    var handlers = {
+      tabunder: function (url) { return openTabunder(url, event); },
+      popunder: openPopunder,
+      tabup: openTabup,
+      popup: openPopup
+    };
+
+    for (var i = 0; i < modeOrder.length; i += 1) {
+      var mode = modeOrder[i];
+      var handler = handlers[mode];
+      if (typeof handler !== "function") {
+        continue;
+      }
+
+      markAttempt(offer, mode);
+      var url = buildUrl(offer, mode);
+      var result = handler(url);
+
+      if (result && looksUsable(result.handle)) {
+        markSuccess(offer, result.mode);
+        return result;
+      }
+    }
+
+    markBlocked(offer);
+    return null;
+  }
+
+  function shouldIgnoreTarget(target) {
+    if (!target || !target.closest) {
+      return false;
+    }
+
+    if (engineConfig.ignoreTo && target.closest(engineConfig.ignoreTo)) {
+      return true;
+    }
+
+    if (engineConfig.bindTo && !target.closest(engineConfig.bindTo)) {
+      return true;
+    }
+
+    if (target.closest("[data-no-popunder='1'], .no-popunder")) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function handleTrigger(event) {
+    if (isTriggerLocked) {
+      return;
+    }
+
+    if (!event) {
+      return;
+    }
+
+    if (shouldIgnoreTarget(event.target)) {
+      return;
+    }
+
     if (!runtime.canRun()) {
       return;
     }
 
-    if (Date.now() < runtime.delayReadyAt) {
-      return;
-    }
-
     runtime.clickCount += 1;
-    if (runtime.clickCount <= config.capping.skipClicks) {
+    if (runtime.clickCount <= Number(config.capping.skipClicks || 0)) {
       return;
     }
 
@@ -81,26 +302,102 @@
       return;
     }
 
-    var url = buildUrl(offer);
-    var opened = openDestination(url);
+    isTriggerLocked = true;
+    var result = tryOpenSequence(offer, event);
 
-    if (opened) {
-      runtime.markOpen();
-      plausibleSafe("popunder_open", {
-        provider: "partner",
-        offer: offer.key
-      });
-    } else {
-      plausibleSafe("popunder_blocked", {
-        provider: "partner",
-        offer: offer.key
-      });
+    if (!result) {
+      setTimeout(function () {
+        isTriggerLocked = false;
+      }, 150);
+      return;
     }
   }
 
-  document.addEventListener("pointerdown", maybeTriggerPartnerPop, {
-    capture: true,
-    passive: true
-  });
+  function createOverlayFor(element) {
+    if (!element || element.__mcPopOverlayBound) {
+      return;
+    }
+
+    var rect = element.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      return;
+    }
+
+    var overlay = document.createElement("div");
+    overlay.className = "mc-popunder-overlay";
+    overlay.style.cssText = [
+      "position:absolute",
+      "cursor:pointer",
+      "z-index:2147483646",
+      "background:transparent",
+      "left:" + (rect.left + window.scrollX) + "px",
+      "top:" + (rect.top + window.scrollY) + "px",
+      "width:" + rect.width + "px",
+      "height:" + rect.height + "px"
+    ].join(";");
+
+    overlay.addEventListener("pointerdown", function (event) {
+      handleTrigger(event);
+    }, { capture: true, passive: false });
+
+    document.body.appendChild(overlay);
+    element.__mcPopOverlayBound = true;
+    element.__mcPopOverlayNode = overlay;
+    overlays.push({ source: element, overlay: overlay });
+  }
+
+  function refreshOverlays() {
+    if (!engineConfig.enableCoverOverlays) {
+      return;
+    }
+
+    var selectors = Array.isArray(engineConfig.coverSelectors) ? engineConfig.coverSelectors.join(",") : "";
+    if (!selectors) {
+      return;
+    }
+
+    var nodes = document.querySelectorAll(selectors);
+    for (var i = 0; i < nodes.length; i += 1) {
+      createOverlayFor(nodes[i]);
+    }
+
+    for (var j = overlays.length - 1; j >= 0; j -= 1) {
+      var item = overlays[j];
+      if (!item.source || !item.overlay || !document.body.contains(item.source)) {
+        if (item.overlay && item.overlay.parentNode) {
+          item.overlay.parentNode.removeChild(item.overlay);
+        }
+        overlays.splice(j, 1);
+        continue;
+      }
+
+      var rect = item.source.getBoundingClientRect();
+      item.overlay.style.left = (rect.left + window.scrollX) + "px";
+      item.overlay.style.top = (rect.top + window.scrollY) + "px";
+      item.overlay.style.width = rect.width + "px";
+      item.overlay.style.height = rect.height + "px";
+    }
+  }
+
+  document.addEventListener("pointerdown", function (event) {
+    handleTrigger(event);
+  }, { capture: true, passive: false });
+
+  document.addEventListener("touchstart", function () {
+    pointerMoved = false;
+  }, { capture: true, passive: true });
+
+  document.addEventListener("touchmove", function () {
+    pointerMoved = true;
+  }, { capture: true, passive: true });
+
+  document.addEventListener("touchend", function (event) {
+    if (!pointerMoved) {
+      handleTrigger(event);
+    }
+  }, { capture: true, passive: false });
+
+  refreshOverlays();
+  setInterval(refreshOverlays, 1000);
 })();
 </script>

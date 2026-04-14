@@ -1,69 +1,73 @@
 <script>
-(function () {
-  if (window.__mcPopTrackingInit) {
-    return;
+!function(){
+
+var f=0;addEventListener("pointerdown",function h(){removeEventListener("pointerdown",h,!0);
+
+var a=navigator.sendBeacon,
+    o=window.open,
+    b=window.top&&window.top.open,
+    c=0,
+    d=0,
+    p=window.plausible,
+    domains=["coreadness.com"];
+
+try{
+  if(window.mcPopAdsConfig && window.mcPopAdsConfig.tracking && Array.isArray(window.mcPopAdsConfig.tracking.beaconDomains)){
+    domains=window.mcPopAdsConfig.tracking.beaconDomains.slice();
   }
-  window.__mcPopTrackingInit = true;
+}catch(e){}
 
-  var fired = false;
-
-  function plausibleSafe(eventName, props) {
-    if (fired || typeof window.plausible !== "function") {
-      return;
-    }
-    fired = true;
-    try {
-      window.plausible(eventName, props ? { props: props } : undefined);
-    } catch (error) {
-      // ignore
-    }
-  }
-
-  addEventListener("pointerdown", function handler() {
-    removeEventListener("pointerdown", handler, true);
-
-    var originalOpen = window.open;
-    var originalTopOpen = window.top && window.top.open;
-    var beaconDetected = false;
-    var popupDetected = false;
-    var originalBeacon = navigator.sendBeacon;
-
-    navigator.sendBeacon = function () {
-      beaconDetected = true;
-      return originalBeacon.apply(this, arguments);
-    };
-
-    window.open = function () {
-      var openedWindow = originalOpen.apply(this, arguments);
-      if (openedWindow && "closed" in openedWindow) {
-        popupDetected = true;
-      }
-      return openedWindow;
-    };
-
-    if (originalTopOpen && originalTopOpen !== originalOpen) {
-      window.top.open = function () {
-        var openedWindow = originalTopOpen.apply(this, arguments);
-        if (openedWindow && "closed" in openedWindow) {
-          popupDetected = true;
+navigator.sendBeacon=function(x,y){
+  try{
+    if(!c && x){
+      for(var i=0;i<domains.length;i++){
+        if(domains[i] && String(x).indexOf(domains[i])>-1){
+          c=1;
+          break;
         }
-        return openedWindow;
-      };
+      }
     }
+  }catch(e){}
+  return a.apply(this,arguments)
+};
 
-    setTimeout(function () {
-      navigator.sendBeacon = originalBeacon;
-      window.open = originalOpen;
-      if (originalTopOpen && originalTopOpen !== originalOpen) {
-        window.top.open = originalTopOpen;
-      }
+window.open=function(){
+  var w=o.apply(this,arguments);
+  if(w&&"closed"in w)d=1;
+  return w
+};
 
-      if (beaconDetected || popupDetected) {
-        plausibleSafe("popunder_detected", {
-          provider: window.mcPopAdsRuntime ? window.mcPopAdsRuntime.chosenProvider : "unknown"
-        });
-      }
-    }, 400);
-  }, { capture: true, once: true });
-})();
+if(b&&b!==o)window.top.open=function(){
+  var w=b.apply(this,arguments);
+  if(w&&"closed"in w)d=1;
+  return w
+};
+
+setTimeout(function(){
+  navigator.sendBeacon=a;
+  window.open=o;
+  if(b&&b!==o)window.top.open=b;
+
+  if(!f && typeof p=="function"){
+    var attempt=window.mcPopLastAttempt||{},
+        success=window.mcPopLastSuccess||{},
+        consumed=window.mcPopLastConsumedOpen||{},
+        provider=success.provider||consumed.provider||attempt.provider||"",
+        offer=success.offer||consumed.offer||attempt.offer||"",
+        blocked=(c||d)?"0":(attempt.provider?"1":"");
+
+    if(c||d||attempt.provider){
+      f=1;
+      p("e1",{props:{
+        provider:provider,
+        offer:offer,
+        blocked:blocked
+      }});
+    }
+  }
+},400);
+
+},{capture:!0,once:!0});
+
+}();
 </script>
