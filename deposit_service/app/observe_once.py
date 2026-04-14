@@ -3,6 +3,7 @@ import logging
 from web3 import Web3
 
 from .evm_rpc import build_web3
+from .rpc_pool import choose_best_rpc_url
 
 
 ERC20_ABI = [
@@ -139,7 +140,17 @@ def _post_observation(
     client.post_signed("/api/internal/ledger/deposit-observations", payload)
 
 
-def _observe_token_option(*, client, option, watch):
+def _build_option_web3(*, option, rpc_max_lag_blocks: int):
+    selected_rpc_url = choose_best_rpc_url(
+        option_key=option.key,
+        rpc_urls=option.rpc_urls,
+        poa_compatible=option.poa_compatible,
+        max_lag_blocks=rpc_max_lag_blocks,
+    )
+    return build_web3(rpc_url=selected_rpc_url, poa_compatible=option.poa_compatible)
+
+
+def _observe_token_option(*, client, option, watch, rpc_max_lag_blocks: int):
     targets = watch["targets"]
     if not targets:
         logging.info(
@@ -150,7 +161,10 @@ def _observe_token_option(*, client, option, watch):
         )
         return
 
-    w3 = build_web3(rpc_url=option.rpc_url, poa_compatible=option.poa_compatible)
+    w3 = _build_option_web3(
+        option=option,
+        rpc_max_lag_blocks=rpc_max_lag_blocks,
+    )
     latest_block = int(w3.eth.block_number)
 
     if _is_native_option(option):
@@ -272,7 +286,6 @@ def _observe_token_option(*, client, option, watch):
             latest_block=latest_block,
             lookback_blocks=option.lookback_blocks,
         )
-
         if latest_incoming is None:
             logging.warning(
                 "positive balance but no recent incoming transfer option=%s session=%s address=%s balance=%s",
@@ -319,7 +332,7 @@ def _observe_token_option(*, client, option, watch):
         )
 
 
-def observe_once(*, client, state, options):
+def observe_once(*, client, state, options, rpc_max_lag_blocks: int):
     if not options:
         return
 
@@ -337,6 +350,7 @@ def observe_once(*, client, state, options):
                 client=client,
                 option=option,
                 watch=watch,
+                rpc_max_lag_blocks=rpc_max_lag_blocks,
             )
         except Exception:
             logging.exception(

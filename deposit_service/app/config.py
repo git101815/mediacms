@@ -11,7 +11,7 @@ class DepositOptionConfig:
     token_contract_address: str
     display_label: str
     account_xpub: str
-    rpc_url: str
+    rpc_urls: list[str]
     required_confirmations: int
     min_amount: int
     session_ttl_seconds: int
@@ -29,6 +29,7 @@ class ServiceConfig:
     poll_interval_seconds: int
     provision_batch_size: int
     evm_account_xpub: str
+    rpc_max_lag_blocks: int
     options: list[DepositOptionConfig]
 
 
@@ -39,7 +40,7 @@ def _require_env(name: str) -> str:
     return value
 
 
-def _resolve_env_placeholder(value: str):
+def _resolve_env_placeholder(value):
     if not isinstance(value, str):
         return value
     if value.startswith("${") and value.endswith("}"):
@@ -48,6 +49,37 @@ def _resolve_env_placeholder(value: str):
             raise RuntimeError("Empty environment variable placeholder")
         return _require_env(env_name)
     return value
+
+
+def _resolve_rpc_urls(item: dict) -> list[str]:
+    raw_urls = item.get("rpc_urls")
+    raw_url = item.get("rpc_url")
+
+    urls: list[str] = []
+
+    if isinstance(raw_urls, list):
+        for value in raw_urls:
+            resolved = str(_resolve_env_placeholder(value)).strip()
+            if resolved:
+                urls.append(resolved)
+
+    if raw_url is not None:
+        resolved = str(_resolve_env_placeholder(raw_url)).strip()
+        if resolved:
+            urls.append(resolved)
+
+    deduped: list[str] = []
+    seen = set()
+    for url in urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        deduped.append(url)
+
+    if not deduped:
+        raise RuntimeError(f"Option {item.get('key', '<unknown>')} must define rpc_url or rpc_urls")
+
+    return deduped
 
 
 def _build_display_label(*, chain: str, asset_code: str, raw_value: str | None) -> str:
@@ -94,7 +126,7 @@ def load_config() -> ServiceConfig:
                 raw_value=item.get("display_label"),
             ),
             account_xpub=_resolve_env_placeholder(item.get("account_xpub", evm_account_xpub)),
-            rpc_url=_resolve_env_placeholder(item["rpc_url"]),
+            rpc_urls=_resolve_rpc_urls(item),
             required_confirmations=int(item["required_confirmations"]),
             min_amount=int(item["min_amount"]),
             session_ttl_seconds=int(item["session_ttl_seconds"]),
@@ -124,6 +156,10 @@ def load_config() -> ServiceConfig:
     if provision_batch_size <= 0:
         raise RuntimeError("DEPOSIT_SERVICE_PROVISION_BATCH_SIZE must be > 0")
 
+    rpc_max_lag_blocks = int(os.environ.get("DEPOSIT_RPC_MAX_LAG_BLOCKS", "64"))
+    if rpc_max_lag_blocks < 0:
+        raise RuntimeError("DEPOSIT_RPC_MAX_LAG_BLOCKS must be >= 0")
+
     return ServiceConfig(
         mediacms_base_url=_require_env("MEDIACMS_INTERNAL_BASE_URL").rstrip("/"),
         service_name=os.environ.get("MEDIACMS_INTERNAL_SERVICE", "deposit-service").strip() or "deposit-service",
@@ -132,5 +168,6 @@ def load_config() -> ServiceConfig:
         poll_interval_seconds=global_poll_interval,
         provision_batch_size=provision_batch_size,
         evm_account_xpub=evm_account_xpub,
+        rpc_max_lag_blocks=rpc_max_lag_blocks,
         options=options,
     )

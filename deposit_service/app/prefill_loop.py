@@ -21,7 +21,12 @@ def main() -> None:
     try:
         while True:
             try:
-                observe_once(client=client, state=None, options=config.options)
+                observe_once(
+                    client=client,
+                    state=state,
+                    options=config.options,
+                    rpc_max_lag_blocks=config.rpc_max_lag_blocks,
+                )
             except Exception:
                 logging.exception("deposit_service cycle failed")
             time.sleep(config.poll_interval_seconds)

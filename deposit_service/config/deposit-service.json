@@ -6,7 +6,11 @@
       "asset_code": "USDT",
       "token_contract_address": "0x55d398326f99059ff775485246999027b3197955",
       "display_label": "BNB Chain · USDT",
-      "rpc_url": "${BSC_RPC_URL}",
+      "rpc_urls": [
+        "${BSC_RPC_URL}",
+        "${BSC_RPC_URL_FALLBACK_1}",
+        "${BSC_RPC_URL_FALLBACK_2}"
+      ],
       "required_confirmations": 12,
       "min_amount": 1000000000000000000,
       "session_ttl_seconds": 3600,
