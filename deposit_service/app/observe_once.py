@@ -3,6 +3,7 @@ import logging
 from web3 import Web3
 
 from .evm_rpc import build_web3
+from .reference_head import get_reference_head
 from .rpc_pool import choose_best_rpc_url
 
 
@@ -140,17 +141,40 @@ def _post_observation(
     client.post_signed("/api/internal/ledger/deposit-observations", payload)
 
 
-def _build_option_web3(*, option, rpc_max_lag_blocks: int):
+def _build_option_web3(
+    *,
+    option,
+    etherscan_api_key: str,
+    rpc_reference_timeout_seconds: float,
+    rpc_max_lag_blocks: int,
+    rpc_max_reference_lag_blocks: int,
+):
+    reference_head = get_reference_head(
+        chain=option.chain,
+        api_key=etherscan_api_key,
+        timeout_seconds=rpc_reference_timeout_seconds,
+    )
     selected_rpc_url = choose_best_rpc_url(
         option_key=option.key,
         rpc_urls=option.rpc_urls,
         poa_compatible=option.poa_compatible,
         max_lag_blocks=rpc_max_lag_blocks,
+        reference_head=reference_head,
+        max_reference_lag_blocks=rpc_max_reference_lag_blocks,
     )
     return build_web3(rpc_url=selected_rpc_url, poa_compatible=option.poa_compatible)
 
 
-def _observe_token_option(*, client, option, watch, rpc_max_lag_blocks: int):
+def _observe_token_option(
+    *,
+    client,
+    option,
+    watch,
+    etherscan_api_key: str,
+    rpc_reference_timeout_seconds: float,
+    rpc_max_lag_blocks: int,
+    rpc_max_reference_lag_blocks: int,
+):
     targets = watch["targets"]
     if not targets:
         logging.info(
@@ -163,7 +187,10 @@ def _observe_token_option(*, client, option, watch, rpc_max_lag_blocks: int):
 
     w3 = _build_option_web3(
         option=option,
+        etherscan_api_key=etherscan_api_key,
+        rpc_reference_timeout_seconds=rpc_reference_timeout_seconds,
         rpc_max_lag_blocks=rpc_max_lag_blocks,
+        rpc_max_reference_lag_blocks=rpc_max_reference_lag_blocks,
     )
     latest_block = int(w3.eth.block_number)
 
@@ -332,7 +359,15 @@ def _observe_token_option(*, client, option, watch, rpc_max_lag_blocks: int):
         )
 
 
-def observe_once(*, client, options, rpc_max_lag_blocks: int):
+def observe_once(
+    *,
+    client,
+    options,
+    etherscan_api_key: str,
+    rpc_reference_timeout_seconds: float,
+    rpc_max_lag_blocks: int,
+    rpc_max_reference_lag_blocks: int,
+):
     if not options:
         return
 
@@ -350,7 +385,10 @@ def observe_once(*, client, options, rpc_max_lag_blocks: int):
                 client=client,
                 option=option,
                 watch=watch,
+                etherscan_api_key=etherscan_api_key,
+                rpc_reference_timeout_seconds=rpc_reference_timeout_seconds,
                 rpc_max_lag_blocks=rpc_max_lag_blocks,
+                rpc_max_reference_lag_blocks=rpc_max_reference_lag_blocks,
             )
         except Exception:
             logging.exception(

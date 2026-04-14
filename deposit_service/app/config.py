@@ -30,6 +30,9 @@ class ServiceConfig:
     provision_batch_size: int
     evm_account_xpub: str
     rpc_max_lag_blocks: int
+    rpc_max_reference_lag_blocks: int
+    rpc_reference_timeout_seconds: float
+    etherscan_api_key: str
     options: list[DepositOptionConfig]
 
 
@@ -77,7 +80,7 @@ def _resolve_rpc_urls(item: dict) -> list[str]:
         deduped.append(url)
 
     if not deduped:
-        raise RuntimeError(f"Option {item.get('key', '<unknown>')} must define rpc_url or rpc_urls")
+        raise RuntimeError(f"Option {item.get('key', '')} must define rpc_url or rpc_urls")
 
     return deduped
 
@@ -92,7 +95,6 @@ def _build_display_label(*, chain: str, asset_code: str, raw_value: str | None) 
         "arbitrum": "Arbitrum One",
         "base": "Base",
         "bsc": "BNB Chain",
-        "polygon": "Polygon",
     }
     normalized_chain = (chain or "").strip().lower()
     chain_label = chain_labels.get(normalized_chain, (chain or "").strip() or "Unknown")
@@ -160,6 +162,18 @@ def load_config() -> ServiceConfig:
     if rpc_max_lag_blocks < 0:
         raise RuntimeError("DEPOSIT_RPC_MAX_LAG_BLOCKS must be >= 0")
 
+    rpc_max_reference_lag_blocks = int(
+        os.environ.get("DEPOSIT_RPC_MAX_REFERENCE_LAG_BLOCKS", "64")
+    )
+    if rpc_max_reference_lag_blocks < 0:
+        raise RuntimeError("DEPOSIT_RPC_MAX_REFERENCE_LAG_BLOCKS must be >= 0")
+
+    rpc_reference_timeout_seconds = float(
+        os.environ.get("DEPOSIT_RPC_REFERENCE_TIMEOUT_SECONDS", "5")
+    )
+    if rpc_reference_timeout_seconds <= 0:
+        raise RuntimeError("DEPOSIT_RPC_REFERENCE_TIMEOUT_SECONDS must be > 0")
+
     return ServiceConfig(
         mediacms_base_url=_require_env("MEDIACMS_INTERNAL_BASE_URL").rstrip("/"),
         service_name=os.environ.get("MEDIACMS_INTERNAL_SERVICE", "deposit-service").strip() or "deposit-service",
@@ -169,5 +183,8 @@ def load_config() -> ServiceConfig:
         provision_batch_size=provision_batch_size,
         evm_account_xpub=evm_account_xpub,
         rpc_max_lag_blocks=rpc_max_lag_blocks,
+        rpc_max_reference_lag_blocks=rpc_max_reference_lag_blocks,
+        rpc_reference_timeout_seconds=rpc_reference_timeout_seconds,
+        etherscan_api_key=_require_env("ETHERSCAN_API_KEY"),
         options=options,
     )
