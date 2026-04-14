@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 
 import httpx
 
@@ -24,33 +25,43 @@ def get_reference_head(
     shared_secret: str,
     timeout_seconds: float,
     max_age_seconds: int,
-) -> int:
+) -> int | None:
     url = f"{base_url.rstrip('/')}/ledger/reference-heads/{chain}"
     headers = {
         "X-Internal-Shared-Secret": shared_secret,
     }
 
-    with httpx.Client(timeout=timeout_seconds) as client:
-        response = client.get(url, headers=headers)
-        response.raise_for_status()
-        payload = response.json()
+    try:
+        with httpx.Client(timeout=timeout_seconds) as client:
+            response = client.get(url, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
 
-    latest_block = payload.get("latest_block")
-    if latest_block is None:
-        raise RuntimeError(f"Missing latest_block in reference payload for chain={chain}: {payload}")
+        latest_block = payload.get("latest_block")
+        if latest_block is None:
+            raise RuntimeError(
+                f"Missing latest_block in reference payload for chain={chain}: {payload}"
+            )
 
-    updated_at = _parse_iso8601(payload.get("updated_at"))
-    now = dt.datetime.now(dt.timezone.utc)
-    age_seconds = int((now - updated_at).total_seconds())
+        updated_at = _parse_iso8601(payload.get("updated_at"))
+        now = dt.datetime.now(dt.timezone.utc)
+        age_seconds = int((now - updated_at).total_seconds())
 
-    if age_seconds < 0:
-        raise RuntimeError(
-            f"Reference payload timestamp is in the future for chain={chain}: {payload}"
+        if age_seconds < 0:
+            raise RuntimeError(
+                f"Reference payload timestamp is in the future for chain={chain}: {payload}"
+            )
+
+        if age_seconds > int(max_age_seconds):
+            raise RuntimeError(
+                f"Reference payload is stale for chain={chain}: age_seconds={age_seconds}, max_age_seconds={max_age_seconds}"
+            )
+
+        return int(latest_block)
+    except Exception as exc:
+        logging.warning(
+            "reference head unavailable chain=%s error=%s fallback=internal-rpc-health-checks",
+            chain,
+            exc,
         )
-
-    if age_seconds > int(max_age_seconds):
-        raise RuntimeError(
-            f"Reference payload is stale for chain={chain}: age_seconds={age_seconds}, max_age_seconds={max_age_seconds}"
-        )
-
-    return int(latest_block)
+        return None

@@ -2,6 +2,7 @@ import logging
 import time
 from dataclasses import dataclass
 
+
 from .evm_rpc import build_web3
 
 
@@ -34,7 +35,7 @@ def choose_best_rpc_url(
     rpc_urls: list[str],
     poa_compatible: bool,
     max_lag_blocks: int,
-    reference_head: int,
+    reference_head: int | None,
     max_reference_lag_blocks: int,
 ) -> str:
     if not rpc_urls:
@@ -82,7 +83,6 @@ def choose_best_rpc_url(
     healthy = []
     for item in successes:
         internal_lag = best_head - item.latest_block
-        reference_lag = int(reference_head) - item.latest_block
 
         if internal_lag > int(max_lag_blocks):
             logging.warning(
@@ -96,21 +96,28 @@ def choose_best_rpc_url(
             )
             continue
 
-        if reference_lag > int(max_reference_lag_blocks):
-            logging.warning(
-                "rpc excluded by reference head option=%s rpc=%s latest_block=%s reference_head=%s lag=%s max_reference_lag_blocks=%s",
-                option_key,
-                item.rpc_url,
-                item.latest_block,
-                reference_head,
-                reference_lag,
-                max_reference_lag_blocks,
-            )
-            continue
+        if reference_head is not None:
+            reference_lag = int(reference_head) - item.latest_block
+            if reference_lag > int(max_reference_lag_blocks):
+                logging.warning(
+                    "rpc excluded by reference head option=%s rpc=%s latest_block=%s reference_head=%s lag=%s max_reference_lag_blocks=%s",
+                    option_key,
+                    item.rpc_url,
+                    item.latest_block,
+                    reference_head,
+                    reference_lag,
+                    max_reference_lag_blocks,
+                )
+                continue
 
         healthy.append(item)
 
     if not healthy:
+        if reference_head is None:
+            raise RuntimeError(
+                f"No healthy RPC endpoints for option {option_key}; "
+                f"best_head={best_head}, max_lag_blocks={max_lag_blocks}"
+            )
         raise RuntimeError(
             f"No healthy RPC endpoints for option {option_key}; "
             f"best_head={best_head}, reference_head={reference_head}, "
@@ -126,13 +133,24 @@ def choose_best_rpc_url(
     )
     chosen = healthy[0]
 
-    logging.info(
-        "rpc selected option=%s rpc=%s latest_block=%s best_head=%s reference_head=%s latency_ms=%s",
-        option_key,
-        chosen.rpc_url,
-        chosen.latest_block,
-        best_head,
-        reference_head,
-        int(chosen.latency_seconds * 1000),
-    )
+    if reference_head is None:
+        logging.info(
+            "rpc selected without reference option=%s rpc=%s latest_block=%s best_head=%s latency_ms=%s",
+            option_key,
+            chosen.rpc_url,
+            chosen.latest_block,
+            best_head,
+            int(chosen.latency_seconds * 1000),
+        )
+    else:
+        logging.info(
+            "rpc selected option=%s rpc=%s latest_block=%s best_head=%s reference_head=%s latency_ms=%s",
+            option_key,
+            chosen.rpc_url,
+            chosen.latest_block,
+            best_head,
+            reference_head,
+            int(chosen.latency_seconds * 1000),
+        )
+
     return chosen.rpc_url
