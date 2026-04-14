@@ -15,7 +15,7 @@ class SweepOptionConfig:
     chain: str
     asset_code: str
     token_contract_address: str
-    rpc_url: str
+    rpc_urls: list[str]
     funding_private_key: str
     destination_address: str
     funding_confirmations: int
@@ -37,6 +37,12 @@ class ServiceConfig:
     mnemonic: str
     mnemonic_passphrase: str
     account_index: int
+    rpc_max_lag_blocks: int
+    rpc_max_reference_lag_blocks: int
+    reference_heads_base_url: str
+    reference_heads_shared_secret: str
+    reference_heads_timeout_seconds: float
+    reference_heads_max_age_seconds: int
     options: list[SweepOptionConfig]
 
 
@@ -86,6 +92,37 @@ def _normalize_private_key(value: str) -> str:
     return f"0x{resolved}"
 
 
+def _resolve_rpc_urls(item: dict) -> list[str]:
+    raw_urls = item.get("rpc_urls")
+    raw_url = item.get("rpc_url")
+
+    urls: list[str] = []
+
+    if isinstance(raw_urls, list):
+        for value in raw_urls:
+            resolved = str(_resolve_env_placeholder(value)).strip()
+            if resolved:
+                urls.append(resolved)
+
+    if raw_url is not None:
+        resolved = str(_resolve_env_placeholder(raw_url)).strip()
+        if resolved:
+            urls.append(resolved)
+
+    deduped: list[str] = []
+    seen = set()
+    for url in urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        deduped.append(url)
+
+    if not deduped:
+        raise RuntimeError(f"Option {item.get('key', '')} must define rpc_url or rpc_urls")
+
+    return deduped
+
+
 def load_config() -> ServiceConfig:
     config_path = _require_env("SWEEPER_SERVICE_CONFIG_PATH")
     with open(config_path, "r", encoding="utf-8") as handle:
@@ -116,7 +153,7 @@ def load_config() -> ServiceConfig:
             chain=str(item["chain"]).strip().lower(),
             asset_code=str(item["asset_code"]).strip().upper(),
             token_contract_address=str(item.get("token_contract_address", "")).strip().lower(),
-            rpc_url=str(_resolve_env_placeholder(item["rpc_url"])).strip(),
+            rpc_urls=_resolve_rpc_urls(item),
             funding_private_key=funding_private_key,
             destination_address=destination_address,
             funding_confirmations=int(item.get("funding_confirmations", 1)),
@@ -153,6 +190,28 @@ def load_config() -> ServiceConfig:
     if poll_interval_seconds <= 0:
         raise RuntimeError("SWEEPER_SERVICE_POLL_INTERVAL_SECONDS must be greater than 0")
 
+    rpc_max_lag_blocks = int(os.environ.get("SWEEPER_RPC_MAX_LAG_BLOCKS", "64"))
+    if rpc_max_lag_blocks < 0:
+        raise RuntimeError("SWEEPER_RPC_MAX_LAG_BLOCKS must be >= 0")
+
+    rpc_max_reference_lag_blocks = int(
+        os.environ.get("SWEEPER_RPC_MAX_REFERENCE_LAG_BLOCKS", "64")
+    )
+    if rpc_max_reference_lag_blocks < 0:
+        raise RuntimeError("SWEEPER_RPC_MAX_REFERENCE_LAG_BLOCKS must be >= 0")
+
+    reference_heads_timeout_seconds = float(
+        os.environ.get("SWEEPER_REFERENCE_HEADS_TIMEOUT_SECONDS", "5")
+    )
+    if reference_heads_timeout_seconds <= 0:
+        raise RuntimeError("SWEEPER_REFERENCE_HEADS_TIMEOUT_SECONDS must be > 0")
+
+    reference_heads_max_age_seconds = int(
+        os.environ.get("SWEEPER_REFERENCE_HEADS_MAX_AGE_SECONDS", "60")
+    )
+    if reference_heads_max_age_seconds <= 0:
+        raise RuntimeError("SWEEPER_REFERENCE_HEADS_MAX_AGE_SECONDS must be > 0")
+
     return ServiceConfig(
         mediacms_base_url=_require_env("MEDIACMS_INTERNAL_BASE_URL").rstrip("/"),
         service_name=os.environ.get("MEDIACMS_INTERNAL_SERVICE", "sweeper-service").strip() or "sweeper-service",
@@ -162,5 +221,11 @@ def load_config() -> ServiceConfig:
         mnemonic=mnemonic,
         mnemonic_passphrase=mnemonic_passphrase,
         account_index=account_index,
+        rpc_max_lag_blocks=rpc_max_lag_blocks,
+        rpc_max_reference_lag_blocks=rpc_max_reference_lag_blocks,
+        reference_heads_base_url=_require_env("REFERENCE_HEADS_BASE_URL").rstrip("/"),
+        reference_heads_shared_secret=_require_env("REFERENCE_HEADS_SHARED_SECRET"),
+        reference_heads_timeout_seconds=reference_heads_timeout_seconds,
+        reference_heads_max_age_seconds=reference_heads_max_age_seconds,
         options=options,
     )

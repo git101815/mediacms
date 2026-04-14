@@ -14,6 +14,8 @@ from .evm import (
     send_native_transfer,
     wait_for_confirmations,
 )
+from .reference_head import get_reference_head
+from .rpc_pool import choose_best_rpc_url
 
 
 logging.basicConfig(
@@ -88,11 +90,36 @@ def _truncate_error(message: str, *, max_length: int = 500) -> str:
     return normalized[: max_length - 3] + "..."
 
 
+def _build_option_web3(*, config, option):
+    reference_head = get_reference_head(
+        chain=option.chain,
+        base_url=config.reference_heads_base_url,
+        shared_secret=config.reference_heads_shared_secret,
+        timeout_seconds=config.reference_heads_timeout_seconds,
+        max_age_seconds=config.reference_heads_max_age_seconds,
+    )
+    selected_rpc_url = choose_best_rpc_url(
+        option_key=option.key,
+        rpc_urls=option.rpc_urls,
+        poa_compatible=option.poa_compatible,
+        request_timeout_seconds=option.tx_timeout_seconds,
+        max_lag_blocks=config.rpc_max_lag_blocks,
+        reference_head=reference_head,
+        max_reference_lag_blocks=config.rpc_max_reference_lag_blocks,
+    )
+    return build_web3(
+        rpc_url=selected_rpc_url,
+        poa_compatible=option.poa_compatible,
+        request_timeout_seconds=option.tx_timeout_seconds,
+    )
+
+
 def _process_claimed_job(
     *,
     client: MediaCMSInternalClient,
     deriver: EvmDeriver,
     nonce_allocator: NonceAllocator,
+    config,
     option,
     job: dict,
 ) -> None:
@@ -124,11 +151,7 @@ def _process_claimed_job(
             f"Refusing to sweep to the same address for job={public_id}"
         )
 
-    w3 = build_web3(
-        rpc_url=option.rpc_url,
-        poa_compatible=option.poa_compatible,
-        request_timeout_seconds=option.tx_timeout_seconds,
-    )
+    w3 = _build_option_web3(config=config, option=option)
 
     if status == "sweep_broadcasted":
         sweep_txid = str(job.get("sweep_txid", "")).strip()
@@ -263,6 +286,7 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
                 client=client,
                 deriver=deriver,
                 nonce_allocator=nonce_allocator,
+                config=config,
                 option=option,
                 job=job,
             )
