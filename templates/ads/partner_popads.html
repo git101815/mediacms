@@ -8,10 +8,10 @@
     return;
   }
 
-  if (window.__mcPartnerPopadsV4Booted) {
+  if (window.__mcPartnerPopadsBooted) {
     return;
   }
-  window.__mcPartnerPopadsV4Booted = true;
+  window.__mcPartnerPopadsBooted = true;
 
   var runtime = window.mcPopAdsRuntime;
   var config = window.mcPopAdsConfig;
@@ -28,7 +28,7 @@
     try {
       window.plausible(eventName, props ? { props: props } : undefined);
     } catch (error) {
-      // ignore analytics errors
+      // ignore
     }
   }
 
@@ -47,113 +47,78 @@
     return runtime.chooseWeightedOffer(partnerConfig.offers || []);
   }
 
-  function buildAdUrl(offer, mode) {
+  function buildAdUrl(offer) {
     var clickId = randomId();
     var url = String(offer.urlTemplate || "").replace(/CLICKID/g, encodeURIComponent(clickId));
     var separator = url.indexOf("?") === -1 ? "?" : "&";
-    return url + separator + "focus=" + encodeURIComponent(mode === "tabup" ? "1" : "0");
+    return url + separator + "focus=0";
   }
 
   function looksUsable(handle) {
     return !!(handle && typeof handle === "object" && "closed" in handle);
   }
 
-  function openWindow(url, features) {
+  function openCloneTab(url) {
     try {
-      return window.open(url, "_blank", features || "");
+      return window.open(url, "_blank", "noopener,noreferrer");
     } catch (error) {
       return null;
     }
   }
 
-  function getClosestLink(target) {
-    try {
-      return target && target.closest ? target.closest("a[href]") : null;
-    } catch (error) {
-      return null;
-    }
-  }
+  function installNextClickBlocker() {
+    var blocked = false;
 
-  function getExplicitContinuationUrl(target) {
-    if (!target || !target.closest) {
-      return "";
-    }
+    function blockClick(e) {
+      if (blocked) {
+        return;
+      }
+      blocked = true;
 
-    try {
-      var node = target.closest("[data-popunder-continuation],[data-href]");
-      if (!node) {
-        return "";
+      try {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === "function") {
+          e.stopImmediatePropagation();
+        }
+      } catch (error) {
+        // ignore
       }
 
-      if (node.getAttribute("data-popunder-continuation")) {
-        return String(node.getAttribute("data-popunder-continuation") || "").trim();
-      }
-
-      if (node.getAttribute("data-href")) {
-        return String(node.getAttribute("data-href") || "").trim();
-      }
-    } catch (error) {
-      // ignore
+      document.removeEventListener("click", blockClick, true);
     }
 
-    return "";
+    document.addEventListener("click", blockClick, true);
+
+    setTimeout(function () {
+      document.removeEventListener("click", blockClick, true);
+    }, 250);
   }
 
-  function getContinuationUrl(event) {
-    var target = event && event.target ? event.target : null;
+  function navigateCurrentTabToAd(adUrl) {
+    var originalHref = String(window.location.href || "");
 
-    var link = getClosestLink(target);
-    if (link && link.href) {
-      return String(link.href);
-    }
-
-    var explicitUrl = getExplicitContinuationUrl(target);
-    if (explicitUrl) {
-      return explicitUrl;
-    }
-
-    return String(window.location.href || "");
-  }
-
-  function openTabup(adUrl) {
-    var handle = openWindow(adUrl, "noopener,noreferrer");
-    if (!looksUsable(handle)) {
-      return null;
-    }
-
-    return {
-      mode: "tabup",
-      handle: handle
-    };
-  }
-
-  function openTabunder(adUrl, event) {
-    var continuationUrl = getContinuationUrl(event);
-
-    try {
-      var link = getClosestLink(event && event.target ? event.target : null);
-      if (link) {
-        event.preventDefault();
+    setTimeout(function () {
+      try {
+        window.location.replace(adUrl);
+      } catch (error) {
+        try {
+          window.location.assign(adUrl);
+        } catch (innerError) {
+          // ignore
+        }
       }
-    } catch (error) {
-      // ignore
-    }
 
-    var handle = openWindow(continuationUrl, "noopener,noreferrer");
-    if (!looksUsable(handle)) {
-      return null;
-    }
-
-    try {
-      window.location.replace(adUrl);
-    } catch (error) {
-      return null;
-    }
-
-    return {
-      mode: "tabunder",
-      handle: handle
-    };
+      setTimeout(function () {
+        try {
+          if (String(window.location.href || "") === originalHref) {
+            window.location.assign(adUrl);
+          }
+        } catch (error) {
+          // ignore
+        }
+      }, 80);
+    }, 0);
   }
 
   function markAttempt(offer, mode) {
@@ -195,45 +160,40 @@
     });
   }
 
-  function resolveMode() {
+  function openTrueTabunder(offer, event) {
     var mode = "tabunder";
-
-    if (runtime && typeof runtime.resolvePreferredMode === "function") {
-      try {
-        mode = runtime.resolvePreferredMode();
-      } catch (error) {
-        mode = "tabunder";
-      }
-    }
-
-    if (mode !== "tabunder" && mode !== "tabup") {
-      mode = "tabunder";
-    }
-
-    return mode;
-  }
-
-  function tryOpen(offer, event) {
-    var mode = resolveMode();
-    var adUrl = buildAdUrl(offer, mode);
+    var adUrl = buildAdUrl(offer);
+    var cloneUrl = String(window.location.href || "");
 
     markAttempt(offer, mode);
 
-    var result = null;
-
-    if (mode === "tabup") {
-      result = openTabup(adUrl);
-    } else {
-      result = openTabunder(adUrl, event);
+    try {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === "function") {
+          event.stopImmediatePropagation();
+        }
+      }
+    } catch (error) {
+      // ignore
     }
 
-    if (result && looksUsable(result.handle)) {
-      markSuccess(offer, result.mode);
-      return result;
+    installNextClickBlocker();
+
+    var cloneHandle = openCloneTab(cloneUrl);
+    if (!looksUsable(cloneHandle)) {
+      markBlocked(offer, mode);
+      return null;
     }
 
-    markBlocked(offer, mode);
-    return null;
+    navigateCurrentTabToAd(adUrl);
+
+    markSuccess(offer, mode);
+    return {
+      mode: mode,
+      handle: cloneHandle
+    };
   }
 
   function shouldIgnoreTarget(target) {
@@ -285,7 +245,7 @@
 
     isTriggerLocked = true;
 
-    var result = tryOpen(offer, event);
+    var result = openTrueTabunder(offer, event);
     if (!result) {
       setTimeout(function () {
         isTriggerLocked = false;
