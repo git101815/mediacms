@@ -58,12 +58,58 @@
     return !!(handle && typeof handle === "object" && "closed" in handle);
   }
 
-  function openCloneTab(url) {
+  function rawOpen(url, name, features) {
     try {
-      return window.open(url, "_blank", "noopener,noreferrer");
+      return window.open(url || "", name || "", features || "");
     } catch (error) {
       return null;
     }
+  }
+
+  /*
+    Closer to Clickaine's we():
+    - open a blank tab/window first
+    - then replace its location
+    - do NOT use noopener/noreferrer here, because we need a usable handle
+  */
+  function openWithReplace(url, name, features) {
+    var popupName = name || String(Math.random());
+    var handle = null;
+
+    try {
+      handle = features ? rawOpen("", popupName, features) : rawOpen("", popupName);
+      if (!handle) {
+        return null;
+      }
+
+      try {
+        handle.location.replace(url);
+      } catch (error) {
+        return null;
+      }
+
+      return handle;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /*
+    Closer to Clickaine's _e():
+    - prevent the native click when target is an <a target="_blank">
+    - then open the continuity URL in a new tab
+  */
+  function openContinuationLikeClickaine(url, event) {
+    try {
+      var link = event && event.target && event.target.closest ? event.target.closest("a") : null;
+      if (link && link.target === "_blank") {
+        event.preventDefault();
+      }
+    } catch (error) {
+      // ignore
+    }
+
+    return openWithReplace(url, String(Math.random()), "");
   }
 
   function installNextClickBlocker() {
@@ -157,7 +203,7 @@
       installNextClickBlocker();
     }
 
-    var cloneHandle = openCloneTab(cloneUrl);
+    var cloneHandle = openContinuationLikeClickaine(cloneUrl, event);
     if (!looksUsable(cloneHandle)) {
       markBlocked(offer, mode);
       return null;
