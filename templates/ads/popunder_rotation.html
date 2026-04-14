@@ -47,11 +47,7 @@
 
       engine: {
         preferredModeDesktop: "tabunder",
-        preferredModeMobile: "tabup",
-        popupWidthDesktop: 1000,
-        popupHeightDesktop: 700,
-        popupWidthMobileRatio: 0.92,
-        popupHeightMobileRatio: 0.88,
+        preferredModeMobile: "tabunder",
         enableCoverOverlays: true,
         coverSelectors: ["iframe", "object", "embed", "video"],
         bindTo: "",
@@ -289,7 +285,6 @@
   }
 
   function detectBrowserEnv() {
-    var ua = String(navigator.userAgent || "").toLowerCase();
     var isTop = false;
 
     try {
@@ -300,8 +295,6 @@
 
     return {
       isMobile: isMobileLike(),
-      isFirefox: ua.indexOf("firefox") !== -1,
-      isSafari: ua.indexOf("safari") !== -1 && ua.indexOf("chrome") === -1 && ua.indexOf("chromium") === -1,
       isTop: isTop
     };
   }
@@ -310,19 +303,11 @@
     var env = detectBrowserEnv();
     var engine = config.partner && config.partner.engine ? config.partner.engine : {};
     var mode = env.isMobile
-      ? (engine.preferredModeMobile || "tabup")
+      ? (engine.preferredModeMobile || "tabunder")
       : (engine.preferredModeDesktop || "tabunder");
 
-    if (mode === "popunder" && (env.isFirefox || env.isSafari)) {
+    if (mode !== "tabunder" && mode !== "tabup") {
       mode = "tabunder";
-    }
-
-    if (mode === "tabunder" && !env.isTop) {
-      mode = "popup";
-    }
-
-    if (env.isMobile && (mode === "tabunder" || mode === "popunder" || mode === "popup")) {
-      mode = "tabup";
     }
 
     return mode;

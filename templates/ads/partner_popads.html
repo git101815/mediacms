@@ -8,10 +8,10 @@
     return;
   }
 
-  if (window.__mcPartnerPopadsV3Booted) {
+  if (window.__mcPartnerPopadsV4Booted) {
     return;
   }
-  window.__mcPartnerPopadsV3Booted = true;
+  window.__mcPartnerPopadsV4Booted = true;
 
   var runtime = window.mcPopAdsRuntime;
   var config = window.mcPopAdsConfig;
@@ -28,7 +28,7 @@
     try {
       window.plausible(eventName, props ? { props: props } : undefined);
     } catch (error) {
-      // ignore
+      // ignore analytics errors
     }
   }
 
@@ -47,61 +47,18 @@
     return runtime.chooseWeightedOffer(partnerConfig.offers || []);
   }
 
-  function buildUrl(offer, mode) {
+  function buildAdUrl(offer, mode) {
     var clickId = randomId();
     var url = String(offer.urlTemplate || "").replace(/CLICKID/g, encodeURIComponent(clickId));
     var separator = url.indexOf("?") === -1 ? "?" : "&";
-    return url + separator + "focus=" + encodeURIComponent((mode === "popup" || mode === "tabup") ? "1" : "0");
-  }
-
-  function getViewportPopupSize() {
-    var isMobile = runtime.deviceClass === "mobile";
-
-    if (isMobile) {
-      var mobileWidth = Math.max(280, Math.floor(window.innerWidth * Number(engineConfig.popupWidthMobileRatio || 0.92)));
-      var mobileHeight = Math.max(320, Math.floor(window.innerHeight * Number(engineConfig.popupHeightMobileRatio || 0.88)));
-      return {
-        width: mobileWidth,
-        height: mobileHeight,
-        left: 0,
-        top: 0
-      };
-    }
-
-    var width = Number(engineConfig.popupWidthDesktop || 1000);
-    var height = Number(engineConfig.popupHeightDesktop || 700);
-    return {
-      width: width,
-      height: height,
-      left: Math.max(0, Math.floor((window.screen.width - width) / 2)),
-      top: Math.max(0, Math.floor((window.screen.height - height) / 2))
-    };
-  }
-
-  function popupFeatures() {
-    var size = getViewportPopupSize();
-    return [
-      "popup=yes",
-      "noopener",
-      "noreferrer",
-      "status=0",
-      "location=1",
-      "toolbar=1",
-      "menubar=1",
-      "resizable=1",
-      "scrollbars=1",
-      "width=" + size.width,
-      "height=" + size.height,
-      "left=" + size.left,
-      "top=" + size.top
-    ].join(",");
+    return url + separator + "focus=" + encodeURIComponent(mode === "tabup" ? "1" : "0");
   }
 
   function looksUsable(handle) {
     return !!(handle && typeof handle === "object" && "closed" in handle);
   }
 
-  function openRaw(url, features) {
+  function openWindow(url, features) {
     try {
       return window.open(url, "_blank", features || "");
     } catch (error) {
@@ -109,82 +66,94 @@
     }
   }
 
-  function openTabup(url) {
-    var handle = openRaw(url, "noopener,noreferrer");
-    if (!looksUsable(handle)) {
+  function getClosestLink(target) {
+    try {
+      return target && target.closest ? target.closest("a[href]") : null;
+    } catch (error) {
       return null;
     }
-    return { mode: "tabup", handle: handle };
   }
 
-  function openPopup(url) {
-    var handle = openRaw(url, popupFeatures());
-    if (!looksUsable(handle)) {
-      return null;
+  function getExplicitContinuationUrl(target) {
+    if (!target || !target.closest) {
+      return "";
     }
-    return { mode: "popup", handle: handle };
-  }
-
-  function openTabunder(url, event) {
-    var currentHref = String(window.location.href || "");
-    var targetHref = currentHref;
 
     try {
-      var closestLink = event && event.target && event.target.closest ? event.target.closest("a") : null;
-      if (closestLink && closestLink.href) {
-        if (closestLink.target !== "_blank" || engineConfig.openTargetBlank) {
-          targetHref = closestLink.href;
-        }
+      var node = target.closest("[data-popunder-continuation],[data-href]");
+      if (!node) {
+        return "";
+      }
+
+      if (node.getAttribute("data-popunder-continuation")) {
+        return String(node.getAttribute("data-popunder-continuation") || "").trim();
+      }
+
+      if (node.getAttribute("data-href")) {
+        return String(node.getAttribute("data-href") || "").trim();
+      }
+    } catch (error) {
+      // ignore
+    }
+
+    return "";
+  }
+
+  function getContinuationUrl(event) {
+    var target = event && event.target ? event.target : null;
+
+    var link = getClosestLink(target);
+    if (link && link.href) {
+      return String(link.href);
+    }
+
+    var explicitUrl = getExplicitContinuationUrl(target);
+    if (explicitUrl) {
+      return explicitUrl;
+    }
+
+    return String(window.location.href || "");
+  }
+
+  function openTabup(adUrl) {
+    var handle = openWindow(adUrl, "noopener,noreferrer");
+    if (!looksUsable(handle)) {
+      return null;
+    }
+
+    return {
+      mode: "tabup",
+      handle: handle
+    };
+  }
+
+  function openTabunder(adUrl, event) {
+    var continuationUrl = getContinuationUrl(event);
+
+    try {
+      var link = getClosestLink(event && event.target ? event.target : null);
+      if (link) {
         event.preventDefault();
       }
     } catch (error) {
       // ignore
     }
 
-    var handle = openTabup(targetHref);
-    if (!handle || !looksUsable(handle.handle)) {
+    var handle = openWindow(continuationUrl, "noopener,noreferrer");
+    if (!looksUsable(handle)) {
       return null;
     }
 
     try {
-      window.location.replace(url);
+      window.location.replace(adUrl);
     } catch (error) {
       return null;
     }
 
-    return { mode: "tabunder", handle: handle.handle };
-  }
-
-  function openPopunder(url) {
-    var handle = openPopup(url);
-    if (!handle || !looksUsable(handle.handle)) {
-      return null;
-    }
-
-    try {
-      if (typeof handle.handle.blur === "function") {
-        handle.handle.blur();
-      }
-    } catch (error) {
-      // ignore
-    }
-
-    try {
-      if (window.focus) {
-        window.focus();
-      }
-    } catch (error) {
-      // ignore
-    }
-
-    return { mode: "popunder", handle: handle.handle };
-  }
-
-  function getModeOrder() {
-    if (runtime.deviceClass === "mobile") {
-      return engineConfig.fallbackOrderMobile || ["tabup", "popup"];
-    }
-    return engineConfig.fallbackOrderDesktop || ["tabunder", "popunder", "tabup", "popup"];
+    return {
+      mode: "tabunder",
+      handle: handle
+    };
   }
 
   function markAttempt(offer, mode) {
@@ -217,41 +186,53 @@
     });
   }
 
-  function markBlocked(offer) {
+  function markBlocked(offer, mode) {
     plausibleSafe("popunder_blocked", {
       provider: "partner",
       offer: offer ? offer.key : "",
+      mode: mode || "",
       blocked: "1"
     });
   }
 
-  function tryOpenSequence(offer, event) {
-    var modeOrder = getModeOrder();
-    var handlers = {
-      tabunder: function (url) { return openTabunder(url, event); },
-      popunder: openPopunder,
-      tabup: openTabup,
-      popup: openPopup
-    };
+  function resolveMode() {
+    var mode = "tabunder";
 
-    for (var i = 0; i < modeOrder.length; i += 1) {
-      var mode = modeOrder[i];
-      var handler = handlers[mode];
-      if (typeof handler !== "function") {
-        continue;
-      }
-
-      markAttempt(offer, mode);
-      var url = buildUrl(offer, mode);
-      var result = handler(url);
-
-      if (result && looksUsable(result.handle)) {
-        markSuccess(offer, result.mode);
-        return result;
+    if (runtime && typeof runtime.resolvePreferredMode === "function") {
+      try {
+        mode = runtime.resolvePreferredMode();
+      } catch (error) {
+        mode = "tabunder";
       }
     }
 
-    markBlocked(offer);
+    if (mode !== "tabunder" && mode !== "tabup") {
+      mode = "tabunder";
+    }
+
+    return mode;
+  }
+
+  function tryOpen(offer, event) {
+    var mode = resolveMode();
+    var adUrl = buildAdUrl(offer, mode);
+
+    markAttempt(offer, mode);
+
+    var result = null;
+
+    if (mode === "tabup") {
+      result = openTabup(adUrl);
+    } else {
+      result = openTabunder(adUrl, event);
+    }
+
+    if (result && looksUsable(result.handle)) {
+      markSuccess(offer, result.mode);
+      return result;
+    }
+
+    markBlocked(offer, mode);
     return null;
   }
 
@@ -303,8 +284,8 @@
     }
 
     isTriggerLocked = true;
-    var result = tryOpenSequence(offer, event);
 
+    var result = tryOpen(offer, event);
     if (!result) {
       setTimeout(function () {
         isTriggerLocked = false;
