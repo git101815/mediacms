@@ -31,8 +31,10 @@ class ServiceConfig:
     evm_account_xpub: str
     rpc_max_lag_blocks: int
     rpc_max_reference_lag_blocks: int
-    rpc_reference_timeout_seconds: float
-    etherscan_api_key: str
+    reference_heads_base_url: str
+    reference_heads_shared_secret: str
+    reference_heads_timeout_seconds: float
+    reference_heads_max_age_seconds: int
     options: list[DepositOptionConfig]
 
 
@@ -95,6 +97,7 @@ def _build_display_label(*, chain: str, asset_code: str, raw_value: str | None) 
         "arbitrum": "Arbitrum One",
         "base": "Base",
         "bsc": "BNB Chain",
+        "polygon": "Polygon",
     }
     normalized_chain = (chain or "").strip().lower()
     chain_label = chain_labels.get(normalized_chain, (chain or "").strip() or "Unknown")
@@ -168,11 +171,17 @@ def load_config() -> ServiceConfig:
     if rpc_max_reference_lag_blocks < 0:
         raise RuntimeError("DEPOSIT_RPC_MAX_REFERENCE_LAG_BLOCKS must be >= 0")
 
-    rpc_reference_timeout_seconds = float(
-        os.environ.get("DEPOSIT_RPC_REFERENCE_TIMEOUT_SECONDS", "5")
+    reference_heads_timeout_seconds = float(
+        os.environ.get("DEPOSIT_REFERENCE_HEADS_TIMEOUT_SECONDS", "5")
     )
-    if rpc_reference_timeout_seconds <= 0:
-        raise RuntimeError("DEPOSIT_RPC_REFERENCE_TIMEOUT_SECONDS must be > 0")
+    if reference_heads_timeout_seconds <= 0:
+        raise RuntimeError("DEPOSIT_REFERENCE_HEADS_TIMEOUT_SECONDS must be > 0")
+
+    reference_heads_max_age_seconds = int(
+        os.environ.get("DEPOSIT_REFERENCE_HEADS_MAX_AGE_SECONDS", "60")
+    )
+    if reference_heads_max_age_seconds <= 0:
+        raise RuntimeError("DEPOSIT_REFERENCE_HEADS_MAX_AGE_SECONDS must be > 0")
 
     return ServiceConfig(
         mediacms_base_url=_require_env("MEDIACMS_INTERNAL_BASE_URL").rstrip("/"),
@@ -184,7 +193,9 @@ def load_config() -> ServiceConfig:
         evm_account_xpub=evm_account_xpub,
         rpc_max_lag_blocks=rpc_max_lag_blocks,
         rpc_max_reference_lag_blocks=rpc_max_reference_lag_blocks,
-        rpc_reference_timeout_seconds=rpc_reference_timeout_seconds,
-        etherscan_api_key=_require_env("ETHERSCAN_API_KEY"),
+        reference_heads_base_url=_require_env("REFERENCE_HEADS_BASE_URL").rstrip("/"),
+        reference_heads_shared_secret=_require_env("REFERENCE_HEADS_SHARED_SECRET"),
+        reference_heads_timeout_seconds=reference_heads_timeout_seconds,
+        reference_heads_max_age_seconds=reference_heads_max_age_seconds,
         options=options,
     )

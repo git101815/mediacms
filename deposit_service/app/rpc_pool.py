@@ -34,6 +34,8 @@ def choose_best_rpc_url(
     rpc_urls: list[str],
     poa_compatible: bool,
     max_lag_blocks: int,
+    reference_head: int,
+    max_reference_lag_blocks: int,
 ) -> str:
     if not rpc_urls:
         raise RuntimeError(f"No RPC URLs configured for option {option_key}")
@@ -64,16 +66,56 @@ def choose_best_rpc_url(
         )
 
     best_head = max(item.latest_block for item in successes)
-    healthy = [
-        item
-        for item in successes
-        if (best_head - item.latest_block) <= int(max_lag_blocks)
-    ]
+    worst_head = min(item.latest_block for item in successes)
+    internal_spread = best_head - worst_head
+
+    if internal_spread > int(max_lag_blocks):
+        logging.warning(
+            "rpc pool diverges option=%s best_head=%s worst_head=%s spread=%s max_lag_blocks=%s",
+            option_key,
+            best_head,
+            worst_head,
+            internal_spread,
+            max_lag_blocks,
+        )
+
+    healthy = []
+    for item in successes:
+        internal_lag = best_head - item.latest_block
+        reference_lag = int(reference_head) - item.latest_block
+
+        if internal_lag > int(max_lag_blocks):
+            logging.warning(
+                "rpc excluded as unhealthy option=%s rpc=%s latest_block=%s best_head=%s lag=%s max_lag_blocks=%s",
+                option_key,
+                item.rpc_url,
+                item.latest_block,
+                best_head,
+                internal_lag,
+                max_lag_blocks,
+            )
+            continue
+
+        if reference_lag > int(max_reference_lag_blocks):
+            logging.warning(
+                "rpc excluded by reference head option=%s rpc=%s latest_block=%s reference_head=%s lag=%s max_reference_lag_blocks=%s",
+                option_key,
+                item.rpc_url,
+                item.latest_block,
+                reference_head,
+                reference_lag,
+                max_reference_lag_blocks,
+            )
+            continue
+
+        healthy.append(item)
 
     if not healthy:
         raise RuntimeError(
-            f"All RPC endpoints are too far behind for option {option_key}; "
-            f"best_head={best_head}, max_lag_blocks={max_lag_blocks}"
+            f"No healthy RPC endpoints for option {option_key}; "
+            f"best_head={best_head}, reference_head={reference_head}, "
+            f"max_lag_blocks={max_lag_blocks}, "
+            f"max_reference_lag_blocks={max_reference_lag_blocks}"
         )
 
     healthy.sort(
@@ -84,28 +126,13 @@ def choose_best_rpc_url(
     )
     chosen = healthy[0]
 
-    lagging = [
-        item for item in successes if item.rpc_url != chosen.rpc_url
-    ]
-    for item in lagging:
-        lag = best_head - item.latest_block
-        if lag > int(max_lag_blocks):
-            logging.warning(
-                "rpc excluded as unhealthy option=%s rpc=%s latest_block=%s best_head=%s lag=%s max_lag_blocks=%s",
-                option_key,
-                item.rpc_url,
-                item.latest_block,
-                best_head,
-                lag,
-                max_lag_blocks,
-            )
-
     logging.info(
-        "rpc selected option=%s rpc=%s latest_block=%s best_head=%s latency_ms=%s",
+        "rpc selected option=%s rpc=%s latest_block=%s best_head=%s reference_head=%s latency_ms=%s",
         option_key,
         chosen.rpc_url,
         chosen.latest_block,
         best_head,
+        reference_head,
         int(chosen.latency_seconds * 1000),
     )
     return chosen.rpc_url

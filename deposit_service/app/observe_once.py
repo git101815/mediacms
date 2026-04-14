@@ -144,15 +144,19 @@ def _post_observation(
 def _build_option_web3(
     *,
     option,
-    etherscan_api_key: str,
-    rpc_reference_timeout_seconds: float,
+    reference_heads_base_url: str,
+    reference_heads_shared_secret: str,
+    reference_heads_timeout_seconds: float,
+    reference_heads_max_age_seconds: int,
     rpc_max_lag_blocks: int,
     rpc_max_reference_lag_blocks: int,
 ):
     reference_head = get_reference_head(
         chain=option.chain,
-        api_key=etherscan_api_key,
-        timeout_seconds=rpc_reference_timeout_seconds,
+        base_url=reference_heads_base_url,
+        shared_secret=reference_heads_shared_secret,
+        timeout_seconds=reference_heads_timeout_seconds,
+        max_age_seconds=reference_heads_max_age_seconds,
     )
     selected_rpc_url = choose_best_rpc_url(
         option_key=option.key,
@@ -170,8 +174,10 @@ def _observe_token_option(
     client,
     option,
     watch,
-    etherscan_api_key: str,
-    rpc_reference_timeout_seconds: float,
+    reference_heads_base_url: str,
+    reference_heads_shared_secret: str,
+    reference_heads_timeout_seconds: float,
+    reference_heads_max_age_seconds: int,
     rpc_max_lag_blocks: int,
     rpc_max_reference_lag_blocks: int,
 ):
@@ -187,8 +193,10 @@ def _observe_token_option(
 
     w3 = _build_option_web3(
         option=option,
-        etherscan_api_key=etherscan_api_key,
-        rpc_reference_timeout_seconds=rpc_reference_timeout_seconds,
+        reference_heads_base_url=reference_heads_base_url,
+        reference_heads_shared_secret=reference_heads_shared_secret,
+        reference_heads_timeout_seconds=reference_heads_timeout_seconds,
+        reference_heads_max_age_seconds=reference_heads_max_age_seconds,
         rpc_max_lag_blocks=rpc_max_lag_blocks,
         rpc_max_reference_lag_blocks=rpc_max_reference_lag_blocks,
     )
@@ -363,8 +371,10 @@ def observe_once(
     *,
     client,
     options,
-    etherscan_api_key: str,
-    rpc_reference_timeout_seconds: float,
+    reference_heads_base_url: str,
+    reference_heads_shared_secret: str,
+    reference_heads_timeout_seconds: float,
+    reference_heads_max_age_seconds: int,
     rpc_max_lag_blocks: int,
     rpc_max_reference_lag_blocks: int,
 ):
@@ -385,8 +395,10 @@ def observe_once(
                 client=client,
                 option=option,
                 watch=watch,
-                etherscan_api_key=etherscan_api_key,
-                rpc_reference_timeout_seconds=rpc_reference_timeout_seconds,
+                reference_heads_base_url=reference_heads_base_url,
+                reference_heads_shared_secret=reference_heads_shared_secret,
+                reference_heads_timeout_seconds=reference_heads_timeout_seconds,
+                reference_heads_max_age_seconds=reference_heads_max_age_seconds,
                 rpc_max_lag_blocks=rpc_max_lag_blocks,
                 rpc_max_reference_lag_blocks=rpc_max_reference_lag_blocks,
             )

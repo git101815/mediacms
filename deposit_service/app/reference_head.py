@@ -1,46 +1,56 @@
+import datetime as dt
+
 import httpx
 
 
-_CHAIN_ID_BY_NAME = {
-    "ethereum": 1,
-    "bsc": 56,
-    "arbitrum": 42161,
-    "base": 8453,
-}
+def _parse_iso8601(value: str) -> dt.datetime:
+    text = str(value or "").strip()
+    if not text:
+        raise RuntimeError("Missing updated_at in reference head payload")
 
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
 
-def get_reference_chain_id(*, chain: str) -> int:
-    normalized = (chain or "").strip().lower()
-    try:
-        return int(_CHAIN_ID_BY_NAME[normalized])
-    except KeyError as exc:
-        raise RuntimeError(f"Unsupported reference chain: {chain}") from exc
+    parsed = dt.datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        raise RuntimeError("reference updated_at must include timezone")
+    return parsed
 
 
 def get_reference_head(
     *,
     chain: str,
-    api_key: str,
+    base_url: str,
+    shared_secret: str,
     timeout_seconds: float,
+    max_age_seconds: int,
 ) -> int:
-    chain_id = get_reference_chain_id(chain=chain)
-    url = "https://api.etherscan.io/v2/api"
-    params = {
-        "chainid": str(chain_id),
-        "module": "proxy",
-        "action": "eth_blockNumber",
-        "apikey": api_key,
+    url = f"{base_url.rstrip('/')}/ledger/reference-heads/{chain}"
+    headers = {
+        "X-Internal-Shared-Secret": shared_secret,
     }
 
     with httpx.Client(timeout=timeout_seconds) as client:
-        response = client.get(url, params=params)
+        response = client.get(url, headers=headers)
         response.raise_for_status()
         payload = response.json()
 
-    result = str(payload.get("result", "")).strip()
-    if not result.startswith("0x"):
+    latest_block = payload.get("latest_block")
+    if latest_block is None:
+        raise RuntimeError(f"Missing latest_block in reference payload for chain={chain}: {payload}")
+
+    updated_at = _parse_iso8601(payload.get("updated_at"))
+    now = dt.datetime.now(dt.timezone.utc)
+    age_seconds = int((now - updated_at).total_seconds())
+
+    if age_seconds < 0:
         raise RuntimeError(
-            f"Invalid reference head response for chain={chain}: {payload}"
+            f"Reference payload timestamp is in the future for chain={chain}: {payload}"
         )
 
-    return int(result, 16)
+    if age_seconds > int(max_age_seconds):
+        raise RuntimeError(
+            f"Reference payload is stale for chain={chain}: age_seconds={age_seconds}, max_age_seconds={max_age_seconds}"
+        )
+
+    return int(latest_block)

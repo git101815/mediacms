@@ -4,7 +4,6 @@ import time
 from .client import MediaCMSInternalClient
 from .config import load_config
 from .observe_once import observe_once
-from .prefill import prefill_once
 
 
 def main():
@@ -20,17 +19,13 @@ def main():
                 shared_secret=config.shared_secret,
             )
 
-            prefill_once(
-                client=client,
-                options=config.options,
-                provision_batch_size=config.provision_batch_size,
-            )
-
             observe_once(
                 client=client,
                 options=config.options,
-                etherscan_api_key=config.etherscan_api_key,
-                rpc_reference_timeout_seconds=config.rpc_reference_timeout_seconds,
+                reference_heads_base_url=config.reference_heads_base_url,
+                reference_heads_shared_secret=config.reference_heads_shared_secret,
+                reference_heads_timeout_seconds=config.reference_heads_timeout_seconds,
+                reference_heads_max_age_seconds=config.reference_heads_max_age_seconds,
                 rpc_max_lag_blocks=config.rpc_max_lag_blocks,
                 rpc_max_reference_lag_blocks=config.rpc_max_reference_lag_blocks,
             )
