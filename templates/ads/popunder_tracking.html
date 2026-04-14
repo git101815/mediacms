@@ -7,11 +7,15 @@ addEventListener("pointerdown",function handler(){
 
   var originalBeacon=navigator.sendBeacon,
       originalOpen=window.open,
-      originalTopOpen=window.top&&window.top.open,
+      originalTopOpen=null,
       beaconDetected=0,
       popupDetected=0,
       plausible=window.plausible,
       beaconDomains=["coreadness.com"];
+
+  try{
+    originalTopOpen=window.top&&window.top.open;
+  }catch(e){}
 
   try{
     if(
@@ -35,6 +39,11 @@ addEventListener("pointerdown",function handler(){
         }
       }
     }catch(e){}
+
+    if(typeof originalBeacon!=="function"){
+      return false;
+    }
+
     return originalBeacon.apply(this,arguments);
   };
 
@@ -45,18 +54,23 @@ addEventListener("pointerdown",function handler(){
   };
 
   if(originalTopOpen && originalTopOpen!==originalOpen){
-    window.top.open=function(){
-      var w=originalTopOpen.apply(this,arguments);
-      if(w && "closed" in w) popupDetected=1;
-      return w;
-    };
+    try{
+      window.top.open=function(){
+        var w=originalTopOpen.apply(this,arguments);
+        if(w && "closed" in w) popupDetected=1;
+        return w;
+      };
+    }catch(e){}
   }
 
   setTimeout(function(){
     navigator.sendBeacon=originalBeacon;
     window.open=originalOpen;
+
     if(originalTopOpen && originalTopOpen!==originalOpen){
-      window.top.open=originalTopOpen;
+      try{
+        window.top.open=originalTopOpen;
+      }catch(e){}
     }
 
     if(sent || typeof plausible!=="function"){
