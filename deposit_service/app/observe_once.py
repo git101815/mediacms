@@ -332,7 +332,7 @@ def _observe_token_option(*, client, option, watch, rpc_max_lag_blocks: int):
         )
 
 
-def observe_once(*, client, state, options, rpc_max_lag_blocks: int):
+def observe_once(*, client, options, rpc_max_lag_blocks: int):
     if not options:
         return
 

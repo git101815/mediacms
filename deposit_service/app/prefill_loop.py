@@ -23,7 +23,6 @@ def main() -> None:
             try:
                 observe_once(
                     client=client,
-                    state=state,
                     options=config.options,
                     rpc_max_lag_blocks=config.rpc_max_lag_blocks,
                 )
