@@ -44,35 +44,78 @@ def _decode_topic_address(topic_hex: str) -> str:
     return Web3.to_checksum_address("0x" + topic_hex[-40:])
 
 
-def _find_latest_incoming_erc20_transfer(*, w3, contract_address, deposit_address, latest_block, lookback_blocks):
+def _find_latest_incoming_erc20_transfer(
+    *,
+    w3,
+    contract_address,
+    deposit_address,
+    latest_block,
+    lookback_blocks,
+    initial_chunk_size=25,
+    min_chunk_size=5,
+):
     from_block = max(0, int(latest_block) - int(lookback_blocks))
-    logs = w3.eth.get_logs(
-        {
-            "fromBlock": from_block,
-            "toBlock": latest_block,
-            "address": Web3.to_checksum_address(contract_address),
-            "topics": [
-                _transfer_topic(),
-                None,
-                [_address_topic(deposit_address)],
-            ],
-        }
-    )
+    current_to = int(latest_block)
 
-    if not logs:
-        return None
+    checksum_contract = Web3.to_checksum_address(contract_address)
+    transfer_topic = _transfer_topic()
+    address_topic = _address_topic(deposit_address)
 
-    logs = sorted(
-        logs,
-        key=lambda item: (
-            int(item["blockNumber"]),
-            int(item["transactionIndex"]),
-            int(item["logIndex"]),
-        ),
-        reverse=True,
-    )
-    return logs[0]
+    while current_to >= from_block:
+        chunk_size = int(initial_chunk_size)
 
+        while True:
+            current_from = max(from_block, current_to - chunk_size + 1)
+
+            try:
+                logs = w3.eth.get_logs(
+                    {
+                        "fromBlock": current_from,
+                        "toBlock": current_to,
+                        "address": checksum_contract,
+                        "topics": [
+                            transfer_topic,
+                            None,
+                            [address_topic],
+                        ],
+                    }
+                )
+                break
+            except Exception as exc:
+                message = str(exc)
+                if "413" not in message and "Request Entity Too Large" not in message:
+                    raise
+
+                if chunk_size <= int(min_chunk_size):
+                    raise
+
+                smaller_chunk = max(int(min_chunk_size), chunk_size // 2)
+                logging.warning(
+                    "eth_getLogs chunk too large contract=%s address=%s from_block=%s to_block=%s chunk_size=%s retry_chunk_size=%s",
+                    checksum_contract,
+                    deposit_address,
+                    current_from,
+                    current_to,
+                    chunk_size,
+                    smaller_chunk,
+                )
+                chunk_size = smaller_chunk
+
+        if logs:
+            logs = sorted(
+                logs,
+                key=lambda item: (
+                    int(item["blockNumber"]),
+                    int(item["transactionIndex"]),
+                    int(item["logIndex"]),
+                ),
+                reverse=True,
+            )
+            return logs[0]
+
+        current_to = current_from - 1
+
+    return None
 
 def _find_latest_incoming_native_transfer(*, w3, deposit_address, latest_block, lookback_blocks):
     checksum_deposit_address = Web3.to_checksum_address(deposit_address)

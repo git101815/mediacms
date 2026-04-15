@@ -213,7 +213,27 @@ DEPOSIT_SESSION_STATUS_ICONS = {
     DepositSession.STATUS_FAILED: "error",
     DepositSession.STATUS_CANCELED: "block",
 }
+PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT = "awaiting_payment"
+PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED = "payment_detected"
+PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE = "transaction_complete"
 
+PUBLIC_DEPOSIT_STATUS_LABELS = {
+    PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT: "Waiting for payment",
+    PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED: "Payment detected",
+    PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE: "Transaction complete",
+    "canceled": "Canceled",
+    "failed": "Failed",
+    "expired": "Expired",
+}
+
+PUBLIC_DEPOSIT_STATUS_ICONS = {
+    PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT: "schedule",
+    PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED: "visibility",
+    PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE: "check_circle",
+    "canceled": "cancel",
+    "failed": "error",
+    "expired": "timer_off",
+}
 def about(request):
     """About view"""
 
@@ -591,13 +611,15 @@ def _build_recent_deposit_session_rows(wallet):
     rows = []
     for session in sessions:
         display_label = session.metadata.get("display_label") or f"{session.asset_code} on {session.chain}"
+        public_status = _get_public_deposit_status(session)
         rows.append(
             {
                 "public_id": str(session.public_id),
                 "label": display_label,
-                "status": session.status,
-                "status_label": DEPOSIT_SESSION_STATUS_LABELS.get(session.status, session.status),
-                "status_icon": DEPOSIT_SESSION_STATUS_ICONS.get(session.status, "schedule"),
+                "status": public_status,
+                "raw_status": session.status,
+                "status_label": PUBLIC_DEPOSIT_STATUS_LABELS.get(public_status, public_status),
+                "status_icon": PUBLIC_DEPOSIT_STATUS_ICONS.get(public_status, "schedule"),
                 "deposit_address": session.deposit_address,
                 "created_at": session.created_at,
                 "url": reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}),
@@ -608,12 +630,14 @@ def _build_recent_deposit_session_rows(wallet):
 def _build_deposit_session_payload(session: DepositSession) -> dict:
     network_display = _get_network_display_label(session.chain)
     route_label = f"{network_display} · {session.asset_code}"
+    public_status = _get_public_deposit_status(session)
 
     return {
         "public_id": str(session.public_id),
-        "status": session.status,
-        "status_label": DEPOSIT_SESSION_STATUS_LABELS.get(session.status, session.status),
-        "status_icon": DEPOSIT_SESSION_STATUS_ICONS.get(session.status, "schedule"),
+        "status": public_status,
+        "raw_status": session.status,
+        "status_label": DEPOSIT_SESSION_STATUS_LABELS.get(public_status, public_status),
+        "status_icon": DEPOSIT_SESSION_STATUS_ICONS.get(public_status, "schedule"),
         "chain": session.chain,
         "network_display": network_display,
         "asset_code": session.asset_code,
@@ -628,7 +652,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
             chain=session.chain,
             asset_code=session.asset_code,
         ),
-        "observed_txid": session.observed_txid,
+        "observed_txid": session.observed_txid or "",
         "observed_amount": session.observed_amount,
         "observed_amount_display": (
             _format_route_amount(
@@ -641,7 +665,12 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         ),
         "expires_at": session.expires_at,
         "expires_at_iso": session.expires_at.isoformat(),
-        "is_terminal": session.status in DEPOSIT_SESSION_TERMINAL_STATUSES,
+        "is_terminal": public_status in {
+            PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE,
+            "canceled",
+            "failed",
+            "expired",
+        },
         "wallet_url": reverse("wallet"),
     }
 
@@ -684,6 +713,28 @@ def _find_existing_active_deposit_session(*, user, wallet, option_key):
         .order_by("-created_at")
         .first()
     )
+
+def _get_public_deposit_status(session) -> str:
+    raw_status = str(session.status or "").strip()
+
+    if raw_status in {
+        DepositSession.STATUS_CANCELED,
+        DepositSession.STATUS_FAILED,
+        DepositSession.STATUS_EXPIRED,
+    }:
+        return raw_status
+
+    if raw_status == getattr(DepositSession, "STATUS_SWEPT", "swept"):
+        return PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
+
+    if raw_status == DepositSession.STATUS_AWAITING_PAYMENT:
+        observed_amount = int(getattr(session, "observed_amount", 0) or 0)
+        min_amount = int(getattr(session, "min_amount", 0) or 0)
+        if min_amount > 0 and observed_amount >= min_amount:
+            return PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED
+        return PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT
+
+    return PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED
 
 @login_required
 @require_POST

@@ -15,7 +15,7 @@
       "min_amount": 1000000000000000000,
       "session_ttl_seconds": 3600,
       "poll_interval_seconds": 15,
-      "lookback_blocks": 2000,
+      "lookback_blocks": 200,
       "poa_compatible": true
     }
   ]
