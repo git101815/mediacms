@@ -523,10 +523,15 @@ def _abandon_open_sweep_jobs_for_session(*, deposit_session: DepositSession) -> 
         updated_at=timezone.now(),
     )
 
-def build_evm_event_key(*, chain: str, txid: str, log_index: int) -> str:
+def build_balance_detection_event_key(
+    *,
+    chain: str,
+    session_public_id,
+    detected_block_number: int,
+    amount: int,
+) -> str:
     normalized_chain = _normalize_chain(chain)
-    normalized_txid = (txid or "").strip().lower()
-    return f"{normalized_chain}:{normalized_txid}:{int(log_index)}"
+    return f"{normalized_chain}:balance:{session_public_id}:{int(detected_block_number)}:{int(amount)}"
 
 def get_external_asset_clearing_wallet() -> TokenWallet:
     return get_system_wallet(

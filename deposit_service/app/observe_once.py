@@ -77,6 +77,83 @@ def _find_latest_incoming_native_transfer(*, w3, deposit_address, latest_block, 
 
     return None
 
+def _get_erc20_balance_at_block(*, contract, address, block_number: int) -> int:
+    return int(
+        contract.functions.balanceOf(address).call(
+            block_identifier=int(block_number)
+        )
+    )
+
+
+def _find_first_block_with_min_erc20_balance(
+    *,
+    contract,
+    deposit_address,
+    min_amount: int,
+    from_block: int,
+    to_block: int,
+) -> int | None:
+    low = int(from_block)
+    high = int(to_block)
+
+    latest_balance = _get_erc20_balance_at_block(
+        contract=contract,
+        address=deposit_address,
+        block_number=high,
+    )
+    if latest_balance < int(min_amount):
+        return None
+
+    while low < high:
+        mid = (low + high) // 2
+        mid_balance = _get_erc20_balance_at_block(
+            contract=contract,
+            address=deposit_address,
+            block_number=mid,
+        )
+        if mid_balance >= int(min_amount):
+            high = mid
+        else:
+            low = mid + 1
+
+    return low
+
+def _get_native_balance_at_block(*, w3, address, block_number: int) -> int:
+    return int(w3.eth.get_balance(address, block_identifier=int(block_number)))
+
+
+def _find_first_block_with_min_native_balance(
+    *,
+    w3,
+    deposit_address,
+    min_amount: int,
+    from_block: int,
+    to_block: int,
+) -> int | None:
+    low = int(from_block)
+    high = int(to_block)
+
+    latest_balance = _get_native_balance_at_block(
+        w3=w3,
+        address=deposit_address,
+        block_number=high,
+    )
+    if latest_balance < int(min_amount):
+        return None
+
+    while low < high:
+        mid = (low + high) // 2
+        mid_balance = _get_native_balance_at_block(
+            w3=w3,
+            address=deposit_address,
+            block_number=mid,
+        )
+        if mid_balance >= int(min_amount):
+            high = mid
+        else:
+            low = mid + 1
+
+    return low
 
 def _post_observation(
     *,
@@ -86,26 +163,30 @@ def _post_observation(
     deposit_address,
     txid,
     block_number,
+    detected_block_number,
     from_address,
     amount,
     confirmations,
     required_confirmations,
     raw_payload,
+    detection_method,
     log_index=None,
 ):
     payload = {
         "session_public_id": session_public_id,
         "chain": option.chain,
-        "txid": str(txid or "").strip() or f"balance-detected:{session_public_id}",
-        "log_index": 0 if log_index is None else int(log_index),
-        "block_number": int(block_number),
-        "from_address": str(from_address or "").strip().lower() or deposit_address,
+        "txid": str(txid or "").strip(),
+        "log_index": None if log_index is None else int(log_index),
+        "block_number": None if block_number is None else int(block_number),
+        "detected_block_number": None if detected_block_number is None else int(detected_block_number),
+        "from_address": str(from_address or "").strip().lower(),
         "deposit_address": deposit_address,
         "token_contract_address": option.token_contract_address,
         "asset_code": option.asset_code,
         "amount": int(amount),
         "confirmations": int(confirmations),
         "required_confirmations": int(required_confirmations),
+        "detection_method": detection_method,
         "raw_payload": raw_payload,
     }
 
@@ -201,18 +282,20 @@ def _observe_token_option(
                 )
                 continue
 
-            if current_balance <= 0 or current_balance < min_amount:
+            if current_balance < min_amount:
                 continue
 
-            latest_incoming = _find_latest_incoming_native_transfer(
+            from_block = max(0, int(latest_block) - int(option.lookback_blocks))
+            detected_block_number = _find_first_block_with_min_native_balance(
                 w3=w3,
                 deposit_address=checksum_deposit_address,
-                latest_block=latest_block,
-                lookback_blocks=option.lookback_blocks,
+                min_amount=min_amount,
+                from_block=from_block,
+                to_block=latest_block,
             )
-            if latest_incoming is None:
+            if detected_block_number is None:
                 logging.warning(
-                    "positive native balance but no recent incoming transfer option=%s session=%s address=%s balance=%s",
+                    "native balance threshold reached but detection block not found option=%s session=%s address=%s balance=%s",
                     option.key,
                     session_public_id,
                     checksum_deposit_address,
@@ -220,32 +303,38 @@ def _observe_token_option(
                 )
                 continue
 
-            confirmations = int(latest_block - int(latest_incoming["block_number"]) + 1)
+            confirmations = int(latest_block - int(detected_block_number) + 1)
 
             _post_observation(
                 client=client,
                 option=option,
                 session_public_id=session_public_id,
                 deposit_address=checksum_deposit_address,
-                txid=latest_incoming["txid"],
-                block_number=latest_incoming["block_number"],
-                from_address=latest_incoming["from_address"],
-                amount=latest_incoming["amount"],
+                txid="",
+                block_number=int(detected_block_number),
+                detected_block_number=int(detected_block_number),
+                from_address="",
+                amount=current_balance,
                 confirmations=confirmations,
                 required_confirmations=required_confirmations,
-                raw_payload=latest_incoming["raw_payload"],
-                log_index=0,
+                detection_method="balance_verification",
+                raw_payload={
+                    "detection_method": "balance_verification",
+                    "balance_snapshot": str(current_balance),
+                    "latest_block": int(latest_block),
+                    "detected_block_number": int(detected_block_number),
+                },
+                log_index=None,
             )
 
             logging.info(
-                "native deposit observed option=%s session=%s txid=%s confirmations=%s amount=%s",
+                "native deposit detected by balance option=%s session=%s detected_block=%s confirmations=%s amount=%s",
                 option.key,
                 session_public_id,
-                latest_incoming["txid"],
+                detected_block_number,
                 confirmations,
-                latest_incoming["amount"],
+                current_balance,
             )
-
         return
 
     contract = w3.eth.contract(
@@ -281,10 +370,28 @@ def _observe_token_option(
             )
             continue
 
-        if current_balance <= 0 or current_balance < min_amount:
+        if current_balance < min_amount:
             continue
 
-        confirmations = int(required_confirmations)
+        from_block = max(0, int(latest_block) - int(option.lookback_blocks))
+        detected_block_number = _find_first_block_with_min_erc20_balance(
+            contract=contract,
+            deposit_address=checksum_deposit_address,
+            min_amount=min_amount,
+            from_block=from_block,
+            to_block=latest_block,
+        )
+        if detected_block_number is None:
+            logging.warning(
+                "erc20 balance threshold reached but detection block not found option=%s session=%s address=%s balance=%s",
+                option.key,
+                session_public_id,
+                checksum_deposit_address,
+                current_balance,
+            )
+            continue
+
+        confirmations = int(latest_block - int(detected_block_number) + 1)
 
         _post_observation(
             client=client,
@@ -292,23 +399,27 @@ def _observe_token_option(
             session_public_id=session_public_id,
             deposit_address=checksum_deposit_address,
             txid="",
-            block_number=int(latest_block),
+            block_number=int(detected_block_number),
+            detected_block_number=int(detected_block_number),
             from_address="",
             amount=current_balance,
             confirmations=confirmations,
             required_confirmations=required_confirmations,
+            detection_method="balance_verification",
             raw_payload={
                 "detection_method": "balance_verification",
                 "balance_snapshot": str(current_balance),
                 "latest_block": int(latest_block),
+                "detected_block_number": int(detected_block_number),
             },
-            log_index=0,
+            log_index=None,
         )
 
         logging.info(
-            "deposit observed by balance option=%s session=%s confirmations=%s amount=%s",
+            "deposit detected by balance option=%s session=%s detected_block=%s confirmations=%s amount=%s",
             option.key,
             session_public_id,
+            detected_block_number,
             confirmations,
             current_balance,
         )

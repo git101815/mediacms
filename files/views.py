@@ -636,8 +636,8 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "public_id": str(session.public_id),
         "status": public_status,
         "raw_status": session.status,
-        "status_label": DEPOSIT_SESSION_STATUS_LABELS.get(public_status, public_status),
-        "status_icon": DEPOSIT_SESSION_STATUS_ICONS.get(public_status, "schedule"),
+        "status_label": PUBLIC_DEPOSIT_STATUS_LABELS.get(public_status, public_status),
+        "status_icon": PUBLIC_DEPOSIT_STATUS_ICONS.get(public_status, "schedule"),
         "chain": session.chain,
         "network_display": network_display,
         "asset_code": session.asset_code,
@@ -2568,6 +2568,17 @@ def _parse_required_int(payload, key):
     except (TypeError, ValueError) as exc:
         raise DjangoValidationError(f"Invalid integer field: {key}") from exc
 
+def _parse_optional_int(payload, key):
+    value = payload.get(key)
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        raise DjangoValidationError(f"Invalid integer field: {key}")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise DjangoValidationError(f"Invalid integer field: {key}") from exc
+
 @csrf_exempt
 @require_POST
 def internal_deposit_observation(request):
@@ -2579,14 +2590,16 @@ def internal_deposit_observation(request):
             session_public_id=payload.get("session_public_id"),
             chain=payload.get("chain", ""),
             txid=payload.get("txid", ""),
-            log_index=_parse_required_int(payload, "log_index"),
-            block_number=None if payload.get("block_number") is None else _parse_required_int(payload, "block_number"),
+            log_index=_parse_optional_int(payload, "log_index"),
+            block_number=_parse_optional_int(payload, "block_number"),
+            detected_block_number=_parse_optional_int(payload, "detected_block_number"),
             from_address=payload.get("from_address", ""),
             to_address=payload.get("deposit_address", ""),
             token_contract_address=payload.get("token_contract_address", ""),
             asset_code=payload.get("asset_code", ""),
             amount=_parse_required_int(payload, "amount"),
             confirmations=_parse_required_int(payload, "confirmations"),
+            detection_method=(payload.get("detection_method") or "event").strip(),
             raw_payload=payload.get("raw_payload") or payload,
         )
     except DjangoPermissionDenied as exc:

@@ -806,92 +806,37 @@ class DepositSession(models.Model):
         return f"DepositSession #{self.id} user={self.user_id} {self.chain}/{self.asset_code} {self.status}"
 
 class ObservedOnchainTransfer(models.Model):
-    STATUS_OBSERVED = "observed"
-    STATUS_CONFIRMING = "confirming"
-    STATUS_CONFIRMED = "confirmed"
-    STATUS_CREDITED = "credited"
-    STATUS_IGNORED = "ignored"
-    STATUS_FAILED = "failed"
-
-    STATUS_CHOICES = (
-        (STATUS_OBSERVED, "Observed"),
-        (STATUS_CONFIRMING, "Confirming"),
-        (STATUS_CONFIRMED, "Confirmed"),
-        (STATUS_CREDITED, "Credited"),
-        (STATUS_IGNORED, "Ignored"),
-        (STATUS_FAILED, "Failed"),
+    DETECTION_METHOD_EVENT = "event"
+    DETECTION_METHOD_BALANCE = "balance_verification"
+    DETECTION_METHOD_CHOICES = (
+        (DETECTION_METHOD_EVENT, "Event"),
+        (DETECTION_METHOD_BALANCE, "Balance verification"),
     )
 
     event_key = models.CharField(max_length=160, unique=True)
-
     chain = models.CharField(max_length=32, db_index=True)
-    txid = models.CharField(max_length=128, db_index=True)
+
+    txid = models.CharField(max_length=128, db_index=True, blank=True, default="")
     log_index = models.BigIntegerField(null=True, blank=True)
+
     block_number = models.BigIntegerField(null=True, blank=True, db_index=True)
+    detected_block_number = models.BigIntegerField(null=True, blank=True, db_index=True)
 
     from_address = models.CharField(max_length=128, blank=True, default="")
     to_address = models.CharField(max_length=128, db_index=True)
+
     token_contract_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
     asset_code = models.CharField(max_length=32, db_index=True)
-
     amount = models.BigIntegerField()
+
     confirmations = models.PositiveIntegerField(default=0)
 
-    status = models.CharField(
-        max_length=16,
-        choices=STATUS_CHOICES,
-        default=STATUS_OBSERVED,
+    detection_method = models.CharField(
+        max_length=32,
+        choices=DETECTION_METHOD_CHOICES,
+        default=DETECTION_METHOD_EVENT,
         db_index=True,
     )
-
-    deposit_session = models.ForeignKey(
-        DepositSession,
-        null=True,
-        blank=True,
-        on_delete=models.PROTECT,
-        related_name="observed_transfers",
-    )
-
-    credited_ledger_txn = models.OneToOneField(
-        LedgerTransaction,
-        null=True,
-        blank=True,
-        on_delete=models.PROTECT,
-        related_name="credited_onchain_transfer",
-    )
-
-    raw_payload = models.JSONField(default=dict, blank=True)
-    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
-
-    first_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
-    confirmed_at = models.DateTimeField(null=True, blank=True, db_index=True)
-    created_at = models.DateTimeField(default=timezone.now, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        indexes = [
-            models.Index(fields=["chain", "txid"]),
-            models.Index(fields=["chain", "to_address", "status"]),
-            models.Index(fields=["deposit_session", "status"]),
-            models.Index(fields=["status", "first_seen_at"]),
-        ]
-        constraints = [
-            models.CheckConstraint(
-                condition=models.Q(amount__gt=0),
-                name="observedonchaintransfer_amount_gt_0",
-            ),
-            models.CheckConstraint(
-                condition=models.Q(confirmations__gte=0),
-                name="observedonchaintransfer_confirmations_gte_0",
-            ),
-        ]
-        permissions = [
-            ("can_record_onchain_observations", "Can record on-chain observations"),
-            ("can_view_onchain_transfers", "Can view on-chain transfers"),
-        ]
-
-    def __str__(self):
-        return f"ObservedOnchainTransfer #{self.id} {self.event_key} {self.status}"
 
 class DepositAddress(models.Model):
     STATUS_AVAILABLE = "available"
