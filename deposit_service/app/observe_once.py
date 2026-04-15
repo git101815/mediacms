@@ -44,78 +44,6 @@ def _decode_topic_address(topic_hex: str) -> str:
     return Web3.to_checksum_address("0x" + topic_hex[-40:])
 
 
-def _find_latest_incoming_erc20_transfer(
-    *,
-    w3,
-    contract_address,
-    deposit_address,
-    latest_block,
-    lookback_blocks,
-    initial_chunk_size=25,
-    min_chunk_size=5,
-):
-    from_block = max(0, int(latest_block) - int(lookback_blocks))
-    current_to = int(latest_block)
-
-    checksum_contract = Web3.to_checksum_address(contract_address)
-    transfer_topic = _transfer_topic()
-    address_topic = _address_topic(deposit_address)
-
-    while current_to >= from_block:
-        chunk_size = int(initial_chunk_size)
-
-        while True:
-            current_from = max(from_block, current_to - chunk_size + 1)
-
-            try:
-                logs = w3.eth.get_logs(
-                    {
-                        "fromBlock": current_from,
-                        "toBlock": current_to,
-                        "address": checksum_contract,
-                        "topics": [
-                            transfer_topic,
-                            None,
-                            [address_topic],
-                        ],
-                    }
-                )
-                break
-            except Exception as exc:
-                message = str(exc)
-                if "413" not in message and "Request Entity Too Large" not in message:
-                    raise
-
-                if chunk_size <= int(min_chunk_size):
-                    raise
-
-                smaller_chunk = max(int(min_chunk_size), chunk_size // 2)
-                logging.warning(
-                    "eth_getLogs chunk too large contract=%s address=%s from_block=%s to_block=%s chunk_size=%s retry_chunk_size=%s",
-                    checksum_contract,
-                    deposit_address,
-                    current_from,
-                    current_to,
-                    chunk_size,
-                    smaller_chunk,
-                )
-                chunk_size = smaller_chunk
-
-        if logs:
-            logs = sorted(
-                logs,
-                key=lambda item: (
-                    int(item["blockNumber"]),
-                    int(item["transactionIndex"]),
-                    int(item["logIndex"]),
-                ),
-                reverse=True,
-            )
-            return logs[0]
-
-        current_to = current_from - 1
-
-    return None
 
 def _find_latest_incoming_native_transfer(*, w3, deposit_address, latest_block, lookback_blocks):
     checksum_deposit_address = Web3.to_checksum_address(deposit_address)
@@ -168,10 +96,10 @@ def _post_observation(
     payload = {
         "session_public_id": session_public_id,
         "chain": option.chain,
-        "txid": txid,
+        "txid": str(txid or "").strip() or f"balance-detected:{session_public_id}",
         "log_index": 0 if log_index is None else int(log_index),
         "block_number": int(block_number),
-        "from_address": from_address,
+        "from_address": str(from_address or "").strip().lower() or deposit_address,
         "deposit_address": deposit_address,
         "token_contract_address": option.token_contract_address,
         "asset_code": option.asset_code,
@@ -182,7 +110,6 @@ def _post_observation(
     }
 
     client.post_signed("/api/internal/ledger/deposit-observations", payload)
-
 
 def _build_option_web3(
     *,
@@ -357,54 +284,31 @@ def _observe_token_option(
         if current_balance <= 0 or current_balance < min_amount:
             continue
 
-        latest_incoming = _find_latest_incoming_erc20_transfer(
-            w3=w3,
-            contract_address=option.token_contract_address,
-            deposit_address=checksum_deposit_address,
-            latest_block=latest_block,
-            lookback_blocks=option.lookback_blocks,
-        )
-        if latest_incoming is None:
-            logging.warning(
-                "positive balance but no recent incoming transfer option=%s session=%s address=%s balance=%s",
-                option.key,
-                session_public_id,
-                checksum_deposit_address,
-                current_balance,
-            )
-            continue
-
-        block_number = int(latest_incoming["blockNumber"])
-        confirmations = int(latest_block - block_number + 1)
-        txid = latest_incoming["transactionHash"].hex()
-        log_index = int(latest_incoming["logIndex"])
+        confirmations = int(required_confirmations)
 
         _post_observation(
             client=client,
             option=option,
             session_public_id=session_public_id,
             deposit_address=checksum_deposit_address,
-            txid=txid,
-            block_number=block_number,
-            from_address=_decode_topic_address(latest_incoming["topics"][1].hex()),
+            txid="",
+            block_number=int(latest_block),
+            from_address="",
             amount=current_balance,
             confirmations=confirmations,
             required_confirmations=required_confirmations,
             raw_payload={
-                "transaction_hash": txid,
-                "block_hash": latest_incoming["blockHash"].hex(),
-                "transaction_index": int(latest_incoming["transactionIndex"]),
-                "log_index": log_index,
+                "detection_method": "balance_verification",
                 "balance_snapshot": str(current_balance),
+                "latest_block": int(latest_block),
             },
-            log_index=log_index,
+            log_index=0,
         )
 
         logging.info(
-            "deposit observed option=%s session=%s txid=%s confirmations=%s amount=%s",
+            "deposit observed by balance option=%s session=%s confirmations=%s amount=%s",
             option.key,
             session_public_id,
-            txid,
             confirmations,
             current_balance,
         )
