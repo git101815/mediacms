@@ -311,16 +311,12 @@ class ObservedOnchainTransferAdmin(ReadOnlyAdmin):
         "asset_code",
         "txid",
         "log_index",
+        "block_number",
         "to_address",
         "amount",
         "confirmations",
-        "status",
-        "deposit_session",
-        "credited_ledger_txn",
-        "first_seen_at",
-        "confirmed_at",
     )
-    list_filter = ("chain", "asset_code", "status")
+    list_filter = ("chain", "asset_code")
     search_fields = (
         "event_key",
         "txid",
@@ -340,16 +336,8 @@ class ObservedOnchainTransferAdmin(ReadOnlyAdmin):
         "asset_code",
         "amount",
         "confirmations",
-        "status",
-        "deposit_session",
-        "credited_ledger_txn",
-        "raw_payload",
-        "metadata_version",
-        "first_seen_at",
-        "confirmed_at",
-        "created_at",
-        "updated_at",
     )
+
 @admin.register(DepositAddress)
 class DepositAddressAdmin(ReadOnlyAdmin):
     list_display = (
