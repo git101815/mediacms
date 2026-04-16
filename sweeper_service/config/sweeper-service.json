@@ -20,6 +20,7 @@
       "max_gas_funding_amount_wei": "300000000000000",
       "erc20_transfer_gas_limit": 100000,
       "gas_limit_multiplier_bps": 12000,
+      "gas_limit_retry_multiplier_bps": 15000,
       "tx_timeout_seconds": 300,
       "gas_price_multiplier_bps": 12000,
       "poa_compatible": true

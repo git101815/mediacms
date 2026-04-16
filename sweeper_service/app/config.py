@@ -23,6 +23,7 @@ class SweepOptionConfig:
     max_gas_funding_amount_wei: int
     erc20_transfer_gas_limit: int
     gas_limit_multiplier_bps: int
+    gas_limit_retry_multiplier_bps: int
     tx_timeout_seconds: int
     gas_price_multiplier_bps: int
     poa_compatible: bool
@@ -170,6 +171,7 @@ def load_config() -> ServiceConfig:
             ),
             erc20_transfer_gas_limit=int(item.get("erc20_transfer_gas_limit", 100000)),
             gas_limit_multiplier_bps=int(item.get("gas_limit_multiplier_bps", 12000)),
+            gas_limit_retry_multiplier_bps=int(item.get("gas_limit_retry_multiplier_bps", 15000)),
             tx_timeout_seconds=int(item.get("tx_timeout_seconds", 300)),
             gas_price_multiplier_bps=int(item.get("gas_price_multiplier_bps", 12000)),
             poa_compatible=bool(item.get("poa_compatible", False)),
@@ -191,6 +193,8 @@ def load_config() -> ServiceConfig:
             raise RuntimeError(f"tx_timeout_seconds must be > 0 for option {option.key}")
         if option.gas_price_multiplier_bps < 10000:
             raise RuntimeError(f"gas_price_multiplier_bps must be >= 10000 for option {option.key}")
+        if option.gas_limit_retry_multiplier_bps < 10000:
+            raise RuntimeError(f"gas_limit_retry_multiplier_bps must be >= 10000 for option {option.key}")
 
         options.append(option)
 
