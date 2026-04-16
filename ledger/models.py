@@ -806,37 +806,54 @@ class DepositSession(models.Model):
         return f"DepositSession #{self.id} user={self.user_id} {self.chain}/{self.asset_code} {self.status}"
 
 class ObservedOnchainTransfer(models.Model):
-    DETECTION_METHOD_EVENT = "event"
-    DETECTION_METHOD_BALANCE = "balance_verification"
-    DETECTION_METHOD_CHOICES = (
-        (DETECTION_METHOD_EVENT, "Event"),
-        (DETECTION_METHOD_BALANCE, "Balance verification"),
+
+    STATUS_OBSERVED = "observed"
+    STATUS_CONFIRMING = "confirming"
+    STATUS_CONFIRMED = "confirmed"
+    STATUS_CREDITED = "credited"
+
+    STATUS_CHOICES = [
+        (STATUS_OBSERVED, "Observed"),
+        (STATUS_CONFIRMING, "Confirming"),
+        (STATUS_CONFIRMED, "Confirmed"),
+        (STATUS_CREDITED, "Credited"),
+    ]
+
+    deposit_session = models.ForeignKey(
+        "ledger.DepositSession",
+        on_delete=models.PROTECT,
+        related_name="observed_transfers",
     )
-
-    event_key = models.CharField(max_length=160, unique=True)
-    chain = models.CharField(max_length=32, db_index=True)
-
-    txid = models.CharField(max_length=128, db_index=True, blank=True, default="")
-    log_index = models.BigIntegerField(null=True, blank=True)
-
-    block_number = models.BigIntegerField(null=True, blank=True, db_index=True)
-    detected_block_number = models.BigIntegerField(null=True, blank=True, db_index=True)
-
-    from_address = models.CharField(max_length=128, blank=True, default="")
-    to_address = models.CharField(max_length=128, db_index=True)
-
-    token_contract_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
-    asset_code = models.CharField(max_length=32, db_index=True)
+    event_key = models.CharField(max_length=255, unique=True)
+    chain = models.CharField(max_length=32)
+    txid = models.CharField(max_length=255, blank=True)
+    log_index = models.IntegerField(null=True, blank=True)
+    block_number = models.BigIntegerField(null=True, blank=True)
+    detected_block_number = models.BigIntegerField(null=True, blank=True)
+    from_address = models.CharField(max_length=255, blank=True)
+    to_address = models.CharField(max_length=255)
+    token_contract_address = models.CharField(max_length=255, blank=True)
+    asset_code = models.CharField(max_length=32)
     amount = models.BigIntegerField()
-
     confirmations = models.PositiveIntegerField(default=0)
+    detection_method = models.CharField(max_length=32, default="event")
 
-    detection_method = models.CharField(
+    status = models.CharField(
         max_length=32,
-        choices=DETECTION_METHOD_CHOICES,
-        default=DETECTION_METHOD_EVENT,
+        choices=STATUS_CHOICES,
+        default=STATUS_OBSERVED,
         db_index=True,
     )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    raw_payload = models.JSONField(default=dict, blank=True)
+    credited_ledger_txn = models.OneToOneField(
+        "ledger.LedgerTransaction",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="credited_onchain_transfer",
+    )
+    metadata_version = models.PositiveIntegerField(default=LEDGER_METADATA_VERSION)
 
 class DepositAddress(models.Model):
     STATUS_AVAILABLE = "available"
