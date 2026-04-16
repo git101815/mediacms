@@ -33,6 +33,13 @@ def _make_config(option):
         mnemonic="test mnemonic",
         mnemonic_passphrase="",
         account_index=0,
+        rpc_max_lag_blocks=64,
+        rpc_max_reference_lag_blocks=64,
+        reference_heads_base_url="https://reference-heads.example",
+        reference_heads_shared_secret="secret",
+        reference_heads_timeout_seconds=5.0,
+        reference_heads_max_age_seconds=60,
+        request_timeout_seconds=10.0,
     )
 
 

@@ -367,13 +367,15 @@ def parse_deposit_option_key(option_key: str) -> tuple[str, str, str]:
 
 
 def _get_deposit_evm_account_xpub() -> str:
+    if hasattr(settings, "DEPOSIT_EVM_ACCOUNT_XPUB"):
+        settings_value = (getattr(settings, "DEPOSIT_EVM_ACCOUNT_XPUB") or "").strip()
+        if settings_value:
+            return settings_value
+        raise ValidationError("DEPOSIT_EVM_ACCOUNT_XPUB is not configured")
+
     env_value = (os.environ.get("DEPOSIT_EVM_ACCOUNT_XPUB") or "").strip()
     if env_value:
         return env_value
-
-    settings_value = (getattr(settings, "DEPOSIT_EVM_ACCOUNT_XPUB", "") or "").strip()
-    if settings_value:
-        return settings_value
 
     raise ValidationError("DEPOSIT_EVM_ACCOUNT_XPUB is not configured")
 
@@ -532,6 +534,17 @@ def build_balance_detection_event_key(
 ) -> str:
     normalized_chain = _normalize_chain(chain)
     return f"{normalized_chain}:balance:{session_public_id}:{int(detected_block_number)}:{int(amount)}"
+
+
+def build_evm_event_key(*, chain: str, txid: str, log_index: int) -> str:
+    normalized_chain = _normalize_chain(chain)
+    normalized_txid = (txid or "").strip().lower()
+    normalized_log_index = int(log_index)
+    if not normalized_txid:
+        raise ValidationError("Transaction id is required for event-based observations")
+    if normalized_log_index < 0:
+        raise ValidationError("Log index cannot be negative")
+    return f"{normalized_chain}:{normalized_txid}:{normalized_log_index}"
 
 def get_external_asset_clearing_wallet() -> TokenWallet:
     return get_system_wallet(
@@ -1401,15 +1414,17 @@ def record_onchain_observation(
     actor,
     deposit_session: DepositSession,
     chain: str,
-    txid: str,
-    log_index: int,
+    txid: str = "",
+    log_index: int | None = None,
     block_number: int | None,
-    from_address: str,
+    from_address: str = "",
     to_address: str,
     token_contract_address: str,
     asset_code: str,
     amount: int,
     confirmations: int,
+    detected_block_number: int | None = None,
+    detection_method: str = "event",
     raw_payload=None,
 ) -> ObservedOnchainTransfer:
     _require_perm(actor, "ledger.can_record_onchain_observations")
@@ -1425,8 +1440,10 @@ def record_onchain_observation(
 
     chain = _normalize_chain(chain)
     txid = (txid or "").strip().lower()
-    log_index = int(log_index)
+    detection_method = (detection_method or "event").strip().lower()
+    log_index = None if log_index is None else int(log_index)
     block_number = None if block_number is None else int(block_number)
+    detected_block_number = None if detected_block_number is None else int(detected_block_number)
     token_contract_address = _normalize_evm_address(token_contract_address)
     from_address = _normalize_evm_address(from_address)
     to_address = _normalize_evm_address(to_address)
@@ -1434,10 +1451,14 @@ def record_onchain_observation(
     amount = int(amount)
     confirmations = int(confirmations)
 
-    if log_index < 0:
+    if detection_method not in {"event", "balance_verification"}:
+        raise ValidationError("Unsupported observation detection method")
+    if log_index is not None and log_index < 0:
         raise ValidationError("Log index cannot be negative")
     if block_number is not None and block_number < 0:
         raise ValidationError("Block number cannot be negative")
+    if detected_block_number is not None and detected_block_number < 0:
+        raise ValidationError("Detected block number cannot be negative")
     if amount <= 0:
         raise ValidationError("Observed amount must be positive")
     if confirmations < 0:
@@ -1459,23 +1480,41 @@ def record_onchain_observation(
     if to_address != deposit_session.deposit_address:
         raise ValidationError("Observed destination address does not match deposit session address")
 
-    event_key = build_evm_event_key(
-        chain=chain,
-        txid=txid,
-        log_index=log_index,
-    )
+    if detection_method == "balance_verification":
+        if detected_block_number is None:
+            raise ValidationError("Detected block number is required for balance-verification observations")
+        if block_number is None:
+            block_number = detected_block_number
+        if log_index is None:
+            log_index = 0
+        event_key = build_balance_detection_event_key(
+            chain=chain,
+            session_public_id=deposit_session.public_id,
+            detected_block_number=detected_block_number,
+            amount=amount,
+        )
+    else:
+        if log_index is None:
+            raise ValidationError("Log index is required for event-based observations")
+        event_key = build_evm_event_key(
+            chain=chain,
+            txid=txid,
+            log_index=log_index,
+        )
 
     defaults = {
         "chain": chain,
         "txid": txid,
         "log_index": log_index,
         "block_number": block_number,
+        "detected_block_number": detected_block_number,
         "from_address": from_address,
         "to_address": to_address,
         "token_contract_address": token_contract_address,
         "asset_code": asset_code,
         "amount": amount,
         "confirmations": confirmations,
+        "detection_method": detection_method,
         "deposit_session": deposit_session,
         "raw_payload": raw_payload,
         "metadata_version": LEDGER_METADATA_VERSION,
@@ -1495,6 +1534,8 @@ def record_onchain_observation(
             or observed.token_contract_address != token_contract_address
             or observed.asset_code != asset_code
             or int(observed.amount) != amount
+            or getattr(observed, "detected_block_number", None) != detected_block_number
+            or getattr(observed, "detection_method", "event") != detection_method
         )
         if immutable_mismatch:
             raise ValidationError("On-chain event key reused with different payload")
@@ -1507,6 +1548,10 @@ def record_onchain_observation(
         if block_number is not None and observed.block_number != block_number:
             observed.block_number = block_number
             update_fields.append("block_number")
+
+        if detected_block_number is not None and getattr(observed, "detected_block_number", None) != detected_block_number:
+            observed.detected_block_number = detected_block_number
+            update_fields.append("detected_block_number")
 
         if confirmations > observed.confirmations:
             observed.confirmations = confirmations
@@ -2048,15 +2093,17 @@ def ingest_deposit_observation_event(
     actor,
     session_public_id,
     chain: str,
-    txid: str,
-    log_index: int,
+    txid: str = "",
+    log_index: int | None = None,
     block_number: int | None,
-    from_address: str,
+    from_address: str = "",
     to_address: str,
     token_contract_address: str,
     asset_code: str,
     amount: int,
     confirmations: int,
+    detected_block_number: int | None = None,
+    detection_method: str = "event",
     raw_payload=None,
 ):
     if raw_payload is None:
@@ -2081,6 +2128,8 @@ def ingest_deposit_observation_event(
         asset_code=asset_code,
         amount=amount,
         confirmations=confirmations,
+        detected_block_number=detected_block_number,
+        detection_method=detection_method,
         raw_payload=raw_payload,
     )
 

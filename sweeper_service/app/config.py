@@ -44,6 +44,7 @@ class ServiceConfig:
     reference_heads_timeout_seconds: float
     reference_heads_max_age_seconds: int
     options: list[SweepOptionConfig]
+    request_timeout_seconds: float
 
 
 def _require_env(name: str) -> str:
@@ -137,6 +138,11 @@ def load_config() -> ServiceConfig:
     account_index = int(raw.get("account_index", 0))
     if account_index < 0:
         raise RuntimeError("account_index must be >= 0")
+    request_timeout_seconds = float(
+        os.environ.get("SWEEPER_RPC_REQUEST_TIMEOUT_SECONDS", "10")
+    )
+    if request_timeout_seconds <= 0:
+        raise RuntimeError("SWEEPER_RPC_REQUEST_TIMEOUT_SECONDS must be > 0")
 
     options: list[SweepOptionConfig] = []
     for item in raw_options:
@@ -163,6 +169,7 @@ def load_config() -> ServiceConfig:
             tx_timeout_seconds=int(item.get("tx_timeout_seconds", 300)),
             gas_price_multiplier_bps=int(item.get("gas_price_multiplier_bps", 12000)),
             poa_compatible=bool(item.get("poa_compatible", False)),
+
         )
 
         if not option.key:
@@ -228,4 +235,5 @@ def load_config() -> ServiceConfig:
         reference_heads_timeout_seconds=reference_heads_timeout_seconds,
         reference_heads_max_age_seconds=reference_heads_max_age_seconds,
         options=options,
+        request_timeout_seconds=request_timeout_seconds,
     )

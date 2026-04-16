@@ -98,19 +98,21 @@ def _build_option_web3(*, config, option):
         timeout_seconds=config.reference_heads_timeout_seconds,
         max_age_seconds=config.reference_heads_max_age_seconds,
     )
+
     selected_rpc_url = choose_best_rpc_url(
         option_key=option.key,
         rpc_urls=option.rpc_urls,
         poa_compatible=option.poa_compatible,
-        request_timeout_seconds=option.tx_timeout_seconds,
         max_lag_blocks=config.rpc_max_lag_blocks,
         reference_head=reference_head,
         max_reference_lag_blocks=config.rpc_max_reference_lag_blocks,
+        request_timeout_seconds=config.request_timeout_seconds,
     )
+
     return build_web3(
         rpc_url=selected_rpc_url,
         poa_compatible=option.poa_compatible,
-        request_timeout_seconds=option.tx_timeout_seconds,
+        request_timeout_seconds=config.request_timeout_seconds,
     )
 
 
