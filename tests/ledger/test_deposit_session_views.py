@@ -156,7 +156,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         self.assertIn("expires_at_iso", payload)
 
     @patch("ledger.services._derive_session_deposit_address")
-    def test_wallet_deposit_status_json_reflects_credit_after_observation(self, mocked_derive):
+    def test_wallet_deposit_status_json_maps_credited_session_to_payment_detected(self, mocked_derive):
         self.grant_perm(self.operator, "can_record_onchain_observations")
         self.grant_perm(self.operator, "can_credit_confirmed_deposits")
         self.grant_perm(self.operator, "can_manage_deposit_sweep_jobs")
@@ -210,7 +210,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         self.assertEqual(status_response.status_code, 200)
         payload = status_response.json()
 
-        self.assertEqual(payload["status"], DepositSession.STATUS_CREDITED)
+        self.assertEqual(payload["status"], "payment_detected")
         self.assertEqual(payload["observed_txid"], "0xviewflow0001")
         self.assertEqual(payload["confirmations"], session.required_confirmations)
-        self.assertTrue(payload["is_terminal"])
+        self.assertFalse(payload["is_terminal"])
