@@ -315,7 +315,7 @@ class LedgerTransaction(models.Model):
     STATUS_CHOICES = LEDGER_TXN_STATUS_CHOICES
 
     kind = models.CharField(max_length=32, db_index=True)
-    external_id = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    external_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
     request_hash = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
