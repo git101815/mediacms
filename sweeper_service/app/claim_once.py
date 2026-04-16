@@ -1,6 +1,6 @@
 import logging
 import time
-
+import json
 from .client import MediaCMSInternalClient
 from .config import load_config
 from .derivation import EvmDeriver
@@ -88,8 +88,47 @@ def _truncate_error(message: str, *, max_length: int = 500) -> str:
     normalized = (message or "").strip()
     if len(normalized) <= max_length:
         return normalized
-    return normalized[: max_length - 3] + "..."
 
+    try:
+        payload = json.loads(normalized)
+    except Exception:
+        return normalized[: max_length - 3] + "..."
+
+    payload["details"] = payload.get("details", {})
+    payload["details"]["truncated"] = True
+    payload["details"]["original_length"] = len(normalized)
+
+    compact = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    if len(compact) <= max_length:
+        return compact
+
+    payload["details"] = {
+        "truncated": True,
+        "original_length": len(normalized),
+    }
+    compact = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    if len(compact) <= max_length:
+        return compact
+
+    return compact[: max_length - 3] + "..."
+
+def _build_error_payload(*, code: str, message: str, retryable: bool, details: dict | None = None) -> dict:
+    return {
+        "code": str(code),
+        "message": str(message),
+        "retryable": bool(retryable),
+        "details": details or {},
+    }
+
+
+def _raise_structured_error(*, code: str, message: str, retryable: bool, details: dict | None = None) -> None:
+    payload = _build_error_payload(
+        code=code,
+        message=message,
+        retryable=retryable,
+        details=details,
+    )
+    raise RuntimeError(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
 def _build_option_web3(*, config, option):
     reference_head = get_reference_head(
@@ -185,9 +224,19 @@ def _read_mined_receipt(*, w3, txid: str) -> dict:
     try:
         receipt = w3.eth.get_transaction_receipt(txid)
     except TransactionNotFound as exc:
-        raise RuntimeError(f"Missing receipt for mined transaction {txid}") from exc
+        _raise_structured_error(
+            code="SWEEP_RECEIPT_MISSING",
+            message="Missing receipt for mined transaction",
+            retryable=True,
+            details={"txid": txid},
+        )
     if receipt is None:
-        raise RuntimeError(f"Missing receipt for mined transaction {txid}")
+        _raise_structured_error(
+            code="SWEEP_RECEIPT_MISSING",
+            message="Missing receipt for mined transaction",
+            retryable=True,
+            details={"txid": txid},
+        )
     return dict(receipt)
 
 
@@ -237,9 +286,17 @@ def _send_retry_funding_if_needed(
         return
 
     if extra_topup_needed > int(option.max_gas_funding_amount_wei):
-        raise RuntimeError(
-            f"Sweep retry funding exceeds configured cap for job={public_id}: "
-            f"required={extra_topup_needed} cap={option.max_gas_funding_amount_wei}"
+        _raise_structured_error(
+            code="SWEEP_RETRY_FUNDING_CAP_EXCEEDED",
+            message="Sweep retry funding exceeds configured cap",
+            retryable=False,
+            details={
+                "job_public_id": public_id,
+                "required_extra_topup_wei": int(extra_topup_needed),
+                "cap_wei": int(option.max_gas_funding_amount_wei),
+                "chain": option.chain,
+                "asset_code": option.asset_code,
+            },
         )
 
     gas_funding_txid = send_native_transfer(
@@ -399,12 +456,22 @@ def _finalize_sweep_with_single_retry(
         return second_sweep_txid
 
     second_gas_used = int(second_receipt.get("gasUsed", 0) or 0)
-    raise RuntimeError(
-        f"Sweep retry failed for job={public_id} "
-        f"first_txid={first_sweep_txid} second_txid={second_sweep_txid} "
-        f"initial_gas_limit={initial_gas_limit} first_gas_used={first_gas_used} "
-        f"retry_gas_limit={retry_gas_limit} second_gas_used={second_gas_used} "
-        f"extra_topup_needed={extra_topup_needed}"
+    _raise_structured_error(
+        code="SWEEP_GAS_RETRY_FAILED",
+        message="Sweep retry failed after out-of-gas recovery attempt",
+        retryable=False,
+        details={
+            "job_public_id": public_id,
+            "first_sweep_txid": first_sweep_txid,
+            "second_sweep_txid": second_sweep_txid,
+            "initial_gas_limit": int(initial_gas_limit),
+            "first_gas_used": int(first_gas_used),
+            "retry_gas_limit": int(retry_gas_limit),
+            "second_gas_used": int(second_gas_used),
+            "extra_topup_needed": int(extra_topup_needed),
+            "chain": option.chain,
+            "asset_code": option.asset_code,
+        },
     )
 
 def _process_claimed_job(
@@ -450,10 +517,17 @@ def _process_claimed_job(
                     receipt=receipt,
                     attempted_gas_limit=attempted_gas_limit,
             ):
-                raise RuntimeError(
-                    f"Sweep reverted without out-of-gas signature for job={public_id} "
-                    f"txid={sweep_txid} gas_used={int(receipt.get('gasUsed', 0) or 0)} "
-                    f"attempted_gas_limit={attempted_gas_limit}"
+                _raise_structured_error(
+                    code="SWEEP_TOKEN_REVERTED",
+                    message="Sweep reverted without out-of-gas signature",
+                    retryable=False,
+                    details={
+                        "job_public_id": public_id,
+                        "sweep_txid": sweep_txid,
+                        "gas_used": int(receipt.get("gasUsed", 0) or 0),
+                        "attempted_gas_limit": attempted_gas_limit,
+                        "receipt_status": int(receipt.get("status", 0) or 0),
+                    },
                 )
 
             final_sweep_txid = _finalize_sweep_with_single_retry(
