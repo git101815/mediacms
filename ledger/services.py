@@ -1515,9 +1515,6 @@ def record_onchain_observation(
         "amount": amount,
         "confirmations": confirmations,
         "detection_method": detection_method,
-        "deposit_session": deposit_session,
-        "raw_payload": raw_payload,
-        "metadata_version": LEDGER_METADATA_VERSION,
     }
 
     observed, created = ObservedOnchainTransfer.objects.get_or_create(

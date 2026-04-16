@@ -13,7 +13,7 @@ def _make_option():
         chain="ethereum",
         asset_code="USDT",
         token_contract_address=USDT_ETH,
-        rpc_url="https://rpc.example",
+        rpc_urls=["https://rpc.example"],
         funding_private_key="0x" + "22" * 32,
         destination_address="0x" + "99" * 20,
         funding_confirmations=1,
