@@ -20,8 +20,9 @@ class SweepOptionConfig:
     destination_address: str
     funding_confirmations: int
     sweep_confirmations: int
-    gas_funding_amount_wei: int
+    max_gas_funding_amount_wei: int
     erc20_transfer_gas_limit: int
+    gas_limit_multiplier_bps: int
     tx_timeout_seconds: int
     gas_price_multiplier_bps: int
     poa_compatible: bool
@@ -164,12 +165,14 @@ def load_config() -> ServiceConfig:
             destination_address=destination_address,
             funding_confirmations=int(item.get("funding_confirmations", 1)),
             sweep_confirmations=int(item.get("sweep_confirmations", 1)),
-            gas_funding_amount_wei=int(item["gas_funding_amount_wei"]),
+            max_gas_funding_amount_wei=int(
+                item.get("max_gas_funding_amount_wei", item["gas_funding_amount_wei"])
+            ),
             erc20_transfer_gas_limit=int(item.get("erc20_transfer_gas_limit", 100000)),
+            gas_limit_multiplier_bps=int(item.get("gas_limit_multiplier_bps", 12000)),
             tx_timeout_seconds=int(item.get("tx_timeout_seconds", 300)),
             gas_price_multiplier_bps=int(item.get("gas_price_multiplier_bps", 12000)),
             poa_compatible=bool(item.get("poa_compatible", False)),
-
         )
 
         if not option.key:
@@ -178,14 +181,16 @@ def load_config() -> ServiceConfig:
             raise RuntimeError(f"funding_confirmations must be > 0 for option {option.key}")
         if option.sweep_confirmations <= 0:
             raise RuntimeError(f"sweep_confirmations must be > 0 for option {option.key}")
-        if option.gas_funding_amount_wei <= 0:
-            raise RuntimeError(f"gas_funding_amount_wei must be > 0 for option {option.key}")
+        if option.max_gas_funding_amount_wei <= 0:
+            raise RuntimeError(f"max_gas_funding_amount_wei must be > 0 for option {option.key}")
         if option.erc20_transfer_gas_limit <= 0:
             raise RuntimeError(f"erc20_transfer_gas_limit must be > 0 for option {option.key}")
+        if option.gas_limit_multiplier_bps < 10000:
+            raise RuntimeError(f"gas_limit_multiplier_bps must be >= 10000 for option {option.key}")
         if option.tx_timeout_seconds <= 0:
             raise RuntimeError(f"tx_timeout_seconds must be > 0 for option {option.key}")
-        if option.gas_price_multiplier_bps <= 0:
-            raise RuntimeError(f"gas_price_multiplier_bps must be > 0 for option {option.key}")
+        if option.gas_price_multiplier_bps < 10000:
+            raise RuntimeError(f"gas_price_multiplier_bps must be >= 10000 for option {option.key}")
 
         options.append(option)
 

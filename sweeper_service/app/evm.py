@@ -193,3 +193,23 @@ def wait_for_confirmations(
     raise TimeoutError(
         f"Timed out waiting for {required_confirmations} confirmations for {txid}"
     )
+
+def estimate_erc20_transfer_gas(
+    *,
+    w3,
+    token_contract_address: str,
+    source_address: str,
+    destination_address: str,
+    amount: int,
+) -> int:
+    contract = _erc20_contract(w3=w3, token_contract_address=token_contract_address)
+    tx = contract.functions.transfer(
+        Web3.to_checksum_address(destination_address),
+        int(amount),
+    ).build_transaction(
+        {
+            "from": Web3.to_checksum_address(source_address),
+            "value": 0,
+        }
+    )
+    return int(w3.eth.estimate_gas(tx))

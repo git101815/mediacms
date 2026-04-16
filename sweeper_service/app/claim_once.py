@@ -16,7 +16,7 @@ from .evm import (
 )
 from .reference_head import get_reference_head
 from .rpc_pool import choose_best_rpc_url
-
+from web3 import Web3
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,6 +115,70 @@ def _build_option_web3(*, config, option):
         request_timeout_seconds=config.request_timeout_seconds,
     )
 
+def _estimate_erc20_transfer_gas(*, w3, option, source_address: str, amount: int) -> int:
+    token_contract = w3.eth.contract(
+        address=Web3.to_checksum_address(option.token_contract_address),
+        abi=[
+            {
+                "constant": False,
+                "inputs": [
+                    {"name": "_to", "type": "address"},
+                    {"name": "_value", "type": "uint256"},
+                ],
+                "name": "transfer",
+                "outputs": [{"name": "", "type": "bool"}],
+                "payable": False,
+                "stateMutability": "nonpayable",
+                "type": "function",
+            }
+        ],
+    )
+
+    try:
+        estimated_gas = token_contract.functions.transfer(
+            Web3.to_checksum_address(option.destination_address),
+            int(amount),
+        ).estimate_gas(
+            {
+                "from": Web3.to_checksum_address(source_address),
+            }
+        )
+    except Exception:
+        logging.exception(
+            "sweeper_service action=estimate_gas_failed chain=%s asset=%s source=%s fallback_gas_limit=%s",
+            option.chain,
+            option.asset_code,
+            source_address,
+            option.erc20_transfer_gas_limit,
+        )
+        return int(option.erc20_transfer_gas_limit)
+
+    gas_limit = (int(estimated_gas) * int(option.gas_limit_multiplier_bps) + 9999) // 10000
+    if gas_limit < int(estimated_gas):
+        gas_limit = int(estimated_gas)
+    return gas_limit
+
+
+def _compute_effective_gas_price_wei(*, w3, option) -> int:
+    network_gas_price = int(w3.eth.gas_price)
+    effective_gas_price = (
+        network_gas_price * int(option.gas_price_multiplier_bps) + 9999
+    ) // 10000
+    if effective_gas_price < network_gas_price:
+        effective_gas_price = network_gas_price
+    return effective_gas_price
+
+
+def _compute_required_native_wei(*, w3, option, source_address: str, amount: int) -> tuple[int, int]:
+    gas_limit = _estimate_erc20_transfer_gas(
+        w3=w3,
+        option=option,
+        source_address=source_address,
+        amount=amount,
+    )
+    effective_gas_price = _compute_effective_gas_price_wei(w3=w3, option=option)
+    required_native = gas_limit * effective_gas_price
+    return gas_limit, required_native
 
 def _process_claimed_job(
     *,
@@ -169,14 +233,38 @@ def _process_claimed_job(
         raise RuntimeError(f"Unsupported claimed job status for job={public_id}: {status}")
 
     source_native_balance = get_native_balance(w3=w3, address=source_address)
-    if source_native_balance < option.gas_funding_amount_wei and status != "ready_to_sweep":
+    estimated_gas_limit, required_native = _compute_required_native_wei(
+        w3=w3,
+        option=option,
+        source_address=source_address,
+        amount=amount,
+    )
+    topup_needed = max(0, required_native - int(source_native_balance))
+
+    logging.info(
+        "sweeper_service action=native-budget public_id=%s source=%s native_balance=%s required_native=%s topup_needed=%s estimated_gas_limit=%s",
+        public_id,
+        source_address,
+        source_native_balance,
+        required_native,
+        topup_needed,
+        estimated_gas_limit,
+    )
+
+    if topup_needed > 0 and status != "ready_to_sweep":
+        if topup_needed > int(option.max_gas_funding_amount_wei):
+            raise RuntimeError(
+                f"Required gas funding exceeds configured cap for job={public_id}: "
+                f"required={topup_needed} cap={option.max_gas_funding_amount_wei}"
+            )
+
         gas_funding_txid = send_native_transfer(
             chain=option.chain,
             w3=w3,
             nonce_allocator=nonce_allocator,
             funding_private_key=option.funding_private_key,
             to_address=source_address,
-            amount_wei=option.gas_funding_amount_wei,
+            amount_wei=topup_needed,
             gas_price_multiplier_bps=option.gas_price_multiplier_bps,
         )
         client.mark_funding_broadcasted(
@@ -191,9 +279,10 @@ def _process_claimed_job(
             timeout_seconds=option.tx_timeout_seconds,
         )
         logging.info(
-            "sweeper_service action=funding-confirmed public_id=%s txid=%s",
+            "sweeper_service action=funding-confirmed public_id=%s txid=%s topup_needed=%s",
             public_id,
             gas_funding_txid,
+            topup_needed,
         )
 
     client.mark_ready_to_sweep(public_id=public_id)
@@ -217,7 +306,7 @@ def _process_claimed_job(
         source_private_key=source_private_key,
         destination_address=option.destination_address,
         amount=amount,
-        gas_limit=option.erc20_transfer_gas_limit,
+        gas_limit=estimated_gas_limit,
         gas_price_multiplier_bps=option.gas_price_multiplier_bps,
     )
     client.mark_sweep_broadcasted(

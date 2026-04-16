@@ -17,8 +17,9 @@
       "destination_address": "0x18Bcc7fCC04aaCb7D7064d2d35c30Ff898ad433D",
       "funding_confirmations": 1,
       "sweep_confirmations": 1,
-      "gas_funding_amount_wei": "300000000000000",
+      "max_gas_funding_amount_wei": "300000000000000",
       "erc20_transfer_gas_limit": 100000,
+      "gas_limit_multiplier_bps": 12000,
       "tx_timeout_seconds": 300,
       "gas_price_multiplier_bps": 12000,
       "poa_compatible": true
