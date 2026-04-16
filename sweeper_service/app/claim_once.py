@@ -14,6 +14,7 @@ from .evm import (
     send_native_transfer,
     wait_for_confirmations,
 )
+from typing import NoReturn
 from .reference_head import get_reference_head
 from .rpc_pool import choose_best_rpc_url
 from web3 import Web3
@@ -121,7 +122,7 @@ def _build_error_payload(*, code: str, message: str, retryable: bool, details: d
     }
 
 
-def _raise_structured_error(*, code: str, message: str, retryable: bool, details: dict | None = None) -> None:
+def _raise_structured_error(*, code: str, message: str, retryable: bool, details: dict | None = None) -> NoReturn:
     payload = _build_error_payload(
         code=code,
         message=message,
@@ -221,15 +222,17 @@ def _compute_required_native_wei(*, w3, option, source_address: str, amount: int
     return gas_limit, required_native
 
 def _read_mined_receipt(*, w3, txid: str) -> dict:
+    receipt = None
     try:
         receipt = w3.eth.get_transaction_receipt(txid)
-    except TransactionNotFound as exc:
+    except TransactionNotFound:
         _raise_structured_error(
             code="SWEEP_RECEIPT_MISSING",
             message="Missing receipt for mined transaction",
             retryable=True,
             details={"txid": txid},
         )
+
     if receipt is None:
         _raise_structured_error(
             code="SWEEP_RECEIPT_MISSING",
@@ -237,8 +240,8 @@ def _read_mined_receipt(*, w3, txid: str) -> dict:
             retryable=True,
             details={"txid": txid},
         )
-    return dict(receipt)
 
+    return dict(receipt)
 
 def _looks_like_out_of_gas(*, receipt: dict, attempted_gas_limit: int) -> bool:
     gas_used = int(receipt.get("gasUsed", 0) or 0)
