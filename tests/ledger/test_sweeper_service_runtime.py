@@ -93,7 +93,7 @@ def test_run_once_pending_job_funds_sweeps_and_confirms():
 
     with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
          patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
-         patch.object(claim_once, "build_web3", return_value=w3), \
+         patch.object(claim_once, "_build_option_web3", return_value=w3), \
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
          patch.object(claim_once, "get_native_balance", return_value=0), \
          patch.object(claim_once, "send_native_transfer", return_value="0xgas"), \
@@ -159,7 +159,7 @@ def test_run_once_resumes_funding_broadcasted_job_without_refunding():
 
     with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
          patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
-         patch.object(claim_once, "build_web3", return_value=w3), \
+         patch.object(claim_once, "_build_option_web3", return_value=w3), \
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
          patch.object(claim_once, "get_native_balance", return_value=option.gas_funding_amount_wei), \
          patch.object(claim_once, "send_native_transfer") as send_native_transfer, \
@@ -195,7 +195,7 @@ def test_run_once_confirms_existing_sweep_broadcasted_job_without_rebroadcast():
 
     with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
          patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
-         patch.object(claim_once, "build_web3", return_value=w3), \
+         patch.object(claim_once, "_build_option_web3", return_value=w3), \
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
          patch.object(claim_once, "wait_for_confirmations") as wait_for_confirmations, \
          patch.object(claim_once, "send_native_transfer") as send_native_transfer, \
@@ -245,7 +245,7 @@ def test_run_once_marks_failed_when_token_balance_is_insufficient():
 
     with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
          patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
-         patch.object(claim_once, "build_web3", return_value=w3), \
+         patch.object(claim_once, "_build_option_web3", return_value=w3), \
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
          patch.object(claim_once, "get_native_balance", return_value=option.gas_funding_amount_wei), \
          patch.object(claim_once, "get_erc20_balance", return_value=249), \

@@ -1563,7 +1563,6 @@ def record_onchain_observation(
             update_fields.append("raw_payload")
 
         if update_fields:
-            update_fields.append("updated_at")
             observed.save(update_fields=update_fields)
 
     if deposit_session.status == DepositSession.STATUS_CREDITED:
