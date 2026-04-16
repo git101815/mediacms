@@ -131,28 +131,10 @@ def _process_claimed_job(
     source_address = str(job["source_address"]).strip().lower()
     amount = int(job["amount"])
     derivation_index = _resolve_derivation_index(job)
-
-    derived_address = deriver.derive_address(
-        chain=option.chain,
-        address_index=derivation_index,
-    )
-    if derived_address != source_address:
-        raise RuntimeError(
-            "Derived address mismatch for "
-            f"job={public_id}: derived={derived_address} source={source_address}"
-        )
-
     source_private_key = deriver.derive_private_key(
         chain=option.chain,
         address_index=derivation_index,
     )
-    if address_from_private_key(source_private_key) != source_address:
-        raise RuntimeError(f"Derived private key mismatch for job={public_id}")
-
-    if option.destination_address == source_address:
-        raise RuntimeError(
-            f"Refusing to sweep to the same address for job={public_id}"
-        )
 
 
     if status == "sweep_broadcasted":
@@ -261,6 +243,32 @@ def _process_claimed_job(
         sweep_txid,
     )
 
+def _prevalidate_claimed_job(*, deriver: EvmDeriver, option, job: dict) -> None:
+    public_id = str(job["public_id"])
+    source_address = str(job["source_address"]).strip().lower()
+    derivation_index = _resolve_derivation_index(job)
+
+    derived_address = deriver.derive_address(
+        chain=option.chain,
+        address_index=derivation_index,
+    )
+    if derived_address != source_address:
+        raise RuntimeError(
+            "Derived address mismatch for "
+            f"job={public_id}: derived={derived_address} source={source_address}"
+        )
+
+    source_private_key = deriver.derive_private_key(
+        chain=option.chain,
+        address_index=derivation_index,
+    )
+    if address_from_private_key(source_private_key) != source_address:
+        raise RuntimeError(f"Derived private key mismatch for job={public_id}")
+
+    if option.destination_address == source_address:
+        raise RuntimeError(
+            f"Refusing to sweep to the same address for job={public_id}"
+        )
 
 def run_once(*, client: MediaCMSInternalClient, config) -> None:
     options = [_build_option_selector(option) for option in config.options]
@@ -285,6 +293,12 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
         public_id = str(job["public_id"])
         try:
             option = _find_option_for_job(option_index=option_index, job=job)
+
+            _prevalidate_claimed_job(
+                deriver=deriver,
+                option=option,
+                job=job,
+            )
 
             option_cache_key = option.key
             w3 = web3_by_option_key.get(option_cache_key)

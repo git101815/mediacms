@@ -1627,7 +1627,6 @@ def record_onchain_observation(
         observed_update_fields.append("confirmed_at")
 
     if observed_update_fields:
-        observed_update_fields.append("updated_at")
         observed.save(update_fields=observed_update_fields)
 
     session_update_fields = []
@@ -1650,7 +1649,6 @@ def record_onchain_observation(
             session_update_fields.append("status")
 
     if session_update_fields:
-        session_update_fields.append("updated_at")
         deposit_session.save(update_fields=session_update_fields)
 
     return observed
@@ -1771,7 +1769,6 @@ def credit_confirmed_deposit_session(
             "status",
             "credited_ledger_txn",
             "confirmed_at",
-            "updated_at",
         ]
     )
 
