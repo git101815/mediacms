@@ -124,6 +124,7 @@ def _process_claimed_job(
     config,
     option,
     job: dict,
+    w3,
 ) -> None:
     public_id = str(job["public_id"])
     status = str(job.get("status", "")).strip().lower()
@@ -153,7 +154,6 @@ def _process_claimed_job(
             f"Refusing to sweep to the same address for job={public_id}"
         )
 
-    w3 = _build_option_web3(config=config, option=option)
 
     if status == "sweep_broadcasted":
         sweep_txid = str(job.get("sweep_txid", "")).strip()
@@ -279,11 +279,19 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
         account_index=config.account_index,
     )
     nonce_allocator = NonceAllocator()
+    web3_by_option_key = {}
 
     for job in jobs:
         public_id = str(job["public_id"])
         try:
             option = _find_option_for_job(option_index=option_index, job=job)
+
+            option_cache_key = option.key
+            w3 = web3_by_option_key.get(option_cache_key)
+            if w3 is None:
+                w3 = _build_option_web3(config=config, option=option)
+                web3_by_option_key[option_cache_key] = w3
+
             _process_claimed_job(
                 client=client,
                 deriver=deriver,
@@ -291,6 +299,7 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
                 config=config,
                 option=option,
                 job=job,
+                w3=w3,
             )
         except Exception as exc:
             error_message = _truncate_error(str(exc))

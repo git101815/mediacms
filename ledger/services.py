@@ -1503,6 +1503,8 @@ def record_onchain_observation(
         )
 
     defaults = {
+        "deposit_session": deposit_session,
+        "event_key": event_key,
         "chain": chain,
         "txid": txid,
         "log_index": log_index,
@@ -1515,6 +1517,8 @@ def record_onchain_observation(
         "amount": amount,
         "confirmations": confirmations,
         "detection_method": detection_method,
+        "raw_payload": raw_payload,
+        "metadata_version": LEDGER_METADATA_VERSION,
     }
 
     observed, created = ObservedOnchainTransfer.objects.get_or_create(
