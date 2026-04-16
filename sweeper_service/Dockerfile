@@ -10,4 +10,4 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY sweeper_service/app /app/app
 
-CMD ["python", "-m", "app.claim_once"]
+CMD ["sh", "-c", "python -m app.wait_for_web && python -m app.claim_once"]

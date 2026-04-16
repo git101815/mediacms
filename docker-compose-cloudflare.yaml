@@ -6,18 +6,21 @@ services:
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
-      ENABLE_UWSGI: 'no'
-      ENABLE_NGINX: 'no'
-      ENABLE_CELERY_SHORT: 'no'
-      ENABLE_CELERY_LONG: 'no'
-      ENABLE_CELERY_BEAT: 'no'
-      ADMIN_USER: 'admin'
-      ADMIN_EMAIL: 'admin@localhost'
+      ENABLE_UWSGI: "no"
+      ENABLE_NGINX: "no"
+      ENABLE_CELERY_SHORT: "no"
+      ENABLE_CELERY_LONG: "no"
+      ENABLE_CELERY_BEAT: "no"
+      ADMIN_USER: "admin"
+      ADMIN_EMAIL: "admin@localhost"
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+
       LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
       LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
       LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME: sweeper-service
       LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET}
+
+      DEPOSIT_EVM_ACCOUNT_XPUB: ${DEPOSIT_EVM_ACCOUNT_XPUB}
     command: "./deploy/docker/prestart.sh"
     restart: on-failure
     depends_on:
@@ -25,6 +28,7 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
+
   web:
     image: mediacms/mediacms:latest
     deploy:
@@ -32,43 +36,34 @@ services:
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
-      ENABLE_CELERY_BEAT: 'no'
-      ENABLE_CELERY_SHORT: 'no'
-      ENABLE_CELERY_LONG: 'no'
-      ENABLE_MIGRATIONS: 'no'
+      ENABLE_CELERY_BEAT: "no"
+      ENABLE_CELERY_SHORT: "no"
+      ENABLE_CELERY_LONG: "no"
+      ENABLE_MIGRATIONS: "no"
+
       LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
       LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
       LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME: sweeper-service
       LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET}
+
+      DEPOSIT_EVM_ACCOUNT_XPUB: ${DEPOSIT_EVM_ACCOUNT_XPUB}
     depends_on:
-      - migrations
-  celery_beat:
-    image: mediacms/mediacms:latest
-    volumes:
-      - ./:/home/mediacms.io/mediacms/
-    environment:
-      ENABLE_UWSGI: 'no'
-      ENABLE_NGINX: 'no'
-      ENABLE_CELERY_SHORT: 'no'
-      ENABLE_CELERY_LONG: 'no'
-      ENABLE_MIGRATIONS: 'no'
-    depends_on:
-      - redis
-  celery_worker:
-    image: mediacms/mediacms:latest
-    deploy:
-      replicas: 1
-    volumes:
-      - ./:/home/mediacms.io/mediacms/
-    environment:
-      ENABLE_UWSGI: 'no'
-      ENABLE_NGINX: 'no'
-      ENABLE_CELERY_BEAT: 'no'
-      ENABLE_MIGRATIONS: 'no'
-    depends_on:
-      - migrations
-    mem_limit: 40g
-    cpus: 50.0
+      migrations:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/')\" >/dev/null 2>&1 || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   deposit_service:
     build:
       context: .
@@ -77,16 +72,53 @@ services:
       MEDIACMS_INTERNAL_BASE_URL: http://web
       MEDIACMS_INTERNAL_SERVICE: deposit-service
       MEDIACMS_INTERNAL_SHARED_SECRET: ${LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET}
+
+      MEDIACMS_INTERNAL_READY_PATH: /
+      MEDIACMS_INTERNAL_READY_TIMEOUT_SECONDS: 5
+      MEDIACMS_INTERNAL_READY_MAX_WAIT_SECONDS: 180
+      MEDIACMS_INTERNAL_READY_RETRY_SECONDS: 2
+
       DEPOSIT_SERVICE_CONFIG_PATH: /app/config/deposit-service.json
       DEPOSIT_SERVICE_STATE_PATH: /data/state.json
       DEPOSIT_SERVICE_POLL_INTERVAL_SECONDS: 30
       DEPOSIT_SERVICE_PROVISION_BATCH_SIZE: 100
+
+      DEPOSIT_RPC_MAX_LAG_BLOCKS: 64
+      DEPOSIT_RPC_MAX_REFERENCE_LAG_BLOCKS: 64
+
+      DEPOSIT_EVM_ACCOUNT_XPUB: ${DEPOSIT_EVM_ACCOUNT_XPUB}
+
+      DEPOSIT_REFERENCE_HEADS_TIMEOUT_SECONDS: 5
+      DEPOSIT_REFERENCE_HEADS_MAX_AGE_SECONDS: 60
+
+      REFERENCE_HEADS_BASE_URL: ${REFERENCE_HEADS_BASE_URL}
+      REFERENCE_HEADS_SHARED_SECRET: ${REFERENCE_HEADS_SHARED_SECRET}
+
+      ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
+      ETHEREUM_RPC_URL_FALLBACK_1: ${ETHEREUM_RPC_URL_FALLBACK_1}
+      ETHEREUM_RPC_URL_FALLBACK_2: ${ETHEREUM_RPC_URL_FALLBACK_2}
+
+      ARBITRUM_RPC_URL: ${ARBITRUM_RPC_URL}
+      ARBITRUM_RPC_URL_FALLBACK_1: ${ARBITRUM_RPC_URL_FALLBACK_1}
+      ARBITRUM_RPC_URL_FALLBACK_2: ${ARBITRUM_RPC_URL_FALLBACK_2}
+
+      BASE_RPC_URL: ${BASE_RPC_URL}
+      BASE_RPC_URL_FALLBACK_1: ${BASE_RPC_URL_FALLBACK_1}
+      BASE_RPC_URL_FALLBACK_2: ${BASE_RPC_URL_FALLBACK_2}
+
+      BSC_RPC_URL: ${BSC_RPC_URL}
+      BSC_RPC_URL_FALLBACK_1: ${BSC_RPC_URL_FALLBACK_1}
+      BSC_RPC_URL_FALLBACK_2: ${BSC_RPC_URL_FALLBACK_2}
     volumes:
       - ./deposit_service/config:/app/config:ro
       - ./deposit_service/data:/data
     depends_on:
-      - web
+      web:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
     restart: unless-stopped
+
   sweeper_service:
     build:
       context: .
@@ -95,15 +127,101 @@ services:
       MEDIACMS_INTERNAL_BASE_URL: http://web
       MEDIACMS_INTERNAL_SERVICE: sweeper-service
       MEDIACMS_INTERNAL_SHARED_SECRET: ${LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET}
+
+      MEDIACMS_INTERNAL_READY_PATH: /
+      MEDIACMS_INTERNAL_READY_TIMEOUT_SECONDS: 5
+      MEDIACMS_INTERNAL_READY_MAX_WAIT_SECONDS: 180
+      MEDIACMS_INTERNAL_READY_RETRY_SECONDS: 2
+
       SWEEPER_SERVICE_CONFIG_PATH: /app/config/sweeper-service.json
       SWEEPER_SERVICE_POLL_INTERVAL_SECONDS: 30
       SWEEPER_SERVICE_CLAIM_BATCH_SIZE: 20
+
+      ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
+      ARBITRUM_RPC_URL: ${ARBITRUM_RPC_URL}
+      BASE_RPC_URL: ${BASE_RPC_URL}
+      BSC_RPC_URL: ${BSC_RPC_URL}
+
+      SWEEPER_RPC_MAX_LAG_BLOCKS: 64
+      SWEEPER_RPC_MAX_REFERENCE_LAG_BLOCKS: 64
+      SWEEPER_REFERENCE_HEADS_TIMEOUT_SECONDS: 5
+      SWEEPER_REFERENCE_HEADS_MAX_AGE_SECONDS: 60
+
+      REFERENCE_HEADS_BASE_URL: ${REFERENCE_HEADS_BASE_URL}
+      REFERENCE_HEADS_SHARED_SECRET: ${REFERENCE_HEADS_SHARED_SECRET}
+
+      ETHEREUM_RPC_URL_FALLBACK_1: ${ETHEREUM_RPC_URL_FALLBACK_1}
+      ETHEREUM_RPC_URL_FALLBACK_2: ${ETHEREUM_RPC_URL_FALLBACK_2}
+      ARBITRUM_RPC_URL_FALLBACK_1: ${ARBITRUM_RPC_URL_FALLBACK_1}
+      ARBITRUM_RPC_URL_FALLBACK_2: ${ARBITRUM_RPC_URL_FALLBACK_2}
+      BASE_RPC_URL_FALLBACK_1: ${BASE_RPC_URL_FALLBACK_1}
+      BASE_RPC_URL_FALLBACK_2: ${BASE_RPC_URL_FALLBACK_2}
+      BSC_RPC_URL_FALLBACK_1: ${BSC_RPC_URL_FALLBACK_1}
+      BSC_RPC_URL_FALLBACK_2: ${BSC_RPC_URL_FALLBACK_2}
+    secrets:
+      - source: sweeper_evm_mnemonic
+        target: sweeper_evm_mnemonic
+      - source: sweeper_evm_mnemonic_passphrase
+        target: sweeper_evm_mnemonic_passphrase
+      - source: ethereum_sweeper_funding_private_key
+        target: ethereum_sweeper_funding_private_key
+      - source: arbitrum_sweeper_funding_private_key
+        target: arbitrum_sweeper_funding_private_key
+      - source: base_sweeper_funding_private_key
+        target: base_sweeper_funding_private_key
+      - source: bsc_sweeper_funding_private_key
+        target: bsc_sweeper_funding_private_key
     volumes:
       - ./sweeper_service/config:/app/config:ro
       - ./sweeper_service/data:/data
     depends_on:
-      - web
+      web:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
     restart: unless-stopped
+
+  celery_beat:
+    image: mediacms/mediacms:latest
+    volumes:
+      - ./:/home/mediacms.io/mediacms/
+    environment:
+      ENABLE_UWSGI: "no"
+      ENABLE_NGINX: "no"
+      ENABLE_CELERY_SHORT: "no"
+      ENABLE_CELERY_LONG: "no"
+      ENABLE_MIGRATIONS: "no"
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  celery_worker:
+    image: mediacms/mediacms:latest
+    deploy:
+      replicas: 1
+    volumes:
+      - ./:/home/mediacms.io/mediacms/
+    environment:
+      ENABLE_UWSGI: "no"
+      ENABLE_NGINX: "no"
+      ENABLE_CELERY_BEAT: "no"
+      ENABLE_MIGRATIONS: "no"
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
   db:
     image: postgres:17.2-alpine
     volumes:
@@ -119,17 +237,36 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
   redis:
-    image: "redis:alpine"
+    image: redis:alpine
     restart: always
     healthcheck:
-      test: ["CMD", "redis-cli","ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
     restart: unless-stopped
     environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      web:
+        condition: service_healthy
+
+secrets:
+  sweeper_evm_mnemonic:
+    file: ../mediacms-secrets/sweeper/evm_mnemonic.txt
+  sweeper_evm_mnemonic_passphrase:
+    file: ../mediacms-secrets/sweeper/evm_mnemonic_passphrase.txt
+  ethereum_sweeper_funding_private_key:
+    file: ../mediacms-secrets/sweeper/ethereum_funding_private_key.txt
+  arbitrum_sweeper_funding_private_key:
+    file: ../mediacms-secrets/sweeper/arbitrum_funding_private_key.txt
+  base_sweeper_funding_private_key:
+    file: ../mediacms-secrets/sweeper/base_funding_private_key.txt
+  bsc_sweeper_funding_private_key:
+    file: ../mediacms-secrets/sweeper/bsc_funding_private_key.txt

@@ -10,4 +10,4 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY deposit_service/app /app/app
 
-CMD ["python", "-m", "app.prefill_loop"]
+CMD ["sh", "-c", "python -m app.wait_for_web && python -m app.prefill_loop"]
