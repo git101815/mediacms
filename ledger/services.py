@@ -478,12 +478,7 @@ def _normalize_route_amount_to_canonical_stable_units(
         return raw_amount * factor
 
     factor = 10 ** (route_decimals - STABLECOIN_CANONICAL_DECIMALS)
-    quotient, remainder = divmod(raw_amount, factor)
-    if remainder != 0:
-        raise ValidationError(
-            "Observed amount cannot be represented exactly in canonical stablecoin precision"
-        )
-    return quotient
+    return raw_amount // factor
 
 
 def _convert_canonical_stable_to_platform_tokens(stable_amount: int) -> int:
