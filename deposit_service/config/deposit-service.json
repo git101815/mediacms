@@ -1,6 +1,42 @@
 {
   "options": [
     {
+      "key": "ethereum-usdt",
+      "chain": "ethereum",
+      "asset_code": "USDT",
+      "token_contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+      "display_label": "Ethereum · USDT",
+      "rpc_urls": [
+        "${ETHEREUM_RPC_URL}",
+        "${ETHEREUM_RPC_URL_FALLBACK_1}",
+        "${ETHEREUM_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 12,
+      "min_amount": 1000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 200,
+      "poa_compatible": false
+    },
+    {
+      "key": "ethereum-usdc",
+      "chain": "ethereum",
+      "asset_code": "USDC",
+      "token_contract_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "display_label": "Ethereum · USDC",
+      "rpc_urls": [
+        "${ETHEREUM_RPC_URL}",
+        "${ETHEREUM_RPC_URL_FALLBACK_1}",
+        "${ETHEREUM_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 12,
+      "min_amount": 1000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 200,
+      "poa_compatible": false
+    },
+    {
       "key": "bsc-usdt",
       "chain": "bsc",
       "asset_code": "USDT",
@@ -17,6 +53,96 @@
       "poll_interval_seconds": 15,
       "lookback_blocks": 200,
       "poa_compatible": true
+    },
+    {
+      "key": "bsc-usdc",
+      "chain": "bsc",
+      "asset_code": "USDC",
+      "token_contract_address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+      "display_label": "BNB Chain · USDC",
+      "rpc_urls": [
+        "${BSC_RPC_URL}",
+        "${BSC_RPC_URL_FALLBACK_1}",
+        "${BSC_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 12,
+      "min_amount": 1000000000000000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 200,
+      "poa_compatible": true
+    },
+    {
+      "key": "arbitrum-usdt",
+      "chain": "arbitrum",
+      "asset_code": "USDT",
+      "token_contract_address": "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+      "display_label": "Arbitrum One · USDT",
+      "rpc_urls": [
+        "${ARBITRUM_RPC_URL}",
+        "${ARBITRUM_RPC_URL_FALLBACK_1}",
+        "${ARBITRUM_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 20,
+      "min_amount": 1000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 400,
+      "poa_compatible": false
+    },
+    {
+      "key": "arbitrum-usdc",
+      "chain": "arbitrum",
+      "asset_code": "USDC",
+      "token_contract_address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+      "display_label": "Arbitrum One · USDC",
+      "rpc_urls": [
+        "${ARBITRUM_RPC_URL}",
+        "${ARBITRUM_RPC_URL_FALLBACK_1}",
+        "${ARBITRUM_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 20,
+      "min_amount": 1000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 400,
+      "poa_compatible": false
+    },
+    {
+      "key": "base-usdt",
+      "chain": "base",
+      "asset_code": "USDT",
+      "token_contract_address": "0xfde4c96c8593536e31f229ea8f37b2adab105c4e",
+      "display_label": "Base · USDT",
+      "rpc_urls": [
+        "${BASE_RPC_URL}",
+        "${BASE_RPC_URL_FALLBACK_1}",
+        "${BASE_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 20,
+      "min_amount": 1000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 400,
+      "poa_compatible": false
+    },
+    {
+      "key": "base-usdc",
+      "chain": "base",
+      "asset_code": "USDC",
+      "token_contract_address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "display_label": "Base · USDC",
+      "rpc_urls": [
+        "${BASE_RPC_URL}",
+        "${BASE_RPC_URL_FALLBACK_1}",
+        "${BASE_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 20,
+      "min_amount": 1000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 400,
+      "poa_compatible": false
     }
   ]
 }
