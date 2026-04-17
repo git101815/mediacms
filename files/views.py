@@ -286,13 +286,17 @@ def add_subtitle(request):
     context = {"media": media, "form": form, "subtitles": subtitles}
     return render(request, "cms/add_subtitle.html", context)
 
-def _format_token_amount(value: int, *, signed: bool = False) -> str:
+PLATFORM_TOKEN_DECIMALS = 6
+PLATFORM_TOKEN_UI_DECIMALS = 2
+
+def _format_platform_token_amount(value: int, *, signed: bool = False) -> str:
     value = int(value)
-    formatted = f"{abs(value):,}".replace(",", " ")
+    scaled = Decimal(abs(value)) / (Decimal(10) ** PLATFORM_TOKEN_DECIMALS)
+    text = format(scaled.quantize(Decimal("0.01")), "f")
+    prefix = ""
     if signed:
         prefix = "+" if value >= 0 else "-"
-        return f"{prefix}{formatted}"
-    return formatted
+    return f"{prefix}{text}"
 
 NETWORK_DISPLAY_LABELS = {
     "ethereum": "Ethereum",
@@ -301,7 +305,7 @@ NETWORK_DISPLAY_LABELS = {
     "bsc": "BNB Chain",
 }
 
-ROUTE_DISPLAY_DECIMALS = {
+ROUTE_ONCHAIN_DECIMALS = {
     ("ethereum", "USDT"): 6,
     ("ethereum", "USDC"): 6,
     ("arbitrum", "USDT"): 6,
@@ -325,18 +329,14 @@ def _format_route_amount(value, *, chain: str, asset_code: str) -> str:
     normalized_value = int(value)
     normalized_chain = (chain or "").strip().lower()
     normalized_asset = (asset_code or "").strip().upper()
-    decimals = ROUTE_DISPLAY_DECIMALS.get((normalized_chain, normalized_asset))
+    decimals = ROUTE_ONCHAIN_DECIMALS.get((normalized_chain, normalized_asset))
 
     if decimals is None:
-        return _format_token_amount(normalized_value)
+        return str(normalized_value)
 
-    scaled = Decimal(normalized_value) / (Decimal(10) ** decimals)
-    text = format(scaled, "f")
-
-    if "." in text:
-        text = text.rstrip("0").rstrip(".")
-
-    return text or "0"
+    scaled = Decimal(normalized_value) / (Decimal(10) ** int(decimals))
+    text = format(scaled.quantize(Decimal("0.01")), "f")
+    return text
 
 
 def _build_wallet_deposit_options() -> list[dict]:
@@ -479,8 +479,8 @@ def _build_wallet_transaction_rows(*, wallet: TokenWallet, active_tab: str, acti
                 "memo": entry.txn.memo,
                 "counterparty": counterparty,
                 "delta": entry.delta,
-                "delta_display": _format_token_amount(entry.delta, signed=True),
-                "balance_after_display": _format_token_amount(entry.balance_after),
+                "delta_display": _format_platform_token_amount(entry.delta, signed=True),
+                "balance_after_display": _format_platform_token_amount(entry.balance_after),
                 "direction": "credit" if entry.delta > 0 else "debit",
             }
         )
@@ -494,7 +494,7 @@ def _build_wallet_hold_rows(wallet: TokenWallet) -> list[dict]:
     for hold in holds:
         rows.append(
             {
-                "amount_display": _format_token_amount(hold.amount),
+                "amount_display": _format_platform_token_amount(hold.amount),
                 "reason": hold.reason or "Manual hold",
                 "created_at": hold.created_at,
                 "created_by": hold.created_by.username if hold.created_by else "System",
@@ -528,8 +528,8 @@ def _build_wallet_velocity_rows(wallet: TokenWallet) -> list[dict]:
         rows.append(
             {
                 "label": label,
-                "current_display": _format_token_amount(current),
-                "limit_display": _format_token_amount(limit) if limit is not None else "Unlimited",
+                "current_display": _format_platform_token_amount(current),
+                "limit_display": _format_platform_token_amount(limit) if limit is not None else "Unlimited",
                 "progress_percent": progress_percent,
             }
         )
@@ -594,10 +594,10 @@ def _build_wallet_request_rows(wallet: TokenWallet) -> list[dict]:
                 "status": wallet_request.status,
                 "status_label": wallet_request.get_status_display(),
                 "status_icon": WALLET_REQUEST_STATUS_ICON_MAP.get(wallet_request.status, "info"),
-                "amount_display": _format_token_amount(wallet_request.amount),
+                "amount_display": _format_platform_token_amount(wallet_request.amount),
                 "notes": wallet_request.notes,
                 "destination_address": wallet_request.destination_address,
-                "hold_amount_display": _format_token_amount(wallet_request.hold.amount) if wallet_request.hold_id else "",
+                "hold_amount_display": _format_platform_token_amount(wallet_request.hold.amount) if wallet_request.hold_id else "",
             }
         )
     return rows
@@ -902,9 +902,9 @@ def wallet(request):
         "wallet": wallet_obj,
         "wallet_banner": wallet_banner,
         "can_view_risk_reason": can_view_risk_reason,
-        "total_balance_display": _format_token_amount(wallet_obj.balance),
-        "available_balance_display": _format_token_amount(available_balance),
-        "held_balance_display": _format_token_amount(wallet_obj.held_balance),
+        "total_balance_display": _format_platform_token_amount(wallet_obj.balance),
+        "available_balance_display": _format_platform_token_amount(available_balance),
+        "held_balance_display": _format_platform_token_amount(wallet_obj.held_balance),
         "wallet_status_display": wallet_obj.get_risk_status_display(),
         "active_tab": active_tab,
         "active_status": active_status,

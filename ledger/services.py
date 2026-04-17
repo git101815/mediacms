@@ -302,6 +302,20 @@ DISPLAY_DECIMALS_BY_ROUTE = {
     ("bsc", "USDT"): 18,
     ("bsc", "USDC"): 18,
 }
+ROUTE_ONCHAIN_DECIMALS = {
+    ("ethereum", "USDT"): 6,
+    ("ethereum", "USDC"): 6,
+    ("arbitrum", "USDT"): 6,
+    ("arbitrum", "USDC"): 6,
+    ("base", "USDT"): 6,
+    ("base", "USDC"): 6,
+    ("bsc", "USDT"): 18,
+    ("bsc", "USDC"): 18,
+}
+
+STABLECOIN_CANONICAL_DECIMALS = 6
+PLATFORM_TOKEN_DECIMALS = 6
+PLATFORM_TOKENS_PER_STABLECOIN = 100
 
 SUPPORTED_EVM_DEPOSIT_CHAINS = {
     "ethereum",
@@ -436,6 +450,58 @@ def _find_reusable_active_session(
         .first()
     )
 
+def _get_route_onchain_decimals(*, chain: str, asset_code: str) -> int:
+    normalized_chain = _normalize_chain(chain)
+    normalized_asset = (asset_code or "").strip().upper()
+    decimals = ROUTE_ONCHAIN_DECIMALS.get((normalized_chain, normalized_asset))
+    if decimals is None:
+        raise ValidationError(
+            f"Unsupported deposit asset decimals for {normalized_chain}/{normalized_asset}"
+        )
+    return int(decimals)
+
+
+def _normalize_route_amount_to_canonical_stable_units(
+    *,
+    chain: str,
+    asset_code: str,
+    raw_amount: int,
+) -> int:
+    raw_amount = int(raw_amount)
+    route_decimals = _get_route_onchain_decimals(chain=chain, asset_code=asset_code)
+
+    if route_decimals == STABLECOIN_CANONICAL_DECIMALS:
+        return raw_amount
+
+    if route_decimals < STABLECOIN_CANONICAL_DECIMALS:
+        factor = 10 ** (STABLECOIN_CANONICAL_DECIMALS - route_decimals)
+        return raw_amount * factor
+
+    factor = 10 ** (route_decimals - STABLECOIN_CANONICAL_DECIMALS)
+    quotient, remainder = divmod(raw_amount, factor)
+    if remainder != 0:
+        raise ValidationError(
+            "Observed amount cannot be represented exactly in canonical stablecoin precision"
+        )
+    return quotient
+
+
+def _convert_canonical_stable_to_platform_tokens(stable_amount: int) -> int:
+    return int(stable_amount) * int(PLATFORM_TOKENS_PER_STABLECOIN)
+
+
+def _convert_route_amount_to_platform_token_units(
+    *,
+    chain: str,
+    asset_code: str,
+    raw_amount: int,
+) -> int:
+    canonical_stable_amount = _normalize_route_amount_to_canonical_stable_units(
+        chain=chain,
+        asset_code=asset_code,
+        raw_amount=raw_amount,
+    )
+    return _convert_canonical_stable_to_platform_tokens(canonical_stable_amount)
 
 @transaction.atomic
 def _get_or_create_route_counter_for_update(
@@ -1715,12 +1781,18 @@ def credit_confirmed_deposit_session(
     clearing_wallet = get_external_asset_clearing_wallet()
     external_id = f"deposit-credit:{observed_transfer.event_key}"
 
+    ledger_credit_amount = _convert_route_amount_to_platform_token_units(
+        chain=deposit_session.chain,
+        asset_code=deposit_session.asset_code,
+        raw_amount=observed_transfer.amount,
+    )
+
     txn = apply_ledger_transaction(
         actor=actor,
         kind="deposit",
         entries=[
-            (clearing_wallet, -int(observed_transfer.amount)),
-            (deposit_session.wallet, int(observed_transfer.amount)),
+            (clearing_wallet, -int(ledger_credit_amount)),
+            (deposit_session.wallet, int(ledger_credit_amount)),
         ],
         created_by=created_by,
         external_id=external_id,
@@ -1739,7 +1811,24 @@ def credit_confirmed_deposit_session(
             "log_index": observed_transfer.log_index,
             "block_number": observed_transfer.block_number,
             "confirmations": observed_transfer.confirmations,
-            "amount": observed_transfer.amount,
+            "route_raw_amount": int(observed_transfer.amount),
+            "canonical_stable_amount": int(
+                _normalize_route_amount_to_canonical_stable_units(
+                    chain=deposit_session.chain,
+                    asset_code=deposit_session.asset_code,
+                    raw_amount=observed_transfer.amount,
+                )
+            ),
+            "ledger_credit_amount": int(ledger_credit_amount),
+            "route_onchain_decimals": int(
+                _get_route_onchain_decimals(
+                    chain=deposit_session.chain,
+                    asset_code=deposit_session.asset_code,
+                )
+            ),
+            "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
+            "platform_token_decimals": PLATFORM_TOKEN_DECIMALS,
+            "platform_tokens_per_stablecoin": PLATFORM_TOKENS_PER_STABLECOIN,
         },
     )
 

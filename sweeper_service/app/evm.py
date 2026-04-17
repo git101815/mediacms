@@ -132,11 +132,6 @@ def send_erc20_transfer(
         int(amount),
     )
 
-    fee_params = _build_fee_params(
-        w3=w3,
-        gas_price_multiplier_bps=gas_price_multiplier_bps,
-    )
-
     tx = function.build_transaction(
         {
             "chainId": int(w3.eth.chain_id),
@@ -147,7 +142,10 @@ def send_erc20_transfer(
                 address=source_address,
             ),
             "gas": int(gas_limit),
-            **fee_params,
+            **_build_fee_params(
+                w3=w3,
+                gas_price_multiplier_bps=gas_price_multiplier_bps,
+            ),
         }
     )
     return _sign_and_send(w3=w3, tx=tx, private_key=source_private_key)
