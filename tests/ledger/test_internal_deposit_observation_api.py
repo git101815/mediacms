@@ -65,7 +65,7 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         *,
         txid="0xabc",
         log_index=7,
-        amount=250,
+        amount=25000,
         confirmations=12,
         block_number=123456,
         from_address="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -116,7 +116,7 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         payload = self._build_payload(
             txid="0xabc",
             log_index=7,
-            amount=250,
+            amount=25000,
             confirmations=12,
         )
 
@@ -132,15 +132,15 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         self.assertEqual(self.session.status, DepositSession.STATUS_CREDITED)
         self.assertEqual(self.session.confirmations, 12)
         self.assertEqual(self.session.observed_txid, "0xabc")
-        self.assertEqual(self.w1.balance, 250)
-        self.assertEqual(clearing_wallet.balance, -250)
+        self.assertEqual(self.w1.balance, 25000)
+        self.assertEqual(clearing_wallet.balance, -25000)
         self.assertEqual(ObservedOnchainTransfer.objects.count(), 1)
         self.assertEqual(InternalAPIRequestNonce.objects.count(), 1)
 
         observed = ObservedOnchainTransfer.objects.get()
         self.assertEqual(observed.status, ObservedOnchainTransfer.STATUS_CREDITED)
         self.assertEqual(observed.confirmations, 12)
-        self.assertEqual(observed.amount, 250)
+        self.assertEqual(observed.amount, 25000)
 
     def test_same_event_with_new_nonce_is_idempotent(self):
         payload = self._build_payload(
@@ -165,8 +165,8 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         clearing_wallet.refresh_from_db()
 
         self.assertEqual(self.session.status, DepositSession.STATUS_CREDITED)
-        self.assertEqual(self.w1.balance, 300)
-        self.assertEqual(clearing_wallet.balance, -300)
+        self.assertEqual(self.w1.balance, 30000)
+        self.assertEqual(clearing_wallet.balance, -30000)
         self.assertEqual(ObservedOnchainTransfer.objects.count(), 1)
         self.assertEqual(InternalAPIRequestNonce.objects.count(), 2)
 
@@ -180,7 +180,7 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         payload = self._build_payload(
             txid="0x123",
             log_index=9,
-            amount=300,
+            amount=30000,
             confirmations=12,
             block_number=123458,
             from_address="0xcccccccccccccccccccccccccccccccccccccccc",
@@ -199,8 +199,8 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         clearing_wallet.refresh_from_db()
 
         self.assertEqual(self.session.status, DepositSession.STATUS_CREDITED)
-        self.assertEqual(self.w1.balance, 300)
-        self.assertEqual(clearing_wallet.balance, -300)
+        self.assertEqual(self.w1.balance, 30000)
+        self.assertEqual(clearing_wallet.balance, -30000)
         self.assertEqual(ObservedOnchainTransfer.objects.count(), 1)
         self.assertEqual(InternalAPIRequestNonce.objects.count(), 1)
 
@@ -208,7 +208,7 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         payload = self._build_payload(
             txid="0x456",
             log_index=10,
-            amount=300,
+            amount=30000,
             confirmations=12,
             block_number=123459,
             from_address="0xdddddddddddddddddddddddddddddddddddddddd",

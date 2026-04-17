@@ -192,11 +192,24 @@ def _estimate_erc20_transfer_gas(*, w3, option, source_address: str, amount: int
             source_address,
             option.erc20_transfer_gas_limit,
         )
-        return int(option.erc20_transfer_gas_limit)
+        estimated_gas = int(option.erc20_transfer_gas_limit)
 
-    gas_limit = (int(estimated_gas) * int(option.gas_limit_multiplier_bps) + 9999) // 10000
-    if gas_limit < int(estimated_gas):
-        gas_limit = int(estimated_gas)
+    try:
+        estimated_gas = int(estimated_gas)
+    except (TypeError, ValueError):
+        logging.warning(
+            "sweeper_service action=estimate_gas_invalid chain=%s asset=%s source=%s fallback_gas_limit=%s raw=%r",
+            option.chain,
+            option.asset_code,
+            source_address,
+            option.erc20_transfer_gas_limit,
+            estimated_gas,
+        )
+        estimated_gas = int(option.erc20_transfer_gas_limit)
+
+    gas_limit = (estimated_gas * int(option.gas_limit_multiplier_bps) + 9999) // 10000
+    if gas_limit < estimated_gas:
+        gas_limit = estimated_gas
     return gas_limit
 
 

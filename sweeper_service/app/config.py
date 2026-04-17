@@ -156,6 +156,10 @@ def load_config() -> ServiceConfig:
         if not destination_address:
             destination_address = Account.from_key(funding_private_key).address.lower()
 
+        raw_max_gas_funding_amount_wei = item.get("max_gas_funding_amount_wei")
+        if raw_max_gas_funding_amount_wei is None:
+            raw_max_gas_funding_amount_wei = item["gas_funding_amount_wei"]
+
         option = SweepOptionConfig(
             key=str(item["key"]).strip(),
             chain=str(item["chain"]).strip().lower(),
@@ -166,9 +170,7 @@ def load_config() -> ServiceConfig:
             destination_address=destination_address,
             funding_confirmations=int(item.get("funding_confirmations", 1)),
             sweep_confirmations=int(item.get("sweep_confirmations", 1)),
-            max_gas_funding_amount_wei=int(
-                item.get("max_gas_funding_amount_wei", item["gas_funding_amount_wei"])
-            ),
+            max_gas_funding_amount_wei=int(raw_max_gas_funding_amount_wei),
             erc20_transfer_gas_limit=int(item.get("erc20_transfer_gas_limit", 100000)),
             gas_limit_multiplier_bps=int(item.get("gas_limit_multiplier_bps", 12000)),
             gas_limit_retry_multiplier_bps=int(item.get("gas_limit_retry_multiplier_bps", 15000)),

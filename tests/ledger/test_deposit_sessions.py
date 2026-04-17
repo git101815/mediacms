@@ -154,7 +154,7 @@ class TestDepositSessions(BaseLedgerTestCase):
             to_address="0x2222222222222222222222222222222222222222",
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=250,
+            amount=25000,
             confirmations=3,
             raw_payload={"txid": "0xabc", "log_index": 7},
         )
@@ -170,7 +170,7 @@ class TestDepositSessions(BaseLedgerTestCase):
             to_address="0x2222222222222222222222222222222222222222",
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=250,
+            amount=25000,
             confirmations=12,
             raw_payload={"txid": "0xabc", "log_index": 7, "block_number": 124},
         )
@@ -211,7 +211,7 @@ class TestDepositSessions(BaseLedgerTestCase):
             to_address="0x3333333333333333333333333333333333333333",
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=250,
+            amount=25000,
             confirmations=6,
             raw_payload={"txid": "0xdef", "log_index": 4},
         )
@@ -234,8 +234,8 @@ class TestDepositSessions(BaseLedgerTestCase):
         self.assertEqual(observed.status, ObservedOnchainTransfer.STATUS_CREDITED)
         self.assertEqual(session.credited_ledger_txn_id, txn.id)
         self.assertEqual(observed.credited_ledger_txn_id, txn.id)
-        self.assertEqual(self.w1.balance, 250)
-        self.assertEqual(clearing_wallet.balance, -250)
+        self.assertEqual(self.w1.balance, 25000)
+        self.assertEqual(clearing_wallet.balance, -25000)
 
         replay_txn = credit_confirmed_deposit_session(
             actor=self.operator,
@@ -246,7 +246,7 @@ class TestDepositSessions(BaseLedgerTestCase):
 
         self.assertEqual(replay_txn.id, txn.id)
         self.w1.refresh_from_db()
-        self.assertEqual(self.w1.balance, 250)
+        self.assertEqual(self.w1.balance, 25000)
 
     def test_cancel_user_deposit_session_rejects_observed_transaction(self):
         session = create_deposit_session(
@@ -273,7 +273,7 @@ class TestDepositSessions(BaseLedgerTestCase):
             to_address="0x4444444444444444444444444444444444444444",
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=250,
+            amount=25000,
             confirmations=1,
             raw_payload={},
         )
@@ -360,7 +360,7 @@ class TestDepositSessions(BaseLedgerTestCase):
             to_address="0x8888888888888888888888888888888888888888",
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=250,
+            amount=25000,
             confirmations=1,
             raw_payload={},
         )
@@ -393,7 +393,7 @@ class TestDepositSessions(BaseLedgerTestCase):
             to_address="0x9999999999999999999999999999999999999999",
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=250,
+            amount=25000,
             confirmations=6,
             raw_payload={"txid": "0xabc123", "log_index": 7},
         )
@@ -466,7 +466,7 @@ class TestDepositSessions(BaseLedgerTestCase):
             to_address=session.deposit_address,
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=250,
+            amount=25000,
             confirmations=session.required_confirmations,
             raw_payload={"source": "integration-test", "txid": "0xsmoketest0001"},
         )

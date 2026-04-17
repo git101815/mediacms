@@ -123,7 +123,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "0xcccccccccccccccccccccccccccccccccccccccc")
         self.assertContains(response, "Minimum deposit")
-        self.assertContains(response, "0.0001 USDT")
+        self.assertContains(response, "0.00 USDT")
 
     def test_deposit_session_status_endpoint_returns_payload(self):
         session = DepositSession.objects.create(
