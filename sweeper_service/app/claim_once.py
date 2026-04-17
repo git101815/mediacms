@@ -214,7 +214,18 @@ def _estimate_erc20_transfer_gas(*, w3, option, source_address: str, amount: int
 
 
 def _compute_effective_gas_price_wei(*, w3, option) -> int:
-    network_gas_price = int(w3.eth.gas_price)
+    raw_network_gas_price = w3.eth.gas_price
+    try:
+        network_gas_price = int(raw_network_gas_price)
+    except (TypeError, ValueError):
+        logging.warning(
+            "sweeper_service action=gas_price_invalid chain=%s asset=%s fallback_gas_price=1 raw=%r",
+            option.chain,
+            option.asset_code,
+            raw_network_gas_price,
+        )
+        network_gas_price = 1
+
     effective_gas_price = (
         network_gas_price * int(option.gas_price_multiplier_bps) + 9999
     ) // 10000

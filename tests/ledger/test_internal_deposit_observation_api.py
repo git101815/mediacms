@@ -180,7 +180,7 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         payload = self._build_payload(
             txid="0x123",
             log_index=9,
-            amount=30000,
+            amount=300,
             confirmations=12,
             block_number=123458,
             from_address="0xcccccccccccccccccccccccccccccccccccccccc",
@@ -208,7 +208,7 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         payload = self._build_payload(
             txid="0x456",
             log_index=10,
-            amount=30000,
+            amount=300,
             confirmations=12,
             block_number=123459,
             from_address="0xdddddddddddddddddddddddddddddddddddddddd",

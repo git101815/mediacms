@@ -78,7 +78,7 @@ class TestDepositSmokeFlow(TestDepositSessions):
             to_address=session.deposit_address,
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=25000,
+            amount=250,
             confirmations=session.required_confirmations,
             raw_payload={"source": "smoke-flow-test", "txid": "0xsmokeflow0001"},
         )

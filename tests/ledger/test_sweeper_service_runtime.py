@@ -97,6 +97,7 @@ def test_run_once_pending_job_funds_sweeps_and_confirms():
          patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
          patch.object(claim_once, "_build_option_web3", return_value=w3), \
          patch.object(claim_once, "_estimate_erc20_transfer_gas", return_value=50000), \
+         patch.object(claim_once, "_compute_effective_gas_price_wei", return_value=1), \
          patch.object(claim_once, "_read_mined_receipt", return_value={"status": 1, "gasUsed": 50000}), \
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
          patch.object(claim_once, "get_native_balance", return_value=0), \
@@ -165,6 +166,7 @@ def test_run_once_resumes_funding_broadcasted_job_without_refunding():
          patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
          patch.object(claim_once, "_build_option_web3", return_value=w3), \
          patch.object(claim_once, "_estimate_erc20_transfer_gas", return_value=50000), \
+         patch.object(claim_once, "_compute_effective_gas_price_wei", return_value=1), \
          patch.object(claim_once, "_read_mined_receipt", return_value={"status": 1, "gasUsed": 50000}), \
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
          patch.object(claim_once, "get_native_balance", return_value=option.max_gas_funding_amount_wei), \
@@ -228,10 +230,10 @@ def test_run_once_marks_failed_when_derived_address_mismatches_job():
 
     with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
          patch.object(claim_once, "NonceAllocator", return_value=Mock()), \
-         patch.object(claim_once, "_build_option_web3") as build_web3:
+         patch.object(claim_once, "_build_option_web3") as build_option_web3:
         claim_once.run_once(client=client, config=config)
 
-    build_web3.assert_not_called()
+    build_option_web3.assert_not_called()
     client.mark_failed.assert_called_once()
     assert "Derived address mismatch" in client.mark_failed.call_args.kwargs["error"]
 
@@ -254,6 +256,7 @@ def test_run_once_marks_failed_when_token_balance_is_insufficient():
          patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
          patch.object(claim_once, "_build_option_web3", return_value=w3), \
          patch.object(claim_once, "_estimate_erc20_transfer_gas", return_value=50000), \
+         patch.object(claim_once, "_compute_effective_gas_price_wei", return_value=1), \
          patch.object(claim_once, "_read_mined_receipt", return_value={"status": 1, "gasUsed": 50000}), \
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
          patch.object(claim_once, "get_native_balance", return_value=option.max_gas_funding_amount_wei), \
