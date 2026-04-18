@@ -3,13 +3,18 @@
 {% block headtitle %}Wallet - {{ PORTAL_NAME }}{% endblock headtitle %}
 
 {% block innercontent %}
-<div class="wallet-ui" data-wallet-ui>
+<div class="wallet-ui wallet-ui--tokens" data-wallet-ui>
   <div class="wallet-ui__shell">
     <header class="wallet-ui__header">
       <button type="button" class="wallet-ui__icon-btn" onclick="history.back()" aria-label="Back">
         <i class="material-icons" aria-hidden="true">arrow_back</i>
       </button>
-      <h1 class="wallet-ui__title">MY WALLET</h1>
+
+      <div class="wallet-ui__header-copy">
+        <div class="wallet-ui__eyebrow">Wallet</div>
+        <h1 class="wallet-ui__title">My Tokens</h1>
+      </div>
+
       <div class="wallet-ui__header-spacer"></div>
     </header>
 
@@ -31,96 +36,112 @@
       </div>
       {% endif %}
 
-      <section class="wallet-ui__balance">
-        <div class="wallet-ui__balance-label">Available Balance</div>
-        <div class="wallet-ui__balance-value">{{ available_balance_display }}</div>
+      <section class="wallet-ui__section wallet-ui__section--balance">
+        <div class="wallet-ui__section-kicker">Wallet</div>
 
-        <div class="wallet-ui__action-row">
-          <button
-            type="button"
-            class="wallet-ui__pill wallet-ui__pill--primary"
-            data-wallet-open="deposit"
-            {% if not wallet_actions.can_deposit %}disabled{% endif %}
-          >
-            <i class="material-icons" aria-hidden="true">add_circle</i>
-            <span>Deposit</span>
-          </button>
-
-          <button
-            type="button"
-            class="wallet-ui__pill wallet-ui__pill--secondary"
-            data-wallet-open="withdraw"
-            {% if not wallet_actions.can_withdraw %}disabled{% endif %}
-          >
-            <i class="material-icons" aria-hidden="true">north_east</i>
-            <span>Withdraw</span>
-          </button>
-        </div>
-
-        {% if wallet_actions.hint %}
-        <p class="wallet-ui__hint">{{ wallet_actions.hint }}</p>
-        {% endif %}
-
-        <div class="wallet-ui__stats">
-          <div class="wallet-ui__stat">
-            <span>Total balance</span>
-            <strong>{{ total_balance_display }}</strong>
-          </div>
-          <div class="wallet-ui__stat">
-            <span>Available</span>
-            <strong>{{ available_balance_display }}</strong>
-          </div>
-          <div class="wallet-ui__stat">
-            <span>On hold</span>
-            <strong>{{ held_balance_display }}</strong>
-          </div>
-        </div>
-      </section>
-
-      <section class="wallet-ui__section">
-        <div class="wallet-ui__section-head">
-          <h2>Recent Deposit Sessions</h2>
-        </div>
-
-        {% if recent_deposit_session_rows %}
-        <div class="wallet-ui__list">
-          {% for row in recent_deposit_session_rows %}
-          <article class="wallet-ui__card">
-            <div class="wallet-ui__card-main">
-              <div class="wallet-ui__card-top">
-                <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
-                <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
-                  <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
-                  <span>{{ row.status_label }}</span>
-                </span>
-              </div>
-
-              <div class="wallet-ui__card-title">{{ row.display_label|default:row.label }}</div>
-              <div class="wallet-ui__card-meta">{{ row.deposit_address }}</div>
-              <div class="wallet-ui__card-meta">
-                <a href="{{ row.url }}" class="wallet-ui__link">Open session</a>
-              </div>
+        <div class="wallet-balance">
+          <div class="wallet-balance__main">
+            <div class="wallet-balance__label">Available balance</div>
+            <div class="wallet-balance__value" title="{{ available_balance_display }}">
+              {{ available_balance_display }}
             </div>
-          </article>
-          {% endfor %}
+            <div class="wallet-balance__unit">platform tokens</div>
+
+            {% if wallet_actions.hint %}
+            <p class="wallet-balance__hint">{{ wallet_actions.hint }}</p>
+            {% endif %}
+
+            <div class="wallet-balance__actions">
+              <button
+                type="button"
+                class="wallet-btn wallet-btn--primary"
+                data-wallet-open="deposit"
+                {% if not wallet_actions.can_deposit %}disabled{% endif %}
+              >
+                <i class="material-icons" aria-hidden="true">add_circle</i>
+                <span>Buy tokens</span>
+              </button>
+
+              <button
+                type="button"
+                class="wallet-btn wallet-btn--secondary"
+                data-wallet-open="withdraw"
+                {% if not wallet_actions.can_withdraw %}disabled{% endif %}
+              >
+                <i class="material-icons" aria-hidden="true">payments</i>
+                <span>Cash out</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="wallet-balance__stats">
+            <div class="wallet-balance-stat">
+              <span>Total</span>
+              <strong title="{{ total_balance_display }}">{{ total_balance_display }}</strong>
+            </div>
+            <div class="wallet-balance-stat">
+              <span>Available</span>
+              <strong title="{{ available_balance_display }}">{{ available_balance_display }}</strong>
+            </div>
+            <div class="wallet-balance-stat">
+              <span>On hold</span>
+              <strong title="{{ held_balance_display }}">{{ held_balance_display }}</strong>
+            </div>
+          </div>
         </div>
-        {% else %}
-        <div class="wallet-ui__empty">
-          <div class="wallet-ui__empty-title">No deposit session yet</div>
-          <div class="wallet-ui__empty-text">Your recent deposit sessions will appear here.</div>
-        </div>
-        {% endif %}
       </section>
 
       <section class="wallet-ui__section">
-        <div class="wallet-ui__section-head">
-          <h2>Recent Withdrawal Requests</h2>
+        <div class="wallet-ui__section-head wallet-ui__section-head--split">
+          <div>
+            <div class="wallet-ui__section-kicker">Top up</div>
+            <h2>Buy token packs</h2>
+          </div>
+          <div class="wallet-ui__section-note">
+            Users buy platform tokens. Payment rails stay in the background.
+          </div>
+        </div>
+
+        <div class="wallet-pack-grid">
+          <button type="button" class="wallet-pack-card" data-wallet-open="deposit">
+            <span class="wallet-pack-card__tokens">250</span>
+            <span class="wallet-pack-card__label">Starter pack</span>
+            <span class="wallet-pack-card__price">Quick top-up</span>
+          </button>
+
+          <button type="button" class="wallet-pack-card wallet-pack-card--featured" data-wallet-open="deposit">
+            <span class="wallet-pack-card__badge">Popular</span>
+            <span class="wallet-pack-card__tokens">1,000</span>
+            <span class="wallet-pack-card__label">Most common</span>
+            <span class="wallet-pack-card__price">Best default choice</span>
+          </button>
+
+          <button type="button" class="wallet-pack-card" data-wallet-open="deposit">
+            <span class="wallet-pack-card__tokens">2,500</span>
+            <span class="wallet-pack-card__label">Power pack</span>
+            <span class="wallet-pack-card__price">For regular buyers</span>
+          </button>
+
+          <button type="button" class="wallet-pack-card" data-wallet-open="deposit">
+            <span class="wallet-pack-card__tokens">5,000</span>
+            <span class="wallet-pack-card__label">Creator pack</span>
+            <span class="wallet-pack-card__price">Large recharge</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="wallet-ui__section">
+        <div class="wallet-ui__section-head wallet-ui__section-head--split">
+          <div>
+            <div class="wallet-ui__section-kicker">Cash out</div>
+            <h2>Recent payout requests</h2>
+          </div>
         </div>
 
         {% if recent_request_rows %}
         <div class="wallet-ui__list">
           {% for row in recent_request_rows %}
-          <article class="wallet-ui__card">
+          <article class="wallet-ui__card wallet-ui__card--soft">
             <div class="wallet-ui__card-main">
               <div class="wallet-ui__card-top">
                 <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
@@ -131,32 +152,36 @@
               </div>
 
               <div class="wallet-ui__card-title">
-                {% if row.notes %}{{ row.notes }}{% else %}Withdrawal request{% endif %}
+                {% if row.notes %}{{ row.notes }}{% else %}Payout request{% endif %}
               </div>
 
               {% if row.destination_address %}
               <div class="wallet-ui__card-meta">Destination {{ row.destination_address }}</div>
               {% endif %}
-              <div class="wallet-ui__card-meta">Ref {{ row.reference }}</div>
+              <div class="wallet-ui__card-meta">Reference {{ row.reference }}</div>
             </div>
 
             <div class="wallet-ui__card-side">
-              <strong>{{ row.amount_display }}</strong>
+              <strong title="{{ row.amount_display }}">{{ row.amount_display }}</strong>
+              <span>tokens</span>
             </div>
           </article>
           {% endfor %}
         </div>
         {% else %}
         <div class="wallet-ui__empty">
-          <div class="wallet-ui__empty-title">No request yet</div>
-          <div class="wallet-ui__empty-text">Deposit and withdrawal requests will appear here.</div>
+          <div class="wallet-ui__empty-title">No payout request yet</div>
+          <div class="wallet-ui__empty-text">Your payout requests will appear here.</div>
         </div>
         {% endif %}
       </section>
 
       <section class="wallet-ui__section">
-        <div class="wallet-ui__section-head">
-          <h2>Recent Activity</h2>
+        <div class="wallet-ui__section-head wallet-ui__section-head--split">
+          <div>
+            <div class="wallet-ui__section-kicker">Activity</div>
+            <h2>Recent token activity</h2>
+          </div>
         </div>
 
         <div class="wallet-ui__toolbar">
@@ -185,7 +210,7 @@
         {% if transaction_rows %}
         <div class="wallet-ui__list">
           {% for row in transaction_rows %}
-          <article class="wallet-ui__card">
+          <article class="wallet-ui__card wallet-ui__card--soft">
             <div class="wallet-ui__card-main">
               <div class="wallet-ui__card-top">
                 <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
@@ -206,8 +231,10 @@
             </div>
 
             <div class="wallet-ui__card-side">
-              <strong class="wallet-ui__delta wallet-ui__delta--{{ row.direction }}">{{ row.delta_display }}</strong>
-              <span>Balance {{ row.balance_after_display }}</span>
+              <strong class="wallet-ui__delta wallet-ui__delta--{{ row.direction }}" title="{{ row.delta_display }}">
+                {{ row.delta_display }}
+              </strong>
+              <span title="{{ row.balance_after_display }}">Balance {{ row.balance_after_display }}</span>
             </div>
           </article>
           {% endfor %}
@@ -216,6 +243,45 @@
         <div class="wallet-ui__empty">
           <div class="wallet-ui__empty-title">{{ empty_state_title }}</div>
           <div class="wallet-ui__empty-text">{{ empty_state_text }}</div>
+        </div>
+        {% endif %}
+      </section>
+
+      <section class="wallet-ui__section">
+        <div class="wallet-ui__section-head wallet-ui__section-head--split">
+          <div>
+            <div class="wallet-ui__section-kicker">Top-up history</div>
+            <h2>Pending top-ups</h2>
+          </div>
+        </div>
+
+        {% if recent_deposit_session_rows %}
+        <div class="wallet-ui__list">
+          {% for row in recent_deposit_session_rows %}
+          <article class="wallet-ui__card wallet-ui__card--soft">
+            <div class="wallet-ui__card-main">
+              <div class="wallet-ui__card-top">
+                <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
+                  <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
+                  <span>{{ row.status_label }}</span>
+                </span>
+              </div>
+
+              <div class="wallet-ui__card-title">{{ row.display_label|default:row.label }}</div>
+              <div class="wallet-ui__card-meta">{{ row.deposit_address }}</div>
+            </div>
+
+            <div class="wallet-ui__card-side">
+              <a href="{{ row.url }}" class="wallet-ui__ghost-link">View</a>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="wallet-ui__empty">
+          <div class="wallet-ui__empty-title">No pending top-up</div>
+          <div class="wallet-ui__empty-text">When a token top-up is started, it will appear here.</div>
         </div>
         {% endif %}
       </section>
@@ -230,13 +296,9 @@
       <i class="material-icons" aria-hidden="true">close</i>
     </button>
 
-    <div class="wallet-modal__hero-icon" aria-hidden="true">
-      <i class="material-icons">south_west</i>
-    </div>
-
-    <h2 id="wallet-deposit-modal-title" class="wallet-modal__title">Select a network</h2>
+    <h2 id="wallet-deposit-modal-title" class="wallet-modal__title">Buy tokens</h2>
     <p class="wallet-modal__subtitle">
-      Make sure the network you choose matches the asset and route you are going to send.
+      Select a payment route. The payment rail stays behind the token top-up flow.
     </p>
 
     {% if deposit_options %}
@@ -265,16 +327,16 @@
               {% elif option.network_slug == "base" %}
               <span>BASE</span>
               {% elif option.network_slug == "ethereum" %}
-              <span>Ξ</span>
+              <span>ETH</span>
               {% else %}
               <span>{{ option.asset_code }}</span>
               {% endif %}
             </span>
 
             <span class="wallet-route-card__content">
-              <span class="wallet-route-card__title">{{ option.network_label|default:option.chain }}</span>
+              <span class="wallet-route-card__title">{{ option.network_display|default:option.network_label|default:option.chain }}</span>
               <span class="wallet-route-card__subtitle">
-                Minimum deposit: {{ option.min_amount_display|default:option.min_amount }} {{ option.asset_code }}
+                Min. deposit {{ option.min_amount_display|default:option.min_amount }} {{ option.asset_code }}
               </span>
             </span>
 
@@ -285,16 +347,15 @@
       </div>
 
       <div class="wallet-route-form__note">
-        Send only the exact asset shown for the selected network.
-        Unsupported assets or networks are not credited automatically.
+        This opens a top-up session and credits your platform wallet after payment detection and confirmation.
       </div>
 
       <button type="submit" class="wallet-route-form__submit">Continue</button>
     </form>
     {% else %}
     <div class="wallet-ui__empty wallet-ui__empty--compact">
-      <div class="wallet-ui__empty-title">Deposits are temporarily unavailable</div>
-      <div class="wallet-ui__empty-text">No deposit route is currently available.</div>
+      <div class="wallet-ui__empty-title">Token top-ups are unavailable</div>
+      <div class="wallet-ui__empty-text">No payment route is currently available.</div>
     </div>
     {% endif %}
   </div>
@@ -305,8 +366,8 @@
   <div class="wallet-modal__dialog wallet-modal__dialog--withdraw" role="dialog" aria-modal="true" aria-labelledby="wallet-withdraw-modal-title">
     <div class="wallet-withdraw__head">
       <div>
-        <h2 id="wallet-withdraw-modal-title" class="wallet-withdraw__title">Request withdrawal</h2>
-        <p class="wallet-withdraw__subtitle">The requested amount is reserved from your available balance immediately.</p>
+        <h2 id="wallet-withdraw-modal-title" class="wallet-withdraw__title">Request payout</h2>
+        <p class="wallet-withdraw__subtitle">The requested amount is reserved from your available token balance immediately.</p>
       </div>
 
       <button type="button" class="wallet-modal__close wallet-modal__close--inline" data-wallet-close="withdraw" aria-label="Close">
@@ -320,19 +381,7 @@
       <input type="hidden" name="return_status" value="{{ active_status }}">
 
       <label class="wallet-field">
-        <span class="wallet-field__label">Network</span>
-        <div class="wallet-field__select-wrap">
-          <select name="network" class="wallet-field__select" required>
-            {% for option in withdrawal_network_options %}
-            <option value="{{ option.value }}">{{ option.label }}</option>
-            {% endfor %}
-          </select>
-          <i class="material-icons" aria-hidden="true">expand_more</i>
-        </div>
-      </label>
-
-      <label class="wallet-field">
-        <span class="wallet-field__label">Destination address</span>
+        <span class="wallet-field__label">Destination wallet</span>
         <input type="text" name="destination_address" class="wallet-field__input" maxlength="255" required>
       </label>
 
@@ -343,7 +392,7 @@
 
       <label class="wallet-field">
         <span class="wallet-field__label">Notes</span>
-        <textarea name="notes" rows="4" class="wallet-field__textarea"></textarea>
+        <textarea name="notes" rows="4" class="wallet-field__textarea" placeholder="Optional note for ops / payout handling"></textarea>
       </label>
 
       <button type="submit" class="wallet-withdraw__submit">Submit request</button>

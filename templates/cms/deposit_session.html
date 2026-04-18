@@ -11,8 +11,8 @@
       </a>
 
       <div class="wallet-deposit-ui__title-wrap">
-        <div class="wallet-deposit-ui__eyebrow">DEPOSIT</div>
-        <h1 class="wallet-deposit-ui__title">DEPOSIT {{ deposit_session.asset_code }}</h1>
+        <div class="wallet-deposit-ui__eyebrow">Top up</div>
+        <h1 class="wallet-deposit-ui__title">Complete top-up</h1>
       </div>
 
       <span class="wallet-deposit-ui__status wallet-deposit-ui__status--{{ deposit_session.status }}" data-deposit-status-pill>
@@ -22,11 +22,10 @@
     </header>
 
     <div class="wallet-deposit-ui__body">
-      <div class="wallet-deposit-ui__field-label">Network</div>
+      <div class="wallet-deposit-ui__field-label">Payment route</div>
 
       <div class="wallet-deposit-ui__network-box">
         <span>{{ deposit_session.route_label|default:deposit_session.display_label|default:deposit_session.asset_code }}</span>
-        <i class="material-icons" aria-hidden="true">expand_more</i>
       </div>
 
       <div class="wallet-deposit-ui__address-box">
@@ -38,7 +37,7 @@
 
       <div class="wallet-deposit-ui__info-card">
         <div class="wallet-deposit-ui__row">
-          <span class="wallet-deposit-ui__row-label">Deposit Network</span>
+          <span class="wallet-deposit-ui__row-label">Network</span>
           <span class="wallet-deposit-ui__row-value">{{ deposit_session.network_display|default:deposit_session.chain }}</span>
         </div>
 
@@ -48,14 +47,14 @@
         </div>
 
         <div class="wallet-deposit-ui__row">
-          <span class="wallet-deposit-ui__row-label">Required confirmations</span>
+          <span class="wallet-deposit-ui__row-label">Confirmations</span>
           <span class="wallet-deposit-ui__row-value">
             <span data-deposit-confirmations>{{ deposit_session.confirmations }}</span> / {{ deposit_session.required_confirmations }}
           </span>
         </div>
 
         <div class="wallet-deposit-ui__row">
-          <span class="wallet-deposit-ui__row-label">Transaction</span>
+          <span class="wallet-deposit-ui__row-label">Reference</span>
           <span class="wallet-deposit-ui__row-value wallet-deposit-ui__row-value--mono" data-deposit-txid>
             {{ deposit_session.observed_txid|default:"—" }}
           </span>
@@ -65,15 +64,13 @@
       <div class="wallet-deposit-ui__warning">
         <i class="material-icons" aria-hidden="true">warning</i>
         <div>
-          The current address only supports depositing {{ deposit_session.asset_code }} on
-          {{ deposit_session.network_display|default:deposit_session.chain }}.
-          Depositing other assets will result in loss.
+          Send only {{ deposit_session.asset_code }} on {{ deposit_session.network_display|default:deposit_session.chain }}.
         </div>
       </div>
 
       <div class="wallet-deposit-ui__footer">
         <div class="wallet-deposit-ui__balance">
-          <div class="wallet-deposit-ui__balance-label">Observed amount</div>
+          <div class="wallet-deposit-ui__balance-label">Received</div>
           <div class="wallet-deposit-ui__balance-value">
             <span data-deposit-observed-amount>{{ deposit_session.observed_amount_display|default:"0" }}</span>
             <span>{{ deposit_session.asset_code }}</span>
@@ -87,12 +84,12 @@
           {% if deposit_session.status == "awaiting_payment" and not deposit_session.observed_txid %}
           <form method="post" action="{% url 'wallet_deposit_session_cancel' public_id=deposit_session.public_id %}">
             {% csrf_token %}
-            <button type="submit" class="wallet-deposit-ui__cancel">Cancel deposit</button>
+            <button type="submit" class="wallet-deposit-ui__cancel">Cancel top-up</button>
           </form>
           {% endif %}
 
           <a href="{{ wallet_url }}" class="wallet-deposit-ui__return">Return to wallet</a>
-          <button type="button" class="wallet-deposit-ui__share" data-share-deposit-details>Share deposit details</button>
+          <button type="button" class="wallet-deposit-ui__share" data-share-deposit-details>Share details</button>
         </div>
       </div>
     </div>
@@ -133,7 +130,13 @@
 
   if (copyButton && addressNode) {
     copyButton.addEventListener('click', async function () {
-      await copyText(addressNode.textContent.trim());
+      const copied = await copyText(addressNode.textContent.trim());
+      if (copied) {
+        copyButton.classList.add('wallet-deposit-ui__copy--done');
+        setTimeout(function () {
+          copyButton.classList.remove('wallet-deposit-ui__copy--done');
+        }, 1000);
+      }
     });
   }
 
@@ -141,12 +144,12 @@
     shareButton.addEventListener('click', async function () {
       const details = [
         'Address: ' + (addressNode ? addressNode.textContent.trim() : ''),
-        'Transaction: ' + (txidNode ? txidNode.textContent.trim() : '—')
+        'Reference: ' + (txidNode ? txidNode.textContent.trim() : '—')
       ].join('\n');
 
       if (navigator.share) {
         try {
-          await navigator.share({ title: 'Deposit details', text: details });
+          await navigator.share({ title: 'Top-up details', text: details });
           return;
         } catch (error) {
         }
