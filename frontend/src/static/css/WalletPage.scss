@@ -462,15 +462,16 @@ $error-text: #ff9a9a;
 }
 
 .wallet-ui__select {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  background-image: none !important;
   width: 100%;
   height: 42px;
   padding: 0 42px 0 16px;
   border: 0;
   border-radius: 999px;
-  background: $bg-pill;
+  background-color: $bg-pill;
   color: $text-primary;
   font-size: 14px;
   font-weight: 500;
@@ -497,6 +498,11 @@ $error-text: #ff9a9a;
   font-size: 20px;
   color: $text-secondary;
   pointer-events: none;
+}
+
+.wallet-ui__select-wrap::after {
+  display: none;
+  content: none;
 }
 
 /* list / card */

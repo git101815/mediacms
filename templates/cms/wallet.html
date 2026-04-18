@@ -133,54 +133,14 @@
       <section class="wallet-ui__section">
         <div class="wallet-ui__section-head wallet-ui__section-head--split">
           <div>
-            <div class="wallet-ui__section-kicker">Cash out</div>
-            <h2>Recent payout requests</h2>
-          </div>
-        </div>
-
-        {% if recent_request_rows %}
-        <div class="wallet-ui__list">
-          {% for row in recent_request_rows %}
-          <article class="wallet-ui__card wallet-ui__card--soft">
-            <div class="wallet-ui__card-main">
-              <div class="wallet-ui__card-top">
-                <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
-                <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
-                  <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
-                  <span>{{ row.status_label }}</span>
-                </span>
-              </div>
-
-              <div class="wallet-ui__card-title">
-                {% if row.notes %}{{ row.notes }}{% else %}Payout request{% endif %}
-              </div>
-
-              {% if row.destination_address %}
-              <div class="wallet-ui__card-meta">Destination {{ row.destination_address }}</div>
-              {% endif %}
-              <div class="wallet-ui__card-meta">Reference {{ row.reference }}</div>
-            </div>
-
-            <div class="wallet-ui__card-side">
-              <strong title="{{ row.amount_display }}">{{ row.amount_display }}</strong>
-              <span>tokens</span>
-            </div>
-          </article>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="wallet-ui__empty">
-          <div class="wallet-ui__empty-title">No payout request yet</div>
-          <div class="wallet-ui__empty-text">Your payout requests will appear here.</div>
-        </div>
-        {% endif %}
-      </section>
-
-      <section class="wallet-ui__section">
-        <div class="wallet-ui__section-head wallet-ui__section-head--split">
-          <div>
             <div class="wallet-ui__section-kicker">Activity</div>
+            {% if active_tab == "deposits" %}
+            <h2>Recent top-ups</h2>
+            {% elif active_tab == "withdrawals" %}
+            <h2>Recent cash outs</h2>
+            {% else %}
             <h2>Recent token activity</h2>
+            {% endif %}
           </div>
         </div>
 
@@ -207,82 +167,114 @@
           </form>
         </div>
 
-        {% if transaction_rows %}
-        <div class="wallet-ui__list">
-          {% for row in transaction_rows %}
-          <article class="wallet-ui__card wallet-ui__card--soft">
-            <div class="wallet-ui__card-main">
-              <div class="wallet-ui__card-top">
-                <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
-                <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
-                  <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
-                  <span>{{ row.status_label }}</span>
-                </span>
+        {% if active_tab == "deposits" %}
+          {% if recent_deposit_session_rows %}
+          <div class="wallet-ui__list">
+            {% for row in recent_deposit_session_rows %}
+            <article class="wallet-ui__card wallet-ui__card--soft">
+              <div class="wallet-ui__card-main">
+                <div class="wallet-ui__card-top">
+                  <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                  <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
+                    <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
+                    <span>{{ row.status_label }}</span>
+                  </span>
+                </div>
+
+                <div class="wallet-ui__card-title">{{ row.display_label|default:row.label }}</div>
+                <div class="wallet-ui__card-meta">{{ row.deposit_address }}</div>
               </div>
 
-              <div class="wallet-ui__card-title">
-                {% if row.memo %}{{ row.memo }}{% else %}{{ row.kind }}{% endif %}
+              <div class="wallet-ui__card-side">
+                <a href="{{ row.url }}" class="wallet-ui__ghost-link">View</a>
               </div>
-
-              {% if row.counterparty != "—" %}
-              <div class="wallet-ui__card-meta">{{ row.counterparty }}</div>
-              {% endif %}
-              <div class="wallet-ui__card-meta">Ref #{{ row.txn_id }}</div>
-            </div>
-
-            <div class="wallet-ui__card-side">
-              <strong class="wallet-ui__delta wallet-ui__delta--{{ row.direction }}" title="{{ row.delta_display }}">
-                {{ row.delta_display }}
-              </strong>
-              <span title="{{ row.balance_after_display }}">Balance {{ row.balance_after_display }}</span>
-            </div>
-          </article>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="wallet-ui__empty">
-          <div class="wallet-ui__empty-title">{{ empty_state_title }}</div>
-          <div class="wallet-ui__empty-text">{{ empty_state_text }}</div>
-        </div>
-        {% endif %}
-      </section>
-
-      <section class="wallet-ui__section">
-        <div class="wallet-ui__section-head wallet-ui__section-head--split">
-          <div>
-            <div class="wallet-ui__section-kicker">Top-up history</div>
-            <h2>Pending top-ups</h2>
+            </article>
+            {% endfor %}
           </div>
-        </div>
+          {% else %}
+          <div class="wallet-ui__empty">
+            <div class="wallet-ui__empty-title">No top-up yet</div>
+            <div class="wallet-ui__empty-text">Your recent top-ups will appear here.</div>
+          </div>
+          {% endif %}
 
-        {% if recent_deposit_session_rows %}
-        <div class="wallet-ui__list">
-          {% for row in recent_deposit_session_rows %}
-          <article class="wallet-ui__card wallet-ui__card--soft">
-            <div class="wallet-ui__card-main">
-              <div class="wallet-ui__card-top">
-                <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
-                <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
-                  <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
-                  <span>{{ row.status_label }}</span>
-                </span>
+        {% elif active_tab == "withdrawals" %}
+          {% if recent_request_rows %}
+          <div class="wallet-ui__list">
+            {% for row in recent_request_rows %}
+            <article class="wallet-ui__card wallet-ui__card--soft">
+              <div class="wallet-ui__card-main">
+                <div class="wallet-ui__card-top">
+                  <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                  <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
+                    <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
+                    <span>{{ row.status_label }}</span>
+                  </span>
+                </div>
+
+                <div class="wallet-ui__card-title">
+                  {% if row.notes %}{{ row.notes }}{% else %}Cash out request{% endif %}
+                </div>
+
+                {% if row.destination_address %}
+                <div class="wallet-ui__card-meta">Destination {{ row.destination_address }}</div>
+                {% endif %}
+                <div class="wallet-ui__card-meta">Reference {{ row.reference }}</div>
               </div>
 
-              <div class="wallet-ui__card-title">{{ row.display_label|default:row.label }}</div>
-              <div class="wallet-ui__card-meta">{{ row.deposit_address }}</div>
-            </div>
+              <div class="wallet-ui__card-side">
+                <strong title="{{ row.amount_display }}">{{ row.amount_display }}</strong>
+                <span>tokens</span>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="wallet-ui__empty">
+            <div class="wallet-ui__empty-title">No cash out yet</div>
+            <div class="wallet-ui__empty-text">Your recent cash out requests will appear here.</div>
+          </div>
+          {% endif %}
 
-            <div class="wallet-ui__card-side">
-              <a href="{{ row.url }}" class="wallet-ui__ghost-link">View</a>
-            </div>
-          </article>
-          {% endfor %}
-        </div>
         {% else %}
-        <div class="wallet-ui__empty">
-          <div class="wallet-ui__empty-title">No pending top-up</div>
-          <div class="wallet-ui__empty-text">When a token top-up is started, it will appear here.</div>
-        </div>
+          {% if transaction_rows %}
+          <div class="wallet-ui__list">
+            {% for row in transaction_rows %}
+            <article class="wallet-ui__card wallet-ui__card--soft">
+              <div class="wallet-ui__card-main">
+                <div class="wallet-ui__card-top">
+                  <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                  <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
+                    <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
+                    <span>{{ row.status_label }}</span>
+                  </span>
+                </div>
+
+                <div class="wallet-ui__card-title">
+                  {% if row.memo %}{{ row.memo }}{% else %}{{ row.kind }}{% endif %}
+                </div>
+
+                {% if row.counterparty != "—" %}
+                <div class="wallet-ui__card-meta">{{ row.counterparty }}</div>
+                {% endif %}
+                <div class="wallet-ui__card-meta">Ref #{{ row.txn_id }}</div>
+              </div>
+
+              <div class="wallet-ui__card-side">
+                <strong class="wallet-ui__delta wallet-ui__delta--{{ row.direction }}" title="{{ row.delta_display }}">
+                  {{ row.delta_display }}
+                </strong>
+                <span title="{{ row.balance_after_display }}">Balance {{ row.balance_after_display }}</span>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="wallet-ui__empty">
+            <div class="wallet-ui__empty-title">{{ empty_state_title }}</div>
+            <div class="wallet-ui__empty-text">{{ empty_state_text }}</div>
+          </div>
+          {% endif %}
         {% endif %}
       </section>
     </div>
@@ -366,7 +358,7 @@
   <div class="wallet-modal__dialog wallet-modal__dialog--withdraw" role="dialog" aria-modal="true" aria-labelledby="wallet-withdraw-modal-title">
     <div class="wallet-withdraw__head">
       <div>
-        <h2 id="wallet-withdraw-modal-title" class="wallet-withdraw__title">Request payout</h2>
+        <h2 id="wallet-withdraw-modal-title" class="wallet-withdraw__title">Request cash out</h2>
         <p class="wallet-withdraw__subtitle">The requested amount is reserved from your available token balance immediately.</p>
       </div>
 
