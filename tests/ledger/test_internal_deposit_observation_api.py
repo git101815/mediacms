@@ -116,7 +116,7 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         payload = self._build_payload(
             txid="0xabc",
             log_index=7,
-            amount=25000,
+            amount=250,
             confirmations=12,
         )
 
@@ -140,7 +140,7 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         observed = ObservedOnchainTransfer.objects.get()
         self.assertEqual(observed.status, ObservedOnchainTransfer.STATUS_CREDITED)
         self.assertEqual(observed.confirmations, 12)
-        self.assertEqual(observed.amount, 25000)
+        self.assertEqual(observed.amount, 250)
 
     def test_same_event_with_new_nonce_is_idempotent(self):
         payload = self._build_payload(

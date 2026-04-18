@@ -18,7 +18,7 @@ def _make_option():
         destination_address="0x" + "99" * 20,
         funding_confirmations=1,
         sweep_confirmations=1,
-        max_gas_funding_amount_wei=1000,
+        max_gas_funding_amount_wei=100000,
         erc20_transfer_gas_limit=100000,
         gas_limit_multiplier_bps=12000,
         gas_limit_retry_multiplier_bps=15000,
@@ -259,7 +259,7 @@ def test_run_once_marks_failed_when_token_balance_is_insufficient():
          patch.object(claim_once, "_compute_effective_gas_price_wei", return_value=1), \
          patch.object(claim_once, "_read_mined_receipt", return_value={"status": 1, "gasUsed": 50000}), \
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
-         patch.object(claim_once, "get_native_balance", return_value=option.max_gas_funding_amount_wei), \
+         patch.object(claim_once, "get_native_balance", return_value=50000), \
          patch.object(claim_once, "get_erc20_balance", return_value=249), \
          patch.object(claim_once, "send_native_transfer") as send_native_transfer, \
          patch.object(claim_once, "send_erc20_transfer") as send_erc20_transfer:
