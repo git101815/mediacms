@@ -94,52 +94,17 @@
       <section class="wallet-ui__section">
         <div class="wallet-ui__section-head wallet-ui__section-head--split">
           <div>
-            <div class="wallet-ui__section-kicker">Top up</div>
-            <h2>Buy token packs</h2>
-          </div>
-          <div class="wallet-ui__section-note">
-            Users buy platform tokens. Payment rails stay in the background.
-          </div>
-        </div>
-
-        <div class="wallet-pack-grid">
-          <button type="button" class="wallet-pack-card" data-wallet-open="deposit">
-            <span class="wallet-pack-card__tokens">250</span>
-            <span class="wallet-pack-card__label">Starter pack</span>
-            <span class="wallet-pack-card__price">Quick top-up</span>
-          </button>
-
-          <button type="button" class="wallet-pack-card wallet-pack-card--featured" data-wallet-open="deposit">
-            <span class="wallet-pack-card__badge">Popular</span>
-            <span class="wallet-pack-card__tokens">1,000</span>
-            <span class="wallet-pack-card__label">Most common</span>
-            <span class="wallet-pack-card__price">Best default choice</span>
-          </button>
-
-          <button type="button" class="wallet-pack-card" data-wallet-open="deposit">
-            <span class="wallet-pack-card__tokens">2,500</span>
-            <span class="wallet-pack-card__label">Power pack</span>
-            <span class="wallet-pack-card__price">For regular buyers</span>
-          </button>
-
-          <button type="button" class="wallet-pack-card" data-wallet-open="deposit">
-            <span class="wallet-pack-card__tokens">5,000</span>
-            <span class="wallet-pack-card__label">Creator pack</span>
-            <span class="wallet-pack-card__price">Large recharge</span>
-          </button>
-        </div>
-      </section>
-
-      <section class="wallet-ui__section">
-        <div class="wallet-ui__section-head wallet-ui__section-head--split">
-          <div>
             <div class="wallet-ui__section-kicker">Activity</div>
             {% if active_tab == "deposits" %}
             <h2>Recent top-ups</h2>
             {% elif active_tab == "withdrawals" %}
             <h2>Recent cash outs</h2>
+            {% elif active_tab == "purchases" %}
+            <h2>Recent purchases</h2>
+            {% elif active_tab == "transfers" %}
+            <h2>Recent transfers</h2>
             {% else %}
-            <h2>Recent token activity</h2>
+            <h2>All activity</h2>
             {% endif %}
           </div>
         </div>
@@ -168,6 +133,7 @@
         </div>
 
         {% if active_tab == "deposits" %}
+
           {% if recent_deposit_session_rows %}
           <div class="wallet-ui__list">
             {% for row in recent_deposit_session_rows %}
@@ -199,6 +165,7 @@
           {% endif %}
 
         {% elif active_tab == "withdrawals" %}
+
           {% if recent_request_rows %}
           <div class="wallet-ui__list">
             {% for row in recent_request_rows %}
@@ -236,7 +203,100 @@
           </div>
           {% endif %}
 
+        {% elif active_tab == "all" %}
+
+          {% if recent_deposit_session_rows or recent_request_rows or transaction_rows %}
+          <div class="wallet-ui__list">
+
+            {% for row in recent_deposit_session_rows %}
+            <article class="wallet-ui__card wallet-ui__card--soft">
+              <div class="wallet-ui__card-main">
+                <div class="wallet-ui__card-top">
+                  <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                  <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
+                    <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
+                    <span>{{ row.status_label }}</span>
+                  </span>
+                </div>
+
+                <div class="wallet-ui__card-title">Top up · {{ row.display_label|default:row.label }}</div>
+                <div class="wallet-ui__card-meta">{{ row.deposit_address }}</div>
+              </div>
+
+              <div class="wallet-ui__card-side">
+                <a href="{{ row.url }}" class="wallet-ui__ghost-link">View</a>
+              </div>
+            </article>
+            {% endfor %}
+
+            {% for row in recent_request_rows %}
+            <article class="wallet-ui__card wallet-ui__card--soft">
+              <div class="wallet-ui__card-main">
+                <div class="wallet-ui__card-top">
+                  <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                  <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
+                    <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
+                    <span>{{ row.status_label }}</span>
+                  </span>
+                </div>
+
+                <div class="wallet-ui__card-title">
+                  Cash out{% if row.notes %} · {{ row.notes }}{% endif %}
+                </div>
+
+                {% if row.destination_address %}
+                <div class="wallet-ui__card-meta">Destination {{ row.destination_address }}</div>
+                {% endif %}
+                <div class="wallet-ui__card-meta">Reference {{ row.reference }}</div>
+              </div>
+
+              <div class="wallet-ui__card-side">
+                <strong title="{{ row.amount_display }}">{{ row.amount_display }}</strong>
+                <span>tokens</span>
+              </div>
+            </article>
+            {% endfor %}
+
+            {% for row in transaction_rows %}
+            <article class="wallet-ui__card wallet-ui__card--soft">
+              <div class="wallet-ui__card-main">
+                <div class="wallet-ui__card-top">
+                  <span class="wallet-ui__card-date">{{ row.created_at|date:"M d, Y H:i" }}</span>
+                  <span class="wallet-ui__status wallet-ui__status--{{ row.status }}">
+                    <i class="material-icons" aria-hidden="true">{{ row.status_icon }}</i>
+                    <span>{{ row.status_label }}</span>
+                  </span>
+                </div>
+
+                <div class="wallet-ui__card-title">
+                  {% if row.memo %}{{ row.memo }}{% else %}{{ row.kind }}{% endif %}
+                </div>
+
+                {% if row.counterparty != "—" %}
+                <div class="wallet-ui__card-meta">{{ row.counterparty }}</div>
+                {% endif %}
+                <div class="wallet-ui__card-meta">Ref #{{ row.txn_id }}</div>
+              </div>
+
+              <div class="wallet-ui__card-side">
+                <strong class="wallet-ui__delta wallet-ui__delta--{{ row.direction }}" title="{{ row.delta_display }}">
+                  {{ row.delta_display }}
+                </strong>
+                <span title="{{ row.balance_after_display }}">Balance {{ row.balance_after_display }}</span>
+              </div>
+            </article>
+            {% endfor %}
+
+          </div>
+          {% else %}
+          <div class="wallet-ui__empty">
+            <div class="wallet-ui__empty-title">No activity yet</div>
+            <div class="wallet-ui__empty-text">Your wallet activity will appear here.</div>
+          </div>
+          {% endif %}
+
         {% else %}
+
           {% if transaction_rows %}
           <div class="wallet-ui__list">
             {% for row in transaction_rows %}
@@ -275,6 +335,7 @@
             <div class="wallet-ui__empty-text">{{ empty_state_text }}</div>
           </div>
           {% endif %}
+
         {% endif %}
       </section>
     </div>
@@ -283,66 +344,161 @@
 
 <div class="wallet-modal" data-wallet-modal="deposit" hidden>
   <div class="wallet-modal__backdrop" data-wallet-close="deposit"></div>
-  <div class="wallet-modal__dialog wallet-modal__dialog--deposit" role="dialog" aria-modal="true" aria-labelledby="wallet-deposit-modal-title">
+  <div class="wallet-modal__dialog wallet-modal__dialog--deposit wallet-buy-flow" role="dialog" aria-modal="true" aria-labelledby="wallet-deposit-modal-title">
     <button type="button" class="wallet-modal__close" data-wallet-close="deposit" aria-label="Close">
       <i class="material-icons" aria-hidden="true">close</i>
     </button>
 
+    <div class="wallet-buy-flow__steps">
+      <span class="wallet-buy-flow__step wallet-buy-flow__step--active" data-wallet-step-indicator="1">1. Package</span>
+      <span class="wallet-buy-flow__step" data-wallet-step-indicator="2">2. Payment</span>
+    </div>
+
     <h2 id="wallet-deposit-modal-title" class="wallet-modal__title">Buy tokens</h2>
-    <p class="wallet-modal__subtitle">
-      Select a payment route. The payment rail stays behind the token top-up flow.
+    <p class="wallet-modal__subtitle" data-wallet-buy-subtitle>
+      Choose a package first.
     </p>
 
     {% if deposit_options %}
-    <form method="post" action="{{ wallet_deposit_request_url }}" class="wallet-route-form">
+    <form method="post" action="{{ wallet_deposit_request_url }}" class="wallet-route-form wallet-buy-modal" data-wallet-buy-form>
       {% csrf_token %}
       <input type="hidden" name="return_tab" value="{{ active_tab }}">
       <input type="hidden" name="return_status" value="{{ active_status }}">
+      <input type="hidden" name="token_pack_key" value="100" data-wallet-selected-pack>
 
-      <div class="wallet-route-form__list" role="radiogroup" aria-label="Deposit routes">
-        {% for option in deposit_options %}
-        <label class="wallet-route-card">
-          <input
-            class="wallet-route-card__input"
-            type="radio"
-            name="deposit_option_key"
-            value="{{ option.key }}"
-            {% if forloop.first %}checked{% endif %}
-            required
-          >
-          <span class="wallet-route-card__inner">
-            <span class="wallet-route-card__icon" aria-hidden="true">
-              {% if option.network_slug == "bsc" %}
-              <span>BNB</span>
-              {% elif option.network_slug == "arbitrum" %}
-              <span>ARB</span>
-              {% elif option.network_slug == "base" %}
-              <span>BASE</span>
-              {% elif option.network_slug == "ethereum" %}
-              <span>ETH</span>
-              {% else %}
-              <span>{{ option.asset_code }}</span>
-              {% endif %}
-            </span>
+      <div class="wallet-buy-flow__panel" data-wallet-step-panel="1">
+        <div class="wallet-buy-modal__section">
+          <div class="wallet-buy-modal__section-title">Choose package</div>
 
-            <span class="wallet-route-card__content">
-              <span class="wallet-route-card__title">{{ option.network_display|default:option.network_label|default:option.chain }}</span>
-              <span class="wallet-route-card__subtitle">
-                Min. deposit {{ option.min_amount_display|default:option.min_amount }} {{ option.asset_code }}
+          <div class="wallet-buy-modal__packages" role="radiogroup" aria-label="Token packages">
+            <label class="wallet-buy-modal__package">
+              <input class="wallet-buy-modal__package-input" type="radio" name="token_pack_choice" value="100" checked>
+              <span class="wallet-buy-modal__package-inner">
+                <span class="wallet-buy-modal__package-icon" aria-hidden="true">★</span>
+                <span class="wallet-buy-modal__package-copy">
+                  <span class="wallet-buy-modal__package-title">100 tokens</span>
+                  <span class="wallet-buy-modal__package-subtitle">Starter</span>
+                </span>
               </span>
-            </span>
+            </label>
 
-            <span class="wallet-route-card__radio" aria-hidden="true"></span>
-          </span>
-        </label>
-        {% endfor %}
+            <label class="wallet-buy-modal__package">
+              <input class="wallet-buy-modal__package-input" type="radio" name="token_pack_choice" value="250">
+              <span class="wallet-buy-modal__package-inner">
+                <span class="wallet-buy-modal__package-icon" aria-hidden="true">★</span>
+                <span class="wallet-buy-modal__package-copy">
+                  <span class="wallet-buy-modal__package-title">250 tokens</span>
+                  <span class="wallet-buy-modal__package-subtitle">Quick top-up</span>
+                </span>
+              </span>
+            </label>
+
+            <label class="wallet-buy-modal__package">
+              <input class="wallet-buy-modal__package-input" type="radio" name="token_pack_choice" value="500">
+              <span class="wallet-buy-modal__package-inner">
+                <span class="wallet-buy-modal__package-icon" aria-hidden="true">★</span>
+                <span class="wallet-buy-modal__package-copy">
+                  <span class="wallet-buy-modal__package-title">500 tokens</span>
+                  <span class="wallet-buy-modal__package-subtitle">Most common</span>
+                </span>
+                <span class="wallet-buy-modal__package-tag">Popular</span>
+              </span>
+            </label>
+
+            <label class="wallet-buy-modal__package">
+              <input class="wallet-buy-modal__package-input" type="radio" name="token_pack_choice" value="1000">
+              <span class="wallet-buy-modal__package-inner">
+                <span class="wallet-buy-modal__package-icon" aria-hidden="true">★</span>
+                <span class="wallet-buy-modal__package-copy">
+                  <span class="wallet-buy-modal__package-title">1,000 tokens</span>
+                  <span class="wallet-buy-modal__package-subtitle">Regular buyers</span>
+                </span>
+              </span>
+            </label>
+
+            <label class="wallet-buy-modal__package">
+              <input class="wallet-buy-modal__package-input" type="radio" name="token_pack_choice" value="2500">
+              <span class="wallet-buy-modal__package-inner">
+                <span class="wallet-buy-modal__package-icon" aria-hidden="true">★</span>
+                <span class="wallet-buy-modal__package-copy">
+                  <span class="wallet-buy-modal__package-title">2,500 tokens</span>
+                  <span class="wallet-buy-modal__package-subtitle">Large top-up</span>
+                </span>
+                <span class="wallet-buy-modal__package-tag">Best value</span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="wallet-buy-flow__actions">
+          <button type="button" class="wallet-route-form__submit" data-wallet-next-step>
+            Continue
+          </button>
+        </div>
       </div>
 
-      <div class="wallet-route-form__note">
-        This opens a top-up session and credits your platform wallet after payment detection and confirmation.
-      </div>
+      <div class="wallet-buy-flow__panel" data-wallet-step-panel="2" hidden>
+        <div class="wallet-buy-modal__summary">
+          <div class="wallet-buy-modal__summary-label">Selected package</div>
+          <div class="wallet-buy-modal__summary-value" data-wallet-selected-pack-label>100 tokens</div>
+        </div>
 
-      <button type="submit" class="wallet-route-form__submit">Continue</button>
+        <div class="wallet-buy-modal__section">
+          <div class="wallet-buy-modal__section-title">Choose payment method</div>
+
+          <div class="wallet-route-form__list" role="radiogroup" aria-label="Deposit routes">
+            {% for option in deposit_options %}
+            <label class="wallet-route-card">
+              <input
+                class="wallet-route-card__input"
+                type="radio"
+                name="deposit_option_key"
+                value="{{ option.key }}"
+                {% if forloop.first %}checked{% endif %}
+                required
+              >
+              <span class="wallet-route-card__inner">
+                <span class="wallet-route-card__icon" aria-hidden="true">
+                  {% if option.network_slug == "bsc" %}
+                  <span>BNB</span>
+                  {% elif option.network_slug == "arbitrum" %}
+                  <span>ARB</span>
+                  {% elif option.network_slug == "base" %}
+                  <span>BASE</span>
+                  {% elif option.network_slug == "ethereum" %}
+                  <span>ETH</span>
+                  {% else %}
+                  <span>{{ option.asset_code }}</span>
+                  {% endif %}
+                </span>
+
+                <span class="wallet-route-card__content">
+                  <span class="wallet-route-card__title">{{ option.network_display|default:option.network_label|default:option.chain }}</span>
+                  <span class="wallet-route-card__subtitle">
+                    Min. deposit {{ option.min_amount_display|default:option.min_amount }} {{ option.asset_code }}
+                  </span>
+                </span>
+
+                <span class="wallet-route-card__radio" aria-hidden="true"></span>
+              </span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="wallet-route-form__note">
+          The selected package is kept in the form, but the backend currently opens the top-up session from the chosen payment route.
+        </div>
+
+        <div class="wallet-buy-flow__actions wallet-buy-flow__actions--split">
+          <button type="button" class="wallet-buy-flow__back" data-wallet-prev-step>
+            Back
+          </button>
+          <button type="submit" class="wallet-route-form__submit">
+            Continue
+          </button>
+        </div>
+      </div>
     </form>
     {% else %}
     <div class="wallet-ui__empty wallet-ui__empty--compact">
@@ -415,6 +571,73 @@
     document.body.classList.toggle('wallet-modal-open', anyOpen);
   }
 
+  function resetBuyFlow() {
+    const panels = document.querySelectorAll('[data-wallet-step-panel]');
+    const indicators = document.querySelectorAll('[data-wallet-step-indicator]');
+    const subtitle = document.querySelector('[data-wallet-buy-subtitle]');
+    const selectedPackHidden = document.querySelector('[data-wallet-selected-pack]');
+    const checkedPack = document.querySelector('input[name="token_pack_choice"]:checked');
+    const selectedPackLabel = document.querySelector('[data-wallet-selected-pack-label]');
+
+    panels.forEach(function (panel) {
+      panel.hidden = panel.getAttribute('data-wallet-step-panel') !== '1';
+    });
+
+    indicators.forEach(function (indicator) {
+      indicator.classList.toggle('wallet-buy-flow__step--active', indicator.getAttribute('data-wallet-step-indicator') === '1');
+    });
+
+    if (subtitle) {
+      subtitle.textContent = 'Choose a package first.';
+    }
+
+    if (checkedPack && selectedPackHidden) {
+      selectedPackHidden.value = checkedPack.value;
+    }
+
+    if (checkedPack && selectedPackLabel) {
+      const titleNode = checkedPack.closest('.wallet-buy-modal__package')?.querySelector('.wallet-buy-modal__package-title');
+      selectedPackLabel.textContent = titleNode ? titleNode.textContent.trim() : (checkedPack.value + ' tokens');
+    }
+  }
+
+  function goToBuyStep(step) {
+    const panels = document.querySelectorAll('[data-wallet-step-panel]');
+    const indicators = document.querySelectorAll('[data-wallet-step-indicator]');
+    const subtitle = document.querySelector('[data-wallet-buy-subtitle]');
+    const checkedPack = document.querySelector('input[name="token_pack_choice"]:checked');
+    const selectedPackHidden = document.querySelector('[data-wallet-selected-pack]');
+    const selectedPackLabel = document.querySelector('[data-wallet-selected-pack-label]');
+
+    panels.forEach(function (panel) {
+      panel.hidden = panel.getAttribute('data-wallet-step-panel') !== String(step);
+    });
+
+    indicators.forEach(function (indicator) {
+      indicator.classList.toggle('wallet-buy-flow__step--active', indicator.getAttribute('data-wallet-step-indicator') === String(step));
+    });
+
+    if (step === 1) {
+      if (subtitle) {
+        subtitle.textContent = 'Choose a package first.';
+      }
+      return;
+    }
+
+    if (checkedPack && selectedPackHidden) {
+      selectedPackHidden.value = checkedPack.value;
+    }
+
+    if (checkedPack && selectedPackLabel) {
+      const titleNode = checkedPack.closest('.wallet-buy-modal__package')?.querySelector('.wallet-buy-modal__package-title');
+      selectedPackLabel.textContent = titleNode ? titleNode.textContent.trim() : (checkedPack.value + ' tokens');
+    }
+
+    if (subtitle) {
+      subtitle.textContent = 'Now choose a payment method.';
+    }
+  }
+
   function openModal(name) {
     document.querySelectorAll('.wallet-modal[data-wallet-modal]').forEach(function (node) {
       node.hidden = true;
@@ -426,6 +649,9 @@
     }
 
     modal.hidden = false;
+    if (name === 'deposit') {
+      resetBuyFlow();
+    }
     syncLock();
   }
 
@@ -451,6 +677,38 @@
     if (closeButton) {
       event.preventDefault();
       closeModal(closeButton.getAttribute('data-wallet-close'));
+      return;
+    }
+
+    const nextStepButton = event.target.closest('[data-wallet-next-step]');
+    if (nextStepButton) {
+      event.preventDefault();
+      goToBuyStep(2);
+      return;
+    }
+
+    const prevStepButton = event.target.closest('[data-wallet-prev-step]');
+    if (prevStepButton) {
+      event.preventDefault();
+      goToBuyStep(1);
+    }
+  });
+
+  document.addEventListener('change', function (event) {
+    if (!event.target.matches('input[name="token_pack_choice"]')) {
+      return;
+    }
+
+    const selectedPackHidden = document.querySelector('[data-wallet-selected-pack]');
+    const selectedPackLabel = document.querySelector('[data-wallet-selected-pack-label]');
+    const titleNode = event.target.closest('.wallet-buy-modal__package')?.querySelector('.wallet-buy-modal__package-title');
+
+    if (selectedPackHidden) {
+      selectedPackHidden.value = event.target.value;
+    }
+
+    if (selectedPackLabel) {
+      selectedPackLabel.textContent = titleNode ? titleNode.textContent.trim() : (event.target.value + ' tokens');
     }
   });
 
