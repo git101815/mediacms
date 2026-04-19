@@ -12,7 +12,13 @@
 
       <div class="wallet-deposit-ui__title-wrap">
         <div class="wallet-deposit-ui__eyebrow">Top up</div>
-        <h1 class="wallet-deposit-ui__title">Complete top-up</h1>
+        {% if deposit_session.status == "awaiting_payment" %}
+        <h1 class="wallet-deposit-ui__title">Waiting for payment</h1>
+        {% elif deposit_session.status == "payment_detected" %}
+        <h1 class="wallet-deposit-ui__title">Payment detected</h1>
+        {% else %}
+        <h1 class="wallet-deposit-ui__title">Top-up status</h1>
+        {% endif %}
       </div>
 
       <span class="wallet-deposit-ui__status wallet-deposit-ui__status--{{ deposit_session.status }}" data-deposit-status-pill>
@@ -22,6 +28,13 @@
     </header>
 
     <div class="wallet-deposit-ui__body">
+      <div class="wallet-deposit-progress">
+        <span class="wallet-deposit-progress__step wallet-deposit-progress__step--done">1. Package</span>
+        <span class="wallet-deposit-progress__step wallet-deposit-progress__step--done">2. Token</span>
+        <span class="wallet-deposit-progress__step wallet-deposit-progress__step--done">3. Network</span>
+        <span class="wallet-deposit-progress__step wallet-deposit-progress__step--active">4. Waiting for payment</span>
+      </div>
+
       <div class="wallet-deposit-ui__field-label">Payment route</div>
 
       <div class="wallet-deposit-ui__network-box">

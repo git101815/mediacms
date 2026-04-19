@@ -610,7 +610,7 @@ def _build_recent_deposit_session_rows(wallet):
 
     rows = []
     for session in sessions:
-        display_label = session.metadata.get("display_label") or f"{session.asset_code} on {session.chain}"
+        display_label = f"{_get_network_display_label(session.chain)} · {session.asset_code}"
         public_status = _get_public_deposit_status(session)
         rows.append(
             {

@@ -9,6 +9,7 @@ from .models import (
     LedgerTransaction,
     TokenWallet,
     LedgerSaga,
+    LedgerSaga,
     LedgerSagaStep,
     LEDGER_OUTBOX_RETRY_DELAY_SECONDS,
     LedgerHold,
@@ -323,6 +324,9 @@ SUPPORTED_EVM_DEPOSIT_CHAINS = {
     "arbitrum",
     "base",
 }
+GLOBAL_EVM_COUNTER_ROUTE_KEY = "__global_evm_derivation__"
+GLOBAL_EVM_COUNTER_CHAIN = "ethereum"
+GLOBAL_EVM_COUNTER_ASSET_CODE = "GLOBAL"
 
 def _get_network_display_label(chain: str) -> str:
     normalized_chain = _normalize_chain(chain)
@@ -349,9 +353,6 @@ def _format_deposit_display_amount(*, raw_amount: int, chain: str, asset_code: s
 
 
 def _build_route_label(*, chain: str, asset_code: str, display_label: str = "") -> str:
-    explicit = (display_label or "").strip()
-    if explicit:
-        return explicit
     return f"{_get_network_display_label(chain)} · {(asset_code or '').strip().upper()}"
 
 
@@ -498,54 +499,87 @@ def _convert_route_amount_to_platform_token_units(
     )
     return _convert_canonical_stable_to_platform_tokens(canonical_stable_amount)
 
-@transaction.atomic
-def _get_or_create_route_counter_for_update(
-    *,
-    chain: str,
-    asset_code: str,
-    token_contract_address: str,
-) -> DepositRouteCounter:
-    normalized_chain = _normalize_chain(chain)
-    normalized_asset_code = (asset_code or "").strip().upper()
-    normalized_token_contract_address = _normalize_evm_address(token_contract_address)
-    route_key = _build_deposit_route_key(
-        chain=normalized_chain,
-        asset_code=normalized_asset_code,
-        token_contract_address=normalized_token_contract_address,
-    )
-
-    existing = (
-        DepositRouteCounter.objects.select_for_update()
-        .filter(route_key=route_key)
-        .first()
-    )
-    if existing is not None:
-        return existing
-
-    max_session_index = (
-        DepositSession.objects.filter(route_key=route_key)
+def _get_max_used_evm_derivation_index() -> int:
+    max_provisioned_index = (
+        DepositAddress.objects.filter(chain__in=SUPPORTED_EVM_DEPOSIT_CHAINS)
         .aggregate(value=Max("derivation_index"))
         .get("value")
     )
-    seed_index = -1 if max_session_index is None else int(max_session_index)
+    max_session_index = (
+        DepositSession.objects.filter(chain__in=SUPPORTED_EVM_DEPOSIT_CHAINS)
+        .aggregate(value=Max("derivation_index"))
+        .get("value")
+    )
+
+    candidates = [
+        int(value)
+        for value in (max_provisioned_index, max_session_index)
+        if value is not None
+    ]
+    if not candidates:
+        return -1
+
+    return max(candidates)
+
+
+@transaction.atomic
+def _get_or_create_global_evm_counter_for_update() -> DepositRouteCounter:
+    existing = (
+        DepositRouteCounter.objects.select_for_update()
+        .filter(route_key=GLOBAL_EVM_COUNTER_ROUTE_KEY)
+        .first()
+    )
+
+    required_next_derivation_index = _get_max_used_evm_derivation_index() + 1
+
+    if existing is not None:
+        if int(existing.next_derivation_index) < required_next_derivation_index:
+            existing.next_derivation_index = required_next_derivation_index
+            existing.metadata = {
+                **(existing.metadata or {}),
+                "seeded_from": "deposit_addresses_and_sessions",
+            }
+            existing.save(update_fields=["next_derivation_index", "metadata", "updated_at"])
+        return existing
 
     try:
         return DepositRouteCounter.objects.create(
-            route_key=route_key,
-            chain=normalized_chain,
-            asset_code=normalized_asset_code,
-            token_contract_address=normalized_token_contract_address,
-            next_derivation_index=seed_index + 1,
+            route_key=GLOBAL_EVM_COUNTER_ROUTE_KEY,
+            chain=GLOBAL_EVM_COUNTER_CHAIN,
+            asset_code=GLOBAL_EVM_COUNTER_ASSET_CODE,
+            token_contract_address="",
+            next_derivation_index=required_next_derivation_index,
             metadata={
-                "seeded_from": "deposit_sessions",
+                "seeded_from": "deposit_addresses_and_sessions",
+                "counter_scope": "global_evm",
             },
             metadata_version=LEDGER_METADATA_VERSION,
         )
     except IntegrityError:
-        return (
+        existing = (
             DepositRouteCounter.objects.select_for_update()
-            .get(route_key=route_key)
+            .get(route_key=GLOBAL_EVM_COUNTER_ROUTE_KEY)
         )
+        if int(existing.next_derivation_index) < required_next_derivation_index:
+            existing.next_derivation_index = required_next_derivation_index
+            existing.metadata = {
+                **(existing.metadata or {}),
+                "seeded_from": "deposit_addresses_and_sessions",
+            }
+            existing.save(update_fields=["next_derivation_index", "metadata", "updated_at"])
+        return existing
+
+
+def _is_evm_derivation_address_already_used(address: str) -> bool:
+    normalized_address = _normalize_evm_address(address)
+
+    if DepositAddress.objects.filter(address=normalized_address).exists():
+        return True
+
+    if DepositSession.objects.filter(deposit_address=normalized_address).exists():
+        return True
+
+    return False
 
 
 def _allocate_session_address(
@@ -554,21 +588,24 @@ def _allocate_session_address(
     asset_code: str,
     token_contract_address: str,
 ) -> tuple[str, int, str]:
-    counter = _get_or_create_route_counter_for_update(
-        chain=chain,
-        asset_code=asset_code,
-        token_contract_address=token_contract_address,
-    )
-    derivation_index = int(counter.next_derivation_index)
-    address, derivation_path = _derive_session_deposit_address(
-        chain=chain,
-        derivation_index=derivation_index,
-    )
+    counter = _get_or_create_global_evm_counter_for_update()
+    next_derivation_index = int(counter.next_derivation_index)
 
-    counter.next_derivation_index = derivation_index + 1
-    counter.save(update_fields=["next_derivation_index", "updated_at"])
+    while True:
+        address, derivation_path = _derive_session_deposit_address(
+            chain=chain,
+            derivation_index=next_derivation_index,
+        )
 
-    return address, derivation_index, derivation_path
+        if not _is_evm_derivation_address_already_used(address):
+            counter.next_derivation_index = next_derivation_index + 1
+            counter.save(update_fields=["next_derivation_index", "updated_at"])
+            return address, next_derivation_index, derivation_path
+
+        next_derivation_index += 1
+
+
+
 
 def _abandon_open_sweep_jobs_for_session(*, deposit_session: DepositSession) -> int:
     return DepositSweepJob.objects.filter(
@@ -1888,7 +1925,11 @@ def provision_deposit_address(
     token_contract_address = _normalize_evm_address(token_contract_address)
     address = _normalize_evm_address(address)
     address_derivation_ref = (address_derivation_ref or "").strip()
-    display_label = (display_label or "").strip()
+    display_label = _build_route_label(
+        chain=chain,
+        asset_code=asset_code,
+        display_label=display_label,
+    )
 
     try:
         required_confirmations = int(required_confirmations)
@@ -1960,7 +2001,6 @@ def provision_deposit_address(
             existing.chain != chain
             or existing.asset_code != asset_code
             or existing.token_contract_address != token_contract_address
-            or existing.display_label != display_label
             or existing.address != address
             or existing.address_derivation_ref != address_derivation_ref
             or existing.derivation_index != derivation_index
@@ -1970,6 +2010,10 @@ def provision_deposit_address(
         )
         if immutable_mismatch:
             raise ValidationError("Deposit address already exists with different immutable fields")
+
+        if existing.display_label != display_label:
+            existing.display_label = display_label
+            existing.save(update_fields=["display_label"])
 
         return existing, False
 
@@ -2048,7 +2092,6 @@ def provision_deposit_addresses_batch(*, actor, address_rows):
 def list_available_deposit_options() -> list[dict]:
     rows = (
         DepositAddress.objects.values(
-            "display_label",
             "chain",
             "asset_code",
             "token_contract_address",
@@ -2056,7 +2099,14 @@ def list_available_deposit_options() -> list[dict]:
             "min_amount",
             "session_ttl_seconds",
         )
-        .order_by("display_label", "chain", "asset_code", "token_contract_address")
+        .order_by(
+            "chain",
+            "asset_code",
+            "token_contract_address",
+            "required_confirmations",
+            "min_amount",
+            "session_ttl_seconds",
+        )
         .distinct()
     )
 
@@ -2070,7 +2120,6 @@ def list_available_deposit_options() -> list[dict]:
         route_label = _build_route_label(
             chain=row["chain"],
             asset_code=row["asset_code"],
-            display_label=row["display_label"],
         )
         network_label = _get_network_display_label(row["chain"])
         min_amount_display = _format_deposit_display_amount(
@@ -2082,7 +2131,7 @@ def list_available_deposit_options() -> list[dict]:
         options.append(
             {
                 "key": option_key,
-                "label": row["display_label"],
+                "label": route_label,
                 "route_label": route_label,
                 "network_label": network_label,
                 "chain": row["chain"],
@@ -2095,6 +2144,7 @@ def list_available_deposit_options() -> list[dict]:
                 "network_slug": _normalize_chain(row["chain"]),
             }
         )
+
     return options
 
 @transaction.atomic
@@ -2139,7 +2189,6 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
     display_label = _build_route_label(
         chain=template.chain,
         asset_code=template.asset_code,
-        display_label=template.display_label,
     )
 
     return DepositSession.objects.create(
@@ -2160,7 +2209,7 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
         expires_at=expires_at,
         created_by=actor,
         metadata={
-            "display_label": template.display_label,
+            "display_label": display_label,
             "allocation_source": "session_derivation",
             "route_template_id": template.id,
             "chain_family": "evm",

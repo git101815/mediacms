@@ -351,7 +351,8 @@
 
     <div class="wallet-buy-flow__steps">
       <span class="wallet-buy-flow__step wallet-buy-flow__step--active" data-wallet-step-indicator="1">1. Package</span>
-      <span class="wallet-buy-flow__step" data-wallet-step-indicator="2">2. Payment</span>
+      <span class="wallet-buy-flow__step" data-wallet-step-indicator="2">2. Token</span>
+      <span class="wallet-buy-flow__step" data-wallet-step-indicator="3">3. Network</span>
     </div>
 
     <h2 id="wallet-deposit-modal-title" class="wallet-modal__title">Buy tokens</h2>
@@ -365,6 +366,22 @@
       <input type="hidden" name="return_tab" value="{{ active_tab }}">
       <input type="hidden" name="return_status" value="{{ active_status }}">
       <input type="hidden" name="token_pack_key" value="100" data-wallet-selected-pack>
+      <input type="hidden" name="selected_asset_code" value="" data-wallet-selected-asset>
+      <input type="hidden" name="deposit_option_key" value="" data-wallet-selected-route>
+
+      <div class="wallet-buy-flow__source" hidden aria-hidden="true">
+        {% for option in deposit_options %}
+        <input
+          type="hidden"
+          data-wallet-route-option
+          data-option-key="{{ option.key }}"
+          data-asset-code="{{ option.asset_code }}"
+          data-chain="{{ option.chain }}"
+          data-network-label="{{ option.network_display|default:option.network_label|default:option.chain }}"
+          data-min-amount="{{ option.min_amount_display|default:option.min_amount }}"
+        >
+        {% endfor %}
+      </div>
 
       <div class="wallet-buy-flow__panel" data-wallet-step-panel="1">
         <div class="wallet-buy-modal__section">
@@ -431,7 +448,7 @@
         </div>
 
         <div class="wallet-buy-flow__actions">
-          <button type="button" class="wallet-route-form__submit" data-wallet-next-step>
+          <button type="button" class="wallet-route-form__submit" data-wallet-next-step="2">
             Continue
           </button>
         </div>
@@ -444,54 +461,45 @@
         </div>
 
         <div class="wallet-buy-modal__section">
-          <div class="wallet-buy-modal__section-title">Choose payment method</div>
-
-          <div class="wallet-route-form__list" role="radiogroup" aria-label="Deposit routes">
-            {% for option in deposit_options %}
-            <label class="wallet-route-card">
-              <input
-                class="wallet-route-card__input"
-                type="radio"
-                name="deposit_option_key"
-                value="{{ option.key }}"
-                {% if forloop.first %}checked{% endif %}
-                required
-              >
-              <span class="wallet-route-card__inner">
-                <span class="wallet-route-card__icon" aria-hidden="true">
-                  {% if option.network_slug == "bsc" %}
-                  <span>BNB</span>
-                  {% elif option.network_slug == "arbitrum" %}
-                  <span>ARB</span>
-                  {% elif option.network_slug == "base" %}
-                  <span>BASE</span>
-                  {% elif option.network_slug == "ethereum" %}
-                  <span>ETH</span>
-                  {% else %}
-                  <span>{{ option.asset_code }}</span>
-                  {% endif %}
-                </span>
-
-                <span class="wallet-route-card__content">
-                  <span class="wallet-route-card__title">{{ option.network_display|default:option.network_label|default:option.chain }}</span>
-                  <span class="wallet-route-card__subtitle">
-                    Min. deposit {{ option.min_amount_display|default:option.min_amount }} {{ option.asset_code }}
-                  </span>
-                </span>
-
-                <span class="wallet-route-card__radio" aria-hidden="true"></span>
-              </span>
-            </label>
-            {% endfor %}
-          </div>
-        </div>
-
-        <div class="wallet-route-form__note">
-          The selected package is kept in the form, but the backend currently opens the top-up session from the chosen payment route.
+          <div class="wallet-buy-modal__section-title">Choose token</div>
+          <div class="wallet-buy-flow__choices" data-wallet-token-choices></div>
         </div>
 
         <div class="wallet-buy-flow__actions wallet-buy-flow__actions--split">
-          <button type="button" class="wallet-buy-flow__back" data-wallet-prev-step>
+          <button type="button" class="wallet-buy-flow__back" data-wallet-prev-step="1">
+            Back
+          </button>
+          <button type="button" class="wallet-route-form__submit" data-wallet-next-step="3">
+            Continue
+          </button>
+        </div>
+      </div>
+
+      <div class="wallet-buy-flow__panel" data-wallet-step-panel="3" hidden>
+        <div class="wallet-buy-modal__summary">
+          <div class="wallet-buy-modal__summary-row">
+            <div>
+              <div class="wallet-buy-modal__summary-label">Selected package</div>
+              <div class="wallet-buy-modal__summary-value" data-wallet-selected-pack-label-secondary>100 tokens</div>
+            </div>
+            <div>
+              <div class="wallet-buy-modal__summary-label">Selected token</div>
+              <div class="wallet-buy-modal__summary-value" data-wallet-selected-token-label>—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wallet-buy-modal__section">
+          <div class="wallet-buy-modal__section-title">Choose network</div>
+          <div class="wallet-buy-flow__choices" data-wallet-network-choices></div>
+        </div>
+
+        <div class="wallet-route-form__note">
+          After this step, the existing deposit session page becomes the “waiting for payment” stage.
+        </div>
+
+        <div class="wallet-buy-flow__actions wallet-buy-flow__actions--split">
+          <button type="button" class="wallet-buy-flow__back" data-wallet-prev-step="2">
             Back
           </button>
           <button type="submit" class="wallet-route-form__submit">
@@ -571,71 +579,216 @@
     document.body.classList.toggle('wallet-modal-open', anyOpen);
   }
 
-  function resetBuyFlow() {
-    const panels = document.querySelectorAll('[data-wallet-step-panel]');
-    const indicators = document.querySelectorAll('[data-wallet-step-indicator]');
-    const subtitle = document.querySelector('[data-wallet-buy-subtitle]');
-    const selectedPackHidden = document.querySelector('[data-wallet-selected-pack]');
-    const checkedPack = document.querySelector('input[name="token_pack_choice"]:checked');
-    const selectedPackLabel = document.querySelector('[data-wallet-selected-pack-label]');
+  const buyState = {
+    step: 1,
+    pack: '100',
+    asset: '',
+    routeKey: ''
+  };
 
-    panels.forEach(function (panel) {
-      panel.hidden = panel.getAttribute('data-wallet-step-panel') !== '1';
-    });
-
-    indicators.forEach(function (indicator) {
-      indicator.classList.toggle('wallet-buy-flow__step--active', indicator.getAttribute('data-wallet-step-indicator') === '1');
-    });
-
-    if (subtitle) {
-      subtitle.textContent = 'Choose a package first.';
-    }
-
-    if (checkedPack && selectedPackHidden) {
-      selectedPackHidden.value = checkedPack.value;
-    }
-
-    if (checkedPack && selectedPackLabel) {
-      const titleNode = checkedPack.closest('.wallet-buy-modal__package')?.querySelector('.wallet-buy-modal__package-title');
-      selectedPackLabel.textContent = titleNode ? titleNode.textContent.trim() : (checkedPack.value + ' tokens');
-    }
+  function getBuyForm() {
+    return document.querySelector('[data-wallet-buy-form]');
   }
 
-  function goToBuyStep(step) {
-    const panels = document.querySelectorAll('[data-wallet-step-panel]');
-    const indicators = document.querySelectorAll('[data-wallet-step-indicator]');
-    const subtitle = document.querySelector('[data-wallet-buy-subtitle]');
-    const checkedPack = document.querySelector('input[name="token_pack_choice"]:checked');
-    const selectedPackHidden = document.querySelector('[data-wallet-selected-pack]');
-    const selectedPackLabel = document.querySelector('[data-wallet-selected-pack-label]');
+  function getRouteOptions() {
+    const form = getBuyForm();
+    if (!form) {
+      return [];
+    }
 
-    panels.forEach(function (panel) {
-      panel.hidden = panel.getAttribute('data-wallet-step-panel') !== String(step);
+    return Array.from(form.querySelectorAll('[data-wallet-route-option]')).map(function (node) {
+      return {
+        key: node.getAttribute('data-option-key') || '',
+        assetCode: node.getAttribute('data-asset-code') || '',
+        chain: node.getAttribute('data-chain') || '',
+        networkLabel: node.getAttribute('data-network-label') || '',
+        minAmount: node.getAttribute('data-min-amount') || ''
+      };
     });
+  }
 
-    indicators.forEach(function (indicator) {
-      indicator.classList.toggle('wallet-buy-flow__step--active', indicator.getAttribute('data-wallet-step-indicator') === String(step));
-    });
+  function getAssetChoices() {
+    const seen = new Set();
+    const items = [];
 
-    if (step === 1) {
-      if (subtitle) {
-        subtitle.textContent = 'Choose a package first.';
+    getRouteOptions().forEach(function (option) {
+      if (!option.assetCode || seen.has(option.assetCode)) {
+        return;
       }
+      seen.add(option.assetCode);
+      items.push(option.assetCode);
+    });
+
+    return items;
+  }
+
+  function getNetworkChoicesForAsset(assetCode) {
+    return getRouteOptions().filter(function (option) {
+      return option.assetCode === assetCode;
+    });
+  }
+
+  function updateStepIndicators(step) {
+    document.querySelectorAll('[data-wallet-step-indicator]').forEach(function (node) {
+      node.classList.toggle('wallet-buy-flow__step--active', node.getAttribute('data-wallet-step-indicator') === String(step));
+    });
+  }
+
+  function updateSubtitle(step) {
+    const subtitle = document.querySelector('[data-wallet-buy-subtitle]');
+    if (!subtitle) {
       return;
     }
 
-    if (checkedPack && selectedPackHidden) {
-      selectedPackHidden.value = checkedPack.value;
+    if (step === 1) {
+      subtitle.textContent = 'Choose a package first.';
+      return;
     }
 
-    if (checkedPack && selectedPackLabel) {
-      const titleNode = checkedPack.closest('.wallet-buy-modal__package')?.querySelector('.wallet-buy-modal__package-title');
-      selectedPackLabel.textContent = titleNode ? titleNode.textContent.trim() : (checkedPack.value + ' tokens');
+    if (step === 2) {
+      subtitle.textContent = 'Now choose which token you want to use for the payment.';
+      return;
     }
 
-    if (subtitle) {
-      subtitle.textContent = 'Now choose a payment method.';
+    subtitle.textContent = 'Now choose the network for the selected token.';
+  }
+
+  function updatePanels(step) {
+    document.querySelectorAll('[data-wallet-step-panel]').forEach(function (node) {
+      node.hidden = node.getAttribute('data-wallet-step-panel') !== String(step);
+    });
+  }
+
+  function setSelectedPack(value) {
+    buyState.pack = value || '100';
+    const hidden = document.querySelector('[data-wallet-selected-pack]');
+    if (hidden) {
+      hidden.value = buyState.pack;
     }
+
+    const checkedPack = document.querySelector('input[name="token_pack_choice"]:checked');
+    const titleNode = checkedPack ? checkedPack.closest('.wallet-buy-modal__package').querySelector('.wallet-buy-modal__package-title') : null;
+    const label = titleNode ? titleNode.textContent.trim() : (buyState.pack + ' tokens');
+
+    const primary = document.querySelector('[data-wallet-selected-pack-label]');
+    const secondary = document.querySelector('[data-wallet-selected-pack-label-secondary]');
+
+    if (primary) {
+      primary.textContent = label;
+    }
+    if (secondary) {
+      secondary.textContent = label;
+    }
+  }
+
+  function setSelectedAsset(assetCode) {
+    buyState.asset = assetCode || '';
+    const hidden = document.querySelector('[data-wallet-selected-asset]');
+    if (hidden) {
+      hidden.value = buyState.asset;
+    }
+
+    const tokenLabel = document.querySelector('[data-wallet-selected-token-label]');
+    if (tokenLabel) {
+      tokenLabel.textContent = buyState.asset || '—';
+    }
+  }
+
+  function setSelectedRoute(routeKey) {
+    buyState.routeKey = routeKey || '';
+    const hidden = document.querySelector('[data-wallet-selected-route]');
+    if (hidden) {
+      hidden.value = buyState.routeKey;
+    }
+  }
+
+  function renderTokenChoices() {
+    const container = document.querySelector('[data-wallet-token-choices]');
+    if (!container) {
+      return;
+    }
+
+    const assets = getAssetChoices();
+    if (!buyState.asset || assets.indexOf(buyState.asset) === -1) {
+      setSelectedAsset(assets[0] || '');
+    }
+
+    container.innerHTML = '';
+
+    assets.forEach(function (assetCode) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'wallet-buy-flow__choice' + (buyState.asset === assetCode ? ' wallet-buy-flow__choice--selected' : '');
+      button.setAttribute('data-wallet-asset-choice', assetCode);
+      button.innerHTML =
+        '<span class="wallet-buy-flow__choice-icon">●</span>' +
+        '<span class="wallet-buy-flow__choice-copy">' +
+          '<span class="wallet-buy-flow__choice-title">' + assetCode + '</span>' +
+          '<span class="wallet-buy-flow__choice-subtitle">Token</span>' +
+        '</span>';
+
+      container.appendChild(button);
+    });
+  }
+
+  function renderNetworkChoices() {
+    const container = document.querySelector('[data-wallet-network-choices]');
+    if (!container) {
+      return;
+    }
+
+    const networks = getNetworkChoicesForAsset(buyState.asset);
+    if (!buyState.routeKey || !networks.some(function (item) { return item.key === buyState.routeKey; })) {
+      setSelectedRoute(networks[0] ? networks[0].key : '');
+    }
+
+    container.innerHTML = '';
+
+    networks.forEach(function (item) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'wallet-buy-flow__choice' + (buyState.routeKey === item.key ? ' wallet-buy-flow__choice--selected' : '');
+      button.setAttribute('data-wallet-route-choice', item.key);
+
+      button.innerHTML =
+        '<span class="wallet-buy-flow__choice-icon">' + item.assetCode + '</span>' +
+        '<span class="wallet-buy-flow__choice-copy">' +
+          '<span class="wallet-buy-flow__choice-title">' + item.networkLabel + '</span>' +
+          '<span class="wallet-buy-flow__choice-subtitle">Min. deposit ' + item.minAmount + ' ' + item.assetCode + '</span>' +
+        '</span>';
+
+      container.appendChild(button);
+    });
+  }
+
+  function goToStep(step) {
+    buyState.step = step;
+    updateStepIndicators(step);
+    updateSubtitle(step);
+    updatePanels(step);
+
+    if (step >= 2) {
+      renderTokenChoices();
+    }
+
+    if (step >= 3) {
+      renderNetworkChoices();
+    }
+  }
+
+  function resetBuyFlow() {
+    const checkedPack = document.querySelector('input[name="token_pack_choice"]:checked');
+    setSelectedPack(checkedPack ? checkedPack.value : '100');
+
+    const assets = getAssetChoices();
+    setSelectedAsset(assets[0] || '');
+
+    const routes = getNetworkChoicesForAsset(buyState.asset);
+    setSelectedRoute(routes[0] ? routes[0].key : '');
+
+    renderTokenChoices();
+    renderNetworkChoices();
+    goToStep(1);
   }
 
   function openModal(name) {
@@ -680,17 +833,49 @@
       return;
     }
 
-    const nextStepButton = event.target.closest('[data-wallet-next-step]');
-    if (nextStepButton) {
+    const nextButton = event.target.closest('[data-wallet-next-step]');
+    if (nextButton) {
       event.preventDefault();
-      goToBuyStep(2);
+
+      const step = nextButton.getAttribute('data-wallet-next-step');
+      if (step === '2') {
+        const checkedPack = document.querySelector('input[name="token_pack_choice"]:checked');
+        setSelectedPack(checkedPack ? checkedPack.value : '100');
+        goToStep(2);
+        return;
+      }
+
+      if (step === '3') {
+        if (!buyState.asset) {
+          renderTokenChoices();
+        }
+        renderNetworkChoices();
+        goToStep(3);
+        return;
+      }
+    }
+
+    const prevButton = event.target.closest('[data-wallet-prev-step]');
+    if (prevButton) {
+      event.preventDefault();
+      goToStep(Number(prevButton.getAttribute('data-wallet-prev-step')));
       return;
     }
 
-    const prevStepButton = event.target.closest('[data-wallet-prev-step]');
-    if (prevStepButton) {
+    const assetChoice = event.target.closest('[data-wallet-asset-choice]');
+    if (assetChoice) {
       event.preventDefault();
-      goToBuyStep(1);
+      setSelectedAsset(assetChoice.getAttribute('data-wallet-asset-choice'));
+      renderTokenChoices();
+      renderNetworkChoices();
+      return;
+    }
+
+    const routeChoice = event.target.closest('[data-wallet-route-choice]');
+    if (routeChoice) {
+      event.preventDefault();
+      setSelectedRoute(routeChoice.getAttribute('data-wallet-route-choice'));
+      renderNetworkChoices();
     }
   });
 
@@ -699,17 +884,7 @@
       return;
     }
 
-    const selectedPackHidden = document.querySelector('[data-wallet-selected-pack]');
-    const selectedPackLabel = document.querySelector('[data-wallet-selected-pack-label]');
-    const titleNode = event.target.closest('.wallet-buy-modal__package')?.querySelector('.wallet-buy-modal__package-title');
-
-    if (selectedPackHidden) {
-      selectedPackHidden.value = event.target.value;
-    }
-
-    if (selectedPackLabel) {
-      selectedPackLabel.textContent = titleNode ? titleNode.textContent.trim() : (event.target.value + ' tokens');
-    }
+    setSelectedPack(event.target.value);
   });
 
   document.addEventListener('keydown', function (event) {
