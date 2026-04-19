@@ -802,6 +802,18 @@ def _get_public_deposit_status(session) -> str:
     }:
         return raw_status
 
+    expires_at = getattr(session, "expires_at", None)
+    if (
+        raw_status in {
+            DepositSession.STATUS_AWAITING_PAYMENT,
+            DepositSession.STATUS_SEEN_ONCHAIN,
+            DepositSession.STATUS_CONFIRMING,
+        }
+        and expires_at is not None
+        and expires_at <= timezone.now()
+    ):
+        return DepositSession.STATUS_EXPIRED
+
     if raw_status == getattr(DepositSession, "STATUS_SWEPT", "swept"):
         return PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
 
