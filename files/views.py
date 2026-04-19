@@ -95,6 +95,7 @@ from ledger.models import (
     WalletRequest,
     DepositSession,
     DepositSweepJob,
+    TokenPack,
 )
 from ledger.services import (
     get_wallet_available_balance,
@@ -298,6 +299,42 @@ def _format_platform_token_amount(value: int, *, signed: bool = False) -> str:
         prefix = "+" if value >= 0 else "-"
     return f"{prefix}{text}"
 
+def _format_canonical_stable_amount(value: int) -> str:
+    scaled = Decimal(int(value)) / (Decimal(10) ** 6)
+    text = format(scaled.quantize(Decimal("0.01")), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _format_pack_token_amount(value: int) -> str:
+    scaled = Decimal(int(value)) / (Decimal(10) ** PLATFORM_TOKEN_DECIMALS)
+    text = format(scaled.quantize(Decimal("0.01")), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _build_wallet_token_pack_rows() -> list[dict]:
+    rows = []
+    queryset = TokenPack.objects.filter(is_active=True).order_by("sort_order", "id")[:5]
+
+    for pack in queryset:
+        rows.append(
+            {
+                "code": pack.code,
+                "name": pack.name,
+                "description": pack.description,
+                "badge_text": pack.badge_text,
+                "token_amount": int(pack.token_amount),
+                "token_amount_display": _format_pack_token_amount(pack.token_amount),
+                "gross_stable_amount": int(pack.gross_stable_amount),
+                "price_display": _format_canonical_stable_amount(pack.gross_stable_amount),
+            }
+        )
+
+    return rows
+
 NETWORK_DISPLAY_LABELS = {
     "ethereum": "Ethereum",
     "arbitrum": "Arbitrum One",
@@ -347,12 +384,18 @@ def _build_wallet_deposit_options() -> list[dict]:
         asset_code = option["asset_code"]
         network_display = _get_network_display_label(chain)
         route_label = f"{network_display} · {asset_code}"
+        payment_method_key = f"crypto:{asset_code.lower()}"
+        payment_method_label = asset_code
+        payment_method_type = "crypto"
 
         options.append(
             {
                 **option,
                 "network_display": network_display,
                 "route_label": route_label,
+                "payment_method_key": payment_method_key,
+                "payment_method_label": payment_method_label,
+                "payment_method_type": payment_method_type,
                 "min_amount_display": _format_route_amount(
                     option["min_amount"],
                     chain=chain,
@@ -632,6 +675,27 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
     route_label = f"{network_display} · {session.asset_code}"
     public_status = _get_public_deposit_status(session)
 
+    metadata = session.metadata or {}
+    token_pack = metadata.get("token_pack") or {}
+    payment_method = metadata.get("payment_method") or {}
+
+    token_pack_name = (token_pack.get("name") or "").strip()
+    token_pack_token_amount = int(token_pack.get("token_amount") or 0)
+    token_pack_price = int(token_pack.get("gross_stable_amount") or 0)
+
+    token_pack_label = ""
+    if token_pack_name and token_pack_token_amount > 0:
+        token_pack_label = (
+            f"{token_pack_name} · "
+            f"{_format_pack_token_amount(token_pack_token_amount)} tokens · "
+            f"${_format_canonical_stable_amount(token_pack_price)}"
+        )
+    elif token_pack_token_amount > 0:
+        token_pack_label = (
+            f"{_format_pack_token_amount(token_pack_token_amount)} tokens · "
+            f"${_format_canonical_stable_amount(token_pack_price)}"
+        )
+
     return {
         "public_id": str(session.public_id),
         "status": public_status,
@@ -672,6 +736,10 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
             "expired",
         },
         "wallet_url": reverse("wallet"),
+        "token_pack_name": token_pack_name,
+        "token_pack_label": token_pack_label,
+        "payment_method_label": (payment_method.get("label") or "").strip(),
+        "show_network_step": bool(payment_method.get("show_network_step", True)),
     }
 
 def _parse_required_list(payload, key):
@@ -686,7 +754,7 @@ def _parse_required_string(payload, key):
         raise DjangoValidationError(f"Missing required field: {key}")
     return value
 
-def _find_existing_active_deposit_session(*, user, wallet, option_key):
+def _find_existing_active_deposit_session(*, user, wallet, option_key, token_pack_code=""):
     option = next(
         (item for item in list_available_deposit_options() if item["key"] == option_key),
         None,
@@ -700,7 +768,9 @@ def _find_existing_active_deposit_session(*, user, wallet, option_key):
         DepositSession.STATUS_CONFIRMING,
     ]
 
-    return (
+    normalized_pack_code = (token_pack_code or "").strip()
+
+    candidates = (
         DepositSession.objects.filter(
             user=user,
             wallet=wallet,
@@ -711,8 +781,16 @@ def _find_existing_active_deposit_session(*, user, wallet, option_key):
             expires_at__gt=timezone.now(),
         )
         .order_by("-created_at")
-        .first()
     )
+
+    for session in candidates:
+        snapshot = (session.metadata or {}).get("token_pack") or {}
+        session_pack_code = (snapshot.get("code") or "").strip()
+        if normalized_pack_code and session_pack_code != normalized_pack_code:
+            continue
+        return session
+
+    return None
 
 def _get_public_deposit_status(session) -> str:
     raw_status = str(session.status or "").strip()
@@ -748,14 +826,41 @@ def wallet_deposit_request(request):
     )
 
     option_key = (request.POST.get("deposit_option_key") or "").strip()
-    return_tab = (request.POST.get("return_tab") or WALLET_TAB_ALL).strip()
-    return_status = (request.POST.get("return_status") or WALLET_STATUS_ALL).strip()
+    token_pack_code = (request.POST.get("token_pack_key") or "").strip()
+    payment_method_key = (request.POST.get("payment_method_key") or "").strip()
+    payment_method_type = (request.POST.get("payment_method_type") or "").strip()
+    return_tab = _normalize_wallet_tab((request.POST.get("return_tab") or WALLET_TAB_ALL).strip())
+    return_status = _normalize_wallet_status((request.POST.get("return_status") or WALLET_STATUS_ALL).strip())
 
     try:
+        if not option_key:
+            raise DjangoValidationError("Missing payment route.")
+        if not token_pack_code:
+            raise DjangoValidationError("Missing token pack.")
+
+        deposit_options = _build_wallet_deposit_options()
+        selected_option = next((item for item in deposit_options if item["key"] == option_key), None)
+        if selected_option is None:
+            raise DjangoValidationError("Invalid deposit option.")
+
+        token_pack = TokenPack.objects.filter(code=token_pack_code, is_active=True).first()
+        if token_pack is None:
+            raise DjangoValidationError("Invalid token pack.")
+
+        matching_payment_routes = [
+            item for item in deposit_options
+            if item["payment_method_key"] == selected_option["payment_method_key"]
+        ]
+        show_network_step = (
+            selected_option["payment_method_type"] == "crypto"
+            and len({item["network_display"] for item in matching_payment_routes}) > 1
+        )
+
         existing_session = _find_existing_active_deposit_session(
             user=request.user,
             wallet=wallet_obj,
             option_key=option_key,
+            token_pack_code=token_pack_code,
         )
         if existing_session is not None:
             return redirect("wallet_deposit_session", public_id=existing_session.public_id)
@@ -764,11 +869,17 @@ def wallet_deposit_request(request):
             actor=request.user,
             wallet=wallet_obj,
             option_key=option_key,
+            token_pack=token_pack,
+            payment_method_key=payment_method_key or selected_option["payment_method_key"],
+            payment_method_type=payment_method_type or selected_option["payment_method_type"],
+            payment_method_label=selected_option["payment_method_label"],
+            show_network_step=show_network_step,
         )
     except DjangoValidationError as exc:
         messages.add_message(request, messages.ERROR, str(exc))
-        query = urlencode({"tab": return_tab, "status": return_status})
-        return redirect(f"{reverse('wallet')}?{query}")
+        return redirect(
+            f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status, open_modal='deposit')}"
+        )
 
     return redirect("wallet_deposit_session", public_id=session.public_id)
 
@@ -897,6 +1008,11 @@ def wallet(request):
         status=active_status,
     )
     deposit_options = _build_wallet_deposit_options()
+    token_pack_rows = _build_wallet_token_pack_rows()
+
+    if not deposit_options or not token_pack_rows:
+        wallet_actions["can_deposit"] = False
+        wallet_actions["hint"] = "Top-ups are currently unavailable."
 
     context = {
         "wallet": wallet_obj,
@@ -926,6 +1042,7 @@ def wallet(request):
         "wallet_withdrawal_request_url": reverse("wallet_withdrawal_request"),
         "deposit_options": deposit_options,
         "recent_deposit_session_rows": _build_recent_deposit_session_rows(wallet_obj),
+        "token_pack_rows": token_pack_rows,
     }
     return render(request, "cms/wallet.html", context)
 

@@ -1043,3 +1043,35 @@ class DepositSweepJob(models.Model):
 
     def __str__(self):
         return f"DepositSweepJob #{self.id} {self.chain}/{self.asset_code} {self.status}"
+
+class TokenPack(models.Model):
+    code = models.SlugField(max_length=32, unique=True)
+    name = models.CharField(max_length=64)
+    description = models.CharField(max_length=128, blank=True, default="")
+    badge_text = models.CharField(max_length=24, blank=True, default="")
+    token_amount = models.BigIntegerField()
+    gross_stable_amount = models.BigIntegerField()
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveIntegerField(default=0, db_index=True)
+
+    metadata = models.JSONField(default=dict, blank=True)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("sort_order", "id")
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(token_amount__gt=0),
+                name="tokenpack_token_amount_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(gross_stable_amount__gt=0),
+                name="tokenpack_gross_stable_amount_gt_0",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"

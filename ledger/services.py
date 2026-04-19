@@ -9,7 +9,6 @@ from .models import (
     LedgerTransaction,
     TokenWallet,
     LedgerSaga,
-    LedgerSaga,
     LedgerSagaStep,
     LEDGER_OUTBOX_RETRY_DELAY_SECONDS,
     LedgerHold,
@@ -27,6 +26,7 @@ from .models import (
     DepositAddress,
     DepositSweepJob,
     DepositRouteCounter,
+    TokenPack,
 )
 import json
 import hashlib
@@ -436,8 +436,10 @@ def _find_reusable_active_session(
     chain: str,
     asset_code: str,
     token_contract_address: str,
+    token_pack_code: str = "",
+    expected_min_amount: int | None = None,
 ) -> DepositSession | None:
-    return (
+    candidates = (
         DepositSession.objects.select_for_update()
         .filter(
             wallet=wallet,
@@ -448,8 +450,23 @@ def _find_reusable_active_session(
             expires_at__gt=timezone.now(),
         )
         .order_by("-created_at")
-        .first()
     )
+
+    normalized_pack_code = (token_pack_code or "").strip()
+
+    for session in candidates:
+        snapshot = (session.metadata or {}).get("token_pack") or {}
+        session_pack_code = (snapshot.get("code") or "").strip()
+
+        if normalized_pack_code and session_pack_code != normalized_pack_code:
+            continue
+
+        if expected_min_amount is not None and int(session.min_amount) != int(expected_min_amount):
+            continue
+
+        return session
+
+    return None
 
 def _get_route_onchain_decimals(*, chain: str, asset_code: str) -> int:
     normalized_chain = _normalize_chain(chain)
@@ -498,6 +515,74 @@ def _convert_route_amount_to_platform_token_units(
         raw_amount=raw_amount,
     )
     return _convert_canonical_stable_to_platform_tokens(canonical_stable_amount)
+
+def _convert_platform_token_units_to_canonical_stable_units(platform_token_amount: int) -> int:
+    normalized_amount = int(platform_token_amount)
+    if normalized_amount < 0:
+        raise ValidationError("Platform token amount cannot be negative")
+
+    divisor = int(PLATFORM_TOKENS_PER_STABLECOIN)
+    if divisor <= 0:
+        raise ValidationError("PLATFORM_TOKENS_PER_STABLECOIN must be positive")
+
+    if normalized_amount % divisor != 0:
+        raise ValidationError(
+            "Token amount is not compatible with the base stablecoin conversion rate"
+        )
+
+    return normalized_amount // divisor
+
+
+def _convert_canonical_stable_to_route_raw_amount(
+    *,
+    chain: str,
+    asset_code: str,
+    canonical_amount: int,
+) -> int:
+    normalized_amount = int(canonical_amount)
+    if normalized_amount <= 0:
+        raise ValidationError("Canonical stable amount must be positive")
+
+    route_decimals = _get_route_onchain_decimals(chain=chain, asset_code=asset_code)
+
+    if route_decimals == STABLECOIN_CANONICAL_DECIMALS:
+        return normalized_amount
+
+    if route_decimals > STABLECOIN_CANONICAL_DECIMALS:
+        factor = 10 ** (route_decimals - STABLECOIN_CANONICAL_DECIMALS)
+        return normalized_amount * factor
+
+    factor = 10 ** (STABLECOIN_CANONICAL_DECIMALS - route_decimals)
+    if normalized_amount % factor != 0:
+        raise ValidationError(
+            "Token pack price is not representable on the selected payment route"
+        )
+    return normalized_amount // factor
+
+
+def _build_token_pack_snapshot(*, token_pack: TokenPack) -> dict:
+    token_pack = TokenPack.objects.select_for_update().get(id=token_pack.id)
+
+    if not token_pack.is_active:
+        raise ValidationError("Selected token pack is inactive")
+
+    token_amount = int(token_pack.token_amount)
+    gross_stable_amount = int(token_pack.gross_stable_amount)
+    net_stable_amount = _convert_platform_token_units_to_canonical_stable_units(token_amount)
+
+    if gross_stable_amount < net_stable_amount:
+        raise ValidationError("Token pack gross price cannot be lower than its token credit value")
+
+    return {
+        "code": token_pack.code,
+        "name": token_pack.name,
+        "description": token_pack.description,
+        "badge_text": token_pack.badge_text,
+        "token_amount": token_amount,
+        "gross_stable_amount": gross_stable_amount,
+        "net_stable_amount": net_stable_amount,
+        "fee_stable_amount": gross_stable_amount - net_stable_amount,
+    }
 
 def _get_max_used_evm_derivation_index() -> int:
     max_provisioned_index = (
@@ -1813,56 +1898,137 @@ def credit_confirmed_deposit_session(
     clearing_wallet = get_external_asset_clearing_wallet()
     external_id = f"deposit-credit:{observed_transfer.event_key}"
 
-    ledger_credit_amount = _convert_route_amount_to_platform_token_units(
-        chain=deposit_session.chain,
-        asset_code=deposit_session.asset_code,
-        raw_amount=observed_transfer.amount,
-    )
+    token_pack_snapshot = (deposit_session.metadata or {}).get("token_pack") or {}
+    if token_pack_snapshot:
+        user_credit_amount = int(token_pack_snapshot.get("token_amount") or 0)
+        expected_gross_canonical_stable_amount = int(token_pack_snapshot.get("gross_stable_amount") or 0)
+        expected_net_canonical_stable_amount = int(token_pack_snapshot.get("net_stable_amount") or 0)
 
-    txn = apply_ledger_transaction(
-        actor=actor,
-        kind="deposit",
-        entries=[
-            (clearing_wallet, -int(ledger_credit_amount)),
-            (deposit_session.wallet, int(ledger_credit_amount)),
-        ],
-        created_by=created_by,
-        external_id=external_id,
-        memo=f"Confirmed on-chain deposit {observed_transfer.txid}",
-        metadata={
-            "source": "onchain_deposit",
-            "deposit_session_id": deposit_session.id,
-            "deposit_session_public_id": str(deposit_session.public_id),
-            "observed_transfer_id": observed_transfer.id,
-            "event_key": observed_transfer.event_key,
-            "chain": deposit_session.chain,
-            "asset_code": deposit_session.asset_code,
-            "token_contract_address": deposit_session.token_contract_address,
-            "deposit_address": deposit_session.deposit_address,
-            "txid": observed_transfer.txid,
-            "log_index": observed_transfer.log_index,
-            "block_number": observed_transfer.block_number,
-            "confirmations": observed_transfer.confirmations,
-            "route_raw_amount": int(observed_transfer.amount),
-            "canonical_stable_amount": int(
-                _normalize_route_amount_to_canonical_stable_units(
-                    chain=deposit_session.chain,
-                    asset_code=deposit_session.asset_code,
-                    raw_amount=observed_transfer.amount,
-                )
-            ),
-            "ledger_credit_amount": int(ledger_credit_amount),
-            "route_onchain_decimals": int(
-                _get_route_onchain_decimals(
-                    chain=deposit_session.chain,
-                    asset_code=deposit_session.asset_code,
-                )
-            ),
-            "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
-            "platform_token_decimals": PLATFORM_TOKEN_DECIMALS,
-            "platform_tokens_per_stablecoin": PLATFORM_TOKENS_PER_STABLECOIN,
-        },
-    )
+        if user_credit_amount <= 0 or expected_gross_canonical_stable_amount <= 0:
+            raise ValidationError("Deposit session is missing a valid token pack snapshot")
+
+        observed_canonical_stable_amount = _normalize_route_amount_to_canonical_stable_units(
+            chain=deposit_session.chain,
+            asset_code=deposit_session.asset_code,
+            raw_amount=observed_transfer.amount,
+        )
+
+        if observed_canonical_stable_amount < expected_gross_canonical_stable_amount:
+            raise ValidationError("Observed amount is below the expected token pack price")
+
+        gross_token_equivalent_amount = _convert_canonical_stable_to_platform_tokens(
+            observed_canonical_stable_amount
+        )
+        platform_fee_credit_amount = gross_token_equivalent_amount - user_credit_amount
+
+        if platform_fee_credit_amount < 0:
+            raise ValidationError("Observed amount is lower than the token pack token value")
+
+        platform_fees_wallet = get_system_wallet(
+            TokenWallet.SYSTEM_PLATFORM_FEES,
+            allow_negative=False,
+        )
+
+        entries = [
+            (clearing_wallet, -int(gross_token_equivalent_amount)),
+            (deposit_session.wallet, int(user_credit_amount)),
+        ]
+        if platform_fee_credit_amount > 0:
+            entries.append((platform_fees_wallet, int(platform_fee_credit_amount)))
+
+        txn = apply_ledger_transaction(
+            actor=actor,
+            kind="deposit",
+            entries=entries,
+            created_by=created_by,
+            external_id=external_id,
+            memo=f"Confirmed top-up {observed_transfer.txid}",
+            metadata={
+                "source": "onchain_deposit",
+                "deposit_session_id": deposit_session.id,
+                "deposit_session_public_id": str(deposit_session.public_id),
+                "observed_transfer_id": observed_transfer.id,
+                "event_key": observed_transfer.event_key,
+                "chain": deposit_session.chain,
+                "asset_code": deposit_session.asset_code,
+                "token_contract_address": deposit_session.token_contract_address,
+                "deposit_address": deposit_session.deposit_address,
+                "txid": observed_transfer.txid,
+                "log_index": observed_transfer.log_index,
+                "block_number": observed_transfer.block_number,
+                "confirmations": observed_transfer.confirmations,
+                "route_raw_amount": int(observed_transfer.amount),
+                "observed_canonical_stable_amount": int(observed_canonical_stable_amount),
+                "expected_gross_canonical_stable_amount": int(expected_gross_canonical_stable_amount),
+                "expected_net_canonical_stable_amount": int(expected_net_canonical_stable_amount),
+                "expected_fee_canonical_stable_amount": int(token_pack_snapshot.get("fee_stable_amount") or 0),
+                "user_credit_amount": int(user_credit_amount),
+                "platform_fee_credit_amount": int(platform_fee_credit_amount),
+                "gross_token_equivalent_amount": int(gross_token_equivalent_amount),
+                "token_pack": token_pack_snapshot,
+                "payment_method": (deposit_session.metadata or {}).get("payment_method") or {},
+                "route_onchain_decimals": int(
+                    _get_route_onchain_decimals(
+                        chain=deposit_session.chain,
+                        asset_code=deposit_session.asset_code,
+                    )
+                ),
+                "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
+                "platform_token_decimals": PLATFORM_TOKEN_DECIMALS,
+                "platform_tokens_per_stablecoin": PLATFORM_TOKENS_PER_STABLECOIN,
+            },
+        )
+    else:
+        ledger_credit_amount = _convert_route_amount_to_platform_token_units(
+            chain=deposit_session.chain,
+            asset_code=deposit_session.asset_code,
+            raw_amount=observed_transfer.amount,
+        )
+
+        txn = apply_ledger_transaction(
+            actor=actor,
+            kind="deposit",
+            entries=[
+                (clearing_wallet, -int(ledger_credit_amount)),
+                (deposit_session.wallet, int(ledger_credit_amount)),
+            ],
+            created_by=created_by,
+            external_id=external_id,
+            memo=f"Confirmed on-chain deposit {observed_transfer.txid}",
+            metadata={
+                "source": "onchain_deposit",
+                "deposit_session_id": deposit_session.id,
+                "deposit_session_public_id": str(deposit_session.public_id),
+                "observed_transfer_id": observed_transfer.id,
+                "event_key": observed_transfer.event_key,
+                "chain": deposit_session.chain,
+                "asset_code": deposit_session.asset_code,
+                "token_contract_address": deposit_session.token_contract_address,
+                "deposit_address": deposit_session.deposit_address,
+                "txid": observed_transfer.txid,
+                "log_index": observed_transfer.log_index,
+                "block_number": observed_transfer.block_number,
+                "confirmations": observed_transfer.confirmations,
+                "route_raw_amount": int(observed_transfer.amount),
+                "canonical_stable_amount": int(
+                    _normalize_route_amount_to_canonical_stable_units(
+                        chain=deposit_session.chain,
+                        asset_code=deposit_session.asset_code,
+                        raw_amount=observed_transfer.amount,
+                    )
+                ),
+                "ledger_credit_amount": int(ledger_credit_amount),
+                "route_onchain_decimals": int(
+                    _get_route_onchain_decimals(
+                        chain=deposit_session.chain,
+                        asset_code=deposit_session.asset_code,
+                    )
+                ),
+                "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
+                "platform_token_decimals": PLATFORM_TOKEN_DECIMALS,
+                "platform_tokens_per_stablecoin": PLATFORM_TOKENS_PER_STABLECOIN,
+            },
+        )
 
     deposit_session.observed_txid = observed_transfer.txid
     deposit_session.observed_amount = observed_transfer.amount
@@ -2148,7 +2314,17 @@ def list_available_deposit_options() -> list[dict]:
     return options
 
 @transaction.atomic
-def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) -> DepositSession:
+def open_user_deposit_session(
+    *,
+    actor,
+    wallet: TokenWallet,
+    option_key: str,
+    token_pack: TokenPack,
+    payment_method_key: str = "",
+    payment_method_type: str = "crypto",
+    payment_method_label: str = "",
+    show_network_step: bool = True,
+) -> DepositSession:
     actor = _require_authenticated_actor(actor)
 
     wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
@@ -2158,21 +2334,32 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
         raise PermissionDenied("Cannot open a deposit session for another user's wallet")
 
     chain, asset_code, token_contract_address = parse_deposit_option_key(option_key)
+    template = _get_route_template(
+        chain=chain,
+        asset_code=asset_code,
+        token_contract_address=token_contract_address,
+    )
+
+    token_pack_snapshot = _build_token_pack_snapshot(token_pack=token_pack)
+    expected_min_amount = _convert_canonical_stable_to_route_raw_amount(
+        chain=chain,
+        asset_code=asset_code,
+        canonical_amount=token_pack_snapshot["gross_stable_amount"],
+    )
+
+    if expected_min_amount < int(template.min_amount):
+        raise ValidationError("Selected token pack is below the minimum deposit for this payment route")
 
     existing_session = _find_reusable_active_session(
         wallet=wallet,
         chain=chain,
         asset_code=asset_code,
         token_contract_address=token_contract_address,
+        token_pack_code=token_pack_snapshot["code"],
+        expected_min_amount=expected_min_amount,
     )
     if existing_session is not None:
         return existing_session
-
-    template = _get_route_template(
-        chain=chain,
-        asset_code=asset_code,
-        token_contract_address=token_contract_address,
-    )
 
     deposit_address, derivation_index, derivation_path = _allocate_session_address(
         chain=chain,
@@ -2191,6 +2378,13 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
         asset_code=template.asset_code,
     )
 
+    payment_method_snapshot = {
+        "key": (payment_method_key or "").strip(),
+        "type": (payment_method_type or "").strip() or "crypto",
+        "label": (payment_method_label or "").strip() or template.asset_code,
+        "show_network_step": bool(show_network_step),
+    }
+
     return DepositSession.objects.create(
         user=wallet.user,
         wallet=wallet,
@@ -2204,7 +2398,7 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
         derivation_index=derivation_index,
         derivation_path=derivation_path,
         status=DepositSession.STATUS_AWAITING_PAYMENT,
-        min_amount=int(template.min_amount),
+        min_amount=int(expected_min_amount),
         required_confirmations=int(template.required_confirmations),
         expires_at=expires_at,
         created_by=actor,
@@ -2213,6 +2407,10 @@ def open_user_deposit_session(*, actor, wallet: TokenWallet, option_key: str) ->
             "allocation_source": "session_derivation",
             "route_template_id": template.id,
             "chain_family": "evm",
+            "token_pack": token_pack_snapshot,
+            "payment_method": payment_method_snapshot,
+            "expected_canonical_stable_amount": int(token_pack_snapshot["gross_stable_amount"]),
+            "expected_route_raw_amount": int(expected_min_amount),
         },
         metadata_version=LEDGER_METADATA_VERSION,
     )

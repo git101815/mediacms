@@ -13,6 +13,7 @@ from .models import (
     ObservedOnchainTransfer,
     DepositAddress,
     InternalAPIRequestNonce,
+    TokenPack,
 )
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -392,3 +393,20 @@ class InternalAPIRequestNonceAdmin(ReadOnlyAdmin):
         "created_at",
         "expires_at",
     )
+
+@admin.register(TokenPack)
+class TokenPackAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "code",
+        "name",
+        "token_amount",
+        "gross_stable_amount",
+        "badge_text",
+        "is_active",
+        "sort_order",
+        "updated_at",
+    )
+    list_filter = ("is_active",)
+    search_fields = ("code", "name", "description", "badge_text")
+    readonly_fields = ("created_at", "updated_at", "metadata_version")
