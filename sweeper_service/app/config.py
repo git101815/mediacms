@@ -152,7 +152,9 @@ def load_config() -> ServiceConfig:
             _read_secret_file(item["funding_private_key_file"])
         )
 
-        destination_address = str(item.get("destination_address", "")).strip().lower()
+        destination_address = str(
+            _resolve_env_placeholder(item.get("destination_address", ""))
+        ).strip().lower()
         if not destination_address:
             destination_address = Account.from_key(funding_private_key).address.lower()
 

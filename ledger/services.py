@@ -2465,7 +2465,12 @@ def ingest_deposit_observation_event(
     observed_transfer.refresh_from_db()
 
     ledger_txn = None
-    if observed_transfer.confirmations >= deposit_session.required_confirmations:
+    should_credit = (
+        int(observed_transfer.confirmations) >= int(deposit_session.required_confirmations)
+        and int(observed_transfer.amount) >= int(deposit_session.min_amount)
+    )
+
+    if should_credit:
         ledger_txn = credit_confirmed_deposit_session(
             actor=actor,
             deposit_session=deposit_session,
@@ -2780,10 +2785,16 @@ def mark_sweep_job_ready_to_sweep(
     if job.status == DepositSweepJob.STATUS_READY_TO_SWEEP:
         return job
 
-    if job.status != DepositSweepJob.STATUS_FUNDING_BROADCASTED:
+    if job.status not in {
+        DepositSweepJob.STATUS_PENDING,
+        DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+    }:
         raise ValidationError("Sweep job cannot transition to ready_to_sweep from its current status")
 
-    if not job.gas_funding_txid:
+    if (
+        job.status == DepositSweepJob.STATUS_FUNDING_BROADCASTED
+        and not job.gas_funding_txid
+    ):
         raise ValidationError("Sweep job is missing gas funding txid")
 
     job.status = DepositSweepJob.STATUS_READY_TO_SWEEP
