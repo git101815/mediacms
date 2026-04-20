@@ -14,6 +14,7 @@ class DepositOptionConfig:
     rpc_urls: list[str]
     required_confirmations: int
     min_amount: int
+    observation_min_amount: int
     session_ttl_seconds: int
     poll_interval_seconds: int
     lookback_blocks: int
@@ -120,6 +121,9 @@ def load_config() -> ServiceConfig:
     options: list[DepositOptionConfig] = []
 
     for item in raw_options:
+        resolved_min_amount = int(item["min_amount"])
+        resolved_observation_min_amount = int(item.get("observation_min_amount", resolved_min_amount))
+
         option = DepositOptionConfig(
             key=item["key"],
             chain=item["chain"],
@@ -133,7 +137,8 @@ def load_config() -> ServiceConfig:
             account_xpub=_resolve_env_placeholder(item.get("account_xpub", evm_account_xpub)),
             rpc_urls=_resolve_rpc_urls(item),
             required_confirmations=int(item["required_confirmations"]),
-            min_amount=int(item["min_amount"]),
+            min_amount=resolved_min_amount,
+            observation_min_amount=resolved_observation_min_amount,
             session_ttl_seconds=int(item["session_ttl_seconds"]),
             poll_interval_seconds=int(item.get("poll_interval_seconds", 15)),
             lookback_blocks=int(item.get("lookback_blocks", 2000)),
@@ -144,6 +149,12 @@ def load_config() -> ServiceConfig:
             raise RuntimeError(f"required_confirmations must be > 0 for option {option.key}")
         if option.min_amount <= 0:
             raise RuntimeError(f"min_amount must be > 0 for option {option.key}")
+        if option.observation_min_amount < 0:
+            raise RuntimeError(f"observation_min_amount must be >= 0 for option {option.key}")
+        if option.observation_min_amount > option.min_amount:
+            raise RuntimeError(
+                f"observation_min_amount cannot be greater than min_amount for option {option.key}"
+            )
         if option.session_ttl_seconds <= 0:
             raise RuntimeError(f"session_ttl_seconds must be > 0 for option {option.key}")
         if option.poll_interval_seconds <= 0:

@@ -44,7 +44,6 @@ def _decode_topic_address(topic_hex: str) -> str:
     return Web3.to_checksum_address("0x" + topic_hex[-40:])
 
 
-
 def _find_latest_incoming_native_transfer(*, w3, deposit_address, latest_block, lookback_blocks):
     checksum_deposit_address = Web3.to_checksum_address(deposit_address)
     from_block = max(0, int(latest_block) - int(lookback_blocks))
@@ -77,6 +76,7 @@ def _find_latest_incoming_native_transfer(*, w3, deposit_address, latest_block, 
 
     return None
 
+
 def _get_erc20_balance_at_block(*, contract, address, block_number: int) -> int:
     return int(
         contract.functions.balanceOf(address).call(
@@ -85,23 +85,24 @@ def _get_erc20_balance_at_block(*, contract, address, block_number: int) -> int:
     )
 
 
-def _find_first_block_with_min_erc20_balance(
+def _find_first_block_with_erc20_balance_above(
     *,
     contract,
     deposit_address,
-    min_amount: int,
+    threshold_amount: int,
     from_block: int,
     to_block: int,
 ) -> int | None:
     low = int(from_block)
     high = int(to_block)
+    threshold_amount = int(threshold_amount)
 
     latest_balance = _get_erc20_balance_at_block(
         contract=contract,
         address=deposit_address,
         block_number=high,
     )
-    if latest_balance < int(min_amount):
+    if latest_balance <= threshold_amount:
         return None
 
     while low < high:
@@ -111,34 +112,36 @@ def _find_first_block_with_min_erc20_balance(
             address=deposit_address,
             block_number=mid,
         )
-        if mid_balance >= int(min_amount):
+        if mid_balance > threshold_amount:
             high = mid
         else:
             low = mid + 1
 
     return low
 
+
 def _get_native_balance_at_block(*, w3, address, block_number: int) -> int:
     return int(w3.eth.get_balance(address, block_identifier=int(block_number)))
 
 
-def _find_first_block_with_min_native_balance(
+def _find_first_block_with_native_balance_above(
     *,
     w3,
     deposit_address,
-    min_amount: int,
+    threshold_amount: int,
     from_block: int,
     to_block: int,
 ) -> int | None:
     low = int(from_block)
     high = int(to_block)
+    threshold_amount = int(threshold_amount)
 
     latest_balance = _get_native_balance_at_block(
         w3=w3,
         address=deposit_address,
         block_number=high,
     )
-    if latest_balance < int(min_amount):
+    if latest_balance <= threshold_amount:
         return None
 
     while low < high:
@@ -148,12 +151,13 @@ def _find_first_block_with_min_native_balance(
             address=deposit_address,
             block_number=mid,
         )
-        if mid_balance >= int(min_amount):
+        if mid_balance > threshold_amount:
             high = mid
         else:
             low = mid + 1
 
     return low
+
 
 def _post_observation(
     *,
@@ -191,6 +195,7 @@ def _post_observation(
     }
 
     client.post_signed("/api/internal/ledger/deposit-observations", payload)
+
 
 def _build_option_web3(
     *,
@@ -259,6 +264,7 @@ def _observe_token_option(
             deposit_address = target["deposit_address"]
             required_confirmations = int(target["required_confirmations"])
             min_amount = int(target["min_amount"])
+            observation_min_amount = int(option.observation_min_amount)
 
             try:
                 checksum_deposit_address = Web3.to_checksum_address(deposit_address)
@@ -282,24 +288,25 @@ def _observe_token_option(
                 )
                 continue
 
-            if current_balance < min_amount:
+            if current_balance <= observation_min_amount:
                 continue
 
             from_block = max(0, int(latest_block) - int(option.lookback_blocks))
-            detected_block_number = _find_first_block_with_min_native_balance(
+            detected_block_number = _find_first_block_with_native_balance_above(
                 w3=w3,
                 deposit_address=checksum_deposit_address,
-                min_amount=min_amount,
+                threshold_amount=observation_min_amount,
                 from_block=from_block,
                 to_block=latest_block,
             )
             if detected_block_number is None:
                 logging.warning(
-                    "native balance threshold reached but detection block not found option=%s session=%s address=%s balance=%s",
+                    "native balance threshold crossed but detection block not found option=%s session=%s address=%s balance=%s threshold=%s",
                     option.key,
                     session_public_id,
                     checksum_deposit_address,
                     current_balance,
+                    observation_min_amount,
                 )
                 continue
 
@@ -323,17 +330,22 @@ def _observe_token_option(
                     "balance_snapshot": str(current_balance),
                     "latest_block": int(latest_block),
                     "detected_block_number": int(detected_block_number),
+                    "observation_min_amount": str(observation_min_amount),
+                    "meets_min_amount": current_balance >= min_amount,
+                    "min_amount": str(min_amount),
                 },
                 log_index=None,
             )
 
             logging.info(
-                "native deposit detected by balance option=%s session=%s detected_block=%s confirmations=%s amount=%s",
+                "native deposit observed by balance option=%s session=%s detected_block=%s confirmations=%s amount=%s observation_threshold=%s meets_min=%s",
                 option.key,
                 session_public_id,
                 detected_block_number,
                 confirmations,
                 current_balance,
+                observation_min_amount,
+                current_balance >= min_amount,
             )
         return
 
@@ -347,6 +359,7 @@ def _observe_token_option(
         deposit_address = target["deposit_address"]
         required_confirmations = int(target["required_confirmations"])
         min_amount = int(target["min_amount"])
+        observation_min_amount = int(option.observation_min_amount)
 
         try:
             checksum_deposit_address = Web3.to_checksum_address(deposit_address)
@@ -370,24 +383,25 @@ def _observe_token_option(
             )
             continue
 
-        if current_balance < min_amount:
+        if current_balance <= observation_min_amount:
             continue
 
         from_block = max(0, int(latest_block) - int(option.lookback_blocks))
-        detected_block_number = _find_first_block_with_min_erc20_balance(
+        detected_block_number = _find_first_block_with_erc20_balance_above(
             contract=contract,
             deposit_address=checksum_deposit_address,
-            min_amount=min_amount,
+            threshold_amount=observation_min_amount,
             from_block=from_block,
             to_block=latest_block,
         )
         if detected_block_number is None:
             logging.warning(
-                "erc20 balance threshold reached but detection block not found option=%s session=%s address=%s balance=%s",
+                "erc20 balance threshold crossed but detection block not found option=%s session=%s address=%s balance=%s threshold=%s",
                 option.key,
                 session_public_id,
                 checksum_deposit_address,
                 current_balance,
+                observation_min_amount,
             )
             continue
 
@@ -411,17 +425,22 @@ def _observe_token_option(
                 "balance_snapshot": str(current_balance),
                 "latest_block": int(latest_block),
                 "detected_block_number": int(detected_block_number),
+                "observation_min_amount": str(observation_min_amount),
+                "meets_min_amount": current_balance >= min_amount,
+                "min_amount": str(min_amount),
             },
             log_index=None,
         )
 
         logging.info(
-            "deposit detected by balance option=%s session=%s detected_block=%s confirmations=%s amount=%s",
+            "deposit observed by balance option=%s session=%s detected_block=%s confirmations=%s amount=%s observation_threshold=%s meets_min=%s",
             option.key,
             session_public_id,
             detected_block_number,
             confirmations,
             current_balance,
+            observation_min_amount,
+            current_balance >= min_amount,
         )
 
 
