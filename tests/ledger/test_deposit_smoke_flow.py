@@ -28,7 +28,7 @@ class TestDepositSmokeFlow(TestDepositSessions):
             "m/44'/60'/0'/0/0",
         )
 
-        option_key = "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7"
+        option_key = self.default_deposit_option_key()
         option_rows = [
             {
                 "chain": "ethereum",
@@ -42,6 +42,7 @@ class TestDepositSmokeFlow(TestDepositSessions):
             actor=self.u1,
             wallet=self.w1,
             option_key=option_key,
+            token_pack=self.default_token_pack,
         )
 
         self.assertEqual(session.wallet_id, self.w1.id)
@@ -50,6 +51,7 @@ class TestDepositSmokeFlow(TestDepositSessions):
         self.assertEqual(session.derivation_index, 0)
         self.assertEqual(session.derivation_path, "m/44'/60'/0'/0/0")
         self.assertEqual(session.deposit_address, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        self.assertEqual(session.min_amount, self.default_token_pack.gross_stable_amount)
 
         watch_targets = list_active_deposit_watch_targets(
             actor=self.operator,
@@ -78,7 +80,7 @@ class TestDepositSmokeFlow(TestDepositSessions):
             to_address=session.deposit_address,
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=250,
+            amount=session.min_amount,
             confirmations=session.required_confirmations,
             raw_payload={"source": "smoke-flow-test", "txid": "0xsmokeflow0001"},
         )

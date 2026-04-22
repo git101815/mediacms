@@ -53,18 +53,20 @@ class TestDepositSessions(BaseLedgerTestCase):
         session = open_user_deposit_session(
             actor=self.u1,
             wallet=self.w1,
-            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
         )
 
         self.assertEqual(session.wallet_id, self.w1.id)
         self.assertEqual(session.status, DepositSession.STATUS_AWAITING_PAYMENT)
-        self.assertEqual(session.route_key, "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7")
+        self.assertEqual(session.route_key, self.default_deposit_option_key())
         self.assertEqual(session.deposit_address, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         self.assertEqual(session.derivation_index, 0)
         self.assertEqual(session.derivation_path, "m/44'/60'/0'/0/42")
         self.assertEqual(session.address_derivation_ref, "m/44'/60'/0'/0/42")
         self.assertEqual(session.required_confirmations, 12)
-        self.assertEqual(session.min_amount, 100)
+        self.assertEqual(session.min_amount, self.default_token_pack.gross_stable_amount)
+        self.assertEqual((session.metadata or {}).get("token_pack", {}).get("code"), self.default_token_pack.code)
 
     @patch("ledger.services._derive_session_deposit_address")
     def test_open_user_deposit_session_reuses_existing_active_session(self, mocked_derive):
@@ -76,12 +78,14 @@ class TestDepositSessions(BaseLedgerTestCase):
         first = open_user_deposit_session(
             actor=self.u1,
             wallet=self.w1,
-            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
         )
         second = open_user_deposit_session(
             actor=self.u1,
             wallet=self.w1,
-            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
         )
 
         self.assertEqual(first.id, second.id)
@@ -97,7 +101,8 @@ class TestDepositSessions(BaseLedgerTestCase):
         first = open_user_deposit_session(
             actor=self.u1,
             wallet=self.w1,
-            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
         )
         DepositSession.objects.filter(id=first.id).update(
             expires_at=timezone.now() - timedelta(seconds=1)
@@ -106,7 +111,8 @@ class TestDepositSessions(BaseLedgerTestCase):
         second = open_user_deposit_session(
             actor=self.u1,
             wallet=self.w1,
-            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
         )
 
         self.assertNotEqual(first.id, second.id)
@@ -117,7 +123,8 @@ class TestDepositSessions(BaseLedgerTestCase):
             open_user_deposit_session(
                 actor=self.u1,
                 wallet=self.w2,
-                option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                option_key=self.default_deposit_option_key(),
+                token_pack=self.default_token_pack,
             )
 
     @override_settings(DEPOSIT_EVM_ACCOUNT_XPUB="")
@@ -126,7 +133,8 @@ class TestDepositSessions(BaseLedgerTestCase):
             open_user_deposit_session(
                 actor=self.u1,
                 wallet=self.w1,
-                option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                option_key=self.default_deposit_option_key(),
+                token_pack=self.default_token_pack,
             )
 
     def test_record_onchain_observation_is_idempotent_by_event_key(self):
@@ -423,14 +431,16 @@ class TestDepositSessions(BaseLedgerTestCase):
         session = open_user_deposit_session(
             actor=self.u1,
             wallet=self.w1,
-            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
         )
 
         self.assertEqual(session.status, DepositSession.STATUS_AWAITING_PAYMENT)
-        self.assertEqual(session.route_key, "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7")
+        self.assertEqual(session.route_key, self.default_deposit_option_key())
         self.assertEqual(session.derivation_index, 0)
         self.assertEqual(session.derivation_path, "m/44'/60'/0'/0/0")
         self.assertEqual(session.deposit_address, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        self.assertEqual(session.min_amount, self.default_token_pack.gross_stable_amount)
 
         option_rows = [
             {
@@ -466,7 +476,7 @@ class TestDepositSessions(BaseLedgerTestCase):
             to_address=session.deposit_address,
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=250,
+            amount=session.min_amount,
             confirmations=session.required_confirmations,
             raw_payload={"source": "integration-test", "txid": "0xsmoketest0001"},
         )
@@ -504,7 +514,8 @@ class TestDepositSessions(BaseLedgerTestCase):
         first = open_user_deposit_session(
             actor=self.u1,
             wallet=self.w1,
-            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
         )
         self.assertEqual(first.derivation_index, 0)
         self.assertEqual(first.deposit_address, "0xcccccccccccccccccccccccccccccccccccccccc")
@@ -516,7 +527,8 @@ class TestDepositSessions(BaseLedgerTestCase):
         second = open_user_deposit_session(
             actor=self.u1,
             wallet=self.w1,
-            option_key="ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
         )
 
         self.assertNotEqual(first.id, second.id)

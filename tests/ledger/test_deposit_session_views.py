@@ -5,7 +5,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from ledger.models import DepositAddress, DepositSession, DepositSweepJob
+from ledger.models import DepositAddress, DepositSession
 from ledger.services import credit_confirmed_deposit_session, record_onchain_observation
 
 from .base import BaseLedgerTestCase
@@ -27,6 +27,23 @@ class TestDepositSessionViews(BaseLedgerTestCase):
             session_ttl_seconds=3600,
         )
 
+    def _default_session_metadata(self):
+        return {
+            "display_label": "Ethereum · USDT",
+            "allocation_source": "session_derivation",
+            "route_template_id": 1,
+            "chain_family": "evm",
+            "token_pack": self.default_token_pack_snapshot(),
+            "payment_method": {
+                "key": "crypto:usdt",
+                "type": "crypto",
+                "label": "USDT",
+                "show_network_step": True,
+            },
+            "expected_canonical_stable_amount": int(self.default_token_pack.gross_stable_amount),
+            "expected_route_raw_amount": int(self.default_token_pack.gross_stable_amount),
+        }
+
     @patch("ledger.services._derive_session_deposit_address")
     def test_open_deposit_session_reuses_existing_active_session(self, mocked_derive):
         mocked_derive.return_value = (
@@ -38,11 +55,11 @@ class TestDepositSessionViews(BaseLedgerTestCase):
 
         first = self.client.post(
             reverse("wallet_deposit_request"),
-            {"deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7"},
+            self.default_deposit_request_payload(),
         )
         second = self.client.post(
             reverse("wallet_deposit_request"),
-            {"deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7"},
+            self.default_deposit_request_payload(),
         )
 
         self.assertEqual(DepositSession.objects.count(), 1)
@@ -53,7 +70,9 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         self.assertRedirects(second, expected_url)
         self.assertEqual(session.derivation_index, 0)
         self.assertEqual(session.derivation_path, "m/44'/60'/0'/0/12")
-        self.assertEqual(session.route_key, "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7")
+        self.assertEqual(session.route_key, self.default_deposit_option_key())
+        self.assertEqual(session.min_amount, self.default_token_pack.gross_stable_amount)
+        self.assertEqual((session.metadata or {}).get("token_pack", {}).get("code"), self.default_token_pack.code)
 
     @patch("ledger.services._derive_session_deposit_address")
     def test_open_deposit_session_does_not_reuse_expired_session(self, mocked_derive):
@@ -66,7 +85,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
 
         first = self.client.post(
             reverse("wallet_deposit_request"),
-            {"deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7"},
+            self.default_deposit_request_payload(),
         )
         session = DepositSession.objects.get(wallet=self.w1)
         DepositSession.objects.filter(id=session.id).update(
@@ -75,7 +94,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
 
         second = self.client.post(
             reverse("wallet_deposit_request"),
-            {"deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7"},
+            self.default_deposit_request_payload(),
         )
 
         self.assertEqual(first.status_code, 302)
@@ -89,9 +108,14 @@ class TestDepositSessionViews(BaseLedgerTestCase):
             chain="ethereum",
             asset_code="USDT",
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            route_key=self.default_deposit_option_key(),
+            display_label="Ethereum · USDT",
             deposit_address="0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             address_derivation_ref="m/44'/60'/0'/0/12",
+            derivation_index=12,
+            derivation_path="m/44'/60'/0'/0/12",
             expires_at=timezone.now() + timedelta(hours=1),
+            metadata=self._default_session_metadata(),
         )
 
         self.client.force_login(self.u2)
@@ -107,12 +131,17 @@ class TestDepositSessionViews(BaseLedgerTestCase):
             chain="ethereum",
             asset_code="USDT",
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            route_key=self.default_deposit_option_key(),
+            display_label="Ethereum · USDT",
             deposit_address="0xcccccccccccccccccccccccccccccccccccccccc",
             address_derivation_ref="m/44'/60'/0'/0/13",
+            derivation_index=13,
+            derivation_path="m/44'/60'/0'/0/13",
             expires_at=timezone.now() + timedelta(hours=1),
             status=DepositSession.STATUS_AWAITING_PAYMENT,
             required_confirmations=12,
-            min_amount=100,
+            min_amount=self.default_token_pack.gross_stable_amount,
+            metadata=self._default_session_metadata(),
         )
 
         self.client.force_login(self.u1)
@@ -122,8 +151,9 @@ class TestDepositSessionViews(BaseLedgerTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "0xcccccccccccccccccccccccccccccccccccccccc")
-        self.assertContains(response, "Minimum deposit")
-        self.assertContains(response, "0.00 USDT")
+        self.assertContains(response, "Expected amount")
+        self.assertContains(response, "1.00 USDT")
+        self.assertContains(response, "Starter")
 
     def test_deposit_session_status_endpoint_returns_payload(self):
         session = DepositSession.objects.create(
@@ -132,12 +162,17 @@ class TestDepositSessionViews(BaseLedgerTestCase):
             chain="ethereum",
             asset_code="USDT",
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            route_key=self.default_deposit_option_key(),
+            display_label="Ethereum · USDT",
             deposit_address="0xdddddddddddddddddddddddddddddddddddddddd",
             address_derivation_ref="m/44'/60'/0'/0/14",
+            derivation_index=14,
+            derivation_path="m/44'/60'/0'/0/14",
             expires_at=timezone.now() + timedelta(hours=1),
             status=DepositSession.STATUS_AWAITING_PAYMENT,
             required_confirmations=12,
-            min_amount=100,
+            min_amount=self.default_token_pack.gross_stable_amount,
+            metadata=self._default_session_metadata(),
         )
 
         self.client.force_login(self.u1)
@@ -151,7 +186,8 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         self.assertEqual(payload["confirmations"], 0)
         self.assertEqual(payload["deposit_address"], "0xdddddddddddddddddddddddddddddddddddddddd")
         self.assertEqual(payload["required_confirmations"], 12)
-        self.assertEqual(payload["min_amount"], 100)
+        self.assertEqual(payload["min_amount"], self.default_token_pack.gross_stable_amount)
+        self.assertEqual(payload["token_pack_name"], self.default_token_pack.name)
         self.assertIn("expires_at", payload)
         self.assertIn("expires_at_iso", payload)
 
@@ -170,7 +206,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
 
         response = self.client.post(
             reverse("wallet_deposit_request"),
-            {"deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7"},
+            self.default_deposit_request_payload(),
         )
         self.assertEqual(response.status_code, 302)
 
@@ -187,7 +223,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
             to_address=session.deposit_address,
             token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
             asset_code="USDT",
-            amount=250,
+            amount=session.min_amount,
             confirmations=session.required_confirmations,
             raw_payload={"source": "view-integration-test", "txid": "0xviewflow0001"},
         )

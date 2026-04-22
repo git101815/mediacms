@@ -16,8 +16,11 @@ from ledger.models import (
     ObservedOnchainTransfer,
     DepositAddress,
     DepositSweepJob,
+    TokenPack,
 )
 from ledger.services import get_system_wallet
+
+
 PERMISSION_MODEL_BY_CODENAME = {
     "can_apply_raw_ledger_transaction": LedgerTransaction,
     "can_create_pending_ledger_transaction": LedgerTransaction,
@@ -41,6 +44,8 @@ PERMISSION_MODEL_BY_CODENAME = {
     "can_manage_deposit_sweep_jobs": DepositSweepJob,
     "can_view_deposit_sweep_jobs": DepositSweepJob,
 }
+
+
 class BaseLedgerTestCase(TestCase):
     def setUp(self):
         self.u1 = create_account(password="pass12345")
@@ -53,6 +58,17 @@ class BaseLedgerTestCase(TestCase):
         self.issuance = get_system_wallet(
             TokenWallet.SYSTEM_ISSUANCE,
             allow_negative=True,
+        )
+
+        self.default_token_pack = TokenPack.objects.create(
+            code="starter-pack",
+            name="Starter",
+            description="Test starter pack",
+            badge_text="",
+            token_amount=100_000_000,
+            gross_stable_amount=1_000_000,
+            is_active=True,
+            sort_order=0,
         )
 
         for codename in [
@@ -91,3 +107,29 @@ class BaseLedgerTestCase(TestCase):
             )
 
         user.user_permissions.add(perm)
+
+    def default_deposit_option_key(self) -> str:
+        return "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7"
+
+    def default_deposit_request_payload(self, **overrides) -> dict:
+        payload = {
+            "deposit_option_key": self.default_deposit_option_key(),
+            "token_pack_key": self.default_token_pack.code,
+            "payment_method_key": "crypto:usdt",
+            "payment_method_type": "crypto",
+        }
+        payload.update(overrides)
+        return payload
+
+    def default_token_pack_snapshot(self) -> dict:
+        gross_amount = int(self.default_token_pack.gross_stable_amount)
+        return {
+            "code": self.default_token_pack.code,
+            "name": self.default_token_pack.name,
+            "description": self.default_token_pack.description,
+            "badge_text": self.default_token_pack.badge_text,
+            "token_amount": int(self.default_token_pack.token_amount),
+            "gross_stable_amount": gross_amount,
+            "net_stable_amount": gross_amount,
+            "fee_stable_amount": 0,
+        }
