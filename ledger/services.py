@@ -735,6 +735,31 @@ def get_external_asset_clearing_wallet() -> TokenWallet:
         allow_negative=True,
     )
 
+def _normalize_platform_token_display_amount(amount) -> int:
+    raw_value = str(amount or "").strip().replace(",", ".")
+    if not raw_value:
+        raise ValidationError("Amount must be provided")
+
+    try:
+        parsed = Decimal(raw_value)
+    except Exception as exc:
+        raise ValidationError("Amount must be a valid number") from exc
+
+    if parsed <= 0:
+        raise ValidationError("Amount must be greater than zero")
+
+    scaled = parsed * (Decimal(10) ** PLATFORM_TOKEN_DECIMALS)
+    if scaled != scaled.to_integral_value():
+        raise ValidationError(
+            f"Amount supports at most {PLATFORM_TOKEN_DECIMALS} decimal places"
+        )
+
+    normalized = int(scaled)
+    if normalized <= 0:
+        raise ValidationError("Amount must be greater than zero")
+
+    return normalized
+
 @transaction.atomic
 def create_wallet_deposit_request(
     *,
@@ -781,7 +806,7 @@ def create_wallet_withdrawal_request(
     *,
     actor,
     wallet: TokenWallet,
-    amount: int,
+    amount,
     destination_address: str,
     notes: str = "",
     metadata=None,
@@ -794,7 +819,7 @@ def create_wallet_withdrawal_request(
     wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
     _require_wallet_not_blocked(wallet)
 
-    normalized_amount = _normalize_wallet_request_amount(amount)
+    normalized_amount = _normalize_platform_token_display_amount(amount)
     destination_address = (destination_address or "").strip()
     if not destination_address:
         raise ValidationError("Destination address is required")
@@ -824,6 +849,7 @@ def create_wallet_withdrawal_request(
             "reference": reference,
             "destination_address": destination_address,
             "source": "wallet_ui",
+            "entered_amount": str(amount or "").strip(),
         },
         metadata_version=LEDGER_METADATA_VERSION,
     )

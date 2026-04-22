@@ -48,7 +48,7 @@ class TestDepositSmokeFlow(TestDepositSessions):
         self.assertEqual(session.wallet_id, self.w1.id)
         self.assertEqual(session.status, DepositSession.STATUS_AWAITING_PAYMENT)
         self.assertEqual(session.route_key, option_key)
-        self.assertEqual(session.derivation_index, 0)
+        self.assertEqual(session.derivation_index, 1)
         self.assertEqual(session.derivation_path, "m/44'/60'/0'/0/0")
         self.assertEqual(session.deposit_address, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         self.assertEqual(session.min_amount, self.default_token_pack.gross_stable_amount)

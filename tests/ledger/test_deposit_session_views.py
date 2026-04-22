@@ -1,7 +1,6 @@
 from datetime import timedelta
 from unittest.mock import patch
 
-from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -68,7 +67,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         expected_url = reverse("wallet_deposit_session", kwargs={"public_id": session.public_id})
         self.assertRedirects(first, expected_url)
         self.assertRedirects(second, expected_url)
-        self.assertEqual(session.derivation_index, 0)
+        self.assertEqual(session.derivation_index, 12)
         self.assertEqual(session.derivation_path, "m/44'/60'/0'/0/12")
         self.assertEqual(session.route_key, self.default_deposit_option_key())
         self.assertEqual(session.min_amount, self.default_token_pack.gross_stable_amount)

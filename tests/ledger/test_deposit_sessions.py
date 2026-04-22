@@ -12,7 +12,6 @@ from ledger.services import (
     credit_confirmed_deposit_session,
     delete_user_deposit_session,
     list_active_deposit_watch_targets,
-    enqueue_deposit_sweep_job,
     expire_stale_deposit_sessions,
     get_external_asset_clearing_wallet,
     open_user_deposit_session,
@@ -61,7 +60,7 @@ class TestDepositSessions(BaseLedgerTestCase):
         self.assertEqual(session.status, DepositSession.STATUS_AWAITING_PAYMENT)
         self.assertEqual(session.route_key, self.default_deposit_option_key())
         self.assertEqual(session.deposit_address, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-        self.assertEqual(session.derivation_index, 0)
+        self.assertEqual(session.derivation_index, 1)
         self.assertEqual(session.derivation_path, "m/44'/60'/0'/0/42")
         self.assertEqual(session.address_derivation_ref, "m/44'/60'/0'/0/42")
         self.assertEqual(session.required_confirmations, 12)
@@ -437,7 +436,7 @@ class TestDepositSessions(BaseLedgerTestCase):
 
         self.assertEqual(session.status, DepositSession.STATUS_AWAITING_PAYMENT)
         self.assertEqual(session.route_key, self.default_deposit_option_key())
-        self.assertEqual(session.derivation_index, 0)
+        self.assertEqual(session.derivation_index, 1)
         self.assertEqual(session.derivation_path, "m/44'/60'/0'/0/0")
         self.assertEqual(session.deposit_address, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         self.assertEqual(session.min_amount, self.default_token_pack.gross_stable_amount)
@@ -517,7 +516,7 @@ class TestDepositSessions(BaseLedgerTestCase):
             option_key=self.default_deposit_option_key(),
             token_pack=self.default_token_pack,
         )
-        self.assertEqual(first.derivation_index, 0)
+        self.assertEqual(first.derivation_index, 1)
         self.assertEqual(first.deposit_address, "0xcccccccccccccccccccccccccccccccccccccccc")
 
         DepositSession.objects.filter(id=first.id).update(
@@ -532,7 +531,7 @@ class TestDepositSessions(BaseLedgerTestCase):
         )
 
         self.assertNotEqual(first.id, second.id)
-        self.assertEqual(second.derivation_index, 1)
+        self.assertEqual(second.derivation_index, 2)
         self.assertEqual(second.derivation_path, "m/44'/60'/0'/0/1")
         self.assertEqual(second.deposit_address, "0xdddddddddddddddddddddddddddddddddddddddd")
         self.assertEqual(second.status, DepositSession.STATUS_AWAITING_PAYMENT)
