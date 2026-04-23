@@ -2,7 +2,12 @@ MediaCMS.user = {
 	name: {% if request.user.is_authenticated %}"{{request.user.username}}"{% else %}null{% endif %},
 	username: {% if request.user.is_authenticated %}"{{request.user.username}}"{% else %}null{% endif %},
 	thumbnail: {% if request.user.is_authenticated %}"{{request.user.thumbnail_url}}"{% else %}null{% endif %},
-    balance: {% if request.user.is_authenticated %}{{request.user.token_wallet.balance}}{% else %}0{% endif %},
+    {% if request.user.is_authenticated %}
+    {% widthratio request.user.token_wallet.held_balance 1 -1 as held_balance_negative %}
+    balance: {{ request.user.token_wallet.balance|add:held_balance_negative }},
+    {% else %}
+    balance: 0,
+    {% endif %}
 	is: {
 		admin: {% if IS_MEDIACMS_ADMIN %}true{% else %}false{% endif %},
 		anonymous: {% if request.user.is_authenticated %}false{% else %}true{% endif %},

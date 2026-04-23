@@ -136,28 +136,6 @@
       "poa_compatible": false
     },
     {
-      "key": "base-usdt",
-      "chain": "base",
-      "asset_code": "USDT",
-      "token_contract_address": "0xfde4c96c8593536e31f229ea8f37b2adab105c4e",
-      "rpc_urls": [
-        "${BASE_RPC_URL}",
-        "${BASE_RPC_URL_FALLBACK_1}",
-        "${BASE_RPC_URL_FALLBACK_2}"
-      ],
-      "funding_private_key_file": "/run/secrets/base_sweeper_funding_private_key",
-      "destination_address": "${BASE_SWEEP_DESTINATION_ADDRESS}",
-      "funding_confirmations": 1,
-      "sweep_confirmations": 1,
-      "max_gas_funding_amount_wei": "300000000000000",
-      "erc20_transfer_gas_limit": 120000,
-      "gas_limit_multiplier_bps": 12000,
-      "gas_limit_retry_multiplier_bps": 15000,
-      "tx_timeout_seconds": 300,
-      "gas_price_multiplier_bps": 12000,
-      "poa_compatible": false
-    },
-    {
       "key": "base-usdc",
       "chain": "base",
       "asset_code": "USDC",
