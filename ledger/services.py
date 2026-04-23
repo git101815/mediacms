@@ -870,6 +870,144 @@ def create_wallet_withdrawal_request(
     )
     return wallet_request
 
+def _get_wallet_request_for_update(*, actor, wallet_request) -> WalletRequest:
+    _require_perm(actor, "ledger.can_review_wallet_requests")
+
+    wallet_request_id = wallet_request.id if isinstance(wallet_request, WalletRequest) else int(wallet_request)
+    return WalletRequest.objects.select_for_update().get(id=wallet_request_id)
+
+
+def _release_wallet_request_hold(*, actor, wallet_request: WalletRequest) -> None:
+    if wallet_request.hold_id is None:
+        return
+
+    hold = LedgerHold.objects.select_for_update().get(id=wallet_request.hold_id)
+    if hold.released:
+        return
+
+    wallet = TokenWallet.objects.select_for_update().get(id=wallet_request.wallet_id)
+    hold_amount = int(hold.amount)
+
+    if hold_amount <= 0:
+        raise ValidationError("Wallet request hold amount must be greater than zero")
+
+    if int(wallet.held_balance) < hold_amount:
+        raise ValidationError("Wallet held balance is lower than the wallet request hold amount")
+
+    wallet.held_balance -= hold_amount
+    wallet.save(update_fields=["held_balance", "updated_at"])
+
+    hold.released = True
+    hold.released_by = actor
+    hold.released_at = timezone.now()
+    hold.save(update_fields=["released", "released_by", "released_at"])
+
+
+@transaction.atomic
+def reject_wallet_request(
+    *,
+    actor,
+    wallet_request,
+    rejection_reason: str = "",
+) -> WalletRequest:
+    wallet_request = _get_wallet_request_for_update(actor=actor, wallet_request=wallet_request)
+
+    if wallet_request.request_type != WalletRequest.REQUEST_TYPE_WITHDRAWAL:
+        raise ValidationError("Only withdrawal requests can be rejected")
+
+    if wallet_request.status != WalletRequest.STATUS_PENDING:
+        raise ValidationError("Only pending wallet requests can be rejected")
+
+    _release_wallet_request_hold(actor=actor, wallet_request=wallet_request)
+
+    wallet_request.status = WalletRequest.STATUS_REJECTED
+    wallet_request.reviewed_by = actor
+    wallet_request.reviewed_at = timezone.now()
+    wallet_request.completed_at = None
+    wallet_request.rejection_reason = (rejection_reason or "").strip()
+    wallet_request.payout_txid = ""
+    wallet_request.linked_ledger_txn = None
+    wallet_request.save(
+        update_fields=[
+            "status",
+            "reviewed_by",
+            "reviewed_at",
+            "completed_at",
+            "rejection_reason",
+            "payout_txid",
+            "linked_ledger_txn",
+            "updated_at",
+        ]
+    )
+    return wallet_request
+
+
+@transaction.atomic
+def complete_wallet_withdrawal_request(
+    *,
+    actor,
+    wallet_request,
+    payout_txid: str,
+) -> WalletRequest:
+    wallet_request = _get_wallet_request_for_update(actor=actor, wallet_request=wallet_request)
+
+    if wallet_request.request_type != WalletRequest.REQUEST_TYPE_WITHDRAWAL:
+        raise ValidationError("Only withdrawal requests can be completed")
+
+    if wallet_request.status != WalletRequest.STATUS_PENDING:
+        raise ValidationError("Only pending wallet requests can be completed")
+
+    normalized_payout_txid = (payout_txid or "").strip()
+    if not normalized_payout_txid:
+        raise ValidationError("Payout txid is required")
+
+    _release_wallet_request_hold(actor=actor, wallet_request=wallet_request)
+
+    wallet = TokenWallet.objects.select_for_update().get(id=wallet_request.wallet_id)
+    external_asset_clearing_wallet = get_external_asset_clearing_wallet()
+
+    ledger_txn = apply_ledger_transaction(
+        actor=actor,
+        kind="wallet_withdrawal_completed",
+        entries=[
+            (wallet, -int(wallet_request.amount)),
+            (external_asset_clearing_wallet, int(wallet_request.amount)),
+        ],
+        created_by=wallet_request.created_by or actor,
+        external_id=f"wallet_withdrawal_completed:{wallet_request.reference}",
+        memo=f"Completed wallet withdrawal request {wallet_request.reference}",
+        metadata={
+            **(wallet_request.metadata or {}),
+            "wallet_request_id": wallet_request.id,
+            "wallet_request_reference": wallet_request.reference,
+            "wallet_request_type": wallet_request.request_type,
+            "destination_address": wallet_request.destination_address,
+            "payout_txid": normalized_payout_txid,
+        },
+    )
+
+    now = timezone.now()
+    wallet_request.status = WalletRequest.STATUS_COMPLETED
+    wallet_request.reviewed_by = actor
+    wallet_request.reviewed_at = now
+    wallet_request.completed_at = now
+    wallet_request.rejection_reason = ""
+    wallet_request.payout_txid = normalized_payout_txid
+    wallet_request.linked_ledger_txn = ledger_txn
+    wallet_request.save(
+        update_fields=[
+            "status",
+            "reviewed_by",
+            "reviewed_at",
+            "completed_at",
+            "rejection_reason",
+            "payout_txid",
+            "linked_ledger_txn",
+            "updated_at",
+        ]
+    )
+    return wallet_request
+
 @transaction.atomic
 def create_pending_ledger_transaction(*, actor, kind: str, created_by=None, external_id=None, memo="", metadata=None):
     _require_perm(actor, "ledger.can_create_pending_ledger_transaction")

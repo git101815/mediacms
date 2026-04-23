@@ -1032,6 +1032,7 @@ def wallet(request):
         "can_view_risk_reason": can_view_risk_reason,
         "total_balance_display": _format_platform_token_amount(wallet_obj.balance),
         "available_balance_display": _format_platform_token_amount(available_balance),
+        "available_balance_units": int(available_balance),
         "held_balance_display": _format_platform_token_amount(wallet_obj.held_balance),
         "wallet_status_display": wallet_obj.get_risk_status_display(),
         "active_tab": active_tab,

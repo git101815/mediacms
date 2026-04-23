@@ -1,4 +1,6 @@
-from django.contrib import admin
+from django import forms
+from django.contrib import admin, messages
+
 from .models import (
     TokenWallet,
     LedgerTransaction,
@@ -15,6 +17,7 @@ from .models import (
     InternalAPIRequestNonce,
     TokenPack,
 )
+from .services import complete_wallet_withdrawal_request, reject_wallet_request
 
 class ReadOnlyAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
@@ -48,8 +51,49 @@ class TokenWalletAdmin(ReadOnlyAdmin):
     search_fields = ("user__username", "user__email")
     readonly_fields = ("user", "balance", "created_at", "updated_at")
 
+class WalletRequestReviewAdminForm(forms.ModelForm):
+    ACTION_NONE = ""
+    ACTION_REJECT = "reject"
+    ACTION_COMPLETE = "complete"
+
+    review_action = forms.ChoiceField(
+        required=False,
+        choices=(
+            (ACTION_NONE, "No review action"),
+            (ACTION_REJECT, "Reject request"),
+            (ACTION_COMPLETE, "Mark paid / completed"),
+        ),
+        help_text="Choose one review action and click Save.",
+    )
+    review_payout_txid = forms.CharField(
+        required=False,
+        max_length=128,
+        help_text="Required when marking a withdrawal request as paid.",
+    )
+    review_rejection_reason = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Optional reason stored on rejected requests.",
+    )
+
+    class Meta:
+        model = WalletRequest
+        fields = "__all__"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        action = (cleaned_data.get("review_action") or "").strip()
+        payout_txid = (cleaned_data.get("review_payout_txid") or "").strip()
+
+        if action == self.ACTION_COMPLETE and not payout_txid:
+            raise forms.ValidationError("Payout txid is required when marking a request as paid.")
+
+        return cleaned_data
+
 @admin.register(WalletRequest)
 class WalletRequestAdmin(admin.ModelAdmin):
+    form = WalletRequestReviewAdminForm
+
     list_display = (
         "id",
         "wallet",
@@ -58,6 +102,8 @@ class WalletRequestAdmin(admin.ModelAdmin):
         "amount",
         "asset_code",
         "reference",
+        "destination_address",
+        "payout_txid",
         "created_by",
         "reviewed_by",
         "created_at",
@@ -70,22 +116,129 @@ class WalletRequestAdmin(admin.ModelAdmin):
         "wallet__user__email",
         "destination_address",
         "notes",
+        "rejection_reason",
+        "payout_txid",
     )
     readonly_fields = (
         "wallet",
         "request_type",
+        "status",
         "amount",
         "asset_code",
         "destination_address",
         "reference",
         "notes",
+        "rejection_reason",
+        "payout_txid",
         "metadata",
         "metadata_version",
         "hold",
+        "linked_ledger_txn",
         "created_by",
+        "reviewed_by",
+        "reviewed_at",
+        "completed_at",
         "created_at",
         "updated_at",
     )
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "wallet",
+                    "request_type",
+                    "status",
+                    "amount",
+                    "asset_code",
+                    "destination_address",
+                    "reference",
+                    "notes",
+                )
+            },
+        ),
+        (
+            "Processing",
+            {
+                "fields": (
+                    "hold",
+                    "linked_ledger_txn",
+                    "payout_txid",
+                    "rejection_reason",
+                    "created_by",
+                    "reviewed_by",
+                    "reviewed_at",
+                    "completed_at",
+                )
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "classes": ("collapse",),
+                "fields": (
+                    "metadata",
+                    "metadata_version",
+                    "created_at",
+                    "updated_at",
+                ),
+            },
+        ),
+        (
+            "Review action",
+            {
+                "fields": (
+                    "review_action",
+                    "review_payout_txid",
+                    "review_rejection_reason",
+                ),
+                "description": "Use one review action per save. Mark paid requires a payout txid.",
+            },
+        ),
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            return
+
+        review_action = (form.cleaned_data.get("review_action") or "").strip()
+        if not review_action:
+            super().save_model(request, obj, form, change)
+            return
+
+        if review_action == WalletRequestReviewAdminForm.ACTION_REJECT:
+            updated_request = reject_wallet_request(
+                actor=request.user,
+                wallet_request=obj,
+                rejection_reason=form.cleaned_data.get("review_rejection_reason", ""),
+            )
+            self.message_user(
+                request,
+                f"Wallet request {updated_request.reference} rejected.",
+                level=messages.SUCCESS,
+            )
+            return
+
+        if review_action == WalletRequestReviewAdminForm.ACTION_COMPLETE:
+            updated_request = complete_wallet_withdrawal_request(
+                actor=request.user,
+                wallet_request=obj,
+                payout_txid=form.cleaned_data.get("review_payout_txid", ""),
+            )
+            self.message_user(
+                request,
+                f"Wallet request {updated_request.reference} marked as paid.",
+                level=messages.SUCCESS,
+            )
+            return
+
+        super().save_model(request, obj, form, change)
 
 @admin.register(LedgerTransaction)
 class LedgerTransactionAdmin(ReadOnlyAdmin):

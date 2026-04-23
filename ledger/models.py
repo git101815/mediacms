@@ -248,6 +248,7 @@ class WalletRequest(models.Model):
     reference = models.CharField(max_length=64, unique=True, db_index=True)
     notes = models.TextField(blank=True)
     rejection_reason = models.TextField(blank=True)
+    payout_txid = models.CharField(max_length=128, blank=True, db_index=True)
     metadata = models.JSONField(default=dict, blank=True)
     metadata_version = models.PositiveIntegerField(default=LEDGER_METADATA_VERSION)
 

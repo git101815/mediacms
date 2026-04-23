@@ -510,7 +510,7 @@
       action="{{ wallet_withdrawal_request_url }}"
       class="wallet-withdraw__form"
       data-wallet-withdraw-form
-      data-wallet-withdraw-available="{{ available_balance_display }}"
+      data-wallet-withdraw-available-units="{{ available_balance_units }}"
     >
       {% csrf_token %}
       <input type="hidden" name="return_tab" value="{{ active_tab }}">
@@ -521,11 +521,10 @@
         <input type="text" name="destination_address" class="wallet-field__input" maxlength="255" required>
       </label>
 
-     <div
-    class="wallet-ui__tabs wallet-ui__tabs--compact"
-    data-wallet-withdraw-quick-picks
-    data-wallet-withdraw-available="{{ available_balance_display }}"
-  >
+      <div
+        class="wallet-ui__tabs wallet-ui__tabs--compact"
+        data-wallet-withdraw-quick-picks
+      >
     <button
       type="button"
       class="wallet-ui__tab"
@@ -979,69 +978,54 @@
     closeModal(openModalNode.getAttribute('data-wallet-modal'));
   });
   const withdrawForm = document.querySelector('[data-wallet-withdraw-form]');
-if (withdrawForm) {
-  const amountInput = withdrawForm.querySelector('[data-wallet-withdraw-amount]');
-  const quickPicks = withdrawForm.querySelector('[data-wallet-withdraw-quick-picks]');
-  const percentButtons = Array.from(
-    withdrawForm.querySelectorAll('[data-wallet-withdraw-percent]')
-  );
+  if (withdrawForm) {
+    const amountInput = withdrawForm.querySelector('[data-wallet-withdraw-amount]');
+    const percentButtons = Array.from(
+      withdrawForm.querySelectorAll('[data-wallet-withdraw-percent]')
+    );
 
-  function parseDisplayAmountToUnits(rawValue) {
-    const normalized = String(rawValue || '').trim().replace(',', '.');
-    if (!normalized) {
-      return 0;
+    function formatUnitsToDisplayAmount(units) {
+      const normalizedUnits = Math.max(0, parseInt(units || 0, 10));
+      const integerPart = Math.floor(normalizedUnits / 1000000);
+      const fractionalPart = String(normalizedUnits % 1000000).padStart(6, '0');
+      return (integerPart + '.' + fractionalPart).replace(/\.?0+$/, '');
     }
 
-    const parts = normalized.split('.');
-    const integerPart = (parts[0] || '0').replace(/\D/g, '') || '0';
-    const fractionalRaw = (parts[1] || '').replace(/\D/g, '');
-    const fractionalPart = (fractionalRaw + '000000').slice(0, 6);
+    const availableUnits = Number.parseInt(
+      withdrawForm.getAttribute('data-wallet-withdraw-available-units') || '0',
+      10
+    );
 
-    return (parseInt(integerPart, 10) * 1000000) + parseInt(fractionalPart, 10);
-  }
-
-  function formatUnitsToDisplayAmount(units) {
-    const normalizedUnits = Math.max(0, parseInt(units || 0, 10));
-    const integerPart = Math.floor(normalizedUnits / 1000000);
-    const fractionalPart = String(normalizedUnits % 1000000).padStart(6, '0');
-    return (integerPart + '.' + fractionalPart).replace(/\.?0+$/, '');
-  }
-
-  const availableDisplay = quickPicks
-    ? String(quickPicks.getAttribute('data-wallet-withdraw-available') || '0')
-    : '0';
-
-  const availableUnits = parseDisplayAmountToUnits(availableDisplay);
-
-  if (availableUnits <= 0) {
-    percentButtons.forEach(function (button) {
-      button.disabled = true;
-    });
-  } else {
-    percentButtons.forEach(function (button) {
-      button.addEventListener('click', function () {
-        const percent = Number.parseInt(
-          button.getAttribute('data-wallet-withdraw-percent') || '0',
-          10
-        );
-
-        if (!Number.isFinite(percent) || percent <= 0) {
-          return;
-        }
-
-        let selectedUnits = 0;
-        if (percent >= 100) {
-          selectedUnits = availableUnits;
-        } else {
-          selectedUnits = Math.floor((availableUnits * percent) / 100);
-        }
-
-        amountInput.value = formatUnitsToDisplayAmount(selectedUnits);
-        amountInput.dispatchEvent(new Event('input', { bubbles: true }));
+    if (!Number.isFinite(availableUnits) || availableUnits <= 0) {
+      percentButtons.forEach(function (button) {
+        button.disabled = true;
       });
-    });
+    } else {
+      percentButtons.forEach(function (button) {
+        button.addEventListener('click', function () {
+          const percent = Number.parseInt(
+            button.getAttribute('data-wallet-withdraw-percent') || '0',
+            10
+          );
+
+          if (!Number.isFinite(percent) || percent <= 0) {
+            return;
+          }
+
+          let selectedUnits = 0;
+
+          if (percent >= 100) {
+            selectedUnits = availableUnits;
+          } else {
+            selectedUnits = Math.floor((availableUnits * percent) / 100);
+          }
+
+          amountInput.value = formatUnitsToDisplayAmount(selectedUnits);
+          amountInput.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+      });
+    }
   }
-}
 })();
 </script>
 {% endblock %}
