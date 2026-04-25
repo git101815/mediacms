@@ -1,3 +1,4 @@
+from decimal import Decimal, InvalidOperation
 from django import forms
 from django.contrib import admin, messages
 
@@ -18,6 +19,41 @@ from .models import (
     TokenPack,
 )
 from .services import complete_wallet_withdrawal_request, reject_wallet_request
+
+HUMAN_AMOUNT_SCALE = Decimal("1000000")
+
+def _format_admin_human_amount(value: int) -> str:
+    scaled = Decimal(int(value or 0)) / HUMAN_AMOUNT_SCALE
+    text = format(scaled, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _parse_admin_human_amount(value, field_label: str) -> int:
+    raw_value = str(value or "").strip().replace(",", ".")
+    if not raw_value:
+        raise forms.ValidationError(f"{field_label} is required.")
+
+    try:
+        parsed = Decimal(raw_value)
+    except (InvalidOperation, ValueError) as exc:
+        raise forms.ValidationError(f"{field_label} must be a valid number.") from exc
+
+    if parsed <= 0:
+        raise forms.ValidationError(f"{field_label} must be greater than zero.")
+
+    scaled = parsed * HUMAN_AMOUNT_SCALE
+    if scaled != scaled.to_integral_value():
+        raise forms.ValidationError(
+            f"{field_label} supports at most 6 decimal places."
+        )
+
+    normalized = int(scaled)
+    if normalized <= 0:
+        raise forms.ValidationError(f"{field_label} must be greater than zero.")
+
+    return normalized
 
 class ReadOnlyAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
@@ -547,14 +583,80 @@ class InternalAPIRequestNonceAdmin(ReadOnlyAdmin):
         "expires_at",
     )
 
+class TokenPackAdminForm(forms.ModelForm):
+    token_amount_human = forms.DecimalField(
+        max_digits=24,
+        decimal_places=6,
+        min_value=Decimal("0.000001"),
+        label="Token amount",
+        help_text="Human amount. Example: 100",
+    )
+    gross_stable_amount_human = forms.DecimalField(
+        max_digits=24,
+        decimal_places=6,
+        min_value=Decimal("0.000001"),
+        label="Gross stable amount",
+        help_text="Human amount. Example: 2.29",
+    )
+
+    class Meta:
+        model = TokenPack
+        fields = (
+            "code",
+            "name",
+            "description",
+            "badge_text",
+            "token_amount_human",
+            "gross_stable_amount_human",
+            "is_active",
+            "sort_order",
+        )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        if self.instance and self.instance.pk:
+            self.fields["token_amount_human"].initial = _format_admin_human_amount(
+                self.instance.token_amount
+            )
+            self.fields["gross_stable_amount_human"].initial = _format_admin_human_amount(
+                self.instance.gross_stable_amount
+            )
+
+    def clean(self):
+        cleaned_data = super().clean()
+
+        cleaned_data["token_amount"] = _parse_admin_human_amount(
+            cleaned_data.get("token_amount_human"),
+            "Token amount",
+        )
+        cleaned_data["gross_stable_amount"] = _parse_admin_human_amount(
+            cleaned_data.get("gross_stable_amount_human"),
+            "Gross stable amount",
+        )
+
+        return cleaned_data
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.token_amount = self.cleaned_data["token_amount"]
+        instance.gross_stable_amount = self.cleaned_data["gross_stable_amount"]
+
+        if commit:
+            instance.save()
+            self.save_m2m()
+
+        return instance
+
 @admin.register(TokenPack)
 class TokenPackAdmin(admin.ModelAdmin):
+    form = TokenPackAdminForm
     list_display = (
         "id",
         "code",
         "name",
-        "token_amount",
-        "gross_stable_amount",
+        "token_amount_display",
+        "gross_stable_amount_display",
         "badge_text",
         "is_active",
         "sort_order",
@@ -563,3 +665,24 @@ class TokenPackAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("code", "name", "description", "badge_text")
     readonly_fields = ("created_at", "updated_at", "metadata_version")
+    fields = (
+        "code",
+        "name",
+        "description",
+        "badge_text",
+        "token_amount_human",
+        "gross_stable_amount_human",
+        "is_active",
+        "sort_order",
+        "created_at",
+        "updated_at",
+        "metadata_version",
+    )
+
+    @admin.display(description="Token amount", ordering="token_amount")
+    def token_amount_display(self, obj):
+        return _format_admin_human_amount(obj.token_amount)
+
+    @admin.display(description="Gross stable amount", ordering="gross_stable_amount")
+    def gross_stable_amount_display(self, obj):
+        return _format_admin_human_amount(obj.gross_stable_amount)

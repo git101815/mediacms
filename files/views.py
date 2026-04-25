@@ -645,9 +645,30 @@ def _build_wallet_request_rows(wallet: TokenWallet) -> list[dict]:
         )
     return rows
 
+def _get_deposit_session_credited_amount_display(*, session: DepositSession, wallet: TokenWallet) -> str:
+    if not getattr(session, "credited_ledger_txn_id", None):
+        return ""
+
+    credited_txn = getattr(session, "credited_ledger_txn", None)
+    if credited_txn is None:
+        return ""
+
+    for entry in credited_txn.entries.all():
+        if entry.wallet_id == wallet.id and int(entry.delta) > 0:
+            return _format_platform_token_amount(entry.delta)
+
+    return ""
+
 def _build_recent_deposit_session_rows(wallet):
     sessions = (
         DepositSession.objects.filter(wallet=wallet)
+        .select_related("credited_ledger_txn")
+        .prefetch_related(
+            Prefetch(
+                "credited_ledger_txn__entries",
+                queryset=LedgerEntry.objects.select_related("wallet").order_by("id"),
+            )
+        )
         .order_by("-created_at")[:5]
     )
 
@@ -655,10 +676,19 @@ def _build_recent_deposit_session_rows(wallet):
     for session in sessions:
         display_label = f"{_get_network_display_label(session.chain)} · {session.asset_code}"
         public_status = _get_public_deposit_status(session)
+        credited_amount_display = _get_deposit_session_credited_amount_display(
+            session=session,
+            wallet=wallet,
+        )
+
+        show_amount = bool(credited_amount_display) and public_status == PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
+        show_view = public_status not in {"expired", "canceled"} and not show_amount
+
         rows.append(
             {
                 "public_id": str(session.public_id),
                 "label": display_label,
+                "display_label": session.display_label or display_label,
                 "status": public_status,
                 "raw_status": session.status,
                 "status_label": PUBLIC_DEPOSIT_STATUS_LABELS.get(public_status, public_status),
@@ -666,6 +696,9 @@ def _build_recent_deposit_session_rows(wallet):
                 "deposit_address": session.deposit_address,
                 "created_at": session.created_at,
                 "url": reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}),
+                "credited_amount_display": credited_amount_display,
+                "show_amount": show_amount,
+                "show_view": show_view,
             }
         )
     return rows

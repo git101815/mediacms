@@ -151,9 +151,19 @@
                 <div class="wallet-ui__card-meta">{{ row.deposit_address }}</div>
               </div>
 
-              <div class="wallet-ui__card-side">
-                <a href="{{ row.url }}" class="wallet-ui__ghost-link">View</a>
-              </div>
+                <div class="wallet-ui__card-side">
+                  {% if row.show_amount %}
+                    <strong
+                      class="wallet-ui__delta wallet-ui__delta--credit"
+                      title="+{{ row.credited_amount_display }}"
+                    >
+                      +{{ row.credited_amount_display }}
+                    </strong>
+                    <span>tokens</span>
+                  {% elif row.show_view %}
+                    <a href="{{ row.url }}" class="wallet-ui__ghost-link">View</a>
+                  {% endif %}
+                </div>
             </article>
             {% endfor %}
           </div>
@@ -223,9 +233,19 @@
                 <div class="wallet-ui__card-meta">{{ row.deposit_address }}</div>
               </div>
 
-              <div class="wallet-ui__card-side">
-                <a href="{{ row.url }}" class="wallet-ui__ghost-link">View</a>
-              </div>
+                <div class="wallet-ui__card-side">
+                  {% if row.show_amount %}
+                    <strong
+                      class="wallet-ui__delta wallet-ui__delta--credit"
+                      title="+{{ row.credited_amount_display }}"
+                    >
+                      +{{ row.credited_amount_display }}
+                    </strong>
+                    <span>tokens</span>
+                  {% elif row.show_view %}
+                    <a href="{{ row.url }}" class="wallet-ui__ghost-link">View</a>
+                  {% endif %}
+                </div>
             </article>
             {% endfor %}
 
