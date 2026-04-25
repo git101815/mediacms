@@ -497,17 +497,6 @@ def _build_wallet_tab_items(*, active_tab: str, active_status: str) -> list[dict
         )
     return items
 
-def _get_wallet_status_labels_for_tab(*, active_tab: str) -> dict:
-    if active_tab == "deposits":
-        return WALLET_DEPOSIT_STATUS_LABELS
-
-    if active_tab == "withdrawals":
-        return WALLET_WITHDRAWAL_STATUS_LABELS
-
-    if active_tab == WALLET_TAB_ALL:
-        return {WALLET_STATUS_ALL: "All statuses"}
-
-    return WALLET_LEDGER_STATUS_LABELS
 
 def _build_wallet_status_items(*, active_tab: str, active_status: str) -> list[dict]:
     items = []
