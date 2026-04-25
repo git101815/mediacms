@@ -1,43 +1,48 @@
-"""
-from django.urls import reverse
+from datetime import timedelta
+from unittest.mock import patch
 
-from ledger.models import LEDGER_RISK_STATUS_REVIEW, WalletRequest, DepositAddress, DepositSession
+from django.urls import reverse
+from django.utils import timezone
+
+from ledger.models import (
+    LEDGER_RISK_STATUS_REVIEW,
+    DepositAddress,
+    DepositSession,
+    WalletRequest,
+)
 from ledger.services import (
     apply_ledger_transaction,
     create_pending_ledger_transaction,
-    create_wallet_hold,
+    create_wallet_withdrawal_request,
     reverse_ledger_transaction,
     set_wallet_risk_status,
 )
 
 from .base import BaseLedgerTestCase
-from unittest.mock import patch
-from django.test import override_settings
 
 
 class TestWalletView(BaseLedgerTestCase):
+    def _enable_creator_withdrawals(self, user):
+        user.advancedUser = True
+        user.save(update_fields=["advancedUser"])
+
+    def _status_option_keys(self, response):
+        return [item["key"] for item in response.context["status_select_options"]]
+
     def test_wallet_page_requires_login(self):
         response = self.client.get(reverse("wallet"))
         self.assertEqual(response.status_code, 302)
 
     def test_wallet_page_shows_balances_holds_and_entries(self):
-        self.grant_perm(self.operator, "can_manage_wallet_holds")
-
         apply_ledger_transaction(
             actor=self.operator,
             kind="deposit",
             entries=[
-                (self.issuance, -500),
-                (self.w1, 500),
+                (self.issuance, -500_000_000),
+                (self.w1, 500_000_000),
             ],
             created_by=self.u1,
             memo="Initial top-up",
-        )
-        create_wallet_hold(
-            actor=self.operator,
-            wallet=self.w1,
-            amount=120,
-            reason="Payout reserve",
         )
 
         self.client.force_login(self.u1)
@@ -45,11 +50,10 @@ class TestWalletView(BaseLedgerTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Wallet")
-        self.assertContains(response, "500")
-        self.assertContains(response, "380")
-        self.assertContains(response, "120")
+        self.assertContains(response, "500.00")
+        self.assertContains(response, "500.00")
+        self.assertContains(response, "0.00")
         self.assertContains(response, "Initial top-up")
-        self.assertContains(response, "Payout reserve")
 
     def test_wallet_page_hides_internal_risk_reason_without_permission(self):
         self.grant_perm(self.operator, "can_manage_wallet_risk")
@@ -67,7 +71,7 @@ class TestWalletView(BaseLedgerTestCase):
         self.assertContains(response, "Wallet under review")
         self.assertNotContains(response, "Manual review required")
 
-    def test_wallet_page_shows_internal_risk_reason_with_permission(self):
+    def test_wallet_page_shows_review_banner_with_permission(self):
         self.grant_perm(self.operator, "can_manage_wallet_risk")
         self.grant_perm(self.u1, "can_view_wallet_risk")
         set_wallet_risk_status(
@@ -81,66 +85,85 @@ class TestWalletView(BaseLedgerTestCase):
         self.client.force_login(self.u1)
         response = self.client.get(reverse("wallet"))
 
-        self.assertContains(response, "Manual review required")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Wallet under review")
 
-    def test_wallet_page_filters_transactions_by_tab(self):
+    def test_wallet_page_filters_transaction_tabs(self):
         apply_ledger_transaction(
             actor=self.operator,
             kind="deposit",
             entries=[
-                (self.issuance, -600),
-                (self.w1, 600),
+                (self.issuance, -300_000_000),
+                (self.w1, 300_000_000),
             ],
             created_by=self.u1,
-            memo="Deposit row",
+            memo="Funding top-up",
         )
         apply_ledger_transaction(
             actor=self.operator,
             kind="purchase",
             entries=[
-                (self.w1, -150),
-                (self.issuance, 150),
+                (self.w1, -150_000_000),
+                (self.issuance, 150_000_000),
             ],
             created_by=self.u1,
             memo="Purchase row",
         )
-
-        self.client.force_login(self.u1)
-        response = self.client.get(reverse("wallet"), {"tab": "deposits"})
-
-        self.assertContains(response, "Deposit row")
-        self.assertNotContains(response, "Purchase row")
-        self.assertRegex(
-            response.content.decode(),
-            r'class="wallet-filter-pill wallet-filter-pill--active"[^>]*>\s*Deposits\s*</a>',
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="transfer",
+            entries=[
+                (self.w1, -75_000_000),
+                (self.w2, 75_000_000),
+            ],
+            created_by=self.u1,
+            memo="Transfer row",
         )
 
-    def test_wallet_page_filters_transactions_by_status(self):
-        posted_txn = apply_ledger_transaction(
+        self.client.force_login(self.u1)
+        response = self.client.get(reverse("wallet"), {"tab": "purchases"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Purchase row")
+        self.assertNotContains(response, "Transfer row")
+
+    def test_wallet_page_filters_reversed_transactions_on_all_tab(self):
+        apply_ledger_transaction(
             actor=self.operator,
             kind="deposit",
             entries=[
-                (self.issuance, -400),
-                (self.w1, 400),
+                (self.issuance, -500_000_000),
+                (self.w1, 500_000_000),
             ],
             created_by=self.u1,
-            memo="Posted deposit",
+            memo="Funding top-up",
+        )
+        purchase_txn = apply_ledger_transaction(
+            actor=self.operator,
+            kind="purchase",
+            entries=[
+                (self.w1, -400_000_000),
+                (self.issuance, 400_000_000),
+            ],
+            created_by=self.u1,
+            memo="Posted purchase",
         )
         reverse_ledger_transaction(
             actor=self.operator,
-            original_txn=posted_txn,
+            original_txn=purchase_txn,
             created_by=self.u1,
-            memo="Reversed deposit",
+            memo="Reversed purchase",
         )
 
         self.client.force_login(self.u1)
-        response = self.client.get(reverse("wallet"), {"status": "reversed"})
+        response = self.client.get(reverse("wallet"), {"tab": "all", "status": "reversed"})
 
-        self.assertContains(response, "Reversed deposit")
-        self.assertNotContains(response, "Posted deposit")
-        self.assertContains(response, 'option value="reversed" selected', html=False)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reversed purchase")
+        self.assertNotContains(response, "Posted purchase")
+        self.assertIn("reversed", self._status_option_keys(response))
 
-    def test_wallet_page_pending_filter_shows_empty_state_when_no_pending_entry_exists(self):
+    def test_wallet_page_pending_filter_shows_empty_state_when_no_matching_entry_exists(self):
         create_pending_ledger_transaction(
             actor=self.operator,
             kind="withdrawal",
@@ -149,19 +172,21 @@ class TestWalletView(BaseLedgerTestCase):
         )
 
         self.client.force_login(self.u1)
-        response = self.client.get(reverse("wallet"), {"status": "pending"})
+        response = self.client.get(reverse("wallet"), {"tab": "all", "status": "pending"})
 
-        self.assertContains(response, 'option value="pending" selected', html=False)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("pending", self._status_option_keys(response))
         self.assertContains(response, "No activity yet")
-        self.assertContains(response, "No pending transaction matches this filter yet.")
+        self.assertContains(response, "Your wallet activity will appear here.")
+        self.assertNotContains(response, "Pending withdrawal")
 
     def test_wallet_page_invalid_filters_fallback_to_all(self):
         apply_ledger_transaction(
             actor=self.operator,
             kind="deposit",
             entries=[
-                (self.issuance, -250),
-                (self.w1, 250),
+                (self.issuance, -250_000_000),
+                (self.w1, 250_000_000),
             ],
             created_by=self.u1,
             memo="Fallback row",
@@ -170,45 +195,74 @@ class TestWalletView(BaseLedgerTestCase):
         self.client.force_login(self.u1)
         response = self.client.get(reverse("wallet"), {"tab": "nope", "status": "???"})
 
+        self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Fallback row")
-        self.assertRegex(
-            response.content.decode(),
-            r'class="wallet-filter-pill wallet-filter-pill--active"[^>]*>\s*All\s*</a>',
-        )
-        self.assertContains(response, 'option value="all" selected', html=False)
+        self.assertIn("all", self._status_option_keys(response))
+
+    def test_wallet_page_all_tab_exposes_cross_type_status_options(self):
+        self.client.force_login(self.u1)
+        response = self.client.get(reverse("wallet"), {"tab": "all"})
+
+        self.assertEqual(response.status_code, 200)
+        status_keys = self._status_option_keys(response)
+        self.assertIn("all", status_keys)
+        self.assertIn("pending", status_keys)
+        self.assertIn("posted", status_keys)
+        self.assertIn("payment_detected", status_keys)
+        self.assertIn("completed", status_keys)
 
     def test_wallet_page_paginates_activity(self):
+        total_required = sum((index + 1) * 1_000_000 for index in range(25))
+
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="deposit",
+            entries=[
+                (self.issuance, -total_required),
+                (self.w1, total_required),
+            ],
+            created_by=self.u1,
+            memo="Funding top-up",
+        )
         for index in range(25):
             apply_ledger_transaction(
                 actor=self.operator,
-                kind="deposit",
+                kind="purchase",
                 entries=[
-                    (self.issuance, -(index + 1)),
-                    (self.w1, index + 1),
+                    (self.w1, -(index + 1) * 1_000_000),
+                    (self.issuance, (index + 1) * 1_000_000),
                 ],
                 created_by=self.u1,
-                memo=f"Deposit {index}",
+                memo=f"Purchase {index}",
             )
 
         self.client.force_login(self.u1)
-        page_one = self.client.get(reverse("wallet"))
-        page_two = self.client.get(reverse("wallet"), {"page": 2})
+        page_one = self.client.get(reverse("wallet"), {"tab": "purchases"})
+        page_two = self.client.get(reverse("wallet"), {"tab": "purchases", "page": 2})
 
-        self.assertContains(page_one, "Deposit 24")
-        self.assertContains(page_one, "Deposit 5")
-        self.assertNotContains(page_one, "Deposit 4")
-        self.assertContains(page_two, "Deposit 4")
-        self.assertContains(page_two, "Deposit 0")
-        self.assertContains(page_one, "Page 1 of 2")
-        self.assertContains(page_two, "Page 2 of 2")
+        self.assertContains(page_one, "Purchase 24")
+        self.assertContains(page_one, "Purchase 5")
+        self.assertNotContains(page_one, "Purchase 4")
+        self.assertContains(page_two, "Purchase 4")
+        self.assertContains(page_two, "Purchase 0")
 
-    def test_wallet_page_shows_request_actions(self):
+    def test_wallet_page_hides_cash_out_for_non_creator(self):
         self.client.force_login(self.u1)
         response = self.client.get(reverse("wallet"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Deposit")
-        self.assertContains(response, "Withdraw")
+        self.assertContains(response, "Buy tokens")
+        self.assertNotContains(response, "Cash out")
+
+    def test_wallet_page_shows_cash_out_for_creator(self):
+        self._enable_creator_withdrawals(self.u1)
+
+        self.client.force_login(self.u1)
+        response = self.client.get(reverse("wallet"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Buy tokens")
+        self.assertContains(response, "Cash out")
 
     def test_user_can_open_deposit_session_from_wallet(self):
         DepositAddress.objects.create(
@@ -219,7 +273,7 @@ class TestWalletView(BaseLedgerTestCase):
             address="0x1111111111111111111111111111111111111111",
             address_derivation_ref="m/44'/60'/0'/0/10",
             required_confirmations=12,
-            min_amount=100,
+            min_amount=1_000_000,
             session_ttl_seconds=3600,
         )
 
@@ -227,30 +281,36 @@ class TestWalletView(BaseLedgerTestCase):
 
         response = self.client.post(
             reverse("wallet_deposit_request"),
-            {
-                "deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
-                "return_tab": "all",
-                "return_status": "all",
-            },
+            self.default_deposit_request_payload(
+                return_tab="all",
+                return_status="all",
+            ),
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(WalletRequest.objects.filter(request_type=WalletRequest.REQUEST_TYPE_DEPOSIT).count(), 0)
+        self.assertEqual(
+            WalletRequest.objects.filter(request_type=WalletRequest.REQUEST_TYPE_DEPOSIT).count(),
+            0,
+        )
 
         session = DepositSession.objects.get(wallet=self.w1)
-        self.assertRedirects(response, reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}))
+        self.assertRedirects(
+            response,
+            reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}),
+        )
 
         wallet_response = self.client.get(reverse("wallet"))
-        self.assertContains(wallet_response, "Recent Deposit Sessions")
         self.assertContains(wallet_response, "Ethereum · USDT")
 
     def test_user_can_create_withdrawal_request_from_wallet(self):
+        self._enable_creator_withdrawals(self.u1)
+
         apply_ledger_transaction(
             actor=self.operator,
             kind="deposit",
             entries=[
-                (self.issuance, -500),
-                (self.w1, 500),
+                (self.issuance, -500_000_000),
+                (self.w1, 500_000_000),
             ],
             created_by=self.u1,
             memo="Initial top-up",
@@ -276,27 +336,57 @@ class TestWalletView(BaseLedgerTestCase):
             request_type=WalletRequest.REQUEST_TYPE_WITHDRAWAL,
         )
         self.assertEqual(wallet_request.status, WalletRequest.STATUS_PENDING)
-        self.assertEqual(wallet_request.amount, 120)
+        self.assertEqual(wallet_request.amount, 120_000_000)
         self.assertEqual(wallet_request.destination_address, "0xabc123")
         self.assertEqual(wallet_request.notes, "First withdrawal")
         self.assertIsNotNone(wallet_request.hold)
 
         self.w1.refresh_from_db()
-        self.assertEqual(self.w1.balance, 500)
-        self.assertEqual(self.w1.held_balance, 120)
+        self.assertEqual(self.w1.balance, 500_000_000)
+        self.assertEqual(self.w1.held_balance, 120_000_000)
 
-        wallet_response = self.client.get(reverse("wallet"))
+        wallet_response = self.client.get(reverse("wallet"), {"tab": "withdrawals"})
         self.assertContains(wallet_response, "First withdrawal")
         self.assertContains(wallet_response, "0xabc123")
-        self.assertContains(wallet_response, "Reserved 120")
+        self.assertContains(wallet_response, "120.00")
 
-    def test_withdrawal_request_rejected_when_amount_exceeds_available_balance(self):
+    def test_withdrawal_request_rejected_for_non_creator(self):
         apply_ledger_transaction(
             actor=self.operator,
             kind="deposit",
             entries=[
-                (self.issuance, -100),
-                (self.w1, 100),
+                (self.issuance, -100_000_000),
+                (self.w1, 100_000_000),
+            ],
+            created_by=self.u1,
+            memo="Small top-up",
+        )
+
+        self.client.force_login(self.u1)
+
+        response = self.client.post(
+            reverse("wallet_withdrawal_request"),
+            {
+                "amount": "10",
+                "destination_address": "0xoverflow",
+                "notes": "No creator rights",
+                "return_tab": "all",
+                "return_status": "all",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(WalletRequest.objects.count(), 0)
+
+    def test_withdrawal_request_rejected_when_amount_exceeds_available_balance(self):
+        self._enable_creator_withdrawals(self.u1)
+
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="deposit",
+            entries=[
+                (self.issuance, -100_000_000),
+                (self.w1, 100_000_000),
             ],
             created_by=self.u1,
             memo="Small top-up",
@@ -337,7 +427,7 @@ class TestWalletView(BaseLedgerTestCase):
             address_derivation_ref="m/44'/60'/0'/0/10",
             derivation_index=10,
             required_confirmations=12,
-            min_amount=100,
+            min_amount=1_000_000,
             session_ttl_seconds=3600,
         )
 
@@ -345,19 +435,17 @@ class TestWalletView(BaseLedgerTestCase):
 
         first = self.client.post(
             reverse("wallet_deposit_request"),
-            {
-                "deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
-                "return_tab": "all",
-                "return_status": "all",
-            },
+            self.default_deposit_request_payload(
+                return_tab="all",
+                return_status="all",
+            ),
         )
         second = self.client.post(
             reverse("wallet_deposit_request"),
-            {
-                "deposit_option_key": "ethereum:USDT:0xdac17f958d2ee523a2206206994597c13d831ec7",
-                "return_tab": "all",
-                "return_status": "all",
-            },
+            self.default_deposit_request_payload(
+                return_tab="all",
+                return_status="all",
+            ),
         )
 
         self.assertEqual(first.status_code, 302)
@@ -376,7 +464,7 @@ class TestWalletView(BaseLedgerTestCase):
             expires_at=timezone.now() + timedelta(hours=1),
             status=DepositSession.STATUS_AWAITING_PAYMENT,
             required_confirmations=12,
-            min_amount=100,
+            min_amount=1_000_000,
         )
 
         self.client.force_login(self.u1)
@@ -386,8 +474,8 @@ class TestWalletView(BaseLedgerTestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["min_amount"], 100)
-        self.assertIn("min_amount_display", payload)
+        self.assertEqual(payload["min_amount"], 1_000_000)
+        self.assertEqual(payload["min_amount_display"], "1.00")
 
     def test_wallet_deposit_session_cancel_marks_session_canceled(self):
         session = DepositSession.objects.create(
@@ -401,7 +489,7 @@ class TestWalletView(BaseLedgerTestCase):
             expires_at=timezone.now() + timedelta(hours=1),
             status=DepositSession.STATUS_AWAITING_PAYMENT,
             required_confirmations=12,
-            min_amount=100,
+            min_amount=1_000_000,
         )
 
         self.client.force_login(self.u1)
@@ -412,4 +500,83 @@ class TestWalletView(BaseLedgerTestCase):
         self.assertEqual(response.status_code, 302)
         session.refresh_from_db()
         self.assertEqual(session.status, getattr(DepositSession, "STATUS_CANCELED", "canceled"))
-"""
+
+    def test_wallet_all_tab_can_filter_deposit_public_status(self):
+        awaiting = DepositSession.objects.create(
+            user=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            deposit_address="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            address_derivation_ref="m/44'/60'/0'/0/1",
+            expires_at=timezone.now() + timedelta(hours=1),
+            status=DepositSession.STATUS_AWAITING_PAYMENT,
+            required_confirmations=12,
+            min_amount=1_000_000,
+        )
+        credited = DepositSession.objects.create(
+            user=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            deposit_address="0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            address_derivation_ref="m/44'/60'/0'/0/2",
+            expires_at=timezone.now() + timedelta(hours=1),
+            status=DepositSession.STATUS_CREDITED,
+            required_confirmations=12,
+            min_amount=1_000_000,
+        )
+
+        self.client.force_login(self.u1)
+        response = self.client.get(
+            reverse("wallet"),
+            {"tab": "all", "status": "payment_detected"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, credited.deposit_address)
+        self.assertNotContains(response, awaiting.deposit_address)
+
+    def test_wallet_withdrawals_tab_can_filter_wallet_request_status(self):
+        self._enable_creator_withdrawals(self.u1)
+
+        apply_ledger_transaction(
+            actor=self.operator,
+            kind="deposit",
+            entries=[
+                (self.issuance, -500_000_000),
+                (self.w1, 500_000_000),
+            ],
+            created_by=self.u1,
+            memo="Initial top-up",
+        )
+
+        pending_request = create_wallet_withdrawal_request(
+            actor=self.u1,
+            wallet=self.w1,
+            amount="10",
+            destination_address="0x111",
+            notes="Pending request",
+        )
+
+        completed_request = create_wallet_withdrawal_request(
+            actor=self.u1,
+            wallet=self.w1,
+            amount="5",
+            destination_address="0x222",
+            notes="Completed request",
+        )
+        completed_request.status = WalletRequest.STATUS_COMPLETED
+        completed_request.save(update_fields=["status", "updated_at"])
+
+        self.client.force_login(self.u1)
+        response = self.client.get(
+            reverse("wallet"),
+            {"tab": "withdrawals", "status": WalletRequest.STATUS_COMPLETED},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, completed_request.reference)
+        self.assertNotContains(response, pending_request.reference)
