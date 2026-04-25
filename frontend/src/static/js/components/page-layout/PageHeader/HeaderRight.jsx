@@ -152,15 +152,30 @@ export function HeaderRight(props) {
 
                     <UploadMediaButton user={user} links={links} />
                     {!user.is.anonymous ? (
-                      <a
-                        className="token-balance"
-                        href={walletUrl}
-                        title={translateString('Token balance')}
-                        aria-label={translateString('Token balance')}
-                      >
-                        <MaterialIcon type="account_balance_wallet" />
-                        <span className="amount">{Number(user.balance || 0).toLocaleString()}</span>
-                      </a>
+                    <a
+                      className="token-balance"
+                      href={walletUrl}
+                      title={translateString('Token balance')}
+                      aria-label={translateString('Token balance')}
+                    >
+                      <MaterialIcon type="account_balance_wallet" />
+                      <span className="amount">
+                        {(function formatTokenBalance(rawBalance) {
+                          const normalized = Number(rawBalance || 0);
+
+                          if (!Number.isFinite(normalized)) {
+                            return '0';
+                          }
+
+                          const humanBalance = normalized / 1000000;
+
+                          return humanBalance.toLocaleString(undefined, {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 2,
+                          });
+                        })(user.balance)}
+                      </span>
+                    </a>
                     ) : null}
                     <div
                       className={

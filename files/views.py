@@ -143,6 +143,7 @@ cutoff = timezone.now() - timedelta(minutes=40)
 WALLET_PAGE_SIZE = 20
 WALLET_TAB_ALL = "all"
 WALLET_STATUS_ALL = "all"
+
 WALLET_TAB_LABELS = {
     WALLET_TAB_ALL: "All",
     "deposits": "Deposits",
@@ -150,23 +151,20 @@ WALLET_TAB_LABELS = {
     "transfers": "Transfers",
     "withdrawals": "Withdrawals",
 }
+
 WALLET_TAB_KIND_MAP = {
     "deposits": [LEDGER_ACTION_DEPOSIT],
     "purchases": [LEDGER_ACTION_PURCHASE],
     "transfers": [LEDGER_ACTION_TRANSFER],
     "withdrawals": [LEDGER_ACTION_WITHDRAWAL],
 }
-WALLET_STATUS_LABELS = {
-    WALLET_STATUS_ALL: "All statuses",
-    LEDGER_TXN_STATUS_PENDING: "Pending",
-    LEDGER_TXN_STATUS_POSTED: "Posted",
-    LEDGER_TXN_STATUS_REVERSED: "Reversed",
-}
+
 WALLET_STATUS_ICON_MAP = {
     LEDGER_TXN_STATUS_PENDING: "schedule",
     LEDGER_TXN_STATUS_POSTED: "check_circle",
     LEDGER_TXN_STATUS_REVERSED: "undo",
 }
+
 WALLET_EMPTY_STATE_MESSAGES = {
     WALLET_TAB_ALL: "No activity yet",
     "deposits": "No deposits yet",
@@ -174,7 +172,9 @@ WALLET_EMPTY_STATE_MESSAGES = {
     "transfers": "No transfers yet",
     "withdrawals": "No withdrawals yet",
 }
+
 WALLET_OPEN_MODAL_KEYS = {"deposit", "withdraw"}
+
 WALLET_REQUEST_STATUS_ICON_MAP = {
     WalletRequest.STATUS_PENDING: "schedule",
     WalletRequest.STATUS_APPROVED: "task_alt",
@@ -182,10 +182,12 @@ WALLET_REQUEST_STATUS_ICON_MAP = {
     WalletRequest.STATUS_CANCELED: "block",
     WalletRequest.STATUS_COMPLETED: "check_circle",
 }
+
 WALLET_REQUEST_TYPE_ICON_MAP = {
     WalletRequest.REQUEST_TYPE_DEPOSIT: "south",
     WalletRequest.REQUEST_TYPE_WITHDRAWAL: "north_east",
 }
+
 DEPOSIT_SESSION_TERMINAL_STATUSES = {
     DepositSession.STATUS_CREDITED,
     getattr(DepositSession, "STATUS_SWEPT", "swept"),
@@ -215,6 +217,7 @@ DEPOSIT_SESSION_STATUS_ICONS = {
     DepositSession.STATUS_FAILED: "error",
     DepositSession.STATUS_CANCELED: "block",
 }
+
 PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT = "awaiting_payment"
 PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED = "payment_detected"
 PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE = "transaction_complete"
@@ -235,6 +238,47 @@ PUBLIC_DEPOSIT_STATUS_ICONS = {
     "canceled": "cancel",
     "failed": "error",
     "expired": "timer_off",
+}
+
+WALLET_LEDGER_STATUS_LABELS = {
+    WALLET_STATUS_ALL: "All statuses",
+    LEDGER_TXN_STATUS_PENDING: "Pending",
+    LEDGER_TXN_STATUS_POSTED: "Posted",
+    LEDGER_TXN_STATUS_REVERSED: "Reversed",
+}
+
+WALLET_DEPOSIT_STATUS_LABELS = {
+    WALLET_STATUS_ALL: "All statuses",
+    PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT: "Waiting for payment",
+    PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED: "Payment detected",
+    PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE: "Transaction complete",
+    "canceled": "Canceled",
+    "failed": "Failed",
+    "expired": "Expired",
+}
+
+WALLET_WITHDRAWAL_STATUS_LABELS = {
+    WALLET_STATUS_ALL: "All statuses",
+    WalletRequest.STATUS_PENDING: "Pending",
+    WalletRequest.STATUS_APPROVED: "Approved",
+    WalletRequest.STATUS_REJECTED: "Rejected",
+    WalletRequest.STATUS_CANCELED: "Canceled",
+    WalletRequest.STATUS_COMPLETED: "Completed",
+}
+WALLET_ALL_STATUS_LABELS = {
+    WALLET_STATUS_ALL: "All statuses",
+    LEDGER_TXN_STATUS_PENDING: "Pending",
+    LEDGER_TXN_STATUS_POSTED: "Posted",
+    LEDGER_TXN_STATUS_REVERSED: "Reversed",
+    PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT: "Waiting for payment",
+    PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED: "Payment detected",
+    PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE: "Transaction complete",
+    WalletRequest.STATUS_APPROVED: "Approved",
+    WalletRequest.STATUS_REJECTED: "Rejected",
+    WalletRequest.STATUS_COMPLETED: "Completed",
+    WalletRequest.STATUS_CANCELED: "Canceled",
+    "failed": "Failed",
+    "expired": "Expired",
 }
 def about(request):
     """About view"""
@@ -412,11 +456,23 @@ def _normalize_wallet_tab(value: str) -> str:
         return value
     return WALLET_TAB_ALL
 
-
-def _normalize_wallet_status(value: str) -> str:
-    if value in WALLET_STATUS_LABELS:
+def _normalize_wallet_status(value: str, *, active_tab: str) -> str:
+    labels = _get_wallet_status_labels_for_tab(active_tab=active_tab)
+    if value in labels:
         return value
     return WALLET_STATUS_ALL
+
+def _get_wallet_status_labels_for_tab(*, active_tab: str) -> dict:
+    if active_tab == "deposits":
+        return WALLET_DEPOSIT_STATUS_LABELS
+
+    if active_tab == "withdrawals":
+        return WALLET_WITHDRAWAL_STATUS_LABELS
+
+    if active_tab == WALLET_TAB_ALL:
+        return WALLET_ALL_STATUS_LABELS
+
+    return WALLET_LEDGER_STATUS_LABELS
 
 
 def _build_wallet_querystring(*, tab: str, status: str, page: int | None = None, open_modal: str | None = None) -> str:
@@ -441,10 +497,23 @@ def _build_wallet_tab_items(*, active_tab: str, active_status: str) -> list[dict
         )
     return items
 
+def _get_wallet_status_labels_for_tab(*, active_tab: str) -> dict:
+    if active_tab == "deposits":
+        return WALLET_DEPOSIT_STATUS_LABELS
+
+    if active_tab == "withdrawals":
+        return WALLET_WITHDRAWAL_STATUS_LABELS
+
+    if active_tab == WALLET_TAB_ALL:
+        return {WALLET_STATUS_ALL: "All statuses"}
+
+    return WALLET_LEDGER_STATUS_LABELS
 
 def _build_wallet_status_items(*, active_tab: str, active_status: str) -> list[dict]:
     items = []
-    for key, label in WALLET_STATUS_LABELS.items():
+    status_labels = _get_wallet_status_labels_for_tab(active_tab=active_tab)
+
+    for key, label in status_labels.items():
         items.append(
             {
                 "key": key,
@@ -466,17 +535,20 @@ def _get_wallet_counterparty_label(wallet: TokenWallet) -> str:
 
 def _get_wallet_empty_state_message(*, tab: str, status: str) -> tuple[str, str]:
     title = WALLET_EMPTY_STATE_MESSAGES.get(tab, WALLET_EMPTY_STATE_MESSAGES[WALLET_TAB_ALL])
+    status_labels = _get_wallet_status_labels_for_tab(active_tab=tab)
+
     if status == WALLET_STATUS_ALL:
         if tab == WALLET_TAB_ALL:
             text = "Your wallet does not have any transaction yet."
         else:
             text = f"No {WALLET_TAB_LABELS[tab].lower()} have been recorded for this wallet yet."
     else:
-        status_label = WALLET_STATUS_LABELS[status].lower()
+        status_label = status_labels.get(status, status).lower()
         if tab == WALLET_TAB_ALL:
             text = f"No {status_label} transaction matches this filter yet."
         else:
             text = f"No {status_label} {WALLET_TAB_LABELS[tab].lower()} match this filter yet."
+
     return title, text
 
 
@@ -592,10 +664,13 @@ def _extract_wallet_form_error(exc) -> str:
 
 
 def _build_wallet_action_state(*, wallet: TokenWallet, available_balance: int) -> dict:
+    is_advanced_user = bool(getattr(wallet.user, "advancedUser", False))
+
     if wallet.risk_status == LEDGER_RISK_STATUS_BLOCKED:
         return {
             "can_deposit": False,
             "can_withdraw": False,
+            "show_withdraw": is_advanced_user,
             "hint": "Wallet actions are disabled while this wallet is blocked.",
         }
 
@@ -603,6 +678,7 @@ def _build_wallet_action_state(*, wallet: TokenWallet, available_balance: int) -
         return {
             "can_deposit": False,
             "can_withdraw": False,
+            "show_withdraw": is_advanced_user,
             "hint": "Wallet actions are disabled while this wallet is under review.",
         }
 
@@ -610,24 +686,33 @@ def _build_wallet_action_state(*, wallet: TokenWallet, available_balance: int) -
         return {
             "can_deposit": True,
             "can_withdraw": False,
+            "show_withdraw": is_advanced_user,
             "hint": "Add funds before requesting a withdrawal.",
         }
 
     return {
         "can_deposit": True,
-        "can_withdraw": True,
-        "hint": "Withdrawals reserve your available balance until the request is processed.",
+        "can_withdraw": is_advanced_user,
+        "show_withdraw": is_advanced_user,
+        "hint": (
+            "Withdrawals reserve your available balance until the request is processed."
+            if is_advanced_user
+            else ""
+        ),
     }
 
 
-def _build_wallet_request_rows(wallet: TokenWallet) -> list[dict]:
+def _build_wallet_request_rows(wallet: TokenWallet, *, active_status: str = WALLET_STATUS_ALL) -> list[dict]:
     wallet_requests = (
         wallet.wallet_requests.select_related("created_by", "reviewed_by", "hold", "linked_ledger_txn")
-        .order_by("-created_at", "-id")[:10]
+        .order_by("-created_at", "-id")
     )
 
+    if active_status != WALLET_STATUS_ALL:
+        wallet_requests = wallet_requests.filter(status=active_status)
+
     rows = []
-    for wallet_request in wallet_requests:
+    for wallet_request in wallet_requests[:10]:
         rows.append(
             {
                 "created_at": wallet_request.created_at,
@@ -646,16 +731,20 @@ def _build_wallet_request_rows(wallet: TokenWallet) -> list[dict]:
         )
     return rows
 
-def _build_recent_deposit_session_rows(wallet):
+def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_STATUS_ALL):
     sessions = (
         DepositSession.objects.filter(wallet=wallet)
-        .order_by("-created_at")[:5]
+        .order_by("-created_at")
     )
 
     rows = []
     for session in sessions:
         display_label = f"{_get_network_display_label(session.chain)} · {session.asset_code}"
         public_status = _get_public_deposit_status(session)
+
+        if active_status != WALLET_STATUS_ALL and public_status != active_status:
+            continue
+
         rows.append(
             {
                 "public_id": str(session.public_id),
@@ -669,6 +758,10 @@ def _build_recent_deposit_session_rows(wallet):
                 "url": reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}),
             }
         )
+
+        if len(rows) >= 5:
+            break
+
     return rows
 
 def _build_deposit_session_payload(session: DepositSession) -> dict:
@@ -843,7 +936,10 @@ def wallet_deposit_request(request):
     payment_method_key = (request.POST.get("payment_method_key") or "").strip()
     payment_method_type = (request.POST.get("payment_method_type") or "").strip()
     return_tab = _normalize_wallet_tab((request.POST.get("return_tab") or WALLET_TAB_ALL).strip())
-    return_status = _normalize_wallet_status((request.POST.get("return_status") or WALLET_STATUS_ALL).strip())
+    return_status = _normalize_wallet_status(
+        (request.POST.get("return_status") or WALLET_STATUS_ALL).strip(),
+        active_tab=return_tab,
+    )
 
     try:
         if not option_key:
@@ -909,11 +1005,16 @@ def wallet_withdrawal_request(request):
     )
 
     return_tab = _normalize_wallet_tab(request.POST.get("return_tab", WALLET_TAB_ALL).strip())
-    return_status = _normalize_wallet_status(request.POST.get("return_status", WALLET_STATUS_ALL).strip())
+    return_status = _normalize_wallet_status(
+        (request.POST.get("return_status") or WALLET_STATUS_ALL).strip(),
+        active_tab=return_tab,
+    )
     amount = request.POST.get("amount", "").strip()
     destination_address = request.POST.get("destination_address", "").strip()
     notes = request.POST.get("notes", "").strip()
-
+    if not getattr(request.user, "advancedUser", False):
+        messages.error(request, "Cash out is available only for creator accounts.")
+        return redirect(f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status)}")
     try:
         wallet_request = create_wallet_withdrawal_request(
             actor=request.user,
@@ -982,8 +1083,11 @@ def wallet(request):
         },
     )
 
-    active_tab = _normalize_wallet_tab(request.GET.get("tab", WALLET_TAB_ALL).strip())
-    active_status = _normalize_wallet_status(request.GET.get("status", WALLET_STATUS_ALL).strip())
+    active_tab = _normalize_wallet_tab((request.GET.get("tab") or WALLET_TAB_ALL).strip())
+    active_status = _normalize_wallet_status(
+        (request.GET.get("status") or WALLET_STATUS_ALL).strip(),
+        active_tab=active_tab,
+    )
     open_modal = _normalize_wallet_open_modal(request.GET.get("open_modal", "").strip())
 
     try:
@@ -993,7 +1097,10 @@ def wallet(request):
 
     available_balance = get_wallet_available_balance(wallet_obj)
     can_view_risk_reason = request.user.is_superuser or request.user.has_perm("ledger.can_view_wallet_risk")
-    recent_request_rows = _build_wallet_request_rows(wallet_obj)
+    recent_request_rows = _build_wallet_request_rows(
+        wallet_obj,
+        active_status=active_status,
+    )
     wallet_actions = _build_wallet_action_state(wallet=wallet_obj, available_balance=available_balance)
 
     wallet_banner = None
@@ -1043,7 +1150,10 @@ def wallet(request):
         "recent_request_rows": recent_request_rows,
         "tab_items": _build_wallet_tab_items(active_tab=active_tab, active_status=active_status),
         "status_items": _build_wallet_status_items(active_tab=active_tab, active_status=active_status),
-        "status_select_options": [{"key": key, "label": label} for key, label in WALLET_STATUS_LABELS.items()],
+        "status_select_options": [
+            {"key": key, "label": label}
+            for key, label in _get_wallet_status_labels_for_tab(active_tab=active_tab).items()
+        ],
         "transaction_rows": transaction_rows,
         "page_obj": page_obj,
         "empty_state_title": empty_state_title,
@@ -1055,7 +1165,7 @@ def wallet(request):
         "wallet_deposit_request_url": reverse("wallet_deposit_request"),
         "wallet_withdrawal_request_url": reverse("wallet_withdrawal_request"),
         "deposit_options": deposit_options,
-        "recent_deposit_session_rows": _build_recent_deposit_session_rows(wallet_obj),
+        "recent_deposit_session_rows": _build_recent_deposit_session_rows(wallet_obj,active_status=active_status),
         "token_pack_rows": token_pack_rows,
     }
     return render(request, "cms/wallet.html", context)

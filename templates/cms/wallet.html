@@ -61,16 +61,17 @@
                 <i class="material-icons" aria-hidden="true">add_circle</i>
                 <span>Buy tokens</span>
               </button>
-
-              <button
-                type="button"
-                class="wallet-btn wallet-btn--secondary"
-                data-wallet-open="withdraw"
-                {% if not wallet_actions.can_withdraw %}disabled{% endif %}
-              >
-                <i class="material-icons" aria-hidden="true">payments</i>
-                <span>Cash out</span>
-              </button>
+                {% if wallet_actions.show_withdraw %}
+                <button
+                  type="button"
+                  class="wallet-btn wallet-btn--secondary"
+                  data-wallet-open="withdraw"
+                  {% if not wallet_actions.can_withdraw %}disabled{% endif %}
+                >
+                  <i class="material-icons" aria-hidden="true">payments</i>
+                  <span>Cash out</span>
+                </button>
+                {% endif %}
             </div>
           </div>
 
@@ -511,6 +512,7 @@
   </div>
 </div>
 
+{% if wallet_actions.show_withdraw %}
 <div class="wallet-modal" data-wallet-modal="withdraw" hidden>
   <div class="wallet-modal__backdrop" data-wallet-close="withdraw"></div>
   <div class="wallet-modal__dialog wallet-modal__dialog--withdraw" role="dialog" aria-modal="true" aria-labelledby="wallet-withdraw-modal-title">
@@ -599,6 +601,7 @@
     </form>
   </div>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block bottomimports %}
