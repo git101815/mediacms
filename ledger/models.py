@@ -1015,9 +1015,14 @@ class DepositSweepJob(models.Model):
 
     claimed_by_service = models.CharField(max_length=64, blank=True, default="")
     claim_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     attempt_count = models.PositiveIntegerField(default=0)
+    retry_count = models.PositiveIntegerField(default=0)
     last_error = models.TextField(blank=True, default="")
+    last_error_code = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    last_error_retryable = models.BooleanField(default=False, db_index=True)
+    last_sweep_gas_limit = models.PositiveBigIntegerField(null=True, blank=True)
 
     metadata = models.JSONField(default=dict, blank=True)
     metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
@@ -1030,6 +1035,7 @@ class DepositSweepJob(models.Model):
         indexes = [
             models.Index(fields=["status", "chain", "asset_code"]),
             models.Index(fields=["status", "claim_expires_at"]),
+            models.Index(fields=["status", "next_retry_at"]),
         ]
         constraints = [
             models.CheckConstraint(

@@ -49,13 +49,18 @@ class MediaCMSInternalClient:
         public_id: str,
         gas_funding_txid: str,
         destination_address: str,
+        last_sweep_gas_limit: int | None = None,
     ) -> dict:
+        payload = {
+            "gas_funding_txid": gas_funding_txid,
+            "destination_address": destination_address,
+        }
+        if last_sweep_gas_limit is not None:
+            payload["last_sweep_gas_limit"] = int(last_sweep_gas_limit)
+
         return self.post_signed(
             f"/api/internal/ledger/sweep-jobs/{public_id}/funding-broadcasted",
-            {
-                "gas_funding_txid": gas_funding_txid,
-                "destination_address": destination_address,
-            },
+            payload,
         )
 
     def mark_ready_to_sweep(self, *, public_id: str) -> dict:
@@ -70,13 +75,18 @@ class MediaCMSInternalClient:
         public_id: str,
         sweep_txid: str,
         destination_address: str,
+        last_sweep_gas_limit: int | None = None,
     ) -> dict:
+        payload = {
+            "sweep_txid": sweep_txid,
+            "destination_address": destination_address,
+        }
+        if last_sweep_gas_limit is not None:
+            payload["last_sweep_gas_limit"] = int(last_sweep_gas_limit)
+
         return self.post_signed(
             f"/api/internal/ledger/sweep-jobs/{public_id}/sweep-broadcasted",
-            {
-                "sweep_txid": sweep_txid,
-                "destination_address": destination_address,
-            },
+            payload,
         )
 
     def mark_confirmed(self, *, public_id: str) -> dict:
@@ -90,5 +100,26 @@ class MediaCMSInternalClient:
             f"/api/internal/ledger/sweep-jobs/{public_id}/failed",
             {
                 "error": error,
+            },
+        )
+
+    def mark_rescheduled(
+        self,
+        *,
+        public_id: str,
+        next_retry_in_seconds: int,
+        error: str = "",
+        error_code: str = "",
+        retryable: bool = True,
+        increment_retry_count: bool = False,
+    ) -> dict:
+        return self.post_signed(
+            f"/api/internal/ledger/sweep-jobs/{public_id}/reschedule",
+            {
+                "next_retry_in_seconds": int(next_retry_in_seconds),
+                "error": error,
+                "error_code": error_code,
+                "retryable": bool(retryable),
+                "increment_retry_count": bool(increment_retry_count),
             },
         )

@@ -10,6 +10,7 @@ from .evm import (
     build_web3,
     get_erc20_balance,
     get_native_balance,
+    get_receipt_with_confirmations,
     send_erc20_transfer,
     send_native_transfer,
     wait_for_confirmations,
@@ -299,6 +300,73 @@ def _compute_retry_budget(
     return required_native, extra_topup_needed
 
 
+
+
+def _default_retry_delay_seconds(config) -> int:
+    return max(15, int(getattr(config, "poll_interval_seconds", 15)))
+
+
+def _compute_required_native_for_gas_limit(*, w3, option, gas_limit: int) -> int:
+    effective_gas_price = _compute_effective_gas_price_wei(w3=w3, option=option)
+    return int(gas_limit) * int(effective_gas_price)
+
+
+def _compute_native_transfer_fee_wei(*, w3, option) -> int:
+    effective_gas_price = _compute_effective_gas_price_wei(w3=w3, option=option)
+    return 21000 * effective_gas_price
+
+
+def _ensure_funding_wallet_budget(
+    *,
+    w3,
+    option,
+    amount_wei: int,
+    public_id: str,
+) -> None:
+    funding_address = address_from_private_key(option.funding_private_key)
+    funding_native_balance = int(get_native_balance(w3=w3, address=funding_address))
+    funding_tx_fee_wei = _compute_native_transfer_fee_wei(w3=w3, option=option)
+    required_total_wei = int(amount_wei) + int(funding_tx_fee_wei)
+
+    if funding_native_balance >= required_total_wei:
+        return
+
+    _raise_structured_error(
+        code="SWEEP_FUNDING_WALLET_UNDERFUNDED",
+        message="Funding wallet does not have enough native balance for gas top-up",
+        retryable=True,
+        details={
+            "job_public_id": public_id,
+            "chain": option.chain,
+            "asset_code": option.asset_code,
+            "funding_address": funding_address,
+            "funding_native_balance_wei": funding_native_balance,
+            "topup_amount_wei": int(amount_wei),
+            "funding_tx_fee_wei": int(funding_tx_fee_wei),
+            "required_total_wei": int(required_total_wei),
+        },
+    )
+
+
+def _extract_structured_error(exc: Exception) -> dict | None:
+    raw_value = str(exc or "").strip()
+    if not raw_value:
+        return None
+
+    try:
+        payload = json.loads(raw_value)
+    except Exception:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    if "retryable" not in payload:
+        return None
+
+    return payload
+
+
 def _send_retry_funding_if_needed(
     *,
     client,
@@ -515,6 +583,9 @@ def _process_claimed_job(
     status = str(job.get("status", "")).strip().lower()
     source_address = str(job["source_address"]).strip().lower()
     amount = int(job["amount"])
+    retry_delay_seconds = _default_retry_delay_seconds(config)
+    explicit_gas_limit_override = None
+
     derivation_index = _resolve_derivation_index(job)
     source_private_key = deriver.derive_private_key(
         chain=option.chain,
@@ -526,103 +597,225 @@ def _process_claimed_job(
         if not sweep_txid:
             raise RuntimeError(f"Missing sweep_txid for job={public_id}")
 
-        wait_for_confirmations(
+        receipt, confirmations = get_receipt_with_confirmations(
             w3=w3,
             txid=sweep_txid,
-            required_confirmations=option.sweep_confirmations,
-            timeout_seconds=option.tx_timeout_seconds,
         )
-        receipt = _read_mined_receipt(w3=w3, txid=sweep_txid)
-        if int(receipt.get("status", 0) or 0) != 1:
-            attempted_gas_limit = int(
-                job.get("last_sweep_gas_limit")
-                or receipt.get("gasUsed")
-                or option.erc20_transfer_gas_limit
-            )
-
-            if not _looks_like_out_of_gas(
-                    receipt=receipt,
-                    attempted_gas_limit=attempted_gas_limit,
-            ):
-                _raise_structured_error(
-                    code="SWEEP_TOKEN_REVERTED",
-                    message="Sweep reverted without out-of-gas signature",
-                    retryable=False,
-                    details={
-                        "job_public_id": public_id,
-                        "sweep_txid": sweep_txid,
-                        "gas_used": int(receipt.get("gasUsed", 0) or 0),
-                        "attempted_gas_limit": attempted_gas_limit,
-                        "receipt_status": int(receipt.get("status", 0) or 0),
-                    },
-                )
-
-            final_sweep_txid = _finalize_sweep_with_single_retry(
-                client=client,
-                nonce_allocator=nonce_allocator,
-                w3=w3,
-                option=option,
+        if receipt is None or confirmations < int(option.sweep_confirmations):
+            client.mark_rescheduled(
                 public_id=public_id,
-                source_address=source_address,
-                source_private_key=source_private_key,
-                amount=amount,
-                initial_gas_limit=attempted_gas_limit,
+                next_retry_in_seconds=retry_delay_seconds,
             )
-            client.mark_confirmed(public_id=public_id)
             logging.info(
-                "sweeper_service action=confirmed-after-retry public_id=%s original_txid=%s final_txid=%s",
+                "sweeper_service action=sweep-awaiting-confirmations public_id=%s txid=%s confirmations=%s required=%s",
                 public_id,
                 sweep_txid,
-                final_sweep_txid,
+                confirmations,
+                option.sweep_confirmations,
             )
             return
 
-        client.mark_confirmed(public_id=public_id)
-        logging.info(
-            "sweeper_service action=confirmed-existing public_id=%s sweep_txid=%s",
+        if int(receipt.get("status", 0) or 0) == 1:
+            client.mark_confirmed(public_id=public_id)
+            logging.info(
+                "sweeper_service action=confirmed-existing public_id=%s sweep_txid=%s confirmations=%s",
+                public_id,
+                sweep_txid,
+                confirmations,
+            )
+            return
+
+        attempted_gas_limit = int(
+            job.get("last_sweep_gas_limit")
+            or receipt.get("gasUsed")
+            or option.erc20_transfer_gas_limit
+        )
+
+        if not _looks_like_out_of_gas(
+            receipt=receipt,
+            attempted_gas_limit=attempted_gas_limit,
+        ):
+            _raise_structured_error(
+                code="SWEEP_TOKEN_REVERTED",
+                message="Sweep reverted without out-of-gas signature",
+                retryable=False,
+                details={
+                    "job_public_id": public_id,
+                    "sweep_txid": sweep_txid,
+                    "gas_used": int(receipt.get("gasUsed", 0) or 0),
+                    "attempted_gas_limit": attempted_gas_limit,
+                    "receipt_status": int(receipt.get("status", 0) or 0),
+                },
+            )
+
+        retry_gas_limit = _recommended_retry_gas_limit(
+            option=option,
+            attempted_gas_limit=attempted_gas_limit,
+            gas_used=int(receipt.get("gasUsed", 0) or 0),
+        )
+        required_native, extra_topup_needed = _compute_retry_budget(
+            w3=w3,
+            option=option,
+            source_address=source_address,
+            retry_gas_limit=retry_gas_limit,
+        )
+
+        logging.warning(
+            "sweeper_service action=sweep-retry-planned public_id=%s sweep_txid=%s retry_gas_limit=%s required_native=%s extra_topup_needed=%s",
             public_id,
             sweep_txid,
+            retry_gas_limit,
+            required_native,
+            extra_topup_needed,
         )
-        return
+
+        if extra_topup_needed > 0:
+            if extra_topup_needed > int(option.max_gas_funding_amount_wei):
+                _raise_structured_error(
+                    code="SWEEP_RETRY_FUNDING_CAP_EXCEEDED",
+                    message="Sweep retry funding exceeds configured cap",
+                    retryable=False,
+                    details={
+                        "job_public_id": public_id,
+                        "required_extra_topup_wei": int(extra_topup_needed),
+                        "cap_wei": int(option.max_gas_funding_amount_wei),
+                        "chain": option.chain,
+                        "asset_code": option.asset_code,
+                    },
+                )
+
+            _ensure_funding_wallet_budget(
+                w3=w3,
+                option=option,
+                amount_wei=extra_topup_needed,
+                public_id=public_id,
+            )
+
+            gas_funding_txid = send_native_transfer(
+                chain=option.chain,
+                w3=w3,
+                nonce_allocator=nonce_allocator,
+                funding_private_key=option.funding_private_key,
+                to_address=source_address,
+                amount_wei=extra_topup_needed,
+                gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+            )
+            client.mark_funding_broadcasted(
+                public_id=public_id,
+                gas_funding_txid=gas_funding_txid,
+                destination_address=option.destination_address,
+                last_sweep_gas_limit=retry_gas_limit,
+            )
+            client.mark_rescheduled(
+                public_id=public_id,
+                next_retry_in_seconds=retry_delay_seconds,
+            )
+            logging.info(
+                "sweeper_service action=retry-funding-broadcasted public_id=%s txid=%s amount=%s next_gas_limit=%s",
+                public_id,
+                gas_funding_txid,
+                extra_topup_needed,
+                retry_gas_limit,
+            )
+            return
+
+        client.mark_ready_to_sweep(public_id=public_id)
+        status = "ready_to_sweep"
+        explicit_gas_limit_override = retry_gas_limit
 
     if status == "funding_broadcasted":
         gas_funding_txid = str(job.get("gas_funding_txid", "")).strip()
         if not gas_funding_txid:
             raise RuntimeError(f"Missing gas_funding_txid for job={public_id}")
-        wait_for_confirmations(
+
+        receipt, confirmations = get_receipt_with_confirmations(
             w3=w3,
             txid=gas_funding_txid,
-            required_confirmations=option.funding_confirmations,
-            timeout_seconds=option.tx_timeout_seconds,
         )
+        if receipt is None or confirmations < int(option.funding_confirmations):
+            client.mark_rescheduled(
+                public_id=public_id,
+                next_retry_in_seconds=retry_delay_seconds,
+            )
+            logging.info(
+                "sweeper_service action=funding-awaiting-confirmations public_id=%s txid=%s confirmations=%s required=%s",
+                public_id,
+                gas_funding_txid,
+                confirmations,
+                option.funding_confirmations,
+            )
+            return
+
+        if int(receipt.get("status", 0) or 0) != 1:
+            _raise_structured_error(
+                code="SWEEP_GAS_FUNDING_REVERTED",
+                message="Gas funding transaction reverted",
+                retryable=False,
+                details={
+                    "job_public_id": public_id,
+                    "gas_funding_txid": gas_funding_txid,
+                    "receipt_status": int(receipt.get("status", 0) or 0),
+                },
+            )
+
     elif status not in {"pending", "ready_to_sweep"}:
         raise RuntimeError(f"Unsupported claimed job status for job={public_id}: {status}")
 
-    source_native_balance = get_native_balance(w3=w3, address=source_address)
-    estimated_gas_limit, required_native = _compute_required_native_wei(
+    source_native_balance = int(get_native_balance(w3=w3, address=source_address))
+    estimated_gas_limit, estimated_required_native = _compute_required_native_wei(
         w3=w3,
         option=option,
         source_address=source_address,
         amount=amount,
     )
-    topup_needed = max(0, required_native - int(source_native_balance))
+
+    chosen_gas_limit = int(
+        explicit_gas_limit_override
+        or job.get("last_sweep_gas_limit")
+        or estimated_gas_limit
+    )
+    if chosen_gas_limit == int(estimated_gas_limit):
+        required_native = int(estimated_required_native)
+    else:
+        required_native = _compute_required_native_for_gas_limit(
+            w3=w3,
+            option=option,
+            gas_limit=chosen_gas_limit,
+        )
+
+    topup_needed = max(0, required_native - source_native_balance)
 
     logging.info(
-        "sweeper_service action=native-budget public_id=%s source=%s native_balance=%s required_native=%s topup_needed=%s estimated_gas_limit=%s",
+        "sweeper_service action=native-budget public_id=%s source=%s native_balance=%s required_native=%s topup_needed=%s gas_limit=%s",
         public_id,
         source_address,
         source_native_balance,
         required_native,
         topup_needed,
-        estimated_gas_limit,
+        chosen_gas_limit,
     )
 
-    if topup_needed > 0 and status != "ready_to_sweep":
+    if topup_needed > 0:
         if topup_needed > int(option.max_gas_funding_amount_wei):
-            raise RuntimeError(
-                f"Required gas funding exceeds configured cap for job={public_id}: "
-                f"required={topup_needed} cap={option.max_gas_funding_amount_wei}"
+            _raise_structured_error(
+                code="SWEEP_FUNDING_CAP_EXCEEDED",
+                message="Required gas funding exceeds configured cap",
+                retryable=False,
+                details={
+                    "job_public_id": public_id,
+                    "required_topup_wei": int(topup_needed),
+                    "cap_wei": int(option.max_gas_funding_amount_wei),
+                    "chain": option.chain,
+                    "asset_code": option.asset_code,
+                },
             )
+
+        _ensure_funding_wallet_budget(
+            w3=w3,
+            option=option,
+            amount_wei=topup_needed,
+            public_id=public_id,
+        )
 
         gas_funding_txid = send_native_transfer(
             chain=option.chain,
@@ -637,53 +830,74 @@ def _process_claimed_job(
             public_id=public_id,
             gas_funding_txid=gas_funding_txid,
             destination_address=option.destination_address,
+            last_sweep_gas_limit=chosen_gas_limit,
         )
-        wait_for_confirmations(
-            w3=w3,
-            txid=gas_funding_txid,
-            required_confirmations=option.funding_confirmations,
-            timeout_seconds=option.tx_timeout_seconds,
+        client.mark_rescheduled(
+            public_id=public_id,
+            next_retry_in_seconds=retry_delay_seconds,
         )
         logging.info(
-            "sweeper_service action=funding-confirmed public_id=%s txid=%s topup_needed=%s",
+            "sweeper_service action=funding-broadcasted public_id=%s txid=%s topup_needed=%s next_gas_limit=%s",
             public_id,
             gas_funding_txid,
             topup_needed,
+            chosen_gas_limit,
+        )
+        return
+
+    token_balance = int(
+        get_erc20_balance(
+            w3=w3,
+            token_contract_address=option.token_contract_address,
+            owner_address=source_address,
+        )
+    )
+    if token_balance < amount:
+        _raise_structured_error(
+            code="SWEEP_TOKEN_BALANCE_NOT_READY",
+            message="Source wallet token balance is lower than the expected sweep amount",
+            retryable=True,
+            details={
+                "job_public_id": public_id,
+                "required_amount": int(amount),
+                "actual_amount": int(token_balance),
+                "chain": option.chain,
+                "asset_code": option.asset_code,
+            },
         )
 
     client.mark_ready_to_sweep(public_id=public_id)
 
-    token_balance = get_erc20_balance(
+    sweep_txid = send_erc20_transfer(
+        chain=option.chain,
         w3=w3,
-        token_contract_address=option.token_contract_address,
-        owner_address=source_address,
-    )
-    if token_balance < amount:
-        raise RuntimeError(
-            f"Insufficient token balance for job={public_id}: "
-            f"required={amount} actual={token_balance}"
-        )
-
-    final_sweep_txid = _finalize_sweep_with_single_retry(
-        client=client,
         nonce_allocator=nonce_allocator,
-        w3=w3,
-        option=option,
-        public_id=public_id,
-        source_address=source_address,
+        token_contract_address=option.token_contract_address,
         source_private_key=source_private_key,
+        destination_address=option.destination_address,
         amount=amount,
-        initial_gas_limit=estimated_gas_limit,
+        gas_limit=chosen_gas_limit,
+        gas_price_multiplier_bps=option.gas_price_multiplier_bps,
     )
-    client.mark_confirmed(public_id=public_id)
+    client.mark_sweep_broadcasted(
+        public_id=public_id,
+        sweep_txid=sweep_txid,
+        destination_address=option.destination_address,
+        last_sweep_gas_limit=chosen_gas_limit,
+    )
+    client.mark_rescheduled(
+        public_id=public_id,
+        next_retry_in_seconds=retry_delay_seconds,
+    )
 
     logging.info(
-        "sweeper_service action=confirmed public_id=%s chain=%s asset=%s amount=%s sweep_txid=%s",
+        "sweeper_service action=sweep-broadcasted public_id=%s chain=%s asset=%s amount=%s sweep_txid=%s gas_limit=%s",
         public_id,
         option.chain,
         option.asset_code,
         amount,
-        final_sweep_txid,
+        sweep_txid,
+        chosen_gas_limit,
     )
 
 def _prevalidate_claimed_job(*, deriver: EvmDeriver, option, job: dict) -> None:
@@ -759,6 +973,34 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
                 w3=w3,
             )
         except Exception as exc:
+            structured_error = _extract_structured_error(exc)
+
+            if structured_error and bool(structured_error.get("retryable", False)):
+                error_message = _truncate_error(str(structured_error.get("message") or str(exc)))
+                error_code = str(structured_error.get("code") or "").strip()
+                try:
+                    client.mark_rescheduled(
+                        public_id=public_id,
+                        next_retry_in_seconds=_default_retry_delay_seconds(config),
+                        error=error_message,
+                        error_code=error_code,
+                        retryable=True,
+                        increment_retry_count=True,
+                    )
+                except Exception:
+                    logging.exception(
+                        "sweeper_service action=mark_rescheduled_error public_id=%s",
+                        public_id,
+                    )
+
+                logging.warning(
+                    "sweeper_service action=job_rescheduled public_id=%s error_code=%s error=%s",
+                    public_id,
+                    error_code,
+                    error_message,
+                )
+                continue
+
             error_message = _truncate_error(str(exc))
             try:
                 client.mark_failed(public_id=public_id, error=error_message)

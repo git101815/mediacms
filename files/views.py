@@ -111,6 +111,7 @@ from ledger.services import (
     claim_deposit_sweep_jobs,
     mark_sweep_job_confirmed,
     mark_sweep_job_failed,
+    reschedule_deposit_sweep_job,
     mark_sweep_job_funding_broadcasted,
     mark_sweep_job_ready_to_sweep,
     mark_sweep_job_sweep_broadcasted,
@@ -645,30 +646,9 @@ def _build_wallet_request_rows(wallet: TokenWallet) -> list[dict]:
         )
     return rows
 
-def _get_deposit_session_credited_amount_display(*, session: DepositSession, wallet: TokenWallet) -> str:
-    if not getattr(session, "credited_ledger_txn_id", None):
-        return ""
-
-    credited_txn = getattr(session, "credited_ledger_txn", None)
-    if credited_txn is None:
-        return ""
-
-    for entry in credited_txn.entries.all():
-        if entry.wallet_id == wallet.id and int(entry.delta) > 0:
-            return _format_platform_token_amount(entry.delta)
-
-    return ""
-
 def _build_recent_deposit_session_rows(wallet):
     sessions = (
         DepositSession.objects.filter(wallet=wallet)
-        .select_related("credited_ledger_txn")
-        .prefetch_related(
-            Prefetch(
-                "credited_ledger_txn__entries",
-                queryset=LedgerEntry.objects.select_related("wallet").order_by("id"),
-            )
-        )
         .order_by("-created_at")[:5]
     )
 
@@ -676,19 +656,10 @@ def _build_recent_deposit_session_rows(wallet):
     for session in sessions:
         display_label = f"{_get_network_display_label(session.chain)} · {session.asset_code}"
         public_status = _get_public_deposit_status(session)
-        credited_amount_display = _get_deposit_session_credited_amount_display(
-            session=session,
-            wallet=wallet,
-        )
-
-        show_amount = bool(credited_amount_display) and public_status == PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
-        show_view = public_status not in {"expired", "canceled"} and not show_amount
-
         rows.append(
             {
                 "public_id": str(session.public_id),
                 "label": display_label,
-                "display_label": session.display_label or display_label,
                 "status": public_status,
                 "raw_status": session.status,
                 "status_label": PUBLIC_DEPOSIT_STATUS_LABELS.get(public_status, public_status),
@@ -696,9 +667,6 @@ def _build_recent_deposit_session_rows(wallet):
                 "deposit_address": session.deposit_address,
                 "created_at": session.created_at,
                 "url": reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}),
-                "credited_amount_display": credited_amount_display,
-                "show_amount": show_amount,
-                "show_view": show_view,
             }
         )
     return rows
@@ -2889,6 +2857,7 @@ def internal_sweep_job_funding_broadcasted(request, public_id):
         actor, payload, service_name = authenticate_internal_sweeper_request(request)
         gas_funding_txid = _parse_required_string(payload, "gas_funding_txid")
         destination_address = _parse_required_string(payload, "destination_address")
+        last_sweep_gas_limit = _parse_optional_int(payload, "last_sweep_gas_limit")
 
         job = mark_sweep_job_funding_broadcasted(
             actor=actor,
@@ -2896,6 +2865,7 @@ def internal_sweep_job_funding_broadcasted(request, public_id):
             service_name=service_name,
             gas_funding_txid=gas_funding_txid,
             destination_address=destination_address,
+            last_sweep_gas_limit=last_sweep_gas_limit,
         )
     except DjangoPermissionDenied as exc:
         return JsonResponse({"error": str(exc)}, status=403)
@@ -2952,6 +2922,7 @@ def internal_sweep_job_sweep_broadcasted(request, public_id):
         actor, payload, service_name = authenticate_internal_sweeper_request(request)
         sweep_txid = _parse_required_string(payload, "sweep_txid")
         destination_address = _parse_required_string(payload, "destination_address")
+        last_sweep_gas_limit = _parse_optional_int(payload, "last_sweep_gas_limit")
 
         job = mark_sweep_job_sweep_broadcasted(
             actor=actor,
@@ -2959,6 +2930,7 @@ def internal_sweep_job_sweep_broadcasted(request, public_id):
             service_name=service_name,
             sweep_txid=sweep_txid,
             destination_address=destination_address,
+            last_sweep_gas_limit=last_sweep_gas_limit,
         )
     except DjangoPermissionDenied as exc:
         return JsonResponse({"error": str(exc)}, status=403)
@@ -3004,6 +2976,46 @@ def internal_sweep_job_confirmed(request, public_id):
             "public_id": str(job.public_id),
             "status": job.status,
             "confirmed_at": job.confirmed_at.isoformat() if job.confirmed_at else None,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def internal_sweep_job_reschedule(request, public_id):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        error = str(payload.get("error") or "").strip()
+        error_code = str(payload.get("error_code") or "").strip()
+        retryable = bool(payload.get("retryable", True))
+        increment_retry_count = bool(payload.get("increment_retry_count", False))
+        next_retry_in_seconds = _parse_required_int(payload, "next_retry_in_seconds")
+
+        job = reschedule_deposit_sweep_job(
+            actor=actor,
+            public_id=public_id,
+            service_name=service_name,
+            error=error,
+            error_code=error_code,
+            retryable=retryable,
+            next_retry_in_seconds=next_retry_in_seconds,
+            increment_retry_count=increment_retry_count,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except DepositSweepJob.DoesNotExist:
+        return JsonResponse({"error": "Sweep job not found"}, status=404)
+
+    return JsonResponse(
+        {
+            "public_id": str(job.public_id),
+            "status": job.status,
+            "next_retry_at": job.next_retry_at.isoformat() if job.next_retry_at else None,
+            "retry_count": int(job.retry_count),
         }
     )
 

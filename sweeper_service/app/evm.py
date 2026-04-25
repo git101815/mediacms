@@ -61,6 +61,23 @@ def get_native_balance(*, w3: Web3, address: str) -> int:
     return int(w3.eth.get_balance(Web3.to_checksum_address(address)))
 
 
+
+
+def get_receipt_with_confirmations(
+    *,
+    w3: Web3,
+    txid: str,
+) -> tuple[dict | None, int]:
+    try:
+        receipt = w3.eth.get_transaction_receipt(txid)
+    except TransactionNotFound:
+        return None, 0
+
+    latest_block = int(w3.eth.block_number)
+    confirmations = latest_block - int(receipt["blockNumber"]) + 1
+    return dict(receipt), max(0, confirmations)
+
+
 def send_native_transfer(
     *,
     chain: str,

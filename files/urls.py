@@ -80,6 +80,11 @@ urlpatterns = [
         name="internal_sweep_job_confirmed",
     ),
     path(
+        "api/internal/ledger/sweep-jobs/<uuid:public_id>/reschedule",
+        views.internal_sweep_job_reschedule,
+        name="internal_sweep_job_reschedule",
+    ),
+    path(
         "api/internal/ledger/sweep-jobs/<uuid:public_id>/failed",
         views.internal_sweep_job_failed,
         name="internal_sweep_job_failed",

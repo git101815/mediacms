@@ -267,7 +267,13 @@ def _parse_derivation_index_from_ref(address_derivation_ref: str):
 
     return parsed
 
-def _get_claimed_sweep_job_for_update(*, actor, public_id, service_name: str) -> DepositSweepJob:
+def _get_claimed_sweep_job_for_update(
+    *,
+    actor,
+    public_id,
+    service_name: str,
+    allow_expired_claim: bool = False,
+) -> DepositSweepJob:
     _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
 
     job = DepositSweepJob.objects.select_for_update().get(public_id=public_id)
@@ -275,7 +281,10 @@ def _get_claimed_sweep_job_for_update(*, actor, public_id, service_name: str) ->
     if job.claimed_by_service != service_name:
         raise ValidationError("Sweep job is not claimed by this service")
 
-    if job.claim_expires_at is None or job.claim_expires_at <= timezone.now():
+    if (
+        not allow_expired_claim
+        and (job.claim_expires_at is None or job.claim_expires_at <= timezone.now())
+    ):
         raise ValidationError("Sweep job claim has expired")
 
     return job
@@ -2812,6 +2821,52 @@ def enqueue_deposit_sweep_job(*, actor, deposit_session: DepositSession, observe
     return job
 
 @transaction.atomic
+def reschedule_deposit_sweep_job(
+    *,
+    actor,
+    public_id,
+    service_name: str,
+    error: str = "",
+    error_code: str = "",
+    retryable: bool = True,
+    next_retry_in_seconds: int = 60,
+    increment_retry_count: bool = False,
+) -> DepositSweepJob:
+    job = _get_claimed_sweep_job_for_update(
+        actor=actor,
+        public_id=public_id,
+        service_name=service_name,
+        allow_expired_claim=True,
+    )
+
+    delay_seconds = max(1, int(next_retry_in_seconds))
+    job.next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
+
+    if error:
+        job.last_error = str(error).strip()
+    job.last_error_code = str(error_code or "").strip()
+    job.last_error_retryable = bool(retryable)
+
+    if increment_retry_count:
+        job.retry_count = int(job.retry_count) + 1
+
+    _clear_sweep_job_claim(job)
+    job.save(
+        update_fields=[
+            "claimed_by_service",
+            "claim_expires_at",
+            "next_retry_at",
+            "last_error",
+            "last_error_code",
+            "last_error_retryable",
+            "retry_count",
+            "updated_at",
+        ]
+    )
+    return job
+
+
+@transaction.atomic
 def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: int, lease_seconds: int):
     if not isinstance(option_rows, list) or not option_rows:
         raise ValidationError("Options payload must be a non-empty list")
@@ -2853,6 +2908,7 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
                 ],
             )
             .filter(Q(claim_expires_at__isnull=True) | Q(claim_expires_at__lt=now))
+            .filter(Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now))
             .order_by("id")
         )
 
@@ -2875,14 +2931,12 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
                     "amount": job.amount,
                     "gas_funding_txid": job.gas_funding_txid,
                     "sweep_txid": job.sweep_txid,
+                    "last_sweep_gas_limit": job.last_sweep_gas_limit,
                 }
             )
 
             if len(claimed) >= limit:
-                break
-
-        if len(claimed) >= limit:
-            break
+                return claimed
 
     return claimed
 
@@ -2894,6 +2948,7 @@ def mark_sweep_job_funding_broadcasted(
     service_name: str,
     gas_funding_txid: str,
     destination_address: str,
+    last_sweep_gas_limit: int | None = None,
 ) -> DepositSweepJob:
     gas_funding_txid = (gas_funding_txid or "").strip().lower()
     destination_address = _normalize_evm_address(destination_address)
@@ -2914,19 +2969,33 @@ def mark_sweep_job_funding_broadcasted(
             return job
         raise ValidationError("Sweep job already has a different gas funding txid")
 
-    if job.status != DepositSweepJob.STATUS_PENDING:
+    if job.status not in {
+        DepositSweepJob.STATUS_PENDING,
+        DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+        DepositSweepJob.STATUS_READY_TO_SWEEP,
+        DepositSweepJob.STATUS_SWEEP_BROADCASTED,
+    }:
         raise ValidationError("Sweep job cannot transition to funding_broadcasted from its current status")
 
     job.status = DepositSweepJob.STATUS_FUNDING_BROADCASTED
     job.gas_funding_txid = gas_funding_txid
     job.destination_address = destination_address
     job.last_error = ""
+    job.last_error_code = ""
+    job.last_error_retryable = False
+    job.next_retry_at = None
+    if last_sweep_gas_limit is not None:
+        job.last_sweep_gas_limit = int(last_sweep_gas_limit)
     job.save(
         update_fields=[
             "status",
             "gas_funding_txid",
             "destination_address",
             "last_error",
+            "last_error_code",
+            "last_error_retryable",
+            "next_retry_at",
+            "last_sweep_gas_limit",
             "updated_at",
         ]
     )
@@ -2963,7 +3032,19 @@ def mark_sweep_job_ready_to_sweep(
 
     job.status = DepositSweepJob.STATUS_READY_TO_SWEEP
     job.last_error = ""
-    job.save(update_fields=["status", "last_error", "updated_at"])
+    job.last_error_code = ""
+    job.last_error_retryable = False
+    job.next_retry_at = None
+    job.save(
+        update_fields=[
+            "status",
+            "last_error",
+            "last_error_code",
+            "last_error_retryable",
+            "next_retry_at",
+            "updated_at",
+        ]
+    )
     return job
 
 
@@ -2975,6 +3056,7 @@ def mark_sweep_job_sweep_broadcasted(
     service_name: str,
     sweep_txid: str,
     destination_address: str,
+    last_sweep_gas_limit: int | None = None,
 ) -> DepositSweepJob:
     sweep_txid = (sweep_txid or "").strip().lower()
     destination_address = _normalize_evm_address(destination_address)
@@ -3002,12 +3084,21 @@ def mark_sweep_job_sweep_broadcasted(
     job.sweep_txid = sweep_txid
     job.destination_address = destination_address
     job.last_error = ""
+    job.last_error_code = ""
+    job.last_error_retryable = False
+    job.next_retry_at = None
+    if last_sweep_gas_limit is not None:
+        job.last_sweep_gas_limit = int(last_sweep_gas_limit)
     job.save(
         update_fields=[
             "status",
             "sweep_txid",
             "destination_address",
             "last_error",
+            "last_error_code",
+            "last_error_retryable",
+            "next_retry_at",
+            "last_sweep_gas_limit",
             "updated_at",
         ]
     )
@@ -3021,18 +3112,15 @@ def mark_sweep_job_confirmed(
     public_id,
     service_name: str,
 ) -> DepositSweepJob:
-    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
-
-    job = DepositSweepJob.objects.select_for_update().get(public_id=public_id)
+    job = _get_claimed_sweep_job_for_update(
+        actor=actor,
+        public_id=public_id,
+        service_name=service_name,
+        allow_expired_claim=True,
+    )
 
     if job.status == DepositSweepJob.STATUS_CONFIRMED:
         return job
-
-    if job.claimed_by_service != service_name:
-        raise ValidationError("Sweep job is not claimed by this service")
-
-    if job.claim_expires_at is None or job.claim_expires_at <= timezone.now():
-        raise ValidationError("Sweep job claim has expired")
 
     if job.status != DepositSweepJob.STATUS_SWEEP_BROADCASTED:
         raise ValidationError("Sweep job cannot transition to confirmed from its current status")
@@ -3043,12 +3131,18 @@ def mark_sweep_job_confirmed(
     job.status = DepositSweepJob.STATUS_CONFIRMED
     job.confirmed_at = timezone.now()
     job.last_error = ""
+    job.last_error_code = ""
+    job.last_error_retryable = False
+    job.next_retry_at = None
     _clear_sweep_job_claim(job)
     job.save(
         update_fields=[
             "status",
             "confirmed_at",
             "last_error",
+            "last_error_code",
+            "last_error_retryable",
+            "next_retry_at",
             "claimed_by_service",
             "claim_expires_at",
             "updated_at",
@@ -3077,18 +3171,17 @@ def mark_sweep_job_failed(
     if not error:
         raise ValidationError("Failure reason is required")
 
-    job = DepositSweepJob.objects.select_for_update().get(public_id=public_id)
+    job = _get_claimed_sweep_job_for_update(
+        actor=actor,
+        public_id=public_id,
+        service_name=service_name,
+        allow_expired_claim=True,
+    )
 
     if job.status == DepositSweepJob.STATUS_FAILED:
         if job.last_error == error:
             return job
         raise ValidationError("Sweep job is already failed with a different error")
-
-    if job.claimed_by_service != service_name:
-        raise ValidationError("Sweep job is not claimed by this service")
-
-    if job.claim_expires_at is None or job.claim_expires_at <= timezone.now():
-        raise ValidationError("Sweep job claim has expired")
 
     if job.status in {
         DepositSweepJob.STATUS_CONFIRMED,
@@ -3098,11 +3191,17 @@ def mark_sweep_job_failed(
 
     job.status = DepositSweepJob.STATUS_FAILED
     job.last_error = error
+    job.last_error_code = ""
+    job.last_error_retryable = False
+    job.next_retry_at = None
     _clear_sweep_job_claim(job)
     job.save(
         update_fields=[
             "status",
             "last_error",
+            "last_error_code",
+            "last_error_retryable",
+            "next_retry_at",
             "claimed_by_service",
             "claim_expires_at",
             "updated_at",
