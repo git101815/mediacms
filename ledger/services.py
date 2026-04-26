@@ -3257,6 +3257,105 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
 
     return results
 
+def _active_sweep_job_statuses_for_residual_coalescing() -> list[str]:
+    return [
+        DepositSweepJob.STATUS_PENDING,
+        DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+        DepositSweepJob.STATUS_READY_TO_SWEEP,
+        DepositSweepJob.STATUS_SWEEP_BROADCASTED,
+    ]
+
+
+def _find_active_sweep_job_for_residual_balance_observation(
+    *,
+    deposit_session: DepositSession,
+) -> DepositSweepJob | None:
+    return (
+        DepositSweepJob.objects.select_for_update()
+        .filter(
+            chain=deposit_session.chain,
+            asset_code=deposit_session.asset_code,
+            token_contract_address=deposit_session.token_contract_address,
+            source_address=deposit_session.deposit_address,
+            status__in=_active_sweep_job_statuses_for_residual_coalescing(),
+        )
+        .order_by("id")
+        .first()
+    )
+
+
+def _mark_residual_balance_observation_coalesced(
+    *,
+    observed_transfer: ObservedOnchainTransfer,
+    job: DepositSweepJob,
+) -> None:
+    raw_payload = observed_transfer.raw_payload if isinstance(observed_transfer.raw_payload, dict) else {}
+    payload = dict(raw_payload)
+    payload.update(
+        {
+            "residual_coalesced_into_active_sweep_job": True,
+            "coalesced_sweep_job_public_id": str(job.public_id),
+            "coalesced_sweep_job_id": job.id,
+            "coalesced_sweep_job_status": job.status,
+            "coalesced_sweep_job_amount": int(job.amount),
+            "coalesced_at": timezone.now().isoformat(),
+        }
+    )
+    observed_transfer.raw_payload = payload
+    observed_transfer.save(update_fields=["raw_payload"])
+
+
+def _coalesce_residual_balance_observation_into_active_sweep_job(
+    *,
+    job: DepositSweepJob,
+    observed_transfer: ObservedOnchainTransfer,
+) -> DepositSweepJob:
+    metadata = dict(job.metadata or {})
+    coalesced = list(metadata.get("coalesced_residual_balance_observations") or [])
+
+    if not any(row.get("event_key") == observed_transfer.event_key for row in coalesced):
+        coalesced.append(
+            {
+                "observed_transfer_id": observed_transfer.id,
+                "event_key": observed_transfer.event_key,
+                "txid": observed_transfer.txid,
+                "detection_method": observed_transfer.detection_method,
+                "detected_block_number": observed_transfer.detected_block_number,
+                "amount": int(observed_transfer.amount),
+                "confirmations": int(observed_transfer.confirmations),
+                "coalesced_at": timezone.now().isoformat(),
+            }
+        )
+
+    metadata["coalesced_residual_balance_observations"] = coalesced[-50:]
+    metadata["has_coalesced_residual_balance_observations"] = True
+    metadata["latest_residual_balance_observed_amount"] = int(observed_transfer.amount)
+    metadata["latest_residual_balance_observed_event_key"] = observed_transfer.event_key
+    metadata["latest_residual_balance_observed_at"] = timezone.now().isoformat()
+
+    update_fields = ["metadata", "updated_at"]
+
+    if job.status in {
+        DepositSweepJob.STATUS_PENDING,
+        DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+        DepositSweepJob.STATUS_READY_TO_SWEEP,
+    }:
+        observed_amount = int(observed_transfer.amount)
+        if observed_amount > int(job.amount):
+            job.amount = observed_amount
+            update_fields.append("amount")
+            metadata["amount_increased_by_residual_balance_observation"] = True
+            metadata["latest_amount_increase_event_key"] = observed_transfer.event_key
+
+    job.metadata = metadata
+    job.save(update_fields=update_fields)
+    _mark_residual_balance_observation_coalesced(
+        observed_transfer=observed_transfer,
+        job=job,
+    )
+    return job
+
+
 def _get_or_create_sweep_job_for_observed_transfer(
     *,
     deposit_session: DepositSession,
@@ -3344,6 +3443,30 @@ def enqueue_residual_deposit_sweep_job(*, actor, deposit_session: DepositSession
 
     if observed_transfer.status != ObservedOnchainTransfer.STATUS_CONFIRMED:
         raise ValidationError("Cannot enqueue residual sweep for an unconfirmed observed transfer")
+
+    if observed_transfer.detection_method == "balance_verification":
+        existing_job = (
+            DepositSweepJob.objects.select_for_update()
+            .filter(observed_transfer=observed_transfer)
+            .first()
+        )
+        if existing_job is not None:
+            return existing_job
+
+        active_job = _find_active_sweep_job_for_residual_balance_observation(
+            deposit_session=deposit_session,
+        )
+        if active_job is not None:
+            job = _coalesce_residual_balance_observation_into_active_sweep_job(
+                job=active_job,
+                observed_transfer=observed_transfer,
+            )
+            _touch_residual_deposit_session_activity(
+                deposit_session=deposit_session,
+                observed_transfer=observed_transfer,
+                reason="residual_balance_observation_coalesced",
+            )
+            return job
 
     job = _get_or_create_sweep_job_for_observed_transfer(
         deposit_session=deposit_session,
