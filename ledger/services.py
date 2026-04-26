@@ -1105,6 +1105,40 @@ def _build_residual_observation_payload(
     return payload
 
 
+def _touch_residual_deposit_session_activity(
+    *,
+    deposit_session: DepositSession,
+    observed_transfer: ObservedOnchainTransfer | None = None,
+    reason: str,
+) -> None:
+    now = timezone.now()
+    metadata = dict(deposit_session.metadata or {})
+    residual_watch = dict(metadata.get("residual_deposit_watch") or {})
+    residual_watch.update(
+        {
+            "last_activity_at": now.isoformat(),
+            "last_activity_reason": (reason or "residual_activity").strip() or "residual_activity",
+        }
+    )
+
+    if observed_transfer is not None:
+        residual_watch.update(
+            {
+                "last_observed_transfer_id": observed_transfer.id,
+                "last_observed_transfer_event_key": observed_transfer.event_key,
+                "last_observed_transfer_txid": observed_transfer.txid,
+            }
+        )
+
+    metadata["residual_deposit_watch"] = residual_watch
+    DepositSession.objects.filter(id=deposit_session.id).update(
+        metadata=metadata,
+        updated_at=now,
+    )
+    deposit_session.metadata = metadata
+    deposit_session.updated_at = now
+
+
 def _is_primary_credited_observation(
     *,
     deposit_session: DepositSession,
@@ -2388,6 +2422,11 @@ def record_onchain_observation(
             observed_transfer=observed,
             required_confirmations=deposit_session.required_confirmations,
         )
+        _touch_residual_deposit_session_activity(
+            deposit_session=deposit_session,
+            observed_transfer=observed,
+            reason="residual_observation_recorded",
+        )
 
         if observed.status == ObservedOnchainTransfer.STATUS_CONFIRMED:
             enqueue_residual_deposit_sweep_job(
@@ -3306,11 +3345,17 @@ def enqueue_residual_deposit_sweep_job(*, actor, deposit_session: DepositSession
     if observed_transfer.status != ObservedOnchainTransfer.STATUS_CONFIRMED:
         raise ValidationError("Cannot enqueue residual sweep for an unconfirmed observed transfer")
 
-    return _get_or_create_sweep_job_for_observed_transfer(
+    job = _get_or_create_sweep_job_for_observed_transfer(
         deposit_session=deposit_session,
         observed_transfer=observed_transfer,
         metadata_source="residual_deposit",
     )
+    _touch_residual_deposit_session_activity(
+        deposit_session=deposit_session,
+        observed_transfer=observed_transfer,
+        reason="residual_sweep_enqueued",
+    )
+    return job
 
 @transaction.atomic
 def reschedule_deposit_sweep_job(
@@ -3824,7 +3869,13 @@ def mark_sweep_job_confirmed(
 
     session = DepositSession.objects.select_for_update().get(id=job.deposit_session_id)
     is_residual_sweep = (job.metadata or {}).get("source") == "residual_deposit"
-    if not is_residual_sweep and session.status != DepositSession.STATUS_SWEPT:
+    if is_residual_sweep:
+        _touch_residual_deposit_session_activity(
+            deposit_session=session,
+            observed_transfer=job.observed_transfer,
+            reason="residual_sweep_confirmed",
+        )
+    elif session.status != DepositSession.STATUS_SWEPT:
         session.status = DepositSession.STATUS_SWEPT
         session.swept_at = timezone.now()
         session.save(update_fields=["status", "swept_at", "updated_at"])
