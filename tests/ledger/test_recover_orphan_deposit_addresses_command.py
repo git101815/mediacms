@@ -3,7 +3,9 @@ from datetime import timedelta
 from io import StringIO
 from unittest.mock import Mock, patch
 
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.test import override_settings
 from django.utils import timezone
 
 from ledger.models import DepositSession, OrphanDepositRecoveryAudit
@@ -13,10 +15,19 @@ from ledger.management.commands import recover_orphan_deposit_addresses as comma
 from .base import BaseLedgerTestCase
 
 
+@override_settings(LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME="sweeper-service")
 class TestRecoverOrphanDepositAddressesCommand(BaseLedgerTestCase):
     def setUp(self):
         super().setUp()
         self.grant_perm(self.operator, "can_manage_deposit_sweep_jobs")
+
+        user_model = get_user_model()
+        self.sweeper_service_user = user_model.objects.create_user(
+            username="sweeper-service",
+            email="sweeper-service@example.com",
+            password="test-password-123",
+        )
+        self.grant_perm(self.sweeper_service_user, "can_manage_deposit_sweep_jobs")
 
     def _make_session(self, *, deposit_address: str, status: str = DepositSession.STATUS_SWEPT) -> DepositSession:
         session = DepositSession.objects.create(
