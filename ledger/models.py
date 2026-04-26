@@ -1122,3 +1122,100 @@ class TokenPack(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.code})"
+
+ORPHAN_DEPOSIT_RECOVERY_STATUS_PENDING_CHECK = "pending_check"
+ORPHAN_DEPOSIT_RECOVERY_STATUS_RETRYABLE_ERROR = "retryable_error"
+ORPHAN_DEPOSIT_RECOVERY_STATUS_EMPTY_FINAL = "empty_final"
+ORPHAN_DEPOSIT_RECOVERY_STATUS_DUST_FINAL = "dust_final"
+ORPHAN_DEPOSIT_RECOVERY_STATUS_IGNORED_FINAL = "ignored_final"
+ORPHAN_DEPOSIT_RECOVERY_STATUS_SWEPT_TOKEN_FINAL = "swept_token_final"
+ORPHAN_DEPOSIT_RECOVERY_STATUS_SWEPT_NATIVE_FINAL = "swept_native_final"
+ORPHAN_DEPOSIT_RECOVERY_STATUS_SWEPT_BOTH_FINAL = "swept_both_final"
+
+ORPHAN_DEPOSIT_RECOVERY_STATUS_CHOICES = (
+    (ORPHAN_DEPOSIT_RECOVERY_STATUS_PENDING_CHECK, "Pending check"),
+    (ORPHAN_DEPOSIT_RECOVERY_STATUS_RETRYABLE_ERROR, "Retryable error"),
+    (ORPHAN_DEPOSIT_RECOVERY_STATUS_EMPTY_FINAL, "Empty final"),
+    (ORPHAN_DEPOSIT_RECOVERY_STATUS_DUST_FINAL, "Dust final"),
+    (ORPHAN_DEPOSIT_RECOVERY_STATUS_IGNORED_FINAL, "Ignored final"),
+    (ORPHAN_DEPOSIT_RECOVERY_STATUS_SWEPT_TOKEN_FINAL, "Swept token final"),
+    (ORPHAN_DEPOSIT_RECOVERY_STATUS_SWEPT_NATIVE_FINAL, "Swept native final"),
+    (ORPHAN_DEPOSIT_RECOVERY_STATUS_SWEPT_BOTH_FINAL, "Swept both final"),
+)
+
+
+class OrphanDepositRecoveryAudit(models.Model):
+    STATUS_PENDING_CHECK = ORPHAN_DEPOSIT_RECOVERY_STATUS_PENDING_CHECK
+    STATUS_RETRYABLE_ERROR = ORPHAN_DEPOSIT_RECOVERY_STATUS_RETRYABLE_ERROR
+    STATUS_EMPTY_FINAL = ORPHAN_DEPOSIT_RECOVERY_STATUS_EMPTY_FINAL
+    STATUS_DUST_FINAL = ORPHAN_DEPOSIT_RECOVERY_STATUS_DUST_FINAL
+    STATUS_IGNORED_FINAL = ORPHAN_DEPOSIT_RECOVERY_STATUS_IGNORED_FINAL
+    STATUS_SWEPT_TOKEN_FINAL = ORPHAN_DEPOSIT_RECOVERY_STATUS_SWEPT_TOKEN_FINAL
+    STATUS_SWEPT_NATIVE_FINAL = ORPHAN_DEPOSIT_RECOVERY_STATUS_SWEPT_NATIVE_FINAL
+    STATUS_SWEPT_BOTH_FINAL = ORPHAN_DEPOSIT_RECOVERY_STATUS_SWEPT_BOTH_FINAL
+    STATUS_CHOICES = ORPHAN_DEPOSIT_RECOVERY_STATUS_CHOICES
+
+    deposit_session = models.ForeignKey(
+        DepositSession,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="orphan_recovery_audits",
+    )
+
+    chain = models.CharField(max_length=32, db_index=True)
+    asset_code = models.CharField(max_length=32, db_index=True)
+    token_contract_address = models.CharField(max_length=64, blank=True, default="", db_index=True)
+
+    deposit_address = models.CharField(max_length=128, db_index=True)
+    address_derivation_ref = models.CharField(max_length=128, blank=True, default="")
+    derivation_index = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
+
+    status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING_CHECK,
+        db_index=True,
+    )
+    decision_reason = models.CharField(max_length=64, blank=True, default="", db_index=True)
+
+    last_token_balance = models.BigIntegerField(default=0)
+    last_native_balance = models.BigIntegerField(default=0)
+
+    last_token_value_usd = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
+    last_native_value_usd = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
+    last_estimated_token_recovery_cost_usd = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
+    last_estimated_native_recovery_cost_usd = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
+
+    funding_txid = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    token_sweep_txid = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    native_sweep_txid = models.CharField(max_length=128, blank=True, default="", db_index=True)
+
+    last_error = models.TextField(blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+
+    last_checked_at = models.DateTimeField(default=timezone.now, db_index=True)
+    finalized_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "last_checked_at"]),
+            models.Index(fields=["chain", "asset_code", "status"]),
+            models.Index(fields=["finalized_at"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["chain", "deposit_address"],
+                name="orphanrecoveryaudit_unique_chain_address",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(derivation_index__isnull=True) | models.Q(derivation_index__gte=0),
+                name="orphanrecoveryaudit_derivation_index_gte_0_if_present",
+            ),
+        ]
+
+    def __str__(self):
+        return f"OrphanRecovery #{self.id} {self.chain}:{self.deposit_address} {self.status}"
