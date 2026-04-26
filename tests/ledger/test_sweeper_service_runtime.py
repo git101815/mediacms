@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch
 
 import sweeper_service.app.claim_once as claim_once
 
@@ -67,6 +67,7 @@ def _make_job(
         "source_address": source_address,
         "amount": amount,
         "status": status,
+        "claim_token": "claim-token-1",
         "address_derivation_ref": f"evm:ethereum:external:{derivation_index}",
         "derivation_index": derivation_index,
     }
@@ -85,13 +86,29 @@ def test_run_once_pending_job_funds_then_reschedules():
     config = _make_config(option)
     job = _make_job()
     client = Mock()
+    client.acquire_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 0,
+        "lock_token": "sender-lock-token-1",
+        "lock_expires_at": None,
+    }
+    client.confirm_evm_sender_nonce_used.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 1,
+    }
+    client.release_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "released": True,
+    }
     client.claim_jobs.return_value = [job]
 
     deriver = Mock()
     deriver.derive_address.return_value = job["source_address"]
     deriver.derive_private_key.return_value = "0x" + "33" * 32
 
-    nonce_allocator = Mock()
     w3 = Mock()
 
     funding_address = "0x" + "22" * 20
@@ -107,9 +124,9 @@ def test_run_once_pending_job_funds_then_reschedules():
         return 0
 
     with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
-         patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
          patch.object(claim_once, "_build_option_web3", return_value=w3), \
-         patch.object(claim_once, "_estimate_erc20_transfer_gas", return_value=50000), \
+            patch.object(claim_once, "_pending_nonce", return_value=0), \
+            patch.object(claim_once, "_estimate_erc20_transfer_gas", return_value=50000), \
          patch.object(claim_once, "_compute_effective_gas_price_wei", return_value=1), \
          patch.object(claim_once, "address_from_private_key", side_effect=fake_address_from_private_key), \
          patch.object(claim_once, "get_native_balance", side_effect=fake_get_native_balance), \
@@ -129,28 +146,32 @@ def test_run_once_pending_job_funds_then_reschedules():
         limit=20,
     )
 
-    assert client.method_calls == [
-        call.claim_jobs(
-            options=[
-                {
-                    "chain": "ethereum",
-                    "asset_code": "USDT",
-                    "token_contract_address": USDT_ETH,
-                }
-            ],
-            limit=20,
-        ),
-        call.mark_funding_broadcasted(
-            public_id="job-1",
-            gas_funding_txid="0xgas",
-            destination_address=option.destination_address,
-            last_sweep_gas_limit=50000,
-        ),
-        call.mark_rescheduled(
-            public_id="job-1",
-            next_retry_in_seconds=30,
-        ),
-    ]
+    client.acquire_evm_sender_lock.assert_called_once_with(
+        chain="ethereum",
+        address=funding_address,
+        lock_seconds=120,
+    )
+    client.confirm_evm_sender_nonce_used.assert_called_once_with(
+        chain="ethereum",
+        address=funding_address,
+        lock_token="sender-lock-token-1",
+        nonce=0,
+        txid="0xgas",
+    )
+    client.release_evm_sender_lock.assert_not_called()
+
+    client.mark_funding_broadcasted.assert_called_once_with(
+        public_id="job-1",
+        claim_token=job["claim_token"],
+        gas_funding_txid="0xgas",
+        destination_address=option.destination_address,
+        last_sweep_gas_limit=50000,
+    )
+    client.mark_rescheduled.assert_called_once_with(
+        public_id="job-1",
+        claim_token=job["claim_token"],
+        next_retry_in_seconds=30,
+    )
 
 
 def test_run_once_resumes_funding_broadcasted_job_without_refunding():
@@ -158,13 +179,29 @@ def test_run_once_resumes_funding_broadcasted_job_without_refunding():
     config = _make_config(option)
     job = _make_job(status="funding_broadcasted", gas_funding_txid="0xgas")
     client = Mock()
+    client.acquire_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 0,
+        "lock_token": "sender-lock-token-1",
+        "lock_expires_at": None,
+    }
+    client.confirm_evm_sender_nonce_used.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 1,
+    }
+    client.release_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "released": True,
+    }
     client.claim_jobs.return_value = [job]
 
     deriver = Mock()
     deriver.derive_address.return_value = job["source_address"]
     deriver.derive_private_key.return_value = "0x" + "33" * 32
 
-    nonce_allocator = Mock()
     w3 = Mock()
 
     funding_address = "0x" + "22" * 20
@@ -175,9 +212,9 @@ def test_run_once_resumes_funding_broadcasted_job_without_refunding():
         return job["source_address"]
 
     with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
-         patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
          patch.object(claim_once, "_build_option_web3", return_value=w3), \
-         patch.object(claim_once, "_estimate_erc20_transfer_gas", return_value=50000), \
+            patch.object(claim_once, "_pending_nonce", return_value=0), \
+            patch.object(claim_once, "_estimate_erc20_transfer_gas", return_value=50000), \
          patch.object(claim_once, "_compute_effective_gas_price_wei", return_value=1), \
          patch.object(claim_once, "get_receipt_with_confirmations", return_value=({"status": 1, "gasUsed": 21000}, 1)), \
          patch.object(claim_once, "address_from_private_key", side_effect=fake_address_from_private_key), \
@@ -189,17 +226,22 @@ def test_run_once_resumes_funding_broadcasted_job_without_refunding():
 
     send_native_transfer.assert_not_called()
     client.mark_funding_broadcasted.assert_not_called()
-    client.mark_ready_to_sweep.assert_called_once_with(public_id="job-1")
+    client.mark_ready_to_sweep.assert_called_once_with(
+        public_id="job-1",
+        claim_token=job["claim_token"],
+    )
     client.mark_sweep_broadcasted.assert_called_once_with(
         public_id="job-1",
+        claim_token=job["claim_token"],
         sweep_txid="0xsweep",
         destination_address=option.destination_address,
         last_sweep_gas_limit=50000,
     )
     client.mark_confirmed.assert_not_called()
     client.mark_rescheduled.assert_called_once_with(
-        public_id="job-1",
-        next_retry_in_seconds=30,
+        public_id=job["public_id"],
+        claim_token=job["claim_token"],
+        next_retry_in_seconds=config.poll_interval_seconds,
     )
 
 
@@ -208,18 +250,34 @@ def test_run_once_confirms_existing_sweep_broadcasted_job_without_rebroadcast():
     config = _make_config(option)
     job = _make_job(status="sweep_broadcasted", sweep_txid="0xsweep")
     client = Mock()
+    client.acquire_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 0,
+        "lock_token": "sender-lock-token-1",
+        "lock_expires_at": None,
+    }
+    client.confirm_evm_sender_nonce_used.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 1,
+    }
+    client.release_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "released": True,
+    }
     client.claim_jobs.return_value = [job]
 
     deriver = Mock()
     deriver.derive_address.return_value = job["source_address"]
     deriver.derive_private_key.return_value = "0x" + "33" * 32
 
-    nonce_allocator = Mock()
     w3 = Mock()
 
     with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
-         patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
-         patch.object(claim_once, "_build_option_web3", return_value=w3), \
+            patch.object(claim_once, "_pending_nonce", return_value=0), \
+            patch.object(claim_once, "_build_option_web3", return_value=w3), \
          patch.object(claim_once, "get_receipt_with_confirmations", return_value=({"status": 1, "gasUsed": 50000}, 1)), \
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
          patch.object(claim_once, "send_native_transfer") as send_native_transfer, \
@@ -228,7 +286,10 @@ def test_run_once_confirms_existing_sweep_broadcasted_job_without_rebroadcast():
 
     send_native_transfer.assert_not_called()
     send_erc20_transfer.assert_not_called()
-    client.mark_confirmed.assert_called_once_with(public_id="job-1")
+    client.mark_confirmed.assert_called_once_with(
+        public_id="job-1",
+        claim_token=job["claim_token"],
+    )
     client.mark_rescheduled.assert_not_called()
 
 
@@ -237,18 +298,35 @@ def test_run_once_marks_failed_when_derived_address_mismatches_job():
     config = _make_config(option)
     job = _make_job()
     client = Mock()
+    client.acquire_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 0,
+        "lock_token": "sender-lock-token-1",
+        "lock_expires_at": None,
+    }
+    client.confirm_evm_sender_nonce_used.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 1,
+    }
+    client.release_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "released": True,
+    }
     client.claim_jobs.return_value = [job]
 
     deriver = Mock()
     deriver.derive_address.return_value = "0x" + "44" * 20
 
     with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
-         patch.object(claim_once, "NonceAllocator", return_value=Mock()), \
          patch.object(claim_once, "_build_option_web3") as build_option_web3:
         claim_once.run_once(client=client, config=config)
 
     build_option_web3.assert_not_called()
     client.mark_failed.assert_called_once()
+    assert client.mark_failed.call_args.kwargs["claim_token"] == job["claim_token"]
     assert "Derived address mismatch" in client.mark_failed.call_args.kwargs["error"]
 
 
@@ -257,17 +335,33 @@ def test_run_once_reschedules_when_token_balance_is_insufficient():
     config = _make_config(option)
     job = _make_job(amount=250)
     client = Mock()
+    client.acquire_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 0,
+        "lock_token": "sender-lock-token-1",
+        "lock_expires_at": None,
+    }
+    client.confirm_evm_sender_nonce_used.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 1,
+    }
+    client.release_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "released": True,
+    }
     client.claim_jobs.return_value = [job]
 
     deriver = Mock()
     deriver.derive_address.return_value = job["source_address"]
     deriver.derive_private_key.return_value = "0x" + "33" * 32
 
-    nonce_allocator = Mock()
     w3 = Mock()
 
     with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
-         patch.object(claim_once, "NonceAllocator", return_value=nonce_allocator), \
+         patch.object(claim_once, "_pending_nonce", return_value=0),\
          patch.object(claim_once, "_build_option_web3", return_value=w3), \
          patch.object(claim_once, "_estimate_erc20_transfer_gas", return_value=50000), \
          patch.object(claim_once, "_compute_effective_gas_price_wei", return_value=1), \
@@ -286,6 +380,7 @@ def test_run_once_reschedules_when_token_balance_is_insufficient():
     client.mark_failed.assert_not_called()
     client.mark_rescheduled.assert_called_once_with(
         public_id="job-1",
+        claim_token=job["claim_token"],
         next_retry_in_seconds=30,
         error="Source wallet token balance is lower than the expected sweep amount",
         error_code="SWEEP_TOKEN_BALANCE_NOT_READY",

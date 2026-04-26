@@ -184,10 +184,12 @@ class TestInternalSweepJobsAPI(BaseLedgerTestCase):
             now_value=mocked_now.return_value,
         )
         self.assertEqual(claim_response.status_code, 200)
-
+        claim_token = claim_response.json()["results"][0]["claim_token"]
+        self.assertTrue(claim_token)
         response = self._post_signed(
             "internal_sweep_job_funding_broadcasted",
             {
+                "claim_token": claim_token,
                 "gas_funding_txid": "0xgas123",
                 "destination_address": "0x9999999999999999999999999999999999999999",
             },
@@ -199,7 +201,7 @@ class TestInternalSweepJobsAPI(BaseLedgerTestCase):
 
         response = self._post_signed(
             "internal_sweep_job_ready_to_sweep",
-            {},
+            {"claim_token": claim_token,},
             nonce="ready-1",
             now_value=mocked_now.return_value,
             public_id=job.public_id,
@@ -209,6 +211,7 @@ class TestInternalSweepJobsAPI(BaseLedgerTestCase):
         response = self._post_signed(
             "internal_sweep_job_sweep_broadcasted",
             {
+                "claim_token": claim_token,
                 "sweep_txid": "0xsweep123",
                 "destination_address": "0x9999999999999999999999999999999999999999",
             },
@@ -220,7 +223,7 @@ class TestInternalSweepJobsAPI(BaseLedgerTestCase):
 
         response = self._post_signed(
             "internal_sweep_job_confirmed",
-            {},
+            {"claim_token": claim_token,},
             nonce="confirmed-1",
             now_value=mocked_now.return_value,
             public_id=job.public_id,
@@ -257,10 +260,15 @@ class TestInternalSweepJobsAPI(BaseLedgerTestCase):
             now_value=mocked_now.return_value,
         )
         self.assertEqual(claim_response.status_code, 200)
+        claim_token = claim_response.json()["results"][0]["claim_token"]
+        self.assertTrue(claim_token)
 
         response = self._post_signed(
             "internal_sweep_job_failed",
-            {"error": "gas funding transaction dropped"},
+            {
+                "claim_token": claim_token,
+                "error": "gas funding transaction dropped",
+            },
             nonce="failed-1",
             now_value=mocked_now.return_value,
             public_id=job.public_id,

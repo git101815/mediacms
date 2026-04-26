@@ -115,6 +115,9 @@ from ledger.services import (
     mark_sweep_job_funding_broadcasted,
     mark_sweep_job_ready_to_sweep,
     mark_sweep_job_sweep_broadcasted,
+    acquire_evm_sender_lock,
+    confirm_evm_sender_nonce_used,
+    release_evm_sender_lock,
     cancel_user_deposit_session,
     delete_user_deposit_session,
     expire_stale_deposit_sessions,
@@ -2949,11 +2952,115 @@ def internal_sweep_jobs_claim(request):
 
     return JsonResponse({"results": results})
 
+
+@csrf_exempt
+@require_POST
+def internal_evm_sender_lock_acquire(request):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        chain = _parse_required_string(payload, "chain")
+        address = _parse_required_string(payload, "address")
+        lock_seconds = _parse_required_int(
+            {"lock_seconds": payload.get("lock_seconds", getattr(settings, "LEDGER_EVM_SENDER_LOCK_SECONDS", 300))},
+            "lock_seconds",
+        )
+
+        result = acquire_evm_sender_lock(
+            actor=actor,
+            service_name=service_name,
+            chain=chain,
+            address=address,
+            lock_seconds=lock_seconds,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+
+    return JsonResponse(
+        {
+            **result,
+            "lock_expires_at": result["lock_expires_at"].isoformat() if result.get("lock_expires_at") else None,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def internal_evm_sender_lock_confirm(request):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        chain = _parse_required_string(payload, "chain")
+        address = _parse_required_string(payload, "address")
+        lock_token = _parse_required_string(payload, "lock_token")
+        nonce = _parse_required_int(payload, "nonce")
+        txid = _parse_required_string(payload, "txid")
+
+        state = confirm_evm_sender_nonce_used(
+            actor=actor,
+            service_name=service_name,
+            chain=chain,
+            address=address,
+            lock_token=lock_token,
+            nonce=nonce,
+            txid=txid,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+
+    return JsonResponse(
+        {
+            "chain": state.chain,
+            "address": state.address,
+            "next_nonce": state.next_nonce,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def internal_evm_sender_lock_release(request):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        chain = _parse_required_string(payload, "chain")
+        address = _parse_required_string(payload, "address")
+        lock_token = _parse_required_string(payload, "lock_token")
+
+        state = release_evm_sender_lock(
+            actor=actor,
+            service_name=service_name,
+            chain=chain,
+            address=address,
+            lock_token=lock_token,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+
+    return JsonResponse(
+        {
+            "chain": state.chain,
+            "address": state.address,
+            "released": True,
+        }
+    )
+
+
 @csrf_exempt
 @require_POST
 def internal_sweep_job_funding_broadcasted(request, public_id):
     try:
         actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        claim_token = _parse_required_string(payload, "claim_token")
         gas_funding_txid = _parse_required_string(payload, "gas_funding_txid")
         destination_address = _parse_required_string(payload, "destination_address")
         last_sweep_gas_limit = _parse_optional_int(payload, "last_sweep_gas_limit")
@@ -2962,6 +3069,7 @@ def internal_sweep_job_funding_broadcasted(request, public_id):
             actor=actor,
             public_id=public_id,
             service_name=service_name,
+            claim_token=claim_token,
             gas_funding_txid=gas_funding_txid,
             destination_address=destination_address,
             last_sweep_gas_limit=last_sweep_gas_limit,
@@ -2990,11 +3098,13 @@ def internal_sweep_job_funding_broadcasted(request, public_id):
 def internal_sweep_job_ready_to_sweep(request, public_id):
     try:
         actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        claim_token = _parse_required_string(payload, "claim_token")
 
         job = mark_sweep_job_ready_to_sweep(
             actor=actor,
             public_id=public_id,
             service_name=service_name,
+            claim_token=claim_token,
         )
     except DjangoPermissionDenied as exc:
         return JsonResponse({"error": str(exc)}, status=403)
@@ -3019,6 +3129,7 @@ def internal_sweep_job_ready_to_sweep(request, public_id):
 def internal_sweep_job_sweep_broadcasted(request, public_id):
     try:
         actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        claim_token = _parse_required_string(payload, "claim_token")
         sweep_txid = _parse_required_string(payload, "sweep_txid")
         destination_address = _parse_required_string(payload, "destination_address")
         last_sweep_gas_limit = _parse_optional_int(payload, "last_sweep_gas_limit")
@@ -3027,6 +3138,7 @@ def internal_sweep_job_sweep_broadcasted(request, public_id):
             actor=actor,
             public_id=public_id,
             service_name=service_name,
+            claim_token=claim_token,
             sweep_txid=sweep_txid,
             destination_address=destination_address,
             last_sweep_gas_limit=last_sweep_gas_limit,
@@ -3055,11 +3167,13 @@ def internal_sweep_job_sweep_broadcasted(request, public_id):
 def internal_sweep_job_confirmed(request, public_id):
     try:
         actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        claim_token = _parse_required_string(payload, "claim_token")
 
         job = mark_sweep_job_confirmed(
             actor=actor,
             public_id=public_id,
             service_name=service_name,
+            claim_token=claim_token,
         )
     except DjangoPermissionDenied as exc:
         return JsonResponse({"error": str(exc)}, status=403)
@@ -3084,6 +3198,7 @@ def internal_sweep_job_confirmed(request, public_id):
 def internal_sweep_job_reschedule(request, public_id):
     try:
         actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        claim_token = _parse_required_string(payload, "claim_token")
         error = str(payload.get("error") or "").strip()
         error_code = str(payload.get("error_code") or "").strip()
         retryable = bool(payload.get("retryable", True))
@@ -3094,6 +3209,7 @@ def internal_sweep_job_reschedule(request, public_id):
             actor=actor,
             public_id=public_id,
             service_name=service_name,
+            claim_token=claim_token,
             error=error,
             error_code=error_code,
             retryable=retryable,
@@ -3124,12 +3240,14 @@ def internal_sweep_job_reschedule(request, public_id):
 def internal_sweep_job_failed(request, public_id):
     try:
         actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        claim_token = _parse_required_string(payload, "claim_token")
         error = _parse_required_string(payload, "error")
 
         job = mark_sweep_job_failed(
             actor=actor,
             public_id=public_id,
             service_name=service_name,
+            claim_token=claim_token,
             error=error,
         )
     except DjangoPermissionDenied as exc:

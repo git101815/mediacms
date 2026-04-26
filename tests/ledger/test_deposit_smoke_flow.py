@@ -108,7 +108,8 @@ class TestDepositSmokeFlow(TestDepositSessions):
             lease_seconds=300,
         )
         self.assertEqual(len(claimed), 1)
-
+        claim_token = claimed[0]["claim_token"]
+        self.assertTrue(claim_token)
         job.refresh_from_db()
         self.assertEqual(job.status, DepositSweepJob.STATUS_PENDING)
         self.assertEqual(job.claimed_by_service, service_name)
@@ -117,6 +118,7 @@ class TestDepositSmokeFlow(TestDepositSessions):
         mark_sweep_job_funding_broadcasted(
             actor=self.operator,
             service_name=service_name,
+            claim_token=claim_token,
             public_id=job.public_id,
             gas_funding_txid="0xfunding0001",
             destination_address=session.deposit_address,
@@ -129,6 +131,7 @@ class TestDepositSmokeFlow(TestDepositSessions):
         mark_sweep_job_ready_to_sweep(
             actor=self.operator,
             service_name=service_name,
+            claim_token=claim_token,
             public_id=job.public_id,
         )
 
@@ -138,6 +141,7 @@ class TestDepositSmokeFlow(TestDepositSessions):
         mark_sweep_job_sweep_broadcasted(
             actor=self.operator,
             service_name=service_name,
+            claim_token=claim_token,
             public_id=job.public_id,
             sweep_txid="0xsweep0001",
             destination_address=session.deposit_address,
@@ -150,6 +154,7 @@ class TestDepositSmokeFlow(TestDepositSessions):
         mark_sweep_job_confirmed(
             actor=self.operator,
             service_name=service_name,
+            claim_token=claim_token,
             public_id=job.public_id,
         )
 

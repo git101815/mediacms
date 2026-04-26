@@ -61,8 +61,6 @@ def get_native_balance(*, w3: Web3, address: str) -> int:
     return int(w3.eth.get_balance(Web3.to_checksum_address(address)))
 
 
-
-
 def get_receipt_with_confirmations(
     *,
     w3: Web3,
@@ -82,7 +80,7 @@ def send_native_transfer(
     *,
     chain: str,
     w3: Web3,
-    nonce_allocator: NonceAllocator,
+    nonce: int,
     funding_private_key: str,
     to_address: str,
     amount_wei: int,
@@ -92,11 +90,7 @@ def send_native_transfer(
 
     tx = {
         "chainId": int(w3.eth.chain_id),
-        "nonce": nonce_allocator.next_nonce(
-            chain=chain,
-            w3=w3,
-            address=funding_address,
-        ),
+        "nonce": int(nonce),
         "from": Web3.to_checksum_address(funding_address),
         "to": Web3.to_checksum_address(to_address),
         "value": int(amount_wei),
@@ -130,7 +124,7 @@ def send_erc20_transfer(
     *,
     chain: str,
     w3: Web3,
-    nonce_allocator: NonceAllocator,
+    nonce: int,
     token_contract_address: str,
     source_private_key: str,
     destination_address: str,
@@ -153,11 +147,7 @@ def send_erc20_transfer(
         {
             "chainId": int(w3.eth.chain_id),
             "from": Web3.to_checksum_address(source_address),
-            "nonce": nonce_allocator.next_nonce(
-                chain=chain,
-                w3=w3,
-                address=source_address,
-            ),
+            "nonce": int(nonce),
             "gas": int(gas_limit),
             **_build_fee_params(
                 w3=w3,

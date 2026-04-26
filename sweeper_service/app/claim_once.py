@@ -5,7 +5,6 @@ from .client import MediaCMSInternalClient
 from .config import load_config
 from .derivation import EvmDeriver
 from .evm import (
-    NonceAllocator,
     address_from_private_key,
     build_web3,
     get_erc20_balance,
@@ -367,13 +366,192 @@ def _extract_structured_error(exc: Exception) -> dict | None:
     return payload
 
 
+def _claim_token_for_job(job: dict) -> str:
+    claim_token = str(job.get("claim_token", "")).strip()
+    if not claim_token:
+        raise RuntimeError(f"Sweep job {job.get('public_id')} is missing claim_token")
+    return claim_token
+
+
+def _sender_lock_seconds(config) -> int:
+    value = int(getattr(config, "evm_sender_lock_seconds", 120) or 120)
+    return max(30, value)
+
+
+def _pending_nonce(*, w3, address: str) -> int:
+    return int(
+        w3.eth.get_transaction_count(
+            Web3.to_checksum_address(address),
+            block_identifier="pending",
+        )
+    )
+
+
+def _reserve_sender_nonce(
+    *,
+    client: MediaCMSInternalClient,
+    config,
+    option,
+    w3,
+    address: str,
+) -> dict:
+    normalized_address = str(address or "").strip().lower()
+    if not normalized_address:
+        raise RuntimeError("Cannot reserve nonce for an empty address")
+
+    lock = client.acquire_evm_sender_lock(
+        chain=option.chain,
+        address=normalized_address,
+        lock_seconds=_sender_lock_seconds(config),
+    )
+
+    rpc_pending_nonce = _pending_nonce(w3=w3, address=normalized_address)
+    backend_next_nonce = lock.get("next_nonce")
+    if backend_next_nonce is None:
+        selected_nonce = rpc_pending_nonce
+    else:
+        selected_nonce = max(int(backend_next_nonce), rpc_pending_nonce)
+
+    return {
+        **lock,
+        "address": normalized_address,
+        "nonce": int(selected_nonce),
+    }
+
+
+def _release_sender_lock_safely(
+    *,
+    client: MediaCMSInternalClient,
+    option,
+    sender_lock: dict | None,
+) -> None:
+    if not sender_lock:
+        return
+
+    try:
+        client.release_evm_sender_lock(
+            chain=option.chain,
+            address=sender_lock["address"],
+            lock_token=sender_lock["lock_token"],
+        )
+    except Exception:
+        logging.exception(
+            "sweeper_service action=release_sender_lock_failed chain=%s address=%s",
+            option.chain,
+            sender_lock.get("address"),
+        )
+
+
+def _send_native_transfer_with_sender_lock(
+    *,
+    client: MediaCMSInternalClient,
+    config,
+    w3,
+    option,
+    funding_private_key: str,
+    to_address: str,
+    amount_wei: int,
+) -> str:
+    funding_address = address_from_private_key(funding_private_key)
+    sender_lock = None
+    txid = ""
+
+    try:
+        sender_lock = _reserve_sender_nonce(
+            client=client,
+            config=config,
+            option=option,
+            w3=w3,
+            address=funding_address,
+        )
+        txid = send_native_transfer(
+            chain=option.chain,
+            w3=w3,
+            nonce=sender_lock["nonce"],
+            funding_private_key=funding_private_key,
+            to_address=to_address,
+            amount_wei=amount_wei,
+            gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+        )
+        client.confirm_evm_sender_nonce_used(
+            chain=option.chain,
+            address=funding_address,
+            lock_token=sender_lock["lock_token"],
+            nonce=sender_lock["nonce"],
+            txid=txid,
+        )
+        return txid
+    except Exception:
+        if not txid:
+            _release_sender_lock_safely(
+                client=client,
+                option=option,
+                sender_lock=sender_lock,
+            )
+        raise
+
+
+def _send_erc20_transfer_with_sender_lock(
+    *,
+    client: MediaCMSInternalClient,
+    config,
+    w3,
+    option,
+    token_contract_address: str,
+    source_private_key: str,
+    destination_address: str,
+    amount: int,
+    gas_limit: int,
+) -> str:
+    source_address = address_from_private_key(source_private_key)
+    sender_lock = None
+    txid = ""
+
+    try:
+        sender_lock = _reserve_sender_nonce(
+            client=client,
+            config=config,
+            option=option,
+            w3=w3,
+            address=source_address,
+        )
+        txid = send_erc20_transfer(
+            chain=option.chain,
+            w3=w3,
+            nonce=sender_lock["nonce"],
+            token_contract_address=token_contract_address,
+            source_private_key=source_private_key,
+            destination_address=destination_address,
+            amount=amount,
+            gas_limit=gas_limit,
+            gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+        )
+        client.confirm_evm_sender_nonce_used(
+            chain=option.chain,
+            address=source_address,
+            lock_token=sender_lock["lock_token"],
+            nonce=sender_lock["nonce"],
+            txid=txid,
+        )
+        return txid
+    except Exception:
+        if not txid:
+            _release_sender_lock_safely(
+                client=client,
+                option=option,
+                sender_lock=sender_lock,
+            )
+        raise
+
+
 def _send_retry_funding_if_needed(
     *,
     client,
-    nonce_allocator,
+    config,
     w3,
     option,
     public_id: str,
+    claim_token: str,
     source_address: str,
     extra_topup_needed: int,
 ) -> None:
@@ -394,17 +572,18 @@ def _send_retry_funding_if_needed(
             },
         )
 
-    gas_funding_txid = send_native_transfer(
-        chain=option.chain,
+    gas_funding_txid = _send_native_transfer_with_sender_lock(
+        client=client,
+        config=config,
         w3=w3,
-        nonce_allocator=nonce_allocator,
+        option=option,
         funding_private_key=option.funding_private_key,
         to_address=source_address,
         amount_wei=extra_topup_needed,
-        gas_price_multiplier_bps=option.gas_price_multiplier_bps,
     )
     client.mark_funding_broadcasted(
         public_id=public_id,
+        claim_token=claim_token,
         gas_funding_txid=gas_funding_txid,
         destination_address=option.destination_address,
     )
@@ -425,29 +604,32 @@ def _send_retry_funding_if_needed(
 def _run_single_sweep_attempt(
     *,
     client,
-    nonce_allocator,
+    config,
     w3,
     option,
     public_id: str,
+    claim_token: str,
     source_private_key: str,
     amount: int,
     gas_limit: int,
 ) -> tuple[str, dict]:
-    sweep_txid = send_erc20_transfer(
-        chain=option.chain,
+    sweep_txid = _send_erc20_transfer_with_sender_lock(
+        client=client,
+        config=config,
         w3=w3,
-        nonce_allocator=nonce_allocator,
+        option=option,
         token_contract_address=option.token_contract_address,
         source_private_key=source_private_key,
         destination_address=option.destination_address,
         amount=amount,
         gas_limit=gas_limit,
-        gas_price_multiplier_bps=option.gas_price_multiplier_bps,
     )
     client.mark_sweep_broadcasted(
         public_id=public_id,
+        claim_token=claim_token,
         sweep_txid=sweep_txid,
         destination_address=option.destination_address,
+        last_sweep_gas_limit=gas_limit,
     )
     wait_for_confirmations(
         w3=w3,
@@ -458,13 +640,15 @@ def _run_single_sweep_attempt(
     receipt = _read_mined_receipt(w3=w3, txid=sweep_txid)
     return sweep_txid, receipt
 
+
 def _finalize_sweep_with_single_retry(
     *,
     client,
-    nonce_allocator,
+    config,
     w3,
     option,
     public_id: str,
+    claim_token: str,
     source_address: str,
     source_private_key: str,
     amount: int,
@@ -472,10 +656,11 @@ def _finalize_sweep_with_single_retry(
 ) -> str:
     first_sweep_txid, first_receipt = _run_single_sweep_attempt(
         client=client,
-        nonce_allocator=nonce_allocator,
+        config=config,
         w3=w3,
         option=option,
         public_id=public_id,
+        claim_token=claim_token,
         source_private_key=source_private_key,
         amount=amount,
         gas_limit=initial_gas_limit,
@@ -521,20 +706,22 @@ def _finalize_sweep_with_single_retry(
 
     _send_retry_funding_if_needed(
         client=client,
-        nonce_allocator=nonce_allocator,
+        config=config,
         w3=w3,
         option=option,
         public_id=public_id,
+        claim_token=claim_token,
         source_address=source_address,
         extra_topup_needed=extra_topup_needed,
     )
 
     second_sweep_txid, second_receipt = _run_single_sweep_attempt(
         client=client,
-        nonce_allocator=nonce_allocator,
+        config=config,
         w3=w3,
         option=option,
         public_id=public_id,
+        claim_token=claim_token,
         source_private_key=source_private_key,
         amount=amount,
         gas_limit=retry_gas_limit,
@@ -569,17 +756,18 @@ def _finalize_sweep_with_single_retry(
         },
     )
 
+
 def _process_claimed_job(
     *,
     client: MediaCMSInternalClient,
     deriver: EvmDeriver,
-    nonce_allocator: NonceAllocator,
     config,
     option,
     job: dict,
     w3,
 ) -> None:
     public_id = str(job["public_id"])
+    claim_token = _claim_token_for_job(job)
     status = str(job.get("status", "")).strip().lower()
     source_address = str(job["source_address"]).strip().lower()
     amount = int(job["amount"])
@@ -604,6 +792,7 @@ def _process_claimed_job(
         if receipt is None or confirmations < int(option.sweep_confirmations):
             client.mark_rescheduled(
                 public_id=public_id,
+                claim_token=claim_token,
                 next_retry_in_seconds=retry_delay_seconds,
             )
             logging.info(
@@ -616,7 +805,7 @@ def _process_claimed_job(
             return
 
         if int(receipt.get("status", 0) or 0) == 1:
-            client.mark_confirmed(public_id=public_id)
+            client.mark_confirmed(public_id=public_id, claim_token=claim_token)
             logging.info(
                 "sweeper_service action=confirmed-existing public_id=%s sweep_txid=%s confirmations=%s",
                 public_id,
@@ -691,23 +880,25 @@ def _process_claimed_job(
                 public_id=public_id,
             )
 
-            gas_funding_txid = send_native_transfer(
-                chain=option.chain,
+            gas_funding_txid = _send_native_transfer_with_sender_lock(
+                client=client,
+                config=config,
                 w3=w3,
-                nonce_allocator=nonce_allocator,
+                option=option,
                 funding_private_key=option.funding_private_key,
                 to_address=source_address,
                 amount_wei=extra_topup_needed,
-                gas_price_multiplier_bps=option.gas_price_multiplier_bps,
             )
             client.mark_funding_broadcasted(
                 public_id=public_id,
+                claim_token=claim_token,
                 gas_funding_txid=gas_funding_txid,
                 destination_address=option.destination_address,
                 last_sweep_gas_limit=retry_gas_limit,
             )
             client.mark_rescheduled(
                 public_id=public_id,
+                claim_token=claim_token,
                 next_retry_in_seconds=retry_delay_seconds,
             )
             logging.info(
@@ -719,7 +910,7 @@ def _process_claimed_job(
             )
             return
 
-        client.mark_ready_to_sweep(public_id=public_id)
+        client.mark_ready_to_sweep(public_id=public_id, claim_token=claim_token)
         status = "ready_to_sweep"
         explicit_gas_limit_override = retry_gas_limit
 
@@ -735,6 +926,7 @@ def _process_claimed_job(
         if receipt is None or confirmations < int(option.funding_confirmations):
             client.mark_rescheduled(
                 public_id=public_id,
+                claim_token=claim_token,
                 next_retry_in_seconds=retry_delay_seconds,
             )
             logging.info(
@@ -817,23 +1009,25 @@ def _process_claimed_job(
             public_id=public_id,
         )
 
-        gas_funding_txid = send_native_transfer(
-            chain=option.chain,
+        gas_funding_txid = _send_native_transfer_with_sender_lock(
+            client=client,
+            config=config,
             w3=w3,
-            nonce_allocator=nonce_allocator,
+            option=option,
             funding_private_key=option.funding_private_key,
             to_address=source_address,
             amount_wei=topup_needed,
-            gas_price_multiplier_bps=option.gas_price_multiplier_bps,
         )
         client.mark_funding_broadcasted(
             public_id=public_id,
+            claim_token=claim_token,
             gas_funding_txid=gas_funding_txid,
             destination_address=option.destination_address,
             last_sweep_gas_limit=chosen_gas_limit,
         )
         client.mark_rescheduled(
             public_id=public_id,
+            claim_token=claim_token,
             next_retry_in_seconds=retry_delay_seconds,
         )
         logging.info(
@@ -866,27 +1060,29 @@ def _process_claimed_job(
             },
         )
 
-    client.mark_ready_to_sweep(public_id=public_id)
+    client.mark_ready_to_sweep(public_id=public_id, claim_token=claim_token)
 
-    sweep_txid = send_erc20_transfer(
-        chain=option.chain,
+    sweep_txid = _send_erc20_transfer_with_sender_lock(
+        client=client,
+        config=config,
         w3=w3,
-        nonce_allocator=nonce_allocator,
+        option=option,
         token_contract_address=option.token_contract_address,
         source_private_key=source_private_key,
         destination_address=option.destination_address,
         amount=amount,
         gas_limit=chosen_gas_limit,
-        gas_price_multiplier_bps=option.gas_price_multiplier_bps,
     )
     client.mark_sweep_broadcasted(
         public_id=public_id,
+        claim_token=claim_token,
         sweep_txid=sweep_txid,
         destination_address=option.destination_address,
         last_sweep_gas_limit=chosen_gas_limit,
     )
     client.mark_rescheduled(
         public_id=public_id,
+        claim_token=claim_token,
         next_retry_in_seconds=retry_delay_seconds,
     )
 
@@ -943,11 +1139,11 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
         passphrase=config.mnemonic_passphrase,
         account_index=config.account_index,
     )
-    nonce_allocator = NonceAllocator()
     web3_by_option_key = {}
 
     for job in jobs:
         public_id = str(job["public_id"])
+        claim_token = str(job.get("claim_token", "")).strip()
         try:
             option = _find_option_for_job(option_index=option_index, job=job)
 
@@ -966,7 +1162,6 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
             _process_claimed_job(
                 client=client,
                 deriver=deriver,
-                nonce_allocator=nonce_allocator,
                 config=config,
                 option=option,
                 job=job,
@@ -981,6 +1176,7 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
                 try:
                     client.mark_rescheduled(
                         public_id=public_id,
+                        claim_token=claim_token,
                         next_retry_in_seconds=_default_retry_delay_seconds(config),
                         error=error_message,
                         error_code=error_code,
@@ -1003,7 +1199,7 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
 
             error_message = _truncate_error(str(exc))
             try:
-                client.mark_failed(public_id=public_id, error=error_message)
+                client.mark_failed(public_id=public_id, claim_token=claim_token, error=error_message)
             except Exception:
                 logging.exception(
                     "sweeper_service action=mark_failed_error public_id=%s",

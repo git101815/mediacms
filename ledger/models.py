@@ -960,6 +960,44 @@ class InternalAPIRequestNonce(models.Model):
     def __str__(self):
         return f"InternalAPIRequestNonce #{self.id} {self.service_name}:{self.nonce}"
 
+class EvmSenderState(models.Model):
+    chain = models.CharField(max_length=32, db_index=True)
+    address = models.CharField(max_length=128, db_index=True)
+    next_nonce = models.PositiveBigIntegerField(null=True, blank=True)
+
+    locked_by_service = models.CharField(max_length=64, blank=True, default="")
+    lock_token = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    lock_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    metadata = models.JSONField(default=dict, blank=True)
+    metadata_version = models.PositiveSmallIntegerField(default=LEDGER_METADATA_VERSION)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["chain", "address"]),
+            models.Index(fields=["lock_expires_at"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["chain", "address"],
+                name="uniq_evmsenderstate_chain_address",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(next_nonce__isnull=True) | models.Q(next_nonce__gte=0),
+                name="evmsenderstate_next_nonce_gte_0_if_present",
+            ),
+        ]
+        permissions = [
+            ("can_manage_evm_sender_states", "Can manage EVM sender nonce locks"),
+            ("can_view_evm_sender_states", "Can view EVM sender nonce locks"),
+        ]
+
+    def __str__(self):
+        return f"EvmSenderState #{self.id} {self.chain}:{self.address} next={self.next_nonce}"
+
 class DepositSweepJob(models.Model):
     STATUS_PENDING = "pending"
     STATUS_FUNDING_BROADCASTED = "funding_broadcasted"
@@ -1014,6 +1052,7 @@ class DepositSweepJob(models.Model):
     )
 
     claimed_by_service = models.CharField(max_length=64, blank=True, default="")
+    claim_token = models.CharField(max_length=64, blank=True, default="", db_index=True)
     claim_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
     next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
@@ -1035,6 +1074,7 @@ class DepositSweepJob(models.Model):
         indexes = [
             models.Index(fields=["status", "chain", "asset_code"]),
             models.Index(fields=["status", "claim_expires_at"]),
+            models.Index(fields=["claimed_by_service", "claim_token"]),
             models.Index(fields=["status", "next_retry_at"]),
         ]
         constraints = [

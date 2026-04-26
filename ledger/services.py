@@ -26,6 +26,7 @@ from .models import (
     DepositAddress,
     DepositSweepJob,
     DepositRouteCounter,
+    EvmSenderState,
     TokenPack,
 )
 import json
@@ -267,19 +268,31 @@ def _parse_derivation_index_from_ref(address_derivation_ref: str):
 
     return parsed
 
+def _normalize_claim_token(value: str) -> str:
+    normalized = (value or "").strip()
+    if not normalized:
+        raise ValidationError("Sweep job claim token is required")
+    return normalized
+
+
 def _get_claimed_sweep_job_for_update(
     *,
     actor,
     public_id,
     service_name: str,
+    claim_token: str,
     allow_expired_claim: bool = False,
 ) -> DepositSweepJob:
     _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
 
     job = DepositSweepJob.objects.select_for_update().get(public_id=public_id)
+    normalized_claim_token = _normalize_claim_token(claim_token)
 
     if job.claimed_by_service != service_name:
         raise ValidationError("Sweep job is not claimed by this service")
+
+    if not job.claim_token or job.claim_token != normalized_claim_token:
+        raise ValidationError("Sweep job claim token does not match")
 
     if (
         not allow_expired_claim
@@ -291,7 +304,207 @@ def _get_claimed_sweep_job_for_update(
 
 def _clear_sweep_job_claim(job: DepositSweepJob) -> None:
     job.claimed_by_service = ""
+    job.claim_token = ""
     job.claim_expires_at = None
+
+
+def _normalize_sender_chain(value: str) -> str:
+    normalized = _normalize_chain(value)
+    if not normalized:
+        raise ValidationError("Sender chain is required")
+    return normalized
+
+
+def _normalize_sender_address(value: str) -> str:
+    normalized = _normalize_evm_address(value)
+    if not normalized:
+        raise ValidationError("Sender address is required")
+    return normalized
+
+
+def _normalize_lock_token(value: str) -> str:
+    normalized = (value or "").strip()
+    if not normalized:
+        raise ValidationError("Sender lock token is required")
+    return normalized
+
+
+def _clear_evm_sender_lock(state: EvmSenderState) -> None:
+    state.locked_by_service = ""
+    state.lock_token = ""
+    state.lock_expires_at = None
+
+
+def _get_locked_evm_sender_state_for_update(
+    *,
+    actor,
+    service_name: str,
+    chain: str,
+    address: str,
+    lock_token: str,
+    allow_expired_lock: bool = False,
+) -> EvmSenderState:
+    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+
+    state = EvmSenderState.objects.select_for_update().get(
+        chain=_normalize_sender_chain(chain),
+        address=_normalize_sender_address(address),
+    )
+
+    normalized_lock_token = _normalize_lock_token(lock_token)
+
+    if state.locked_by_service != service_name:
+        raise ValidationError("EVM sender is not locked by this service")
+
+    if not state.lock_token or state.lock_token != normalized_lock_token:
+        raise ValidationError("EVM sender lock token does not match")
+
+    if (
+        not allow_expired_lock
+        and (state.lock_expires_at is None or state.lock_expires_at <= timezone.now())
+    ):
+        raise ValidationError("EVM sender lock has expired")
+
+    return state
+
+
+@transaction.atomic
+def acquire_evm_sender_lock(
+    *,
+    actor,
+    service_name: str,
+    chain: str,
+    address: str,
+    lock_seconds: int,
+) -> dict:
+    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+
+    chain = _normalize_sender_chain(chain)
+    address = _normalize_sender_address(address)
+    lock_seconds = int(lock_seconds)
+
+    if lock_seconds <= 0:
+        raise ValidationError("Sender lock duration must be positive")
+
+    now = timezone.now()
+    lock_until = now + timedelta(seconds=lock_seconds)
+
+    state, _created = EvmSenderState.objects.select_for_update().get_or_create(
+        chain=chain,
+        address=address,
+        defaults={
+            "next_nonce": None,
+            "metadata": {},
+            "metadata_version": LEDGER_METADATA_VERSION,
+        },
+    )
+
+    if state.lock_token and state.lock_expires_at and state.lock_expires_at > now:
+        raise ValidationError("EVM sender is already locked")
+
+    state.locked_by_service = service_name
+    state.lock_token = uuid.uuid4().hex
+    state.lock_expires_at = lock_until
+    state.save(
+        update_fields=[
+            "locked_by_service",
+            "lock_token",
+            "lock_expires_at",
+            "updated_at",
+        ]
+    )
+
+    return {
+        "chain": state.chain,
+        "address": state.address,
+        "next_nonce": state.next_nonce,
+        "locked_by_service": state.locked_by_service,
+        "lock_token": state.lock_token,
+        "lock_expires_at": state.lock_expires_at,
+    }
+
+
+@transaction.atomic
+def confirm_evm_sender_nonce_used(
+    *,
+    actor,
+    service_name: str,
+    chain: str,
+    address: str,
+    lock_token: str,
+    nonce: int,
+    txid: str,
+) -> EvmSenderState:
+    state = _get_locked_evm_sender_state_for_update(
+        actor=actor,
+        service_name=service_name,
+        chain=chain,
+        address=address,
+        lock_token=lock_token,
+        allow_expired_lock=True,
+    )
+
+    nonce = int(nonce)
+    if nonce < 0:
+        raise ValidationError("Nonce cannot be negative")
+
+    txid = (txid or "").strip().lower()
+    if not txid:
+        raise ValidationError("Transaction id is required")
+
+    next_nonce = nonce + 1
+    if state.next_nonce is not None:
+        next_nonce = max(int(state.next_nonce), next_nonce)
+
+    state.next_nonce = next_nonce
+    state.metadata = {
+        **(state.metadata or {}),
+        "last_txid": txid,
+        "last_nonce": nonce,
+        "last_confirmed_at": timezone.now().isoformat(),
+    }
+    _clear_evm_sender_lock(state)
+    state.save(
+        update_fields=[
+            "next_nonce",
+            "metadata",
+            "locked_by_service",
+            "lock_token",
+            "lock_expires_at",
+            "updated_at",
+        ]
+    )
+    return state
+
+
+@transaction.atomic
+def release_evm_sender_lock(
+    *,
+    actor,
+    service_name: str,
+    chain: str,
+    address: str,
+    lock_token: str,
+) -> EvmSenderState:
+    state = _get_locked_evm_sender_state_for_update(
+        actor=actor,
+        service_name=service_name,
+        chain=chain,
+        address=address,
+        lock_token=lock_token,
+        allow_expired_lock=True,
+    )
+
+    _clear_evm_sender_lock(state)
+    state.save(
+        update_fields=[
+            "locked_by_service",
+            "lock_token",
+            "lock_expires_at",
+            "updated_at",
+        ]
+    )
+    return state
 
 DEPOSIT_SESSION_STATUS_CANCELED = getattr(DepositSession, "STATUS_CANCELED", "canceled")
 
@@ -713,6 +926,7 @@ def _abandon_open_sweep_jobs_for_session(*, deposit_session: DepositSession) -> 
     ).update(
         status=DepositSweepJob.STATUS_ABANDONED,
         claimed_by_service="",
+        claim_token="",
         claim_expires_at=None,
         updated_at=timezone.now(),
     )
@@ -2826,6 +3040,7 @@ def reschedule_deposit_sweep_job(
     actor,
     public_id,
     service_name: str,
+    claim_token: str,
     error: str = "",
     error_code: str = "",
     retryable: bool = True,
@@ -2836,6 +3051,7 @@ def reschedule_deposit_sweep_job(
         actor=actor,
         public_id=public_id,
         service_name=service_name,
+        claim_token=claim_token,
         allow_expired_claim=True,
     )
 
@@ -2854,6 +3070,7 @@ def reschedule_deposit_sweep_job(
     job.save(
         update_fields=[
             "claimed_by_service",
+            "claim_token",
             "claim_expires_at",
             "next_retry_at",
             "last_error",
@@ -2913,14 +3130,26 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
         )
 
         for job in qs[:limit - len(claimed)]:
+            claim_token = uuid.uuid4().hex
             job.claimed_by_service = service_name
+            job.claim_token = claim_token
             job.claim_expires_at = claim_until
             job.attempt_count += 1
-            job.save(update_fields=["claimed_by_service", "claim_expires_at", "attempt_count", "updated_at"])
+            job.save(
+                update_fields=[
+                    "claimed_by_service",
+                    "claim_token",
+                    "claim_expires_at",
+                    "attempt_count",
+                    "updated_at",
+                ]
+            )
 
             claimed.append(
                 {
                     "public_id": str(job.public_id),
+                    "claim_token": claim_token,
+                    "claim_expires_at": job.claim_expires_at.isoformat() if job.claim_expires_at else None,
                     "status": job.status,
                     "chain": job.chain,
                     "asset_code": job.asset_code,
@@ -2946,6 +3175,7 @@ def mark_sweep_job_funding_broadcasted(
     actor,
     public_id,
     service_name: str,
+    claim_token: str,
     gas_funding_txid: str,
     destination_address: str,
     last_sweep_gas_limit: int | None = None,
@@ -2962,6 +3192,7 @@ def mark_sweep_job_funding_broadcasted(
         actor=actor,
         public_id=public_id,
         service_name=service_name,
+        claim_token=claim_token,
     )
 
     if job.status == DepositSweepJob.STATUS_FUNDING_BROADCASTED:
@@ -3008,11 +3239,13 @@ def mark_sweep_job_ready_to_sweep(
     actor,
     public_id,
     service_name: str,
+    claim_token: str,
 ) -> DepositSweepJob:
     job = _get_claimed_sweep_job_for_update(
         actor=actor,
         public_id=public_id,
         service_name=service_name,
+        claim_token=claim_token,
     )
 
     if job.status == DepositSweepJob.STATUS_READY_TO_SWEEP:
@@ -3054,6 +3287,7 @@ def mark_sweep_job_sweep_broadcasted(
     actor,
     public_id,
     service_name: str,
+    claim_token: str,
     sweep_txid: str,
     destination_address: str,
     last_sweep_gas_limit: int | None = None,
@@ -3070,6 +3304,7 @@ def mark_sweep_job_sweep_broadcasted(
         actor=actor,
         public_id=public_id,
         service_name=service_name,
+        claim_token=claim_token,
     )
 
     if job.status == DepositSweepJob.STATUS_SWEEP_BROADCASTED:
@@ -3111,11 +3346,13 @@ def mark_sweep_job_confirmed(
     actor,
     public_id,
     service_name: str,
+    claim_token: str,
 ) -> DepositSweepJob:
     job = _get_claimed_sweep_job_for_update(
         actor=actor,
         public_id=public_id,
         service_name=service_name,
+        claim_token=claim_token,
         allow_expired_claim=True,
     )
 
@@ -3144,6 +3381,7 @@ def mark_sweep_job_confirmed(
             "last_error_retryable",
             "next_retry_at",
             "claimed_by_service",
+            "claim_token",
             "claim_expires_at",
             "updated_at",
         ]
@@ -3164,6 +3402,7 @@ def mark_sweep_job_failed(
     actor,
     public_id,
     service_name: str,
+    claim_token: str,
     error: str,
 ) -> DepositSweepJob:
     _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
@@ -3175,6 +3414,7 @@ def mark_sweep_job_failed(
         actor=actor,
         public_id=public_id,
         service_name=service_name,
+        claim_token=claim_token,
         allow_expired_claim=True,
     )
 
@@ -3203,6 +3443,7 @@ def mark_sweep_job_failed(
             "last_error_retryable",
             "next_retry_at",
             "claimed_by_service",
+            "claim_token",
             "claim_expires_at",
             "updated_at",
         ]

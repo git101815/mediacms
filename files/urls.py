@@ -26,8 +26,8 @@ urlpatterns = [
     re_path(r"^featured$", views.featured_media),
     re_path(r"^wallet/deposit-request$", views.wallet_deposit_request, name="wallet_deposit_request"),
     re_path(r"^wallet/withdrawal-request$", views.wallet_withdrawal_request, name="wallet_withdrawal_request"),
-    re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/$", views.wallet_deposit_session,name="wallet_deposit_session"),
-    re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/status/$", views.wallet_deposit_session_status,name="wallet_deposit_session_status"),
+    re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/$", views.wallet_deposit_session, name="wallet_deposit_session"),
+    re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/status/$", views.wallet_deposit_session_status, name="wallet_deposit_session_status"),
     re_path(
         r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/cancel/$",
         views.wallet_deposit_session_cancel,
@@ -58,6 +58,21 @@ urlpatterns = [
         r"^api/internal/ledger/sweep-jobs/claim$",
         views.internal_sweep_jobs_claim,
         name="internal_sweep_jobs_claim",
+    ),
+    path(
+        "api/internal/ledger/evm-sender-locks/acquire",
+        views.internal_evm_sender_lock_acquire,
+        name="internal_evm_sender_lock_acquire",
+    ),
+    path(
+        "api/internal/ledger/evm-sender-locks/confirm",
+        views.internal_evm_sender_lock_confirm,
+        name="internal_evm_sender_lock_confirm",
+    ),
+    path(
+        "api/internal/ledger/evm-sender-locks/release",
+        views.internal_evm_sender_lock_release,
+        name="internal_evm_sender_lock_release",
     ),
     path(
         "api/internal/ledger/sweep-jobs/<uuid:public_id>/funding-broadcasted",
