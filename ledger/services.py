@@ -506,6 +506,93 @@ def release_evm_sender_lock(
     )
     return state
 
+
+def _normalize_txid(value: str, *, field_name: str = "Transaction id") -> str:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        raise ValidationError(f"{field_name} is required")
+    return normalized
+
+
+def _optional_sender_nonce_metadata(*, sender_address: str = "", nonce=None) -> dict:
+    metadata = {}
+    normalized_sender = _normalize_evm_address(sender_address)
+    if normalized_sender:
+        metadata["sender_address"] = normalized_sender
+
+    if nonce is not None:
+        normalized_nonce = int(nonce)
+        if normalized_nonce < 0:
+            raise ValidationError("Broadcast nonce cannot be negative")
+        metadata["nonce"] = normalized_nonce
+
+    return metadata
+
+
+def _write_sweep_broadcast_metadata(
+    *,
+    job: DepositSweepJob,
+    key: str,
+    txid: str,
+    destination_address: str,
+    amount: int | None = None,
+    gas_limit: int | None = None,
+    sender_address: str = "",
+    nonce=None,
+) -> None:
+    metadata = dict(job.metadata or {})
+    existing = dict(metadata.get(key) or {})
+
+    payload = {
+        **existing,
+        "txid": txid,
+        "destination_address": destination_address,
+        "prepared_at": existing.get("prepared_at") or timezone.now().isoformat(),
+    }
+    if amount is not None:
+        payload["amount"] = int(amount)
+    if gas_limit is not None:
+        payload["gas_limit"] = int(gas_limit)
+    payload.update(_optional_sender_nonce_metadata(sender_address=sender_address, nonce=nonce))
+
+    metadata[key] = payload
+    job.metadata = metadata
+
+
+def _mark_sweep_broadcast_metadata_missing(*, job: DepositSweepJob, key: str, txid: str) -> None:
+    metadata = dict(job.metadata or {})
+    payload = dict(metadata.get(key) or {})
+    payload["missing_txid"] = txid
+    payload["missing_marked_at"] = timezone.now().isoformat()
+    metadata[key] = payload
+    job.metadata = metadata
+
+
+def _broadcast_prepared_at(job: DepositSweepJob, key: str):
+    value = ((job.metadata or {}).get(key) or {}).get("prepared_at")
+    if not value:
+        return None
+    try:
+        parsed = timezone.datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, timezone=timezone.get_current_timezone())
+    return parsed
+
+
+def sweep_broadcast_missing_deadline_has_passed(
+    *,
+    job: DepositSweepJob,
+    key: str,
+    timeout_seconds: int,
+) -> bool:
+    prepared_at = _broadcast_prepared_at(job, key)
+    if prepared_at is None:
+        return False
+    return timezone.now() >= prepared_at + timedelta(seconds=int(timeout_seconds))
+
+
 DEPOSIT_SESSION_STATUS_CANCELED = getattr(DepositSession, "STATUS_CANCELED", "canceled")
 
 NETWORK_DISPLAY_LABELS = {
@@ -3161,6 +3248,7 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
                     "gas_funding_txid": job.gas_funding_txid,
                     "sweep_txid": job.sweep_txid,
                     "last_sweep_gas_limit": job.last_sweep_gas_limit,
+                    "metadata": job.metadata or {},
                 }
             )
 
@@ -3179,12 +3267,12 @@ def mark_sweep_job_funding_broadcasted(
     gas_funding_txid: str,
     destination_address: str,
     last_sweep_gas_limit: int | None = None,
+    sender_address: str = "",
+    nonce=None,
+    amount_wei: int | None = None,
 ) -> DepositSweepJob:
-    gas_funding_txid = (gas_funding_txid or "").strip().lower()
+    gas_funding_txid = _normalize_txid(gas_funding_txid, field_name="Gas funding txid")
     destination_address = _normalize_evm_address(destination_address)
-
-    if not gas_funding_txid:
-        raise ValidationError("Gas funding txid is required")
     if not destination_address:
         raise ValidationError("Destination address is required")
 
@@ -3197,6 +3285,18 @@ def mark_sweep_job_funding_broadcasted(
 
     if job.status == DepositSweepJob.STATUS_FUNDING_BROADCASTED:
         if job.gas_funding_txid == gas_funding_txid and job.destination_address == destination_address:
+            if sender_address or nonce is not None or amount_wei is not None or last_sweep_gas_limit is not None:
+                _write_sweep_broadcast_metadata(
+                    job=job,
+                    key="gas_funding_broadcast",
+                    txid=gas_funding_txid,
+                    destination_address=destination_address,
+                    amount=amount_wei,
+                    gas_limit=last_sweep_gas_limit,
+                    sender_address=sender_address,
+                    nonce=nonce,
+                )
+                job.save(update_fields=["metadata", "updated_at"])
             return job
         raise ValidationError("Sweep job already has a different gas funding txid")
 
@@ -3217,6 +3317,16 @@ def mark_sweep_job_funding_broadcasted(
     job.next_retry_at = None
     if last_sweep_gas_limit is not None:
         job.last_sweep_gas_limit = int(last_sweep_gas_limit)
+    _write_sweep_broadcast_metadata(
+        job=job,
+        key="gas_funding_broadcast",
+        txid=gas_funding_txid,
+        destination_address=destination_address,
+        amount=amount_wei,
+        gas_limit=last_sweep_gas_limit,
+        sender_address=sender_address,
+        nonce=nonce,
+    )
     job.save(
         update_fields=[
             "status",
@@ -3227,6 +3337,7 @@ def mark_sweep_job_funding_broadcasted(
             "last_error_retryable",
             "next_retry_at",
             "last_sweep_gas_limit",
+            "metadata",
             "updated_at",
         ]
     )
@@ -3291,12 +3402,12 @@ def mark_sweep_job_sweep_broadcasted(
     sweep_txid: str,
     destination_address: str,
     last_sweep_gas_limit: int | None = None,
+    sender_address: str = "",
+    nonce=None,
+    amount: int | None = None,
 ) -> DepositSweepJob:
-    sweep_txid = (sweep_txid or "").strip().lower()
+    sweep_txid = _normalize_txid(sweep_txid, field_name="Sweep txid")
     destination_address = _normalize_evm_address(destination_address)
-
-    if not sweep_txid:
-        raise ValidationError("Sweep txid is required")
     if not destination_address:
         raise ValidationError("Destination address is required")
 
@@ -3309,6 +3420,18 @@ def mark_sweep_job_sweep_broadcasted(
 
     if job.status == DepositSweepJob.STATUS_SWEEP_BROADCASTED:
         if job.sweep_txid == sweep_txid and job.destination_address == destination_address:
+            if sender_address or nonce is not None or amount is not None or last_sweep_gas_limit is not None:
+                _write_sweep_broadcast_metadata(
+                    job=job,
+                    key="sweep_broadcast",
+                    txid=sweep_txid,
+                    destination_address=destination_address,
+                    amount=amount,
+                    gas_limit=last_sweep_gas_limit,
+                    sender_address=sender_address,
+                    nonce=nonce,
+                )
+                job.save(update_fields=["metadata", "updated_at"])
             return job
         raise ValidationError("Sweep job already has a different sweep txid")
 
@@ -3324,6 +3447,16 @@ def mark_sweep_job_sweep_broadcasted(
     job.next_retry_at = None
     if last_sweep_gas_limit is not None:
         job.last_sweep_gas_limit = int(last_sweep_gas_limit)
+    _write_sweep_broadcast_metadata(
+        job=job,
+        key="sweep_broadcast",
+        txid=sweep_txid,
+        destination_address=destination_address,
+        amount=amount,
+        gas_limit=last_sweep_gas_limit,
+        sender_address=sender_address,
+        nonce=nonce,
+    )
     job.save(
         update_fields=[
             "status",
@@ -3334,6 +3467,117 @@ def mark_sweep_job_sweep_broadcasted(
             "last_error_retryable",
             "next_retry_at",
             "last_sweep_gas_limit",
+            "metadata",
+            "updated_at",
+        ]
+    )
+    return job
+
+
+@transaction.atomic
+def mark_sweep_job_funding_broadcast_missing(
+    *,
+    actor,
+    public_id,
+    service_name: str,
+    claim_token: str,
+    gas_funding_txid: str,
+    next_retry_in_seconds: int,
+    error: str = "Gas funding transaction was not found after broadcast timeout",
+) -> DepositSweepJob:
+    gas_funding_txid = _normalize_txid(gas_funding_txid, field_name="Gas funding txid")
+    job = _get_claimed_sweep_job_for_update(
+        actor=actor,
+        public_id=public_id,
+        service_name=service_name,
+        claim_token=claim_token,
+        allow_expired_claim=True,
+    )
+
+    if job.status != DepositSweepJob.STATUS_FUNDING_BROADCASTED:
+        raise ValidationError("Sweep job is not waiting on a gas funding transaction")
+    if job.gas_funding_txid != gas_funding_txid:
+        raise ValidationError("Gas funding txid does not match the sweep job")
+
+    job.status = DepositSweepJob.STATUS_PENDING
+    job.gas_funding_txid = ""
+    job.next_retry_at = timezone.now() + timedelta(seconds=int(next_retry_in_seconds))
+    job.last_error = str(error or "").strip()
+    job.last_error_code = "SWEEP_GAS_FUNDING_TX_MISSING"
+    job.last_error_retryable = True
+    _mark_sweep_broadcast_metadata_missing(
+        job=job,
+        key="gas_funding_broadcast",
+        txid=gas_funding_txid,
+    )
+    _clear_sweep_job_claim(job)
+    job.save(
+        update_fields=[
+            "status",
+            "gas_funding_txid",
+            "next_retry_at",
+            "last_error",
+            "last_error_code",
+            "last_error_retryable",
+            "claimed_by_service",
+            "claim_token",
+            "claim_expires_at",
+            "metadata",
+            "updated_at",
+        ]
+    )
+    return job
+
+
+@transaction.atomic
+def mark_sweep_job_sweep_broadcast_missing(
+    *,
+    actor,
+    public_id,
+    service_name: str,
+    claim_token: str,
+    sweep_txid: str,
+    next_retry_in_seconds: int,
+    error: str = "Sweep transaction was not found after broadcast timeout",
+) -> DepositSweepJob:
+    sweep_txid = _normalize_txid(sweep_txid, field_name="Sweep txid")
+    job = _get_claimed_sweep_job_for_update(
+        actor=actor,
+        public_id=public_id,
+        service_name=service_name,
+        claim_token=claim_token,
+        allow_expired_claim=True,
+    )
+
+    if job.status != DepositSweepJob.STATUS_SWEEP_BROADCASTED:
+        raise ValidationError("Sweep job is not waiting on a sweep transaction")
+    if job.sweep_txid != sweep_txid:
+        raise ValidationError("Sweep txid does not match the sweep job")
+
+    job.status = DepositSweepJob.STATUS_READY_TO_SWEEP
+    job.sweep_txid = ""
+    job.next_retry_at = timezone.now() + timedelta(seconds=int(next_retry_in_seconds))
+    job.last_error = str(error or "").strip()
+    job.last_error_code = "SWEEP_TX_MISSING"
+    job.last_error_retryable = True
+    _mark_sweep_broadcast_metadata_missing(
+        job=job,
+        key="sweep_broadcast",
+        txid=sweep_txid,
+    )
+    _clear_sweep_job_claim(job)
+    job.save(
+        update_fields=[
+            "status",
+            "sweep_txid",
+            "next_retry_at",
+            "last_error",
+            "last_error_code",
+            "last_error_retryable",
+            "claimed_by_service",
+            "claim_token",
+            "claim_expires_at",
+            "metadata",
             "updated_at",
         ]
     )

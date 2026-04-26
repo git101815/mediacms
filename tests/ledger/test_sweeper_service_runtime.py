@@ -81,6 +81,13 @@ def _make_job(
     return job
 
 
+def _signed_tx(txid):
+    return {
+        "txid": txid,
+        "raw_transaction": b"raw-" + txid.encode("utf-8"),
+    }
+
+
 def test_run_once_pending_job_funds_then_reschedules():
     option = _make_option()
     config = _make_config(option)
@@ -130,9 +137,11 @@ def test_run_once_pending_job_funds_then_reschedules():
          patch.object(claim_once, "_compute_effective_gas_price_wei", return_value=1), \
          patch.object(claim_once, "address_from_private_key", side_effect=fake_address_from_private_key), \
          patch.object(claim_once, "get_native_balance", side_effect=fake_get_native_balance), \
-         patch.object(claim_once, "send_native_transfer", return_value="0xgas"), \
-         patch.object(claim_once, "get_erc20_balance", return_value=job["amount"]), \
-         patch.object(claim_once, "send_erc20_transfer", return_value="0xsweep"):
+         patch.object(claim_once, "build_native_transfer_transaction", return_value={"kind": "native"}), \
+         patch.object(claim_once, "build_erc20_transfer_transaction", return_value={"kind": "erc20"}), \
+         patch.object(claim_once, "sign_transaction", return_value=_signed_tx("0xgas")), \
+         patch.object(claim_once, "send_signed_transaction", return_value="0xgas"), \
+         patch.object(claim_once, "get_erc20_balance", return_value=job["amount"]):
         claim_once.run_once(client=client, config=config)
 
     client.claim_jobs.assert_called_once_with(
@@ -166,6 +175,9 @@ def test_run_once_pending_job_funds_then_reschedules():
         gas_funding_txid="0xgas",
         destination_address=option.destination_address,
         last_sweep_gas_limit=50000,
+        sender_address=funding_address,
+        nonce=0,
+        amount_wei=50000,
     )
     client.mark_rescheduled.assert_called_once_with(
         public_id="job-1",
@@ -219,12 +231,14 @@ def test_run_once_resumes_funding_broadcasted_job_without_refunding():
          patch.object(claim_once, "get_receipt_with_confirmations", return_value=({"status": 1, "gasUsed": 21000}, 1)), \
          patch.object(claim_once, "address_from_private_key", side_effect=fake_address_from_private_key), \
          patch.object(claim_once, "get_native_balance", return_value=option.max_gas_funding_amount_wei), \
-         patch.object(claim_once, "send_native_transfer") as send_native_transfer, \
-         patch.object(claim_once, "get_erc20_balance", return_value=job["amount"]), \
-         patch.object(claim_once, "send_erc20_transfer", return_value="0xsweep"):
+         patch.object(claim_once, "build_native_transfer_transaction") as build_native_transfer_transaction, \
+         patch.object(claim_once, "build_erc20_transfer_transaction", return_value={"kind": "erc20"}), \
+         patch.object(claim_once, "sign_transaction", return_value=_signed_tx("0xsweep")), \
+         patch.object(claim_once, "send_signed_transaction", return_value="0xsweep"), \
+         patch.object(claim_once, "get_erc20_balance", return_value=job["amount"]):
         claim_once.run_once(client=client, config=config)
 
-    send_native_transfer.assert_not_called()
+    build_native_transfer_transaction.assert_not_called()
     client.mark_funding_broadcasted.assert_not_called()
     client.mark_ready_to_sweep.assert_called_once_with(
         public_id="job-1",
@@ -236,6 +250,9 @@ def test_run_once_resumes_funding_broadcasted_job_without_refunding():
         sweep_txid="0xsweep",
         destination_address=option.destination_address,
         last_sweep_gas_limit=50000,
+        sender_address=job["source_address"],
+        nonce=0,
+        amount=job["amount"],
     )
     client.mark_confirmed.assert_not_called()
     client.mark_rescheduled.assert_called_once_with(
@@ -280,12 +297,14 @@ def test_run_once_confirms_existing_sweep_broadcasted_job_without_rebroadcast():
             patch.object(claim_once, "_build_option_web3", return_value=w3), \
          patch.object(claim_once, "get_receipt_with_confirmations", return_value=({"status": 1, "gasUsed": 50000}, 1)), \
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
-         patch.object(claim_once, "send_native_transfer") as send_native_transfer, \
-         patch.object(claim_once, "send_erc20_transfer") as send_erc20_transfer:
+         patch.object(claim_once, "build_native_transfer_transaction") as build_native_transfer_transaction, \
+         patch.object(claim_once, "build_erc20_transfer_transaction") as build_erc20_transfer_transaction, \
+         patch.object(claim_once, "send_signed_transaction") as send_signed_transaction:
         claim_once.run_once(client=client, config=config)
 
-    send_native_transfer.assert_not_called()
-    send_erc20_transfer.assert_not_called()
+    build_native_transfer_transaction.assert_not_called()
+    build_erc20_transfer_transaction.assert_not_called()
+    send_signed_transaction.assert_not_called()
     client.mark_confirmed.assert_called_once_with(
         public_id="job-1",
         claim_token=job["claim_token"],
@@ -368,12 +387,14 @@ def test_run_once_reschedules_when_token_balance_is_insufficient():
          patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
          patch.object(claim_once, "get_native_balance", return_value=50000), \
          patch.object(claim_once, "get_erc20_balance", return_value=249), \
-         patch.object(claim_once, "send_native_transfer") as send_native_transfer, \
-         patch.object(claim_once, "send_erc20_transfer") as send_erc20_transfer:
+         patch.object(claim_once, "build_native_transfer_transaction") as build_native_transfer_transaction, \
+         patch.object(claim_once, "build_erc20_transfer_transaction") as build_erc20_transfer_transaction, \
+         patch.object(claim_once, "send_signed_transaction") as send_signed_transaction:
         claim_once.run_once(client=client, config=config)
 
-    send_native_transfer.assert_not_called()
-    send_erc20_transfer.assert_not_called()
+    build_native_transfer_transaction.assert_not_called()
+    build_erc20_transfer_transaction.assert_not_called()
+    send_signed_transaction.assert_not_called()
     client.mark_ready_to_sweep.assert_not_called()
     client.mark_sweep_broadcasted.assert_not_called()
     client.mark_confirmed.assert_not_called()

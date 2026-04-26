@@ -51,10 +51,97 @@ def _build_fee_params(*, w3: Web3, gas_price_multiplier_bps: int) -> dict:
     return {"gasPrice": adjusted_gas_price}
 
 
-def _sign_and_send(*, w3: Web3, tx: dict, private_key: str) -> str:
+def build_native_transfer_transaction(
+    *,
+    w3: Web3,
+    nonce: int,
+    funding_private_key: str,
+    to_address: str,
+    amount_wei: int,
+    gas_price_multiplier_bps: int,
+) -> dict:
+    funding_address = address_from_private_key(funding_private_key)
+    return {
+        "chainId": int(w3.eth.chain_id),
+        "nonce": int(nonce),
+        "from": Web3.to_checksum_address(funding_address),
+        "to": Web3.to_checksum_address(to_address),
+        "value": int(amount_wei),
+        "gas": 21000,
+        **_build_fee_params(
+            w3=w3,
+            gas_price_multiplier_bps=gas_price_multiplier_bps,
+        ),
+    }
+
+
+def build_erc20_transfer_transaction(
+    *,
+    w3: Web3,
+    nonce: int,
+    token_contract_address: str,
+    source_private_key: str,
+    destination_address: str,
+    amount: int,
+    gas_limit: int,
+    gas_price_multiplier_bps: int,
+) -> dict:
+    source_address = address_from_private_key(source_private_key)
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address(token_contract_address),
+        abi=ERC20_ABI,
+    )
+
+    function = contract.functions.transfer(
+        Web3.to_checksum_address(destination_address),
+        int(amount),
+    )
+
+    return function.build_transaction(
+        {
+            "chainId": int(w3.eth.chain_id),
+            "from": Web3.to_checksum_address(source_address),
+            "nonce": int(nonce),
+            "gas": int(gas_limit),
+            **_build_fee_params(
+                w3=w3,
+                gas_price_multiplier_bps=gas_price_multiplier_bps,
+            ),
+        }
+    )
+
+
+def sign_transaction(*, tx: dict, private_key: str) -> dict:
     signed = Account.sign_transaction(tx, private_key=private_key)
-    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-    return tx_hash.hex()
+    return {
+        "raw_transaction": signed.raw_transaction,
+        "txid": signed.hash.hex(),
+    }
+
+
+def send_signed_transaction(*, w3: Web3, raw_transaction, expected_txid: str | None = None) -> str:
+    tx_hash = w3.eth.send_raw_transaction(raw_transaction)
+    txid = tx_hash.hex()
+    if expected_txid and txid.lower() != str(expected_txid).lower():
+        raise RuntimeError(f"Broadcasted txid mismatch: expected={expected_txid} actual={txid}")
+    return txid
+
+
+def _sign_and_send(*, w3: Web3, tx: dict, private_key: str) -> str:
+    signed = sign_transaction(tx=tx, private_key=private_key)
+    return send_signed_transaction(
+        w3=w3,
+        raw_transaction=signed["raw_transaction"],
+        expected_txid=signed["txid"],
+    )
+
+
+def transaction_is_known(*, w3: Web3, txid: str) -> bool:
+    try:
+        w3.eth.get_transaction(txid)
+    except TransactionNotFound:
+        return False
+    return True
 
 
 def get_native_balance(*, w3: Web3, address: str) -> int:
@@ -86,20 +173,14 @@ def send_native_transfer(
     amount_wei: int,
     gas_price_multiplier_bps: int,
 ) -> str:
-    funding_address = address_from_private_key(funding_private_key)
-
-    tx = {
-        "chainId": int(w3.eth.chain_id),
-        "nonce": int(nonce),
-        "from": Web3.to_checksum_address(funding_address),
-        "to": Web3.to_checksum_address(to_address),
-        "value": int(amount_wei),
-        "gas": 21000,
-        **_build_fee_params(
-            w3=w3,
-            gas_price_multiplier_bps=gas_price_multiplier_bps,
-        ),
-    }
+    tx = build_native_transfer_transaction(
+        w3=w3,
+        nonce=nonce,
+        funding_private_key=funding_private_key,
+        to_address=to_address,
+        amount_wei=amount_wei,
+        gas_price_multiplier_bps=gas_price_multiplier_bps,
+    )
     return _sign_and_send(w3=w3, tx=tx, private_key=funding_private_key)
 
 
@@ -132,28 +213,15 @@ def send_erc20_transfer(
     gas_limit: int,
     gas_price_multiplier_bps: int,
 ) -> str:
-    source_address = address_from_private_key(source_private_key)
-    contract = w3.eth.contract(
-        address=Web3.to_checksum_address(token_contract_address),
-        abi=ERC20_ABI,
-    )
-
-    function = contract.functions.transfer(
-        Web3.to_checksum_address(destination_address),
-        int(amount),
-    )
-
-    tx = function.build_transaction(
-        {
-            "chainId": int(w3.eth.chain_id),
-            "from": Web3.to_checksum_address(source_address),
-            "nonce": int(nonce),
-            "gas": int(gas_limit),
-            **_build_fee_params(
-                w3=w3,
-                gas_price_multiplier_bps=gas_price_multiplier_bps,
-            ),
-        }
+    tx = build_erc20_transfer_transaction(
+        w3=w3,
+        nonce=nonce,
+        token_contract_address=token_contract_address,
+        source_private_key=source_private_key,
+        destination_address=destination_address,
+        amount=amount,
+        gas_limit=gas_limit,
+        gas_price_multiplier_bps=gas_price_multiplier_bps,
     )
     return _sign_and_send(w3=w3, tx=tx, private_key=source_private_key)
 

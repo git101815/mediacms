@@ -115,6 +115,8 @@ from ledger.services import (
     mark_sweep_job_funding_broadcasted,
     mark_sweep_job_ready_to_sweep,
     mark_sweep_job_sweep_broadcasted,
+    mark_sweep_job_funding_broadcast_missing,
+    mark_sweep_job_sweep_broadcast_missing,
     acquire_evm_sender_lock,
     confirm_evm_sender_nonce_used,
     release_evm_sender_lock,
@@ -839,6 +841,13 @@ def _parse_required_string(payload, key):
     if not value:
         raise DjangoValidationError(f"Missing required field: {key}")
     return value
+
+
+def _parse_optional_string(payload, key):
+    value = payload.get(key)
+    if value in (None, ""):
+        return ""
+    return str(value).strip()
 
 def _find_existing_active_deposit_session(*, user, wallet, option_key, token_pack_code=""):
     option = next(
@@ -3064,6 +3073,9 @@ def internal_sweep_job_funding_broadcasted(request, public_id):
         gas_funding_txid = _parse_required_string(payload, "gas_funding_txid")
         destination_address = _parse_required_string(payload, "destination_address")
         last_sweep_gas_limit = _parse_optional_int(payload, "last_sweep_gas_limit")
+        sender_address = _parse_optional_string(payload, "sender_address")
+        nonce_value = _parse_optional_int(payload, "nonce")
+        amount_wei = _parse_optional_int(payload, "amount_wei")
 
         job = mark_sweep_job_funding_broadcasted(
             actor=actor,
@@ -3073,6 +3085,9 @@ def internal_sweep_job_funding_broadcasted(request, public_id):
             gas_funding_txid=gas_funding_txid,
             destination_address=destination_address,
             last_sweep_gas_limit=last_sweep_gas_limit,
+            sender_address=sender_address,
+            nonce=nonce_value,
+            amount_wei=amount_wei,
         )
     except DjangoPermissionDenied as exc:
         return JsonResponse({"error": str(exc)}, status=403)
@@ -3133,6 +3148,9 @@ def internal_sweep_job_sweep_broadcasted(request, public_id):
         sweep_txid = _parse_required_string(payload, "sweep_txid")
         destination_address = _parse_required_string(payload, "destination_address")
         last_sweep_gas_limit = _parse_optional_int(payload, "last_sweep_gas_limit")
+        sender_address = _parse_optional_string(payload, "sender_address")
+        nonce_value = _parse_optional_int(payload, "nonce")
+        amount = _parse_optional_int(payload, "amount")
 
         job = mark_sweep_job_sweep_broadcasted(
             actor=actor,
@@ -3142,6 +3160,9 @@ def internal_sweep_job_sweep_broadcasted(request, public_id):
             sweep_txid=sweep_txid,
             destination_address=destination_address,
             last_sweep_gas_limit=last_sweep_gas_limit,
+            sender_address=sender_address,
+            nonce=nonce_value,
+            amount=amount,
         )
     except DjangoPermissionDenied as exc:
         return JsonResponse({"error": str(exc)}, status=403)
@@ -3158,6 +3179,82 @@ def internal_sweep_job_sweep_broadcasted(request, public_id):
             "status": job.status,
             "sweep_txid": job.sweep_txid,
             "destination_address": job.destination_address,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def internal_sweep_job_funding_missing(request, public_id):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        claim_token = _parse_required_string(payload, "claim_token")
+        gas_funding_txid = _parse_required_string(payload, "gas_funding_txid")
+        next_retry_in_seconds = _parse_required_int(payload, "next_retry_in_seconds")
+        error = str(payload.get("error") or "").strip()
+
+        job = mark_sweep_job_funding_broadcast_missing(
+            actor=actor,
+            public_id=public_id,
+            service_name=service_name,
+            claim_token=claim_token,
+            gas_funding_txid=gas_funding_txid,
+            next_retry_in_seconds=next_retry_in_seconds,
+            error=error,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except DepositSweepJob.DoesNotExist:
+        return JsonResponse({"error": "Sweep job not found"}, status=404)
+
+    return JsonResponse(
+        {
+            "public_id": str(job.public_id),
+            "status": job.status,
+            "gas_funding_txid": job.gas_funding_txid,
+            "next_retry_at": job.next_retry_at.isoformat() if job.next_retry_at else None,
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def internal_sweep_job_sweep_missing(request, public_id):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        claim_token = _parse_required_string(payload, "claim_token")
+        sweep_txid = _parse_required_string(payload, "sweep_txid")
+        next_retry_in_seconds = _parse_required_int(payload, "next_retry_in_seconds")
+        error = str(payload.get("error") or "").strip()
+
+        job = mark_sweep_job_sweep_broadcast_missing(
+            actor=actor,
+            public_id=public_id,
+            service_name=service_name,
+            claim_token=claim_token,
+            sweep_txid=sweep_txid,
+            next_retry_in_seconds=next_retry_in_seconds,
+            error=error,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except DepositSweepJob.DoesNotExist:
+        return JsonResponse({"error": "Sweep job not found"}, status=404)
+
+    return JsonResponse(
+        {
+            "public_id": str(job.public_id),
+            "status": job.status,
+            "sweep_txid": job.sweep_txid,
+            "next_retry_at": job.next_retry_at.isoformat() if job.next_retry_at else None,
         }
     )
 

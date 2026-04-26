@@ -58,6 +58,9 @@ class MediaCMSInternalClient:
         gas_funding_txid: str,
         destination_address: str,
         last_sweep_gas_limit: int | None = None,
+        sender_address: str = "",
+        nonce: int | None = None,
+        amount_wei: int | None = None,
     ) -> dict:
         payload = {
             "claim_token": self._require_claim_token(claim_token),
@@ -66,6 +69,12 @@ class MediaCMSInternalClient:
         }
         if last_sweep_gas_limit is not None:
             payload["last_sweep_gas_limit"] = int(last_sweep_gas_limit)
+        if sender_address:
+            payload["sender_address"] = str(sender_address)
+        if nonce is not None:
+            payload["nonce"] = int(nonce)
+        if amount_wei is not None:
+            payload["amount_wei"] = int(amount_wei)
 
         return self.post_signed(
             f"/api/internal/ledger/sweep-jobs/{public_id}/funding-broadcasted",
@@ -88,6 +97,9 @@ class MediaCMSInternalClient:
         sweep_txid: str,
         destination_address: str,
         last_sweep_gas_limit: int | None = None,
+        sender_address: str = "",
+        nonce: int | None = None,
+        amount: int | None = None,
     ) -> dict:
         payload = {
             "claim_token": self._require_claim_token(claim_token),
@@ -96,6 +108,12 @@ class MediaCMSInternalClient:
         }
         if last_sweep_gas_limit is not None:
             payload["last_sweep_gas_limit"] = int(last_sweep_gas_limit)
+        if sender_address:
+            payload["sender_address"] = str(sender_address)
+        if nonce is not None:
+            payload["nonce"] = int(nonce)
+        if amount is not None:
+            payload["amount"] = int(amount)
 
         return self.post_signed(
             f"/api/internal/ledger/sweep-jobs/{public_id}/sweep-broadcasted",
@@ -139,6 +157,45 @@ class MediaCMSInternalClient:
                 "error_code": error_code,
                 "retryable": bool(retryable),
                 "increment_retry_count": bool(increment_retry_count),
+            },
+        )
+
+
+    def mark_funding_broadcast_missing(
+        self,
+        *,
+        public_id: str,
+        claim_token: str,
+        gas_funding_txid: str,
+        next_retry_in_seconds: int,
+        error: str = "",
+    ) -> dict:
+        return self.post_signed(
+            f"/api/internal/ledger/sweep-jobs/{public_id}/funding-missing",
+            {
+                "claim_token": self._require_claim_token(claim_token),
+                "gas_funding_txid": gas_funding_txid,
+                "next_retry_in_seconds": int(next_retry_in_seconds),
+                "error": error,
+            },
+        )
+
+    def mark_sweep_broadcast_missing(
+        self,
+        *,
+        public_id: str,
+        claim_token: str,
+        sweep_txid: str,
+        next_retry_in_seconds: int,
+        error: str = "",
+    ) -> dict:
+        return self.post_signed(
+            f"/api/internal/ledger/sweep-jobs/{public_id}/sweep-missing",
+            {
+                "claim_token": self._require_claim_token(claim_token),
+                "sweep_txid": sweep_txid,
+                "next_retry_in_seconds": int(next_retry_in_seconds),
+                "error": error,
             },
         )
 

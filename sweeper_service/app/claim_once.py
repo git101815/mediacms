@@ -1,17 +1,21 @@
 import logging
 import time
 import json
+from datetime import datetime, timedelta, timezone as dt_timezone
 from .client import MediaCMSInternalClient
 from .config import load_config
 from .derivation import EvmDeriver
 from .evm import (
     address_from_private_key,
+    build_erc20_transfer_transaction,
+    build_native_transfer_transaction,
     build_web3,
     get_erc20_balance,
     get_native_balance,
     get_receipt_with_confirmations,
-    send_erc20_transfer,
-    send_native_transfer,
+    send_signed_transaction,
+    sign_transaction,
+    transaction_is_known,
     wait_for_confirmations,
 )
 from typing import NoReturn
@@ -305,6 +309,26 @@ def _default_retry_delay_seconds(config) -> int:
     return max(15, int(getattr(config, "poll_interval_seconds", 15)))
 
 
+def _broadcast_prepared_at_from_job(job: dict, key: str):
+    value = ((job.get("metadata") or {}).get(key) or {}).get("prepared_at")
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt_timezone.utc)
+    return parsed
+
+
+def _broadcast_missing_deadline_has_passed(*, job: dict, key: str, timeout_seconds: int) -> bool:
+    prepared_at = _broadcast_prepared_at_from_job(job, key)
+    if prepared_at is None:
+        return False
+    return datetime.now(dt_timezone.utc) >= prepared_at + timedelta(seconds=int(timeout_seconds))
+
+
 def _compute_required_native_for_gas_limit(*, w3, option, gas_limit: int) -> int:
     effective_gas_price = _compute_effective_gas_price_wei(w3=w3, option=option)
     return int(gas_limit) * int(effective_gas_price)
@@ -448,13 +472,16 @@ def _send_native_transfer_with_sender_lock(
     config,
     w3,
     option,
+    public_id: str,
+    claim_token: str,
     funding_private_key: str,
     to_address: str,
     amount_wei: int,
+    last_sweep_gas_limit: int | None = None,
 ) -> str:
     funding_address = address_from_private_key(funding_private_key)
     sender_lock = None
-    txid = ""
+    backend_recorded = False
 
     try:
         sender_lock = _reserve_sender_nonce(
@@ -464,14 +491,33 @@ def _send_native_transfer_with_sender_lock(
             w3=w3,
             address=funding_address,
         )
-        txid = send_native_transfer(
-            chain=option.chain,
+        tx = build_native_transfer_transaction(
             w3=w3,
             nonce=sender_lock["nonce"],
             funding_private_key=funding_private_key,
             to_address=to_address,
             amount_wei=amount_wei,
             gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+        )
+        signed = sign_transaction(tx=tx, private_key=funding_private_key)
+        txid = signed["txid"]
+
+        client.mark_funding_broadcasted(
+            public_id=public_id,
+            claim_token=claim_token,
+            gas_funding_txid=txid,
+            destination_address=option.destination_address,
+            last_sweep_gas_limit=last_sweep_gas_limit,
+            sender_address=funding_address,
+            nonce=sender_lock["nonce"],
+            amount_wei=amount_wei,
+        )
+        backend_recorded = True
+
+        send_signed_transaction(
+            w3=w3,
+            raw_transaction=signed["raw_transaction"],
+            expected_txid=txid,
         )
         client.confirm_evm_sender_nonce_used(
             chain=option.chain,
@@ -482,7 +528,7 @@ def _send_native_transfer_with_sender_lock(
         )
         return txid
     except Exception:
-        if not txid:
+        if not backend_recorded:
             _release_sender_lock_safely(
                 client=client,
                 option=option,
@@ -497,6 +543,8 @@ def _send_erc20_transfer_with_sender_lock(
     config,
     w3,
     option,
+    public_id: str,
+    claim_token: str,
     token_contract_address: str,
     source_private_key: str,
     destination_address: str,
@@ -505,7 +553,7 @@ def _send_erc20_transfer_with_sender_lock(
 ) -> str:
     source_address = address_from_private_key(source_private_key)
     sender_lock = None
-    txid = ""
+    backend_recorded = False
 
     try:
         sender_lock = _reserve_sender_nonce(
@@ -515,8 +563,7 @@ def _send_erc20_transfer_with_sender_lock(
             w3=w3,
             address=source_address,
         )
-        txid = send_erc20_transfer(
-            chain=option.chain,
+        tx = build_erc20_transfer_transaction(
             w3=w3,
             nonce=sender_lock["nonce"],
             token_contract_address=token_contract_address,
@@ -525,6 +572,26 @@ def _send_erc20_transfer_with_sender_lock(
             amount=amount,
             gas_limit=gas_limit,
             gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+        )
+        signed = sign_transaction(tx=tx, private_key=source_private_key)
+        txid = signed["txid"]
+
+        client.mark_sweep_broadcasted(
+            public_id=public_id,
+            claim_token=claim_token,
+            sweep_txid=txid,
+            destination_address=option.destination_address,
+            last_sweep_gas_limit=gas_limit,
+            sender_address=source_address,
+            nonce=sender_lock["nonce"],
+            amount=amount,
+        )
+        backend_recorded = True
+
+        send_signed_transaction(
+            w3=w3,
+            raw_transaction=signed["raw_transaction"],
+            expected_txid=txid,
         )
         client.confirm_evm_sender_nonce_used(
             chain=option.chain,
@@ -535,7 +602,7 @@ def _send_erc20_transfer_with_sender_lock(
         )
         return txid
     except Exception:
-        if not txid:
+        if not backend_recorded:
             _release_sender_lock_safely(
                 client=client,
                 option=option,
@@ -577,15 +644,11 @@ def _send_retry_funding_if_needed(
         config=config,
         w3=w3,
         option=option,
+        public_id=public_id,
+        claim_token=claim_token,
         funding_private_key=option.funding_private_key,
         to_address=source_address,
         amount_wei=extra_topup_needed,
-    )
-    client.mark_funding_broadcasted(
-        public_id=public_id,
-        claim_token=claim_token,
-        gas_funding_txid=gas_funding_txid,
-        destination_address=option.destination_address,
     )
     wait_for_confirmations(
         w3=w3,
@@ -618,18 +681,13 @@ def _run_single_sweep_attempt(
         config=config,
         w3=w3,
         option=option,
+        public_id=public_id,
+        claim_token=claim_token,
         token_contract_address=option.token_contract_address,
         source_private_key=source_private_key,
         destination_address=option.destination_address,
         amount=amount,
         gas_limit=gas_limit,
-    )
-    client.mark_sweep_broadcasted(
-        public_id=public_id,
-        claim_token=claim_token,
-        sweep_txid=sweep_txid,
-        destination_address=option.destination_address,
-        last_sweep_gas_limit=gas_limit,
     )
     wait_for_confirmations(
         w3=w3,
@@ -789,7 +847,41 @@ def _process_claimed_job(
             w3=w3,
             txid=sweep_txid,
         )
-        if receipt is None or confirmations < int(option.sweep_confirmations):
+        if receipt is None:
+            if not transaction_is_known(w3=w3, txid=sweep_txid) and _broadcast_missing_deadline_has_passed(
+                job=job,
+                key="sweep_broadcast",
+                timeout_seconds=option.tx_timeout_seconds,
+            ):
+                client.mark_sweep_broadcast_missing(
+                    public_id=public_id,
+                    claim_token=claim_token,
+                    sweep_txid=sweep_txid,
+                    next_retry_in_seconds=retry_delay_seconds,
+                    error="Sweep transaction was not found after broadcast timeout",
+                )
+                logging.warning(
+                    "sweeper_service action=sweep-broadcast-missing public_id=%s txid=%s",
+                    public_id,
+                    sweep_txid,
+                )
+                return
+
+            client.mark_rescheduled(
+                public_id=public_id,
+                claim_token=claim_token,
+                next_retry_in_seconds=retry_delay_seconds,
+            )
+            logging.info(
+                "sweeper_service action=sweep-awaiting-confirmations public_id=%s txid=%s confirmations=%s required=%s",
+                public_id,
+                sweep_txid,
+                confirmations,
+                option.sweep_confirmations,
+            )
+            return
+
+        if confirmations < int(option.sweep_confirmations):
             client.mark_rescheduled(
                 public_id=public_id,
                 claim_token=claim_token,
@@ -885,15 +977,11 @@ def _process_claimed_job(
                 config=config,
                 w3=w3,
                 option=option,
+                public_id=public_id,
+                claim_token=claim_token,
                 funding_private_key=option.funding_private_key,
                 to_address=source_address,
                 amount_wei=extra_topup_needed,
-            )
-            client.mark_funding_broadcasted(
-                public_id=public_id,
-                claim_token=claim_token,
-                gas_funding_txid=gas_funding_txid,
-                destination_address=option.destination_address,
                 last_sweep_gas_limit=retry_gas_limit,
             )
             client.mark_rescheduled(
@@ -923,7 +1011,41 @@ def _process_claimed_job(
             w3=w3,
             txid=gas_funding_txid,
         )
-        if receipt is None or confirmations < int(option.funding_confirmations):
+        if receipt is None:
+            if not transaction_is_known(w3=w3, txid=gas_funding_txid) and _broadcast_missing_deadline_has_passed(
+                job=job,
+                key="gas_funding_broadcast",
+                timeout_seconds=option.tx_timeout_seconds,
+            ):
+                client.mark_funding_broadcast_missing(
+                    public_id=public_id,
+                    claim_token=claim_token,
+                    gas_funding_txid=gas_funding_txid,
+                    next_retry_in_seconds=retry_delay_seconds,
+                    error="Gas funding transaction was not found after broadcast timeout",
+                )
+                logging.warning(
+                    "sweeper_service action=funding-broadcast-missing public_id=%s txid=%s",
+                    public_id,
+                    gas_funding_txid,
+                )
+                return
+
+            client.mark_rescheduled(
+                public_id=public_id,
+                claim_token=claim_token,
+                next_retry_in_seconds=retry_delay_seconds,
+            )
+            logging.info(
+                "sweeper_service action=funding-awaiting-confirmations public_id=%s txid=%s confirmations=%s required=%s",
+                public_id,
+                gas_funding_txid,
+                confirmations,
+                option.funding_confirmations,
+            )
+            return
+
+        if confirmations < int(option.funding_confirmations):
             client.mark_rescheduled(
                 public_id=public_id,
                 claim_token=claim_token,
@@ -1014,15 +1136,11 @@ def _process_claimed_job(
             config=config,
             w3=w3,
             option=option,
+            public_id=public_id,
+            claim_token=claim_token,
             funding_private_key=option.funding_private_key,
             to_address=source_address,
             amount_wei=topup_needed,
-        )
-        client.mark_funding_broadcasted(
-            public_id=public_id,
-            claim_token=claim_token,
-            gas_funding_txid=gas_funding_txid,
-            destination_address=option.destination_address,
             last_sweep_gas_limit=chosen_gas_limit,
         )
         client.mark_rescheduled(
@@ -1067,18 +1185,13 @@ def _process_claimed_job(
         config=config,
         w3=w3,
         option=option,
+        public_id=public_id,
+        claim_token=claim_token,
         token_contract_address=option.token_contract_address,
         source_private_key=source_private_key,
         destination_address=option.destination_address,
         amount=amount,
         gas_limit=chosen_gas_limit,
-    )
-    client.mark_sweep_broadcasted(
-        public_id=public_id,
-        claim_token=claim_token,
-        sweep_txid=sweep_txid,
-        destination_address=option.destination_address,
-        last_sweep_gas_limit=chosen_gas_limit,
     )
     client.mark_rescheduled(
         public_id=public_id,

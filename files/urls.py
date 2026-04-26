@@ -90,6 +90,16 @@ urlpatterns = [
         name="internal_sweep_job_sweep_broadcasted",
     ),
     path(
+        "api/internal/ledger/sweep-jobs/<uuid:public_id>/funding-missing",
+        views.internal_sweep_job_funding_missing,
+        name="internal_sweep_job_funding_missing",
+    ),
+    path(
+        "api/internal/ledger/sweep-jobs/<uuid:public_id>/sweep-missing",
+        views.internal_sweep_job_sweep_missing,
+        name="internal_sweep_job_sweep_missing",
+    ),
+    path(
         "api/internal/ledger/sweep-jobs/<uuid:public_id>/confirmed",
         views.internal_sweep_job_confirmed,
         name="internal_sweep_job_confirmed",
