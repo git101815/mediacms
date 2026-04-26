@@ -7,7 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from ledger.internal_api import build_internal_request_signature
-from ledger.models import DepositSession, InternalAPIRequestNonce, ObservedOnchainTransfer
+from ledger.models import DepositSession, DepositSweepJob, InternalAPIRequestNonce, ObservedOnchainTransfer
 from ledger.services import create_deposit_session, get_external_asset_clearing_wallet
 
 from .base import BaseLedgerTestCase
@@ -203,6 +203,68 @@ class TestInternalDepositObservationAPI(BaseLedgerTestCase):
         self.assertEqual(clearing_wallet.balance, -30000)
         self.assertEqual(ObservedOnchainTransfer.objects.count(), 1)
         self.assertEqual(InternalAPIRequestNonce.objects.count(), 1)
+
+    def test_late_confirmed_transfer_to_credited_address_is_recorded_without_second_credit_and_enqueued_for_sweep(self):
+        first_payload = self._build_payload(
+            txid="0xfirst",
+            log_index=11,
+            amount=250,
+            confirmations=12,
+            block_number=123460,
+            from_address="0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        )
+        first_response = self._post_signed(first_payload, nonce="nonce-late-first")
+        self.assertEqual(first_response.status_code, 200, first_response.content.decode())
+
+        self.session.refresh_from_db()
+        self.w1.refresh_from_db()
+        clearing_wallet = get_external_asset_clearing_wallet()
+        clearing_wallet.refresh_from_db()
+
+        self.assertEqual(self.session.status, DepositSession.STATUS_CREDITED)
+        self.assertEqual(self.session.observed_txid, "0xfirst")
+        self.assertEqual(self.w1.balance, 25000)
+        self.assertEqual(clearing_wallet.balance, -25000)
+
+        second_payload = self._build_payload(
+            txid="0xlate",
+            log_index=12,
+            amount=125,
+            confirmations=12,
+            block_number=123461,
+            from_address="0xffffffffffffffffffffffffffffffffffffffff",
+        )
+        second_response = self._post_signed(second_payload, nonce="nonce-late-second")
+        self.assertEqual(second_response.status_code, 200, second_response.content.decode())
+
+        self.session.refresh_from_db()
+        self.w1.refresh_from_db()
+        clearing_wallet.refresh_from_db()
+
+        self.assertEqual(self.session.status, DepositSession.STATUS_CREDITED)
+        self.assertEqual(self.session.observed_txid, "0xfirst")
+        self.assertEqual(self.session.observed_amount, 250)
+        self.assertEqual(self.w1.balance, 25000)
+        self.assertEqual(clearing_wallet.balance, -25000)
+
+        self.assertEqual(ObservedOnchainTransfer.objects.count(), 2)
+        late_observed = ObservedOnchainTransfer.objects.get(txid="0xlate")
+        self.assertEqual(late_observed.status, ObservedOnchainTransfer.STATUS_CONFIRMED)
+        self.assertIsNone(late_observed.credited_ledger_txn_id)
+        self.assertTrue(late_observed.raw_payload["ledger_residual_deposit"])
+        self.assertFalse(late_observed.raw_payload["auto_credit"])
+
+        residual_job = DepositSweepJob.objects.get(observed_transfer=late_observed)
+        self.assertEqual(residual_job.status, DepositSweepJob.STATUS_PENDING)
+        self.assertEqual(residual_job.deposit_session_id, self.session.id)
+        self.assertEqual(residual_job.amount, 125)
+        self.assertEqual(residual_job.metadata["source"], "residual_deposit")
+        self.assertEqual(residual_job.metadata["credit_policy"], "manual_review")
+
+        replay_response = self._post_signed(second_payload, nonce="nonce-late-third")
+        self.assertEqual(replay_response.status_code, 200, replay_response.content.decode())
+        self.assertEqual(ObservedOnchainTransfer.objects.count(), 2)
+        self.assertEqual(DepositSweepJob.objects.filter(observed_transfer=late_observed).count(), 1)
 
     def test_invalid_signature_is_rejected(self):
         payload = self._build_payload(

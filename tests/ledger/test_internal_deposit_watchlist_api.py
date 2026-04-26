@@ -86,7 +86,7 @@ class TestInternalDepositWatchlistAPI(BaseLedgerTestCase):
         DepositSession.objects.filter(deposit_address="0x2222222222222222222222222222222222222222").update(
             status=DepositSession.STATUS_AWAITING_PAYMENT
         )
-        DepositSession.objects.create(
+        recent_swept = DepositSession.objects.create(
             user=self.u1,
             wallet=self.w1,
             chain="ethereum",
@@ -98,6 +98,22 @@ class TestInternalDepositWatchlistAPI(BaseLedgerTestCase):
             status=DepositSession.STATUS_SWEPT,
             required_confirmations=12,
             min_amount=100,
+        )
+        old_swept = DepositSession.objects.create(
+            user=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            deposit_address="0x6666666666666666666666666666666666666666",
+            address_derivation_ref="m/44'/60'/0'/0/15",
+            expires_at=mocked_now.return_value + timedelta(hours=1),
+            status=DepositSession.STATUS_SWEPT,
+            required_confirmations=12,
+            min_amount=100,
+        )
+        DepositSession.objects.filter(id=old_swept.id).update(
+            updated_at=mocked_now.return_value - timedelta(days=8)
         )
 
         response = self._post_signed(
@@ -116,15 +132,29 @@ class TestInternalDepositWatchlistAPI(BaseLedgerTestCase):
         self.assertEqual(response.status_code, 200, response.content.decode())
         data = response.json()
         self.assertEqual(len(data["results"]), 1)
-        self.assertEqual(len(data["results"][0]["targets"]), 1)
+        targets = data["results"][0]["targets"]
+        self.assertEqual(len(targets), 2)
         self.assertEqual(
-            data["results"][0]["targets"][0]["session_public_id"],
+            targets[0]["session_public_id"],
             str(active.public_id),
         )
         self.assertEqual(
-            data["results"][0]["targets"][0]["deposit_address"],
+            targets[0]["deposit_address"],
             "0x1111111111111111111111111111111111111111",
         )
+        self.assertEqual(targets[0]["watch_reason"], "active")
+        self.assertTrue(targets[0]["auto_credit"])
+
+        self.assertEqual(
+            targets[1]["session_public_id"],
+            str(recent_swept.public_id),
+        )
+        self.assertEqual(
+            targets[1]["deposit_address"],
+            "0x3333333333333333333333333333333333333333",
+        )
+        self.assertEqual(targets[1]["watch_reason"], "residual")
+        self.assertFalse(targets[1]["auto_credit"])
 
     @patch("ledger.internal_api.timezone.now")
     def test_watchlist_separates_routes_by_token_contract_address(self, mocked_now):

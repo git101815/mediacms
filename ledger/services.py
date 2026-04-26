@@ -49,6 +49,21 @@ ACTIVE_DEPOSIT_WATCH_STATUSES = {
     DepositSession.STATUS_CONFIRMING,
 }
 
+RESIDUAL_DEPOSIT_RECORD_STATUSES = {
+    DepositSession.STATUS_CREDITED,
+    DepositSession.STATUS_SWEPT,
+    DepositSession.STATUS_EXPIRED,
+    DepositSession.STATUS_FAILED,
+    DepositSession.STATUS_CANCELED,
+}
+
+RESIDUAL_DEPOSIT_WATCH_STATUSES = {
+    DepositSession.STATUS_CREDITED,
+    DepositSession.STATUS_SWEPT,
+}
+
+DEFAULT_RESIDUAL_DEPOSIT_WATCH_SECONDS = 7 * 24 * 60 * 60
+
 def _compute_next_retry_at() -> timezone.datetime:
     return timezone.now() + timedelta(seconds=LEDGER_OUTBOX_RETRY_DELAY_SECONDS)
 
@@ -1038,6 +1053,102 @@ def build_evm_event_key(*, chain: str, txid: str, log_index: int) -> str:
     if normalized_log_index < 0:
         raise ValidationError("Log index cannot be negative")
     return f"{normalized_chain}:{normalized_txid}:{normalized_log_index}"
+
+
+def _get_residual_deposit_watch_seconds() -> int:
+    configured = int(
+        getattr(
+            settings,
+            "LEDGER_RESIDUAL_DEPOSIT_WATCH_SECONDS",
+            DEFAULT_RESIDUAL_DEPOSIT_WATCH_SECONDS,
+        )
+    )
+    return max(0, configured)
+
+
+def _is_residual_deposit_recording_context(deposit_session: DepositSession) -> bool:
+    return deposit_session.status in RESIDUAL_DEPOSIT_RECORD_STATUSES
+
+
+def _is_residual_observed_transfer(observed_transfer: ObservedOnchainTransfer) -> bool:
+    raw_payload = observed_transfer.raw_payload or {}
+    if not isinstance(raw_payload, dict):
+        return False
+    return bool(
+        raw_payload.get("ledger_residual_deposit")
+        or raw_payload.get("residual_deposit")
+        or raw_payload.get("auto_credit") is False
+    )
+
+
+def _build_residual_observation_payload(
+    *,
+    raw_payload,
+    deposit_session: DepositSession,
+) -> dict:
+    if isinstance(raw_payload, dict):
+        payload = dict(raw_payload)
+    else:
+        payload = {"original_raw_payload": raw_payload}
+
+    payload.update(
+        {
+            "ledger_residual_deposit": True,
+            "residual_deposit": True,
+            "residual_reason": "post_finalized_session_transfer",
+            "credit_policy": "manual_review",
+            "auto_credit": False,
+            "original_deposit_session_status": deposit_session.status,
+            "deposit_session_public_id": str(deposit_session.public_id),
+        }
+    )
+    return payload
+
+
+def _is_primary_credited_observation(
+    *,
+    deposit_session: DepositSession,
+    observed_transfer: ObservedOnchainTransfer,
+) -> bool:
+    if observed_transfer.status != ObservedOnchainTransfer.STATUS_CREDITED:
+        return False
+    if not observed_transfer.credited_ledger_txn_id:
+        return False
+    if not deposit_session.credited_ledger_txn_id:
+        return False
+    return observed_transfer.credited_ledger_txn_id == deposit_session.credited_ledger_txn_id
+
+
+def _mark_observed_transfer_confirmation_state(
+    *,
+    observed_transfer: ObservedOnchainTransfer,
+    required_confirmations: int,
+) -> ObservedOnchainTransfer:
+    if int(observed_transfer.confirmations) >= int(required_confirmations):
+        desired_observed_status = ObservedOnchainTransfer.STATUS_CONFIRMED
+        desired_confirmed_at = observed_transfer.confirmed_at or timezone.now()
+    else:
+        desired_observed_status = (
+            ObservedOnchainTransfer.STATUS_CONFIRMING
+            if int(observed_transfer.confirmations) > 0
+            else ObservedOnchainTransfer.STATUS_OBSERVED
+        )
+        desired_confirmed_at = observed_transfer.confirmed_at
+
+    update_fields = []
+
+    if observed_transfer.status != desired_observed_status:
+        observed_transfer.status = desired_observed_status
+        update_fields.append("status")
+
+    if observed_transfer.confirmed_at != desired_confirmed_at:
+        observed_transfer.confirmed_at = desired_confirmed_at
+        update_fields.append("confirmed_at")
+
+    if update_fields:
+        observed_transfer.save(update_fields=update_fields)
+
+    return observed_transfer
 
 def get_external_asset_clearing_wallet() -> TokenWallet:
     return get_system_wallet(
@@ -2121,13 +2232,6 @@ def record_onchain_observation(
     if confirmations < 0:
         raise ValidationError("Confirmations cannot be negative")
 
-    if deposit_session.status in {
-        DepositSession.STATUS_EXPIRED,
-        DepositSession.STATUS_FAILED,
-        DEPOSIT_SESSION_STATUS_CANCELED,
-    }:
-        raise ValidationError("Cannot record an observation for a closed deposit session")
-
     if chain != deposit_session.chain:
         raise ValidationError("Observed chain does not match deposit session chain")
     if asset_code != deposit_session.asset_code:
@@ -2159,6 +2263,13 @@ def record_onchain_observation(
             log_index=log_index,
         )
 
+    raw_payload_for_create = raw_payload
+    if _is_residual_deposit_recording_context(deposit_session):
+        raw_payload_for_create = _build_residual_observation_payload(
+            raw_payload=raw_payload,
+            deposit_session=deposit_session,
+        )
+
     defaults = {
         "deposit_session": deposit_session,
         "event_key": event_key,
@@ -2174,7 +2285,7 @@ def record_onchain_observation(
         "amount": amount,
         "confirmations": confirmations,
         "detection_method": detection_method,
-        "raw_payload": raw_payload,
+        "raw_payload": raw_payload_for_create,
         "metadata_version": LEDGER_METADATA_VERSION,
     }
 
@@ -2215,34 +2326,46 @@ def record_onchain_observation(
             observed.confirmations = confirmations
             update_fields.append("confirmations")
 
-        if raw_payload and observed.raw_payload != raw_payload:
+        should_mark_existing_as_residual = (
+            _is_residual_deposit_recording_context(deposit_session)
+            and not _is_primary_credited_observation(
+                deposit_session=deposit_session,
+                observed_transfer=observed,
+            )
+            and not _is_residual_observed_transfer(observed)
+        )
+        if should_mark_existing_as_residual:
+            observed.raw_payload = _build_residual_observation_payload(
+                raw_payload=observed.raw_payload,
+                deposit_session=deposit_session,
+            )
+            update_fields.append("raw_payload")
+        elif raw_payload and not _is_residual_observed_transfer(observed) and observed.raw_payload != raw_payload:
             observed.raw_payload = raw_payload
             update_fields.append("raw_payload")
 
         if update_fields:
             observed.save(update_fields=update_fields)
 
-    if deposit_session.status == DepositSession.STATUS_CREDITED:
-        if observed.status != ObservedOnchainTransfer.STATUS_CREDITED:
-            raise ValidationError(
-                "Credited deposit session is linked to a non-credited observed transfer"
-            )
+    is_primary_credited_observation = _is_primary_credited_observation(
+        deposit_session=deposit_session,
+        observed_transfer=observed,
+    )
+    is_residual_observation = (
+        _is_residual_deposit_recording_context(deposit_session)
+        and not is_primary_credited_observation
+    )
 
-    if observed.status == ObservedOnchainTransfer.STATUS_CREDITED:
-        if deposit_session.status != DepositSession.STATUS_CREDITED:
+    if is_primary_credited_observation:
+        if deposit_session.status not in {
+            DepositSession.STATUS_CREDITED,
+            DepositSession.STATUS_SWEPT,
+        }:
             raise ValidationError(
                 "Credited observed transfer is linked to a non-credited deposit session"
             )
 
         session_update_fields = []
-
-        if deposit_session.observed_txid != observed.txid:
-            deposit_session.observed_txid = observed.txid
-            session_update_fields.append("observed_txid")
-
-        if deposit_session.observed_amount != observed.amount:
-            deposit_session.observed_amount = observed.amount
-            session_update_fields.append("observed_amount")
 
         max_confirmations = max(deposit_session.confirmations, observed.confirmations)
         if deposit_session.confirmations != max_confirmations:
@@ -2255,35 +2378,37 @@ def record_onchain_observation(
 
         return observed
 
-    if observed.confirmations >= deposit_session.required_confirmations:
-        desired_observed_status = ObservedOnchainTransfer.STATUS_CONFIRMED
+    if observed.status == ObservedOnchainTransfer.STATUS_CREDITED:
+        raise ValidationError(
+            "Credited observed transfer does not match the deposit session credited transaction"
+        )
+
+    if is_residual_observation:
+        observed = _mark_observed_transfer_confirmation_state(
+            observed_transfer=observed,
+            required_confirmations=deposit_session.required_confirmations,
+        )
+
+        if observed.status == ObservedOnchainTransfer.STATUS_CONFIRMED:
+            enqueue_residual_deposit_sweep_job(
+                actor=actor,
+                deposit_session=deposit_session,
+                observed_transfer=observed,
+            )
+
+        return observed
+
+    observed = _mark_observed_transfer_confirmation_state(
+        observed_transfer=observed,
+        required_confirmations=deposit_session.required_confirmations,
+    )
+
+    if observed.status == ObservedOnchainTransfer.STATUS_CONFIRMED:
         desired_session_status = DepositSession.STATUS_CONFIRMING
-        desired_confirmed_at = observed.confirmed_at or timezone.now()
+    elif observed.confirmations > 0:
+        desired_session_status = DepositSession.STATUS_CONFIRMING
     else:
-        desired_observed_status = (
-            ObservedOnchainTransfer.STATUS_CONFIRMING
-            if observed.confirmations > 0
-            else ObservedOnchainTransfer.STATUS_OBSERVED
-        )
-        desired_session_status = (
-            DepositSession.STATUS_CONFIRMING
-            if observed.confirmations > 0
-            else DepositSession.STATUS_SEEN_ONCHAIN
-        )
-        desired_confirmed_at = observed.confirmed_at
-
-    observed_update_fields = []
-
-    if observed.status != desired_observed_status:
-        observed.status = desired_observed_status
-        observed_update_fields.append("status")
-
-    if observed.confirmed_at != desired_confirmed_at:
-        observed.confirmed_at = desired_confirmed_at
-        observed_update_fields.append("confirmed_at")
-
-    if observed_update_fields:
-        observed.save(update_fields=observed_update_fields)
+        desired_session_status = DepositSession.STATUS_SEEN_ONCHAIN
 
     session_update_fields = []
 
@@ -2336,6 +2461,14 @@ def credit_confirmed_deposit_session(
         if not deposit_session.credited_ledger_txn_id:
             raise ValidationError("Credited session missing linked ledger transaction")
         return deposit_session.credited_ledger_txn
+
+    if deposit_session.status == DepositSession.STATUS_SWEPT:
+        if (
+            deposit_session.credited_ledger_txn_id
+            and observed_transfer.credited_ledger_txn_id == deposit_session.credited_ledger_txn_id
+        ):
+            return deposit_session.credited_ledger_txn
+        raise ValidationError("Swept deposit sessions cannot be credited again")
 
     if deposit_session.status == DEPOSIT_SESSION_STATUS_CANCELED:
         raise ValidationError("Canceled deposit sessions cannot be credited")
@@ -2940,7 +3073,9 @@ def ingest_deposit_observation_event(
 
     ledger_txn = None
     should_credit = (
-        int(observed_transfer.confirmations) >= int(deposit_session.required_confirmations)
+        observed_transfer.status != ObservedOnchainTransfer.STATUS_CREDITED
+        and not _is_residual_observed_transfer(observed_transfer)
+        and int(observed_transfer.confirmations) >= int(deposit_session.required_confirmations)
         and int(observed_transfer.amount) >= int(deposit_session.min_amount)
     )
 
@@ -3013,6 +3148,8 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
 
     results = []
     now = timezone.now()
+    residual_watch_seconds = _get_residual_deposit_watch_seconds()
+    residual_watch_cutoff = now - timedelta(seconds=residual_watch_seconds)
 
     for row in option_rows:
         if not isinstance(row, dict):
@@ -3025,14 +3162,24 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
         if not chain or not asset_code:
             raise ValidationError("Each option requires chain and asset_code")
 
+        watch_filter = Q(
+            status__in=ACTIVE_DEPOSIT_WATCH_STATUSES,
+            expires_at__gt=now,
+        )
+
+        if residual_watch_seconds > 0:
+            watch_filter |= Q(
+                status__in=RESIDUAL_DEPOSIT_WATCH_STATUSES,
+                updated_at__gte=residual_watch_cutoff,
+            )
+
         sessions = (
             DepositSession.objects.filter(
                 chain=chain,
                 asset_code=asset_code,
                 token_contract_address=token_contract_address,
-                status__in=ACTIVE_DEPOSIT_WATCH_STATUSES,
-                expires_at__gt=now,
             )
+            .filter(watch_filter)
             .order_by("id")
             .values(
                 "public_id",
@@ -3046,6 +3193,7 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
 
         targets = []
         for session in sessions:
+            is_residual_watch = session["status"] in RESIDUAL_DEPOSIT_WATCH_STATUSES
             targets.append(
                 {
                     "session_public_id": str(session["public_id"]),
@@ -3054,6 +3202,8 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
                     "min_amount": session["min_amount"],
                     "status": session["status"],
                     "expires_at": session["expires_at"].isoformat(),
+                    "watch_reason": "residual" if is_residual_watch else "active",
+                    "auto_credit": not is_residual_watch,
                 }
             )
 
@@ -3068,19 +3218,12 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
 
     return results
 
-@transaction.atomic
-def enqueue_deposit_sweep_job(*, actor, deposit_session: DepositSession, observed_transfer: ObservedOnchainTransfer):
-    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
-
-    deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
-    observed_transfer = ObservedOnchainTransfer.objects.select_for_update().get(id=observed_transfer.id)
-
-    if deposit_session.status != DepositSession.STATUS_CREDITED:
-        raise ValidationError("Cannot enqueue sweep for a non-credited deposit session")
-
-    if observed_transfer.status != ObservedOnchainTransfer.STATUS_CREDITED:
-        raise ValidationError("Cannot enqueue sweep for a non-credited observed transfer")
-
+def _get_or_create_sweep_job_for_observed_transfer(
+    *,
+    deposit_session: DepositSession,
+    observed_transfer: ObservedOnchainTransfer,
+    metadata_source: str,
+) -> DepositSweepJob:
     derivation_index = deposit_session.derivation_index
     if derivation_index is None:
         derivation_index = _parse_derivation_index_from_ref(deposit_session.address_derivation_ref)
@@ -3098,9 +3241,11 @@ def enqueue_deposit_sweep_job(*, actor, deposit_session: DepositSession, observe
             "amount": observed_transfer.amount,
             "status": DepositSweepJob.STATUS_PENDING,
             "metadata": {
-                "source": "credited_deposit",
+                "source": metadata_source,
                 "deposit_session_public_id": str(deposit_session.public_id),
                 "observed_transfer_event_key": observed_transfer.event_key,
+                "auto_credit": metadata_source == "credited_deposit",
+                "credit_policy": "credited" if metadata_source == "credited_deposit" else "manual_review",
             },
             "metadata_version": LEDGER_METADATA_VERSION,
         },
@@ -3120,6 +3265,52 @@ def enqueue_deposit_sweep_job(*, actor, deposit_session: DepositSession, observe
             raise ValidationError("Sweep job already exists with different immutable fields")
 
     return job
+
+
+@transaction.atomic
+def enqueue_deposit_sweep_job(*, actor, deposit_session: DepositSession, observed_transfer: ObservedOnchainTransfer):
+    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+
+    deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
+    observed_transfer = ObservedOnchainTransfer.objects.select_for_update().get(id=observed_transfer.id)
+
+    if deposit_session.status != DepositSession.STATUS_CREDITED:
+        raise ValidationError("Cannot enqueue sweep for a non-credited deposit session")
+
+    if observed_transfer.status != ObservedOnchainTransfer.STATUS_CREDITED:
+        raise ValidationError("Cannot enqueue sweep for a non-credited observed transfer")
+
+    return _get_or_create_sweep_job_for_observed_transfer(
+        deposit_session=deposit_session,
+        observed_transfer=observed_transfer,
+        metadata_source="credited_deposit",
+    )
+
+
+@transaction.atomic
+def enqueue_residual_deposit_sweep_job(*, actor, deposit_session: DepositSession, observed_transfer: ObservedOnchainTransfer):
+    _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+
+    deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
+    observed_transfer = ObservedOnchainTransfer.objects.select_for_update().get(id=observed_transfer.id)
+
+    if not _is_residual_deposit_recording_context(deposit_session):
+        raise ValidationError("Cannot enqueue residual sweep for an active deposit session")
+
+    if not _is_residual_observed_transfer(observed_transfer):
+        raise ValidationError("Observed transfer is not marked as residual")
+
+    if observed_transfer.credited_ledger_txn_id:
+        raise ValidationError("Credited observed transfers cannot be enqueued as residual sweeps")
+
+    if observed_transfer.status != ObservedOnchainTransfer.STATUS_CONFIRMED:
+        raise ValidationError("Cannot enqueue residual sweep for an unconfirmed observed transfer")
+
+    return _get_or_create_sweep_job_for_observed_transfer(
+        deposit_session=deposit_session,
+        observed_transfer=observed_transfer,
+        metadata_source="residual_deposit",
+    )
 
 @transaction.atomic
 def reschedule_deposit_sweep_job(
@@ -3632,7 +3823,8 @@ def mark_sweep_job_confirmed(
     )
 
     session = DepositSession.objects.select_for_update().get(id=job.deposit_session_id)
-    if session.status != DepositSession.STATUS_SWEPT:
+    is_residual_sweep = (job.metadata or {}).get("source") == "residual_deposit"
+    if not is_residual_sweep and session.status != DepositSession.STATUS_SWEPT:
         session.status = DepositSession.STATUS_SWEPT
         session.swept_at = timezone.now()
         session.save(update_fields=["status", "swept_at", "updated_at"])

@@ -501,7 +501,14 @@ class TestDepositSessions(BaseLedgerTestCase):
             option_rows=option_rows,
         )
         self.assertEqual(len(watch_targets_after_credit), 1)
-        self.assertEqual(watch_targets_after_credit[0]["targets"], [])
+        self.assertEqual(len(watch_targets_after_credit[0]["targets"]), 1)
+
+        residual_target = watch_targets_after_credit[0]["targets"][0]
+        self.assertEqual(residual_target["session_public_id"], str(session.public_id))
+        self.assertEqual(residual_target["deposit_address"], session.deposit_address)
+        self.assertEqual(residual_target["status"], DepositSession.STATUS_CREDITED)
+        self.assertEqual(residual_target["watch_reason"], "residual")
+        self.assertEqual(residual_target["auto_credit"], False)
 
     @patch("ledger.services._derive_session_deposit_address")
     def test_session_first_reopen_after_expiration_allocates_new_session_and_new_index(self, mocked_derive):

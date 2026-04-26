@@ -169,4 +169,15 @@ class TestDepositSmokeFlow(TestDepositSessions):
             option_rows=option_rows,
         )
         self.assertEqual(len(watch_targets_after_sweep), 1)
-        self.assertEqual(watch_targets_after_sweep[0]["targets"], [])
+        self.assertEqual(len(watch_targets_after_sweep[0]["targets"]), 1)
+        self.assertEqual(
+            watch_targets_after_sweep[0]["targets"][0]["session_public_id"],
+            str(session.public_id),
+        )
+        self.assertEqual(
+            watch_targets_after_sweep[0]["targets"][0]["deposit_address"],
+            session.deposit_address,
+        )
+        self.assertEqual(watch_targets_after_sweep[0]["targets"][0]["status"], DepositSession.STATUS_SWEPT)
+        self.assertEqual(watch_targets_after_sweep[0]["targets"][0]["watch_reason"], "residual")
+        self.assertFalse(watch_targets_after_sweep[0]["targets"][0]["auto_credit"])
