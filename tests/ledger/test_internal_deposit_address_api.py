@@ -21,6 +21,7 @@ from .base import BaseLedgerTestCase
     LEDGER_INTERNAL_NONCE_TTL_SECONDS=900,
     LEDGER_INTERNAL_ADDRESS_BATCH_MAX_SIZE=50,
     LEDGER_INTERNAL_ADDRESS_STATS_MAX_SIZE=50,
+    LEDGER_INTERNAL_API_NETWORK_GUARD_ENABLED=False,
 )
 class TestInternalDepositAddressAPI(BaseLedgerTestCase):
     def setUp(self):

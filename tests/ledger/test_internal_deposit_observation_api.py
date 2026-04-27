@@ -18,6 +18,7 @@ from .base import BaseLedgerTestCase
     LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET="super-secret",
     LEDGER_INTERNAL_API_MAX_SKEW_SECONDS=300,
     LEDGER_INTERNAL_NONCE_TTL_SECONDS=900,
+    LEDGER_INTERNAL_API_NETWORK_GUARD_ENABLED=False,
 )
 class TestInternalDepositObservationAPI(BaseLedgerTestCase):
     def setUp(self):

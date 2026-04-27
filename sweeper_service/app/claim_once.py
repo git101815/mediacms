@@ -397,6 +397,72 @@ def _claim_token_for_job(job: dict) -> str:
     return claim_token
 
 
+
+
+def _job_metadata(job: dict) -> dict:
+    metadata = job.get("metadata") or {}
+    if isinstance(metadata, dict):
+        return metadata
+    return {}
+
+
+def _is_residual_balance_snapshot_job(job: dict) -> bool:
+    metadata = _job_metadata(job)
+    event_key = str(metadata.get("observed_transfer_event_key", "")).strip().lower()
+    return (
+        str(metadata.get("source", "")).strip().lower() == "residual_deposit"
+        and ":balance:" in event_key
+    )
+
+
+def _read_current_token_balance_or_raise(
+    *,
+    w3,
+    option,
+    job: dict,
+    public_id: str,
+    source_address: str,
+    amount: int,
+) -> int:
+    token_balance = int(
+        get_erc20_balance(
+            w3=w3,
+            token_contract_address=option.token_contract_address,
+            owner_address=source_address,
+        )
+    )
+    if token_balance >= int(amount):
+        return token_balance
+
+    if _is_residual_balance_snapshot_job(job) and token_balance <= 0:
+        _raise_structured_error(
+            code="SWEEP_RESIDUAL_TOKEN_BALANCE_EMPTY",
+            message="Residual balance snapshot source wallet no longer holds the expected token balance",
+            retryable=False,
+            details={
+                "job_public_id": public_id,
+                "required_amount": int(amount),
+                "actual_amount": int(token_balance),
+                "chain": option.chain,
+                "asset_code": option.asset_code,
+                "source_address": source_address,
+            },
+        )
+
+    _raise_structured_error(
+        code="SWEEP_TOKEN_BALANCE_NOT_READY",
+        message="Source wallet token balance is lower than the expected sweep amount",
+        retryable=True,
+        details={
+            "job_public_id": public_id,
+            "required_amount": int(amount),
+            "actual_amount": int(token_balance),
+            "chain": option.chain,
+            "asset_code": option.asset_code,
+            "source_address": source_address,
+        },
+    )
+
 def _sender_lock_seconds(config) -> int:
     value = int(getattr(config, "evm_sender_lock_seconds", 120) or 120)
     return max(30, value)
@@ -1075,6 +1141,15 @@ def _process_claimed_job(
     elif status not in {"pending", "ready_to_sweep"}:
         raise RuntimeError(f"Unsupported claimed job status for job={public_id}: {status}")
 
+    token_balance = _read_current_token_balance_or_raise(
+        w3=w3,
+        option=option,
+        job=job,
+        public_id=public_id,
+        source_address=source_address,
+        amount=amount,
+    )
+
     source_native_balance = int(get_native_balance(w3=w3, address=source_address))
     estimated_gas_limit, estimated_required_native = _compute_required_native_wei(
         w3=w3,
@@ -1156,27 +1231,6 @@ def _process_claimed_job(
             chosen_gas_limit,
         )
         return
-
-    token_balance = int(
-        get_erc20_balance(
-            w3=w3,
-            token_contract_address=option.token_contract_address,
-            owner_address=source_address,
-        )
-    )
-    if token_balance < amount:
-        _raise_structured_error(
-            code="SWEEP_TOKEN_BALANCE_NOT_READY",
-            message="Source wallet token balance is lower than the expected sweep amount",
-            retryable=True,
-            details={
-                "job_public_id": public_id,
-                "required_amount": int(amount),
-                "actual_amount": int(token_balance),
-                "chain": option.chain,
-                "asset_code": option.asset_code,
-            },
-        )
 
     client.mark_ready_to_sweep(public_id=public_id, claim_token=claim_token)
 

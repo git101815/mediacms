@@ -757,6 +757,49 @@ def _write_sweep_broadcast_metadata(
     job.metadata = metadata
 
 
+
+
+def _archive_replaced_gas_funding_metadata(
+    *,
+    job: DepositSweepJob,
+    replacement_txid: str,
+    replacement_destination_address: str,
+    replacement_amount: int | None = None,
+    replacement_gas_limit: int | None = None,
+    replacement_sender_address: str = "",
+    replacement_nonce=None,
+) -> None:
+    metadata = dict(job.metadata or {})
+    history = list(metadata.get("gas_funding_broadcast_history") or [])
+
+    current = dict(metadata.get("gas_funding_broadcast") or {})
+    if current:
+        current["archived_at"] = timezone.now().isoformat()
+        if not any(str(row.get("txid", "")).lower() == str(current.get("txid", "")).lower() for row in history):
+            history.append(current)
+
+    replacement = {
+        "txid": replacement_txid,
+        "destination_address": replacement_destination_address,
+        "prepared_at": timezone.now().isoformat(),
+        "replaces_gas_funding_txid": job.gas_funding_txid,
+    }
+    if replacement_amount is not None:
+        replacement["amount"] = int(replacement_amount)
+    if replacement_gas_limit is not None:
+        replacement["gas_limit"] = int(replacement_gas_limit)
+    replacement.update(
+        _optional_sender_nonce_metadata(
+            sender_address=replacement_sender_address,
+            nonce=replacement_nonce,
+        )
+    )
+
+    metadata["gas_funding_broadcast_history"] = history[-50:]
+    metadata["gas_funding_broadcast"] = replacement
+    metadata["has_replaced_gas_funding_broadcast"] = True
+    job.metadata = metadata
+
 def _mark_sweep_broadcast_metadata_missing(*, job: DepositSweepJob, key: str, txid: str) -> None:
     metadata = dict(job.metadata or {})
     payload = dict(metadata.get(key) or {})
@@ -3833,7 +3876,7 @@ def mark_sweep_job_funding_broadcasted(
         claim_token=claim_token,
     )
 
-    if job.status == DepositSweepJob.STATUS_FUNDING_BROADCASTED:
+    if job.gas_funding_txid:
         if job.gas_funding_txid == gas_funding_txid and job.destination_address == destination_address:
             if sender_address or nonce is not None or amount_wei is not None or last_sweep_gas_limit is not None:
                 _write_sweep_broadcast_metadata(
@@ -3848,7 +3891,48 @@ def mark_sweep_job_funding_broadcasted(
                 )
                 job.save(update_fields=["metadata", "updated_at"])
             return job
-        raise ValidationError("Sweep job already has a different gas funding txid")
+
+        if job.status not in {
+            DepositSweepJob.STATUS_PENDING,
+            DepositSweepJob.STATUS_FUNDING_BROADCASTED,
+            DepositSweepJob.STATUS_READY_TO_SWEEP,
+            DepositSweepJob.STATUS_SWEEP_BROADCASTED,
+        }:
+            raise ValidationError("Sweep job cannot record another gas funding transaction from its current status")
+
+        _archive_replaced_gas_funding_metadata(
+            job=job,
+            replacement_txid=gas_funding_txid,
+            replacement_destination_address=destination_address,
+            replacement_amount=amount_wei,
+            replacement_gas_limit=last_sweep_gas_limit,
+            replacement_sender_address=sender_address,
+            replacement_nonce=nonce,
+        )
+        job.status = DepositSweepJob.STATUS_FUNDING_BROADCASTED
+        job.gas_funding_txid = gas_funding_txid
+        job.destination_address = destination_address
+        job.last_error = ""
+        job.last_error_code = ""
+        job.last_error_retryable = False
+        job.next_retry_at = None
+        if last_sweep_gas_limit is not None:
+            job.last_sweep_gas_limit = int(last_sweep_gas_limit)
+        job.save(
+            update_fields=[
+                "status",
+                "gas_funding_txid",
+                "destination_address",
+                "last_error",
+                "last_error_code",
+                "last_error_retryable",
+                "next_retry_at",
+                "last_sweep_gas_limit",
+                "metadata",
+                "updated_at",
+            ]
+        )
+        return job
 
     if job.status not in {
         DepositSweepJob.STATUS_PENDING,

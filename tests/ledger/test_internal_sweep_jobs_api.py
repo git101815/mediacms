@@ -25,6 +25,7 @@ from .base import BaseLedgerTestCase
     LEDGER_INTERNAL_NONCE_TTL_SECONDS=900,
     LEDGER_SWEEP_JOB_CLAIM_LEASE_SECONDS=120,
     LEDGER_SWEEP_JOB_CLAIM_MAX_BATCH=50,
+    LEDGER_INTERNAL_API_NETWORK_GUARD_ENABLED=False,
 )
 class TestInternalSweepJobsAPI(BaseLedgerTestCase):
     def setUp(self):
