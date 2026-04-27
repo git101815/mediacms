@@ -1,6 +1,8 @@
 import hashlib
 import hmac
+import ipaddress
 import json
+import os
 from datetime import datetime, timezone as dt_timezone
 
 from django.conf import settings
@@ -10,6 +12,16 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .models import InternalAPIRequestNonce
+
+
+DEFAULT_INTERNAL_API_ALLOWED_CIDRS = [
+    "127.0.0.1/32",
+    "::1/128",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+]
+DEFAULT_INTERNAL_GATEWAY_HEADER = "X-Ledger-Internal-Gateway"
 
 
 def build_internal_request_signature(
@@ -49,6 +61,82 @@ def _get_internal_deposit_service_actor():
     return actor
 
 
+def _setting_enabled(name: str, default: bool = False) -> bool:
+    value = getattr(settings, name, default)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _internal_allowed_cidrs() -> list[str]:
+    configured = getattr(settings, "LEDGER_INTERNAL_API_ALLOWED_CIDRS", DEFAULT_INTERNAL_API_ALLOWED_CIDRS)
+    if isinstance(configured, str):
+        return [item.strip() for item in configured.split(",") if item.strip()]
+    return [str(item).strip() for item in configured if str(item).strip()]
+
+
+def _internal_gateway_secret() -> str:
+    return (
+        str(getattr(settings, "LEDGER_INTERNAL_GATEWAY_SECRET", "") or "").strip()
+        or os.environ.get("LEDGER_INTERNAL_GATEWAY_SECRET", "").strip()
+        or os.environ.get("MEDIACMS_INTERNAL_GATEWAY_SECRET", "").strip()
+    )
+
+
+def _internal_gateway_header_name() -> str:
+    return str(
+        getattr(settings, "LEDGER_INTERNAL_GATEWAY_HEADER", DEFAULT_INTERNAL_GATEWAY_HEADER)
+        or DEFAULT_INTERNAL_GATEWAY_HEADER
+    ).strip()
+
+
+def _request_remote_addr(request) -> str:
+    return str(request.META.get("REMOTE_ADDR", "") or "").strip()
+
+
+def _remote_addr_allowed(remote_addr: str) -> bool:
+    if not remote_addr:
+        return False
+
+    try:
+        ip_addr = ipaddress.ip_address(remote_addr)
+    except ValueError:
+        return False
+
+    for raw_network in _internal_allowed_cidrs():
+        try:
+            network = ipaddress.ip_network(raw_network, strict=False)
+        except ValueError as exc:
+            raise ImproperlyConfigured(f"Invalid LEDGER_INTERNAL_API_ALLOWED_CIDRS entry: {raw_network}") from exc
+        if ip_addr in network:
+            return True
+    return False
+
+
+def _enforce_internal_network_guard(request) -> None:
+    if not _setting_enabled("LEDGER_INTERNAL_API_NETWORK_GUARD_ENABLED", False):
+        return
+
+    if not _internal_allowed_cidrs():
+        raise ImproperlyConfigured("LEDGER_INTERNAL_API_ALLOWED_CIDRS must not be empty when guard is enabled")
+
+    remote_addr = _request_remote_addr(request)
+    if not _remote_addr_allowed(remote_addr):
+        raise PermissionDenied("Internal ledger API source address is not allowed")
+
+    gateway_secret = _internal_gateway_secret()
+    require_gateway_secret = _setting_enabled("LEDGER_INTERNAL_GATEWAY_SECRET_REQUIRED", True)
+    if not gateway_secret:
+        if require_gateway_secret:
+            raise ImproperlyConfigured("LEDGER_INTERNAL_GATEWAY_SECRET must be configured when internal guard is enabled")
+        return
+
+    header_name = _internal_gateway_header_name()
+    provided_gateway_secret = (request.headers.get(header_name) or "").strip()
+    if not hmac.compare_digest(provided_gateway_secret, gateway_secret):
+        raise PermissionDenied("Invalid internal ledger gateway header")
+
+
 def _validate_internal_request_timestamp(timestamp_value: str) -> datetime:
     try:
         timestamp_int = int(timestamp_value)
@@ -62,6 +150,7 @@ def _validate_internal_request_timestamp(timestamp_value: str) -> datetime:
 
     return request_time
 
+
 @transaction.atomic
 def authenticate_internal_service_request(
     request,
@@ -70,6 +159,8 @@ def authenticate_internal_service_request(
     username_setting_name: str,
     shared_secret_setting_name: str,
 ):
+    _enforce_internal_network_guard(request)
+
     service_name = (request.headers.get("X-Ledger-Service") or "").strip()
     timestamp_value = (request.headers.get("X-Ledger-Timestamp") or "").strip()
     nonce = (request.headers.get("X-Ledger-Nonce") or "").strip()
@@ -130,6 +221,7 @@ def authenticate_internal_service_request(
         raise ImproperlyConfigured("Configured internal service actor does not exist")
 
     return actor, payload, service_name
+
 
 def authenticate_internal_deposit_request(request):
     return authenticate_internal_service_request(

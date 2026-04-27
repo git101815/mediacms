@@ -1,7 +1,10 @@
+import os
 import httpx
 
 from .signing import build_signed_json_request
 
+
+DEFAULT_INTERNAL_GATEWAY_HEADER = "X-Ledger-Internal-Gateway"
 
 class MediaCMSInternalClient:
     def __init__(
@@ -15,6 +18,14 @@ class MediaCMSInternalClient:
         self._base_url = base_url.rstrip("/")
         self._service_name = service_name
         self._shared_secret = shared_secret
+        self._gateway_header = os.environ.get(
+            "MEDIACMS_INTERNAL_GATEWAY_HEADER",
+            DEFAULT_INTERNAL_GATEWAY_HEADER,
+        ).strip() or DEFAULT_INTERNAL_GATEWAY_HEADER
+        self._gateway_secret = (
+            os.environ.get("MEDIACMS_INTERNAL_GATEWAY_SECRET", "").strip()
+            or os.environ.get("LEDGER_INTERNAL_GATEWAY_SECRET", "").strip()
+        )
         self._client = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
@@ -26,6 +37,9 @@ class MediaCMSInternalClient:
             shared_secret=self._shared_secret,
             payload=payload,
         )
+        if self._gateway_secret:
+            headers[self._gateway_header] = self._gateway_secret
+
         response = self._client.post(f"{self._base_url}{path}", content=body, headers=headers)
         if response.status_code >= 400:
             raise RuntimeError(f"Internal API error {response.status_code} for {path}: {response.text}")

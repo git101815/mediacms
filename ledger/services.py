@@ -64,8 +64,188 @@ RESIDUAL_DEPOSIT_WATCH_STATUSES = {
 
 DEFAULT_RESIDUAL_DEPOSIT_WATCH_SECONDS = 7 * 24 * 60 * 60
 
+LEDGER_OPERATION_FLAG_DEPOSIT_OPEN = "deposit_open"
+LEDGER_OPERATION_FLAG_OBSERVATION_INGEST = "observation_ingest"
+LEDGER_OPERATION_FLAG_CREDITING = "crediting"
+LEDGER_OPERATION_FLAG_SWEEP_CLAIM = "sweep_claim"
+LEDGER_OPERATION_FLAG_SWEEP_TRANSITIONS = "sweep_transitions"
+LEDGER_OPERATION_FLAG_EVM_SENDER_LOCKS = "evm_sender_locks"
+LEDGER_OPERATION_FLAG_RESIDUAL_WATCH = "residual_watch"
+LEDGER_OPERATION_FLAG_WITHDRAWALS = "withdrawals"
+
+LEDGER_OPERATIONAL_FLAG_DEFAULTS = {
+    LEDGER_OPERATION_FLAG_DEPOSIT_OPEN: True,
+    LEDGER_OPERATION_FLAG_OBSERVATION_INGEST: True,
+    LEDGER_OPERATION_FLAG_CREDITING: True,
+    LEDGER_OPERATION_FLAG_SWEEP_CLAIM: True,
+    LEDGER_OPERATION_FLAG_SWEEP_TRANSITIONS: True,
+    LEDGER_OPERATION_FLAG_EVM_SENDER_LOCKS: True,
+    LEDGER_OPERATION_FLAG_RESIDUAL_WATCH: True,
+    LEDGER_OPERATION_FLAG_WITHDRAWALS: True,
+}
+
+LEDGER_OPERATIONAL_FLAG_LABELS = {
+    LEDGER_OPERATION_FLAG_DEPOSIT_OPEN: "deposit opening",
+    LEDGER_OPERATION_FLAG_OBSERVATION_INGEST: "observation ingestion",
+    LEDGER_OPERATION_FLAG_CREDITING: "deposit crediting",
+    LEDGER_OPERATION_FLAG_SWEEP_CLAIM: "sweep claiming",
+    LEDGER_OPERATION_FLAG_SWEEP_TRANSITIONS: "sweep transitions",
+    LEDGER_OPERATION_FLAG_EVM_SENDER_LOCKS: "EVM sender locks",
+    LEDGER_OPERATION_FLAG_RESIDUAL_WATCH: "residual deposit watching",
+    LEDGER_OPERATION_FLAG_WITHDRAWALS: "withdrawals",
+}
+
+DEFAULT_LEDGER_OPERATIONAL_FLAGS_FILENAME = "ledger_operational_flags.json"
+
 def _compute_next_retry_at() -> timezone.datetime:
     return timezone.now() + timedelta(seconds=LEDGER_OUTBOX_RETRY_DELAY_SECONDS)
+
+
+
+def _get_ledger_operational_flags_path() -> str:
+    configured_path = str(getattr(settings, "LEDGER_OPERATIONAL_FLAGS_PATH", "") or "").strip()
+    if configured_path:
+        return configured_path
+
+    base_dir = str(getattr(settings, "BASE_DIR", "") or "").strip()
+    if not base_dir:
+        base_dir = os.getcwd()
+    return os.path.join(base_dir, DEFAULT_LEDGER_OPERATIONAL_FLAGS_FILENAME)
+
+
+def _normalize_ledger_operation_flag_key(key: str) -> str:
+    normalized = str(key or "").strip().lower()
+    if normalized not in LEDGER_OPERATIONAL_FLAG_DEFAULTS:
+        allowed = ", ".join(sorted(LEDGER_OPERATIONAL_FLAG_DEFAULTS))
+        raise ValidationError(f"Unknown ledger operational flag: {normalized}. Allowed flags: {allowed}")
+    return normalized
+
+
+def _read_ledger_operational_flags_file() -> dict:
+    path = _get_ledger_operational_flags_path()
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as exc:
+        raise ValidationError("Ledger operational flags file contains invalid JSON") from exc
+
+    if not isinstance(payload, dict):
+        raise ValidationError("Ledger operational flags file must contain a JSON object")
+    return payload
+
+
+def _write_ledger_operational_flags_file(flags: dict) -> None:
+    path = _get_ledger_operational_flags_path()
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+    tmp_path = f"{path}.tmp-{uuid.uuid4().hex}"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(flags, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(tmp_path, path)
+
+
+def list_ledger_operation_flags() -> dict:
+    stored_flags = _read_ledger_operational_flags_file()
+    results = {}
+    for key, default_enabled in LEDGER_OPERATIONAL_FLAG_DEFAULTS.items():
+        stored_value = stored_flags.get(key)
+        if isinstance(stored_value, dict):
+            enabled = bool(stored_value.get("enabled", default_enabled))
+            reason = str(stored_value.get("reason", "") or "")
+            updated_at = str(stored_value.get("updated_at", "") or "")
+            updated_by = str(stored_value.get("updated_by", "") or "")
+        elif isinstance(stored_value, bool):
+            enabled = stored_value
+            reason = ""
+            updated_at = ""
+            updated_by = ""
+        else:
+            enabled = bool(default_enabled)
+            reason = ""
+            updated_at = ""
+            updated_by = ""
+
+        results[key] = {
+            "key": key,
+            "label": LEDGER_OPERATIONAL_FLAG_LABELS.get(key, key),
+            "enabled": enabled,
+            "default_enabled": bool(default_enabled),
+            "reason": reason,
+            "updated_at": updated_at,
+            "updated_by": updated_by,
+        }
+    return results
+
+
+def ledger_operation_enabled(key: str) -> bool:
+    normalized_key = _normalize_ledger_operation_flag_key(key)
+    return bool(list_ledger_operation_flags()[normalized_key]["enabled"])
+
+
+def require_ledger_operation_enabled(key: str) -> None:
+    normalized_key = _normalize_ledger_operation_flag_key(key)
+    if not ledger_operation_enabled(normalized_key):
+        label = LEDGER_OPERATIONAL_FLAG_LABELS.get(normalized_key, normalized_key)
+        raise ValidationError(f"Ledger operation is temporarily disabled: {label}")
+
+
+def set_ledger_operation_flag(*, key: str, enabled: bool, reason: str = "", actor=None) -> dict:
+    normalized_key = _normalize_ledger_operation_flag_key(key)
+    flags = _read_ledger_operational_flags_file()
+    flags[normalized_key] = {
+        "enabled": bool(enabled),
+        "reason": str(reason or ""),
+        "updated_at": timezone.now().isoformat(),
+        "updated_by": getattr(actor, "username", "") if actor is not None else "",
+    }
+    _write_ledger_operational_flags_file(flags)
+    return list_ledger_operation_flags()[normalized_key]
+
+
+def _get_int_setting(name: str, default: int, *, minimum: int = 0) -> int:
+    raw_value = getattr(settings, name, default)
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{name} must be an integer") from exc
+    if value < minimum:
+        raise ValidationError(f"{name} must be >= {minimum}")
+    return value
+
+
+def _enforce_deposit_open_cooldown(*, user) -> None:
+    threshold = _get_int_setting("LEDGER_DEPOSIT_OPEN_COOLDOWN_THRESHOLD", 3, minimum=0)
+    window_seconds = _get_int_setting("LEDGER_DEPOSIT_OPEN_COOLDOWN_WINDOW_SECONDS", 5 * 60, minimum=1)
+    cooldown_seconds = _get_int_setting("LEDGER_DEPOSIT_OPEN_COOLDOWN_SECONDS", 15 * 60, minimum=1)
+
+    if threshold <= 0:
+        return
+
+    now = timezone.now()
+    window_start = now - timedelta(seconds=window_seconds)
+    recent_sessions = list(
+        DepositSession.objects.filter(
+            user=user,
+            created_at__gte=window_start,
+        )
+        .order_by("-created_at")
+        .only("id", "created_at")[:threshold]
+    )
+
+    if len(recent_sessions) < threshold:
+        return
+
+    latest_created_at = recent_sessions[0].created_at
+    cooldown_until = latest_created_at + timedelta(seconds=cooldown_seconds)
+    if cooldown_until > now:
+        raise ValidationError(
+            "Too many top-up attempts. Please wait before creating a new deposit address."
+        )
 
 def _require_authenticated_actor(actor):
     if actor is None:
@@ -299,6 +479,7 @@ def _get_claimed_sweep_job_for_update(
     allow_expired_claim: bool = False,
 ) -> DepositSweepJob:
     _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+    require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_SWEEP_TRANSITIONS)
 
     job = DepositSweepJob.objects.select_for_update().get(public_id=public_id)
     normalized_claim_token = _normalize_claim_token(claim_token)
@@ -360,6 +541,7 @@ def _get_locked_evm_sender_state_for_update(
     allow_expired_lock: bool = False,
 ) -> EvmSenderState:
     _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+    require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_EVM_SENDER_LOCKS)
 
     state = EvmSenderState.objects.select_for_update().get(
         chain=_normalize_sender_chain(chain),
@@ -393,6 +575,7 @@ def acquire_evm_sender_lock(
     lock_seconds: int,
 ) -> dict:
     _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+    require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_EVM_SENDER_LOCKS)
 
     chain = _normalize_sender_chain(chain)
     address = _normalize_sender_address(address)
@@ -1225,6 +1408,7 @@ def create_wallet_deposit_request(
     metadata=None,
 ) -> WalletRequest:
     actor = _require_wallet_owner(actor, wallet)
+    require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_DEPOSIT_OPEN)
 
     if metadata is None:
         metadata = {}
@@ -1267,6 +1451,7 @@ def create_wallet_withdrawal_request(
     metadata=None,
 ) -> WalletRequest:
     actor = _require_wallet_owner(actor, wallet)
+    require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_WITHDRAWALS)
 
     if metadata is None:
         metadata = {}
@@ -2230,6 +2415,7 @@ def record_onchain_observation(
     raw_payload=None,
 ) -> ObservedOnchainTransfer:
     _require_perm(actor, "ledger.can_record_onchain_observations")
+    require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_OBSERVATION_INGEST)
 
     if raw_payload is None:
         raw_payload = {}
@@ -2482,6 +2668,7 @@ def credit_confirmed_deposit_session(
     created_by=None,
 ) -> LedgerTransaction:
     _require_perm(actor, "ledger.can_credit_confirmed_deposits")
+    require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_CREDITING)
     created_by = _resolve_created_by(actor=actor, created_by=created_by)
 
     deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
@@ -2972,6 +3159,7 @@ def open_user_deposit_session(
     show_network_step: bool = True,
 ) -> DepositSession:
     actor = _require_authenticated_actor(actor)
+    require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_DEPOSIT_OPEN)
 
     wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
     if wallet.wallet_type != TokenWallet.TYPE_USER:
@@ -3006,6 +3194,8 @@ def open_user_deposit_session(
     )
     if existing_session is not None:
         return existing_session
+
+    _enforce_deposit_open_cooldown(user=wallet.user)
 
     deposit_address, derivation_index, derivation_path = _allocate_session_address(
         chain=chain,
@@ -3206,7 +3396,7 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
             expires_at__gt=now,
         )
 
-        if residual_watch_seconds > 0:
+        if residual_watch_seconds > 0 and ledger_operation_enabled(LEDGER_OPERATION_FLAG_RESIDUAL_WATCH):
             watch_filter |= Q(
                 status__in=RESIDUAL_DEPOSIT_WATCH_STATUSES,
                 updated_at__gte=residual_watch_cutoff,
@@ -3534,6 +3724,7 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
     if not isinstance(option_rows, list) or not option_rows:
         raise ValidationError("Options payload must be a non-empty list")
     _require_perm(actor, "ledger.can_manage_deposit_sweep_jobs")
+    require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_SWEEP_CLAIM)
 
     limit = int(limit)
     lease_seconds = int(lease_seconds)

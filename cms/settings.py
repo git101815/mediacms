@@ -27,6 +27,20 @@ PORTAL_WORKFLOW = "public"
 # valid values: 'light', 'dark'.
 DEFAULT_THEME = "light"
 
+LEDGER_INTERNAL_API_NETWORK_GUARD_ENABLED = True
+LEDGER_INTERNAL_API_ALLOWED_CIDRS = [
+    "127.0.0.1/32",
+    "172.16.0.0/12",
+    "10.0.0.0/8",
+]
+LEDGER_INTERNAL_GATEWAY_SECRET = "CHANGE_ME_LONG_RANDOM_SECRET"
+LEDGER_INTERNAL_GATEWAY_SECRET_REQUIRED = True
+
+LEDGER_OPERATIONAL_FLAGS_PATH = "/home/mediacms.io/mediacms/ledger_operational_flags.json"
+
+LEDGER_DEPOSIT_OPEN_COOLDOWN_THRESHOLD = 3
+LEDGER_DEPOSIT_OPEN_COOLDOWN_WINDOW_SECONDS = 5 * 60
+LEDGER_DEPOSIT_OPEN_COOLDOWN_SECONDS = 15 * 60
 
 # These are passed on every request
 # if set to False will not fetch external content
