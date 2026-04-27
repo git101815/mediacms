@@ -22,6 +22,7 @@ from drf_yasg import openapi as openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import permissions, status
 from rest_framework.exceptions import PermissionDenied
+from django.views.decorators.clickjacking import xframe_options_exempt
 from rest_framework.parsers import (
     FileUploadParser,
     FormParser,
@@ -1493,7 +1494,7 @@ def edit_video(request):
         {"media_object": media, "add_subtitle_url": media.add_subtitle_url, "media_file_path": media_file_path},
     )
 
-
+@xframe_options_exempt
 def embed_media(request):
     """Embed media view"""
 
@@ -1506,8 +1507,7 @@ def embed_media(request):
     if not media:
         return HttpResponseRedirect("/")
 
-    context = {}
-    context["media"] = friendly_token
+    context = {"media": friendly_token}
     return render(request, "cms/embed.html", context)
 
 
