@@ -31,3 +31,5 @@ celerybeat-schedule-wal
 /.env
 .env
 /backup
+.idea/
+deposit_service/data/state.json

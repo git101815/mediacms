@@ -1,0 +1,392 @@
+<script>
+(function () {
+  if (!window.mcPopAdsRuntime || !window.mcPopAdsConfig) {
+    return;
+  }
+
+  if (window.mcPopAdsRuntime.chosenProvider !== "partner") {
+    return;
+  }
+
+  if (window.__mcPartnerPopadsBooted) {
+    return;
+  }
+  window.__mcPartnerPopadsBooted = true;
+
+  var runtime = window.mcPopAdsRuntime;
+  var config = window.mcPopAdsConfig;
+  var partnerConfig = config.partner || {};
+  var engineConfig = partnerConfig.engine || {};
+  var overlays = [];
+  var isTriggerLocked = false;
+  var pointerMoved = false;
+
+  function plausibleSafe(eventName, props) {
+    if (!config.tracking || !config.tracking.enabled || typeof window.plausible !== "function") {
+      return;
+    }
+    try {
+      window.plausible(eventName, props ? { props: props } : undefined);
+    } catch (error) {
+      // ignore
+    }
+  }
+
+  function randomId() {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === "function") {
+        return window.crypto.randomUUID();
+      }
+    } catch (error) {
+      // ignore
+    }
+    return String(Date.now()) + "-" + String(Math.random()).slice(2);
+  }
+
+  function chooseOffer() {
+    return runtime.chooseWeightedOffer(partnerConfig.offers || []);
+  }
+
+  function buildAdUrl(offer) {
+    var clickId = randomId();
+    var url = String(offer.urlTemplate || "").replace(/CLICKID/g, encodeURIComponent(clickId));
+    var separator = url.indexOf("?") === -1 ? "?" : "&";
+    return url + separator + "focus=0";
+  }
+
+  function looksUsable(handle) {
+    return !!(handle && typeof handle === "object" && "closed" in handle);
+  }
+
+  function rawOpen(url, name, features) {
+    try {
+      return window.open(url || "", name || "", features || "");
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /*
+    Closer to Clickaine's we():
+    - open a blank tab/window first
+    - then replace its location
+    - do NOT use noopener/noreferrer here, because we need a usable handle
+  */
+  function openWithReplace(url, name, features) {
+    var popupName = name || String(Math.random());
+    var handle = null;
+
+    try {
+      handle = features ? rawOpen("", popupName, features) : rawOpen("", popupName);
+      if (!handle) {
+        return null;
+      }
+
+      try {
+        handle.location.replace(url);
+      } catch (error) {
+        return null;
+      }
+
+      return handle;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /*
+    Closer to Clickaine's _e():
+    - prevent the native click when target is an <a target="_blank">
+    - then open the continuity URL in a new tab
+  */
+  function openContinuationLikeClickaine(url, event) {
+    try {
+      var link = event && event.target && event.target.closest ? event.target.closest("a") : null;
+      if (link && link.target === "_blank") {
+        event.preventDefault();
+      }
+    } catch (error) {
+      // ignore
+    }
+
+    return openWithReplace(url, String(Math.random()), "");
+  }
+
+  function installNextClickBlocker() {
+    var blocked = false;
+
+    function blockClick(e) {
+      if (blocked) {
+        return;
+      }
+      blocked = true;
+
+      try {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === "function") {
+          e.stopImmediatePropagation();
+        }
+      } catch (error) {
+        // ignore
+      }
+
+      document.removeEventListener("click", blockClick, true);
+    }
+
+    document.addEventListener("click", blockClick, true);
+
+    setTimeout(function () {
+      document.removeEventListener("click", blockClick, true);
+    }, 250);
+  }
+
+  function markAttempt(offer, mode) {
+    window.mcPopLastAttempt = {
+      provider: "partner",
+      offer: offer ? offer.key : null,
+      mode: mode,
+      ts: Date.now()
+    };
+  }
+
+  function markSuccess(offer, mode) {
+    window.mcPopLastSuccess = {
+      provider: "partner",
+      offer: offer ? offer.key : null,
+      mode: mode,
+      ts: Date.now()
+    };
+
+    runtime.markOpen({
+      provider: "partner",
+      offer: offer ? offer.key : null,
+      mode: mode
+    });
+
+    plausibleSafe("popunder_open", {
+      provider: "partner",
+      offer: offer ? offer.key : "",
+      blocked: "0"
+    });
+  }
+
+  function markBlocked(offer, mode) {
+    plausibleSafe("popunder_blocked", {
+      provider: "partner",
+      offer: offer ? offer.key : "",
+      mode: mode || "",
+      blocked: "1"
+    });
+  }
+
+  function openTrueTabunder(offer, event, triggerEventName) {
+    var mode = "tabunder";
+    var adUrl = buildAdUrl(offer);
+    var cloneUrl = String(window.location.href || "");
+
+    markAttempt(offer, mode);
+
+    try {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === "function") {
+          event.stopImmediatePropagation();
+        }
+      }
+    } catch (error) {
+      // ignore
+    }
+
+    if (triggerEventName !== "click") {
+      installNextClickBlocker();
+    }
+
+    var cloneHandle = openContinuationLikeClickaine(cloneUrl, event);
+    if (!looksUsable(cloneHandle)) {
+      markBlocked(offer, mode);
+      return null;
+    }
+
+    try {
+      window.location.replace(adUrl);
+    } catch (error) {
+      try {
+        window.location.assign(adUrl);
+      } catch (innerError) {
+        markBlocked(offer, mode);
+        return null;
+      }
+    }
+
+    markSuccess(offer, mode);
+    return {
+      mode: mode,
+      handle: cloneHandle
+    };
+  }
+
+  function shouldIgnoreTarget(target) {
+    if (!target || !target.closest) {
+      return false;
+    }
+
+    if (engineConfig.ignoreTo && target.closest(engineConfig.ignoreTo)) {
+      return true;
+    }
+
+    if (engineConfig.bindTo && !target.closest(engineConfig.bindTo)) {
+      return true;
+    }
+
+    if (target.closest("[data-no-popunder='1'], .no-popunder")) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function handleTrigger(event, triggerEventName) {
+    if (isTriggerLocked) {
+      return;
+    }
+
+    if (!event) {
+      return;
+    }
+
+    if (shouldIgnoreTarget(event.target)) {
+      return;
+    }
+
+    if (!runtime.canRun()) {
+      return;
+    }
+
+    runtime.clickCount += 1;
+    if (runtime.clickCount <= Number(config.capping.skipClicks || 0)) {
+      return;
+    }
+
+    var offer = chooseOffer();
+    if (!offer) {
+      return;
+    }
+
+    isTriggerLocked = true;
+
+    var result = openTrueTabunder(offer, event, triggerEventName);
+    if (!result) {
+      setTimeout(function () {
+        isTriggerLocked = false;
+      }, 150);
+      return;
+    }
+  }
+
+  function createOverlayFor(element) {
+    if (!element || element.__mcPopOverlayBound) {
+      return;
+    }
+
+    var rect = element.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      return;
+    }
+
+    var overlay = document.createElement("div");
+    overlay.className = "mc-popunder-overlay";
+    overlay.style.cssText = [
+      "position:absolute",
+      "cursor:pointer",
+      "z-index:2147483646",
+      "background:transparent",
+      "left:" + (rect.left + window.scrollX) + "px",
+      "top:" + (rect.top + window.scrollY) + "px",
+      "width:" + rect.width + "px",
+      "height:" + rect.height + "px"
+    ].join(";");
+
+    overlay.addEventListener("mousedown", function (event) {
+      handleTrigger(event, "mousedown");
+    }, { capture: true, passive: false });
+
+    overlay.addEventListener("click", function (event) {
+      var ua = String(navigator.userAgent || "").toLowerCase();
+      if (ua.indexOf("firefox") !== -1) {
+        handleTrigger(event, "click");
+      }
+    }, { capture: true, passive: false });
+
+    document.body.appendChild(overlay);
+    element.__mcPopOverlayBound = true;
+    element.__mcPopOverlayNode = overlay;
+    overlays.push({ source: element, overlay: overlay });
+  }
+
+  function refreshOverlays() {
+    if (!engineConfig.enableCoverOverlays) {
+      return;
+    }
+
+    var selectors = Array.isArray(engineConfig.coverSelectors) ? engineConfig.coverSelectors.join(",") : "";
+    if (!selectors) {
+      return;
+    }
+
+    var nodes = document.querySelectorAll(selectors);
+    for (var i = 0; i < nodes.length; i += 1) {
+      createOverlayFor(nodes[i]);
+    }
+
+    for (var j = overlays.length - 1; j >= 0; j -= 1) {
+      var item = overlays[j];
+      if (!item.source || !item.overlay || !document.body.contains(item.source)) {
+        if (item.overlay && item.overlay.parentNode) {
+          item.overlay.parentNode.removeChild(item.overlay);
+        }
+        overlays.splice(j, 1);
+        continue;
+      }
+
+      var rect = item.source.getBoundingClientRect();
+      item.overlay.style.left = (rect.left + window.scrollX) + "px";
+      item.overlay.style.top = (rect.top + window.scrollY) + "px";
+      item.overlay.style.width = rect.width + "px";
+      item.overlay.style.height = rect.height + "px";
+    }
+  }
+
+  var ua = String(navigator.userAgent || "").toLowerCase();
+  var isFirefox = ua.indexOf("firefox") !== -1;
+  var isMobile = /android|iphone|ipad|ipod|mobile/.test(ua) || window.innerWidth < 900;
+
+  if (isMobile) {
+    document.addEventListener("touchstart", function () {
+      pointerMoved = false;
+    }, { capture: true, passive: true });
+
+    document.addEventListener("touchmove", function () {
+      pointerMoved = true;
+    }, { capture: true, passive: true });
+
+    document.addEventListener("touchend", function (event) {
+      if (!pointerMoved) {
+        handleTrigger(event, "touchend");
+      }
+    }, { capture: true, passive: false });
+  } else if (isFirefox) {
+    document.addEventListener("click", function (event) {
+      handleTrigger(event, "click");
+    }, { capture: true, passive: false });
+  } else {
+    document.addEventListener("mousedown", function (event) {
+      handleTrigger(event, "mousedown");
+    }, { capture: true, passive: false });
+  }
+
+  refreshOverlays();
+  setInterval(refreshOverlays, 1000);
+})();
+</script>

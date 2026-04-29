@@ -1,0 +1,327 @@
+<script>
+(function () {
+  if (window.__mcPopRotationInit) {
+    return;
+  }
+  window.__mcPopRotationInit = true;
+
+  var config = {
+    enabled: {{ SHOW_TABUNDER|yesno:"true,false" }},
+
+    providers: {
+      clickaine: {
+        weight: 0
+      },
+      partner: {
+        weight: 100
+      }
+    },
+
+    capping: {
+      delaySeconds: 0,
+      frequencySeconds: 86400,
+      limitTotal: 1,
+      limitPerPage: 1,
+      limitPerSession: 1,
+      skipClicks: 0
+    },
+
+    tracking: {
+      enabled: true,
+      beaconDomains: ["coreadness.com"]
+    },
+
+    partner: {
+      offers: [
+        {
+          key: "cams",
+          weight: 50,
+          urlTemplate: "https://track.gpsecureads.com/556564ae-1588-4c3a-a795-4684cf4d1da0?var1=celebfakessodaigr&var2=tab&var3=CLICKID"
+        },
+        {
+          key: "dating",
+          weight: 50,
+          urlTemplate: "https://www.instabang.com/tours/?t=best&id=celebfakesgpigr&cmp=tab&ad_id=CLICKID"
+        }
+      ],
+
+      engine: {
+        preferredModeDesktop: "tabunder",
+        preferredModeMobile: "tabunder",
+        enableCoverOverlays: true,
+        coverSelectors: ["iframe", "object", "embed", "video"],
+        bindTo: "",
+        ignoreTo: "a[href^='#'], .no-popunder, [data-no-popunder='1']",
+        openTargetBlank: true
+      }
+    },
+
+    storagePrefix: "mc_pop_v3"
+  };
+
+  window.mcPopAdsConfig = config;
+
+  function getLocalStorageSafe() {
+    try {
+      return window.localStorage;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function getSessionStorageSafe() {
+    try {
+      return window.sessionStorage;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function readJson(storage, key, fallbackValue) {
+    if (!storage) {
+      return fallbackValue;
+    }
+    try {
+      var raw = storage.getItem(key);
+      return raw ? JSON.parse(raw) : fallbackValue;
+    } catch (error) {
+      return fallbackValue;
+    }
+  }
+
+  function writeJson(storage, key, value) {
+    if (!storage) {
+      return;
+    }
+    try {
+      storage.setItem(key, JSON.stringify(value));
+    } catch (error) {
+      // ignore
+    }
+  }
+
+  function nowSeconds() {
+    return Math.floor(Date.now() / 1000);
+  }
+
+  function getPageUrl() {
+    return String(window.location.href || "");
+  }
+
+  function getState() {
+    var localStorageSafe = getLocalStorageSafe();
+    var sessionStorageSafe = getSessionStorageSafe();
+
+    var globalState = readJson(localStorageSafe, config.storagePrefix + ":global", {
+      lastOpenTs: 0,
+      openTimestamps: []
+    });
+
+    var sessionState = readJson(sessionStorageSafe, config.storagePrefix + ":session", {
+      opens: 0
+    });
+
+    var pageState = readJson(sessionStorageSafe, config.storagePrefix + ":page", {
+      url: "",
+      opens: 0
+    });
+
+    var currentUrl = getPageUrl();
+    if (pageState.url !== currentUrl) {
+      pageState = {
+        url: currentUrl,
+        opens: 0
+      };
+      writeJson(sessionStorageSafe, config.storagePrefix + ":page", pageState);
+    }
+
+    return {
+      localStorageSafe: localStorageSafe,
+      sessionStorageSafe: sessionStorageSafe,
+      globalState: globalState,
+      sessionState: sessionState,
+      pageState: pageState
+    };
+  }
+
+  function pruneFrequencyWindow(openTimestamps, nowTs) {
+    var frequencySeconds = Number(config.capping.frequencySeconds || 0);
+    if (!frequencySeconds || !Array.isArray(openTimestamps)) {
+      return Array.isArray(openTimestamps) ? openTimestamps : [];
+    }
+    return openTimestamps.filter(function (ts) {
+      return (nowTs - ts) < frequencySeconds;
+    });
+  }
+
+  function canRun() {
+    if (!config.enabled) {
+      return false;
+    }
+
+    var nowTs = nowSeconds();
+    var state = getState();
+
+    if (Number(config.capping.delaySeconds || 0) > 0 && state.globalState.lastOpenTs > 0) {
+      if ((nowTs - state.globalState.lastOpenTs) < Number(config.capping.delaySeconds || 0)) {
+        return false;
+      }
+    }
+
+    if (
+      Number(config.capping.limitPerPage || 0) > 0 &&
+      Number(state.pageState.opens || 0) >= Number(config.capping.limitPerPage || 0)
+    ) {
+      return false;
+    }
+
+    if (
+      Number(config.capping.limitPerSession || 0) > 0 &&
+      Number(state.sessionState.opens || 0) >= Number(config.capping.limitPerSession || 0)
+    ) {
+      return false;
+    }
+
+    var frequencyWindow = pruneFrequencyWindow(state.globalState.openTimestamps || [], nowTs);
+
+    if (
+      Number(config.capping.limitTotal || 0) > 0 &&
+      frequencyWindow.length >= Number(config.capping.limitTotal || 0)
+    ) {
+      return false;
+    }
+
+    if (
+      Number(config.capping.frequencySeconds || 0) > 0 &&
+      Number(state.globalState.lastOpenTs || 0) > 0 &&
+      (nowTs - Number(state.globalState.lastOpenTs || 0)) < Number(config.capping.frequencySeconds || 0)
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function markOpen(meta) {
+    var nowTs = nowSeconds();
+    var state = getState();
+
+    state.globalState.lastOpenTs = nowTs;
+    state.globalState.openTimestamps = pruneFrequencyWindow(state.globalState.openTimestamps || [], nowTs);
+    state.globalState.openTimestamps.push(nowTs);
+
+    state.sessionState.opens = Number(state.sessionState.opens || 0) + 1;
+    state.pageState.opens = Number(state.pageState.opens || 0) + 1;
+
+    writeJson(state.localStorageSafe, config.storagePrefix + ":global", state.globalState);
+    writeJson(state.sessionStorageSafe, config.storagePrefix + ":session", state.sessionState);
+    writeJson(state.sessionStorageSafe, config.storagePrefix + ":page", state.pageState);
+
+    window.mcPopLastConsumedOpen = {
+      provider: meta && meta.provider ? meta.provider : null,
+      offer: meta && meta.offer ? meta.offer : null,
+      mode: meta && meta.mode ? meta.mode : null,
+      ts: Date.now()
+    };
+  }
+
+  function chooseWeightedKey(items, fallbackKey) {
+    var totalWeight = 0;
+    var normalized = [];
+
+    Object.keys(items || {}).forEach(function (key) {
+      var weight = Math.max(0, Number((items[key] && items[key].weight) || 0));
+      normalized.push({ key: key, weight: weight });
+      totalWeight += weight;
+    });
+
+    if (totalWeight <= 0) {
+      return fallbackKey;
+    }
+
+    var bucket = Math.random() * totalWeight;
+    var cursor = 0;
+
+    for (var i = 0; i < normalized.length; i += 1) {
+      cursor += normalized[i].weight;
+      if (bucket < cursor) {
+        return normalized[i].key;
+      }
+    }
+
+    return fallbackKey;
+  }
+
+  function chooseWeightedOffer(offers) {
+    if (!Array.isArray(offers) || !offers.length) {
+      return null;
+    }
+
+    var totalWeight = 0;
+    for (var i = 0; i < offers.length; i += 1) {
+      totalWeight += Math.max(0, Number(offers[i].weight || 0));
+    }
+
+    if (totalWeight <= 0) {
+      return offers[0];
+    }
+
+    var bucket = Math.random() * totalWeight;
+    var cursor = 0;
+
+    for (var j = 0; j < offers.length; j += 1) {
+      cursor += Math.max(0, Number(offers[j].weight || 0));
+      if (bucket < cursor) {
+        return offers[j];
+      }
+    }
+
+    return offers[0];
+  }
+
+  function isMobileLike() {
+    var ua = String(navigator.userAgent || "").toLowerCase();
+    return /android|iphone|ipad|ipod|mobile/.test(ua) || window.innerWidth < 900;
+  }
+
+  function detectBrowserEnv() {
+    var isTop = false;
+
+    try {
+      isTop = window.top === window.self;
+    } catch (error) {
+      isTop = false;
+    }
+
+    return {
+      isMobile: isMobileLike(),
+      isTop: isTop
+    };
+  }
+
+  function resolvePreferredMode() {
+    var env = detectBrowserEnv();
+    var engine = config.partner && config.partner.engine ? config.partner.engine : {};
+    var mode = env.isMobile
+      ? (engine.preferredModeMobile || "tabunder")
+      : (engine.preferredModeDesktop || "tabunder");
+
+    if (mode !== "tabunder" && mode !== "tabup") {
+      mode = "tabunder";
+    }
+
+    return mode;
+  }
+
+  window.mcPopAdsRuntime = {
+    chosenProvider: chooseWeightedKey(config.providers, "clickaine"),
+    chooseWeightedOffer: chooseWeightedOffer,
+    canRun: canRun,
+    markOpen: markOpen,
+    clickCount: 0,
+    deviceClass: isMobileLike() ? "mobile" : "desktop",
+    detectBrowserEnv: detectBrowserEnv,
+    resolvePreferredMode: resolvePreferredMode
+  };
+})();
+</script>
