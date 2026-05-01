@@ -807,7 +807,6 @@ class DepositSession(models.Model):
         return f"DepositSession #{self.id} user={self.user_id} {self.chain}/{self.asset_code} {self.status}"
 
 class ObservedOnchainTransfer(models.Model):
-
     STATUS_OBSERVED = "observed"
     STATUS_CONFIRMING = "confirming"
     STATUS_CONFIRMED = "confirmed"
@@ -855,6 +854,12 @@ class ObservedOnchainTransfer(models.Model):
         related_name="credited_onchain_transfer",
     )
     metadata_version = models.PositiveIntegerField(default=LEDGER_METADATA_VERSION)
+
+    class Meta:
+        permissions = [
+            ("can_record_onchain_observations", "Can record on-chain observations"),
+            ("can_view_onchain_transfers", "Can view on-chain transfers"),
+        ]
 
 class DepositAddress(models.Model):
     STATUS_AVAILABLE = "available"
