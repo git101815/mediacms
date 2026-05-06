@@ -398,6 +398,14 @@ def _claim_token_for_job(job: dict) -> str:
 
 
 
+def _job_onchain_amount(job: dict) -> int:
+    explicit = job.get("onchain_amount")
+    if explicit is not None and str(explicit).strip() != "":
+        return int(explicit)
+    return int(job["amount"])
+
+
+
 
 def _job_metadata(job: dict) -> dict:
     metadata = job.get("metadata") or {}
@@ -894,7 +902,7 @@ def _process_claimed_job(
     claim_token = _claim_token_for_job(job)
     status = str(job.get("status", "")).strip().lower()
     source_address = str(job["source_address"]).strip().lower()
-    amount = int(job["amount"])
+    amount = _job_onchain_amount(job)
     retry_delay_seconds = _default_retry_delay_seconds(config)
     explicit_gas_limit_override = None
 

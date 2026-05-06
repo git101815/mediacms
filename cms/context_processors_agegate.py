@@ -17,7 +17,7 @@ def age_gate_context(request):
 
     return {
 
-        "SHOW_AGE_GATE": False,
+        "SHOW_AGE_GATE": not is_gbot,
 
         "GOOGLEBOT_DEBUG_COMMENT": bot_comment,
 

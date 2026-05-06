@@ -889,17 +889,27 @@ def _get_deposit_display_decimals(*, chain: str, asset_code: str) -> int | None:
     return DISPLAY_DECIMALS_BY_ROUTE.get((normalized_chain, normalized_asset))
 
 
-def _format_deposit_display_amount(*, raw_amount: int, chain: str, asset_code: str) -> str:
-    normalized_raw = int(raw_amount)
-    decimals = _get_deposit_display_decimals(chain=chain, asset_code=asset_code)
-    if decimals is None:
-        return str(normalized_raw)
-
-    scaled = Decimal(normalized_raw) / (Decimal(10) ** int(decimals))
+def _format_scaled_amount(*, amount: int, decimals: int) -> str:
+    normalized_amount = int(amount)
+    scaled = Decimal(normalized_amount) / (Decimal(10) ** int(decimals))
     text = format(scaled, "f")
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text or "0"
+
+
+def _format_deposit_display_amount(*, raw_amount: int, chain: str, asset_code: str) -> str:
+    decimals = _get_deposit_display_decimals(chain=chain, asset_code=asset_code)
+    if decimals is None:
+        return str(int(raw_amount))
+    return _format_scaled_amount(amount=raw_amount, decimals=decimals)
+
+
+def _format_canonical_stable_display_amount(canonical_amount: int) -> str:
+    return _format_scaled_amount(
+        amount=canonical_amount,
+        decimals=STABLECOIN_CANONICAL_DECIMALS,
+    )
 
 
 def _build_route_label(*, chain: str, asset_code: str, display_label: str = "") -> str:
@@ -1108,6 +1118,179 @@ def _convert_canonical_stable_to_route_raw_amount(
             "Token pack price is not representable on the selected payment route"
         )
     return normalized_amount // factor
+
+
+
+def _normalize_positive_int(value, *, field_name: str) -> int:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{field_name} must be an integer") from exc
+    if normalized <= 0:
+        raise ValidationError(f"{field_name} must be positive")
+    return normalized
+
+
+def _optional_positive_int(value, *, field_name: str) -> int | None:
+    if value is None or value == "":
+        return None
+    return _normalize_positive_int(value, field_name=field_name)
+
+
+def _get_metadata_int(metadata: dict | None, *keys: str) -> int | None:
+    if not isinstance(metadata, dict):
+        return None
+    for key in keys:
+        value = metadata.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _route_decimal_factor(*, chain: str, asset_code: str) -> int:
+    route_decimals = _get_route_onchain_decimals(chain=chain, asset_code=asset_code)
+    if route_decimals <= STABLECOIN_CANONICAL_DECIMALS:
+        return 1
+    return 10 ** (route_decimals - STABLECOIN_CANONICAL_DECIMALS)
+
+
+def _looks_like_legacy_onchain_raw_amount(*, chain: str, asset_code: str, amount: int) -> bool:
+    factor = _route_decimal_factor(chain=chain, asset_code=asset_code)
+    if factor <= 1:
+        return False
+    normalized_amount = int(amount)
+    return normalized_amount >= factor and normalized_amount % factor == 0
+
+
+def _canonical_and_raw_amounts_from_stored_route_value(
+    *,
+    chain: str,
+    asset_code: str,
+    stored_amount: int,
+    raw_amount=None,
+    metadata: dict | None = None,
+    canonical_metadata_keys: tuple[str, ...] = (),
+    raw_metadata_keys: tuple[str, ...] = (),
+) -> tuple[int, int]:
+    stored_amount = _normalize_positive_int(stored_amount, field_name="Stored route amount")
+    explicit_canonical = _get_metadata_int(metadata, *canonical_metadata_keys)
+    explicit_raw = _optional_positive_int(raw_amount, field_name="Raw on-chain amount")
+    if explicit_raw is None:
+        explicit_raw = _get_metadata_int(metadata, *raw_metadata_keys)
+
+    if explicit_canonical is not None:
+        canonical_amount = _normalize_positive_int(explicit_canonical, field_name="Canonical stable amount")
+        if explicit_raw is None:
+            explicit_raw = _convert_canonical_stable_to_route_raw_amount(
+                chain=chain,
+                asset_code=asset_code,
+                canonical_amount=canonical_amount,
+            )
+        return canonical_amount, explicit_raw
+
+    if explicit_raw is not None:
+        canonical_amount = _normalize_route_amount_to_canonical_stable_units(
+            chain=chain,
+            asset_code=asset_code,
+            raw_amount=explicit_raw,
+        )
+        return canonical_amount, explicit_raw
+
+    if isinstance(metadata, dict):
+        amount_unit = str(metadata.get("amount_unit", "") or "").strip().lower()
+        if amount_unit in {"canonical_stable", "canonical_stable_6"}:
+            return stored_amount, _convert_canonical_stable_to_route_raw_amount(
+                chain=chain,
+                asset_code=asset_code,
+                canonical_amount=stored_amount,
+            )
+
+    if _looks_like_legacy_onchain_raw_amount(
+        chain=chain,
+        asset_code=asset_code,
+        amount=stored_amount,
+    ):
+        canonical_amount = _normalize_route_amount_to_canonical_stable_units(
+            chain=chain,
+            asset_code=asset_code,
+            raw_amount=stored_amount,
+        )
+        return canonical_amount, stored_amount
+
+    return stored_amount, _convert_canonical_stable_to_route_raw_amount(
+        chain=chain,
+        asset_code=asset_code,
+        canonical_amount=stored_amount,
+    )
+
+
+def _deposit_address_min_amounts(address: DepositAddress) -> tuple[int, int]:
+    return _canonical_and_raw_amounts_from_stored_route_value(
+        chain=address.chain,
+        asset_code=address.asset_code,
+        stored_amount=address.min_amount,
+        metadata=address.metadata or {},
+        canonical_metadata_keys=("canonical_min_amount", "min_canonical_stable_amount"),
+        raw_metadata_keys=("onchain_min_amount", "min_onchain_raw_amount", "route_raw_min_amount"),
+    )
+
+
+def _deposit_session_min_amounts(session: DepositSession) -> tuple[int, int]:
+    return _canonical_and_raw_amounts_from_stored_route_value(
+        chain=session.chain,
+        asset_code=session.asset_code,
+        stored_amount=session.min_amount,
+        raw_amount=getattr(session, "expected_onchain_raw_amount", None),
+        metadata=session.metadata or {},
+        canonical_metadata_keys=("expected_canonical_stable_amount", "canonical_min_amount"),
+        raw_metadata_keys=("expected_route_raw_amount", "expected_onchain_raw_amount", "onchain_min_amount"),
+    )
+
+
+def _observed_transfer_amounts(observed_transfer: ObservedOnchainTransfer) -> tuple[int, int]:
+    return _canonical_and_raw_amounts_from_stored_route_value(
+        chain=observed_transfer.chain,
+        asset_code=observed_transfer.asset_code,
+        stored_amount=observed_transfer.amount,
+        raw_amount=getattr(observed_transfer, "onchain_raw_amount", None),
+        metadata=observed_transfer.raw_payload or {},
+        canonical_metadata_keys=("canonical_stable_amount", "observed_canonical_stable_amount"),
+        raw_metadata_keys=("onchain_raw_amount", "route_raw_amount", "balance_snapshot"),
+    )
+
+
+def _sweep_job_amounts(job: DepositSweepJob) -> tuple[int, int]:
+    return _canonical_and_raw_amounts_from_stored_route_value(
+        chain=job.chain,
+        asset_code=job.asset_code,
+        stored_amount=job.amount,
+        raw_amount=getattr(job, "onchain_raw_amount", None),
+        metadata=job.metadata or {},
+        canonical_metadata_keys=("canonical_stable_amount", "claimed_canonical_amount"),
+        raw_metadata_keys=("onchain_raw_amount", "claimed_onchain_amount", "route_raw_amount"),
+    )
+
+
+def _amount_metadata(
+    *,
+    chain: str,
+    asset_code: str,
+    canonical_amount: int,
+    raw_amount: int,
+) -> dict:
+    return {
+        "amount_unit": "canonical_stable",
+        "canonical_stable_amount": int(canonical_amount),
+        "onchain_raw_amount": str(int(raw_amount)),
+        "route_onchain_decimals": int(
+            _get_route_onchain_decimals(chain=chain, asset_code=asset_code)
+        ),
+        "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
+    }
 
 
 def _build_token_pack_snapshot(*, token_pack: TokenPack) -> dict:
@@ -2479,7 +2662,13 @@ def record_onchain_observation(
     from_address = _normalize_evm_address(from_address)
     to_address = _normalize_evm_address(to_address)
     asset_code = (asset_code or "").strip().upper()
-    amount = int(amount)
+    route_raw_amount = _normalize_positive_int(amount, field_name="Observed raw on-chain amount")
+    canonical_amount = _normalize_route_amount_to_canonical_stable_units(
+        chain=chain,
+        asset_code=asset_code,
+        raw_amount=route_raw_amount,
+    )
+    canonical_amount = _normalize_positive_int(canonical_amount, field_name="Observed canonical stable amount")
     confirmations = int(confirmations)
 
     if detection_method not in {"event", "balance_verification"}:
@@ -2490,8 +2679,6 @@ def record_onchain_observation(
         raise ValidationError("Block number cannot be negative")
     if detected_block_number is not None and detected_block_number < 0:
         raise ValidationError("Detected block number cannot be negative")
-    if amount <= 0:
-        raise ValidationError("Observed amount must be positive")
     if confirmations < 0:
         raise ValidationError("Confirmations cannot be negative")
 
@@ -2515,7 +2702,7 @@ def record_onchain_observation(
             chain=chain,
             session_public_id=deposit_session.public_id,
             detected_block_number=detected_block_number,
-            amount=amount,
+            amount=route_raw_amount,
         )
     else:
         if log_index is None:
@@ -2526,10 +2713,22 @@ def record_onchain_observation(
             log_index=log_index,
         )
 
-    raw_payload_for_create = raw_payload
+    if isinstance(raw_payload, dict):
+        raw_payload_for_create = dict(raw_payload)
+    else:
+        raw_payload_for_create = {"original_raw_payload": raw_payload}
+    raw_payload_for_create.update(
+        _amount_metadata(
+            chain=chain,
+            asset_code=asset_code,
+            canonical_amount=canonical_amount,
+            raw_amount=route_raw_amount,
+        )
+    )
+
     if _is_residual_deposit_recording_context(deposit_session):
         raw_payload_for_create = _build_residual_observation_payload(
-            raw_payload=raw_payload,
+            raw_payload=raw_payload_for_create,
             deposit_session=deposit_session,
         )
 
@@ -2545,7 +2744,8 @@ def record_onchain_observation(
         "to_address": to_address,
         "token_contract_address": token_contract_address,
         "asset_code": asset_code,
-        "amount": amount,
+        "amount": canonical_amount,
+        "onchain_raw_amount": route_raw_amount,
         "confirmations": confirmations,
         "detection_method": detection_method,
         "raw_payload": raw_payload_for_create,
@@ -2558,6 +2758,7 @@ def record_onchain_observation(
     )
 
     if not created:
+        existing_canonical_amount, existing_raw_amount = _observed_transfer_amounts(observed)
         immutable_mismatch = (
             observed.chain != chain
             or observed.txid != txid
@@ -2565,7 +2766,8 @@ def record_onchain_observation(
             or observed.to_address != to_address
             or observed.token_contract_address != token_contract_address
             or observed.asset_code != asset_code
-            or int(observed.amount) != amount
+            or int(existing_canonical_amount) != canonical_amount
+            or int(existing_raw_amount) != route_raw_amount
             or getattr(observed, "detected_block_number", None) != detected_block_number
             or getattr(observed, "detection_method", "event") != detection_method
         )
@@ -2576,6 +2778,14 @@ def record_onchain_observation(
             raise ValidationError("Observed event already linked to another deposit session")
 
         update_fields = []
+
+        if int(observed.amount) != canonical_amount:
+            observed.amount = canonical_amount
+            update_fields.append("amount")
+
+        if int(existing_raw_amount) != route_raw_amount or getattr(observed, "onchain_raw_amount", None) is None:
+            observed.onchain_raw_amount = route_raw_amount
+            update_fields.append("onchain_raw_amount")
 
         if block_number is not None and observed.block_number != block_number:
             observed.block_number = block_number
@@ -2603,12 +2813,12 @@ def record_onchain_observation(
                 deposit_session=deposit_session,
             )
             update_fields.append("raw_payload")
-        elif raw_payload and not _is_residual_observed_transfer(observed) and observed.raw_payload != raw_payload:
-            observed.raw_payload = raw_payload
+        elif raw_payload_for_create and not _is_residual_observed_transfer(observed) and observed.raw_payload != raw_payload_for_create:
+            observed.raw_payload = raw_payload_for_create
             update_fields.append("raw_payload")
 
         if update_fields:
-            observed.save(update_fields=update_fields)
+            observed.save(update_fields=list(dict.fromkeys(update_fields)))
 
     is_primary_credited_observation = _is_primary_credited_observation(
         deposit_session=deposit_session,
@@ -2684,9 +2894,13 @@ def record_onchain_observation(
         deposit_session.observed_txid = observed.txid
         session_update_fields.append("observed_txid")
 
-    if deposit_session.observed_amount != observed.amount:
-        deposit_session.observed_amount = observed.amount
+    if deposit_session.observed_amount != canonical_amount:
+        deposit_session.observed_amount = canonical_amount
         session_update_fields.append("observed_amount")
+
+    if getattr(deposit_session, "expected_onchain_raw_amount", None) is None:
+        deposit_session.expected_onchain_raw_amount = route_raw_amount
+        session_update_fields.append("expected_onchain_raw_amount")
 
     if deposit_session.confirmations != observed.confirmations:
         deposit_session.confirmations = observed.confirmations
@@ -2765,7 +2979,10 @@ def credit_confirmed_deposit_session(
     if observed_transfer.to_address != deposit_session.deposit_address:
         raise ValidationError("Observed destination address does not match deposit session address")
 
-    if int(observed_transfer.amount) < int(deposit_session.min_amount):
+    observed_canonical_stable_amount, observed_route_raw_amount = _observed_transfer_amounts(observed_transfer)
+    session_min_canonical_amount, session_min_route_raw_amount = _deposit_session_min_amounts(deposit_session)
+
+    if observed_canonical_stable_amount < int(session_min_canonical_amount):
         raise ValidationError("Observed amount is below deposit minimum")
 
     if int(observed_transfer.confirmations) < int(deposit_session.required_confirmations):
@@ -2782,12 +2999,6 @@ def credit_confirmed_deposit_session(
 
         if user_credit_amount <= 0 or expected_gross_canonical_stable_amount <= 0:
             raise ValidationError("Deposit session is missing a valid token pack snapshot")
-
-        observed_canonical_stable_amount = _normalize_route_amount_to_canonical_stable_units(
-            chain=deposit_session.chain,
-            asset_code=deposit_session.asset_code,
-            raw_amount=observed_transfer.amount,
-        )
 
         if observed_canonical_stable_amount < expected_gross_canonical_stable_amount:
             raise ValidationError("Observed amount is below the expected token pack price")
@@ -2833,7 +3044,7 @@ def credit_confirmed_deposit_session(
                 "log_index": observed_transfer.log_index,
                 "block_number": observed_transfer.block_number,
                 "confirmations": observed_transfer.confirmations,
-                "route_raw_amount": int(observed_transfer.amount),
+                "route_raw_amount": str(int(observed_route_raw_amount)),
                 "observed_canonical_stable_amount": int(observed_canonical_stable_amount),
                 "expected_gross_canonical_stable_amount": int(expected_gross_canonical_stable_amount),
                 "expected_net_canonical_stable_amount": int(expected_net_canonical_stable_amount),
@@ -2843,6 +3054,7 @@ def credit_confirmed_deposit_session(
                 "gross_token_equivalent_amount": int(gross_token_equivalent_amount),
                 "token_pack": token_pack_snapshot,
                 "payment_method": (deposit_session.metadata or {}).get("payment_method") or {},
+                "amount_unit": "canonical_stable",
                 "route_onchain_decimals": int(
                     _get_route_onchain_decimals(
                         chain=deposit_session.chain,
@@ -2855,10 +3067,8 @@ def credit_confirmed_deposit_session(
             },
         )
     else:
-        ledger_credit_amount = _convert_route_amount_to_platform_token_units(
-            chain=deposit_session.chain,
-            asset_code=deposit_session.asset_code,
-            raw_amount=observed_transfer.amount,
+        ledger_credit_amount = _convert_canonical_stable_to_platform_tokens(
+            observed_canonical_stable_amount
         )
 
         txn = apply_ledger_transaction(
@@ -2885,15 +3095,10 @@ def credit_confirmed_deposit_session(
                 "log_index": observed_transfer.log_index,
                 "block_number": observed_transfer.block_number,
                 "confirmations": observed_transfer.confirmations,
-                "route_raw_amount": int(observed_transfer.amount),
-                "canonical_stable_amount": int(
-                    _normalize_route_amount_to_canonical_stable_units(
-                        chain=deposit_session.chain,
-                        asset_code=deposit_session.asset_code,
-                        raw_amount=observed_transfer.amount,
-                    )
-                ),
+                "route_raw_amount": str(int(observed_route_raw_amount)),
+                "canonical_stable_amount": int(observed_canonical_stable_amount),
                 "ledger_credit_amount": int(ledger_credit_amount),
+                "amount_unit": "canonical_stable",
                 "route_onchain_decimals": int(
                     _get_route_onchain_decimals(
                         chain=deposit_session.chain,
@@ -2907,7 +3112,9 @@ def credit_confirmed_deposit_session(
         )
 
     deposit_session.observed_txid = observed_transfer.txid
-    deposit_session.observed_amount = observed_transfer.amount
+    deposit_session.observed_amount = observed_canonical_stable_amount
+    if getattr(deposit_session, "expected_onchain_raw_amount", None) is None:
+        deposit_session.expected_onchain_raw_amount = session_min_route_raw_amount
     deposit_session.confirmations = observed_transfer.confirmations
     deposit_session.status = DepositSession.STATUS_CREDITED
     deposit_session.credited_ledger_txn = txn
@@ -2915,6 +3122,7 @@ def credit_confirmed_deposit_session(
         update_fields=[
             "observed_txid",
             "observed_amount",
+            "expected_onchain_raw_amount",
             "confirmations",
             "status",
             "credited_ledger_txn",
@@ -2924,12 +3132,15 @@ def credit_confirmed_deposit_session(
 
     observed_transfer.status = ObservedOnchainTransfer.STATUS_CREDITED
     observed_transfer.credited_ledger_txn = txn
+    if getattr(observed_transfer, "onchain_raw_amount", None) is None:
+        observed_transfer.onchain_raw_amount = observed_route_raw_amount
     if observed_transfer.confirmed_at is None:
         observed_transfer.confirmed_at = timezone.now()
     observed_transfer.save(
         update_fields=[
             "status",
             "credited_ledger_txn",
+            "onchain_raw_amount",
             "confirmed_at",
         ]
     )
@@ -3046,16 +3257,25 @@ def provision_deposit_address(
             or existing.address != address
             or existing.address_derivation_ref != address_derivation_ref
             or existing.derivation_index != derivation_index
-            or int(existing.required_confirmations) != required_confirmations
-            or int(existing.min_amount) != min_amount
-            or int(existing.session_ttl_seconds) != session_ttl_seconds
         )
         if immutable_mismatch:
             raise ValidationError("Deposit address already exists with different immutable fields")
 
+        update_fields = []
         if existing.display_label != display_label:
             existing.display_label = display_label
-            existing.save(update_fields=["display_label"])
+            update_fields.append("display_label")
+        if int(existing.required_confirmations) != required_confirmations:
+            existing.required_confirmations = required_confirmations
+            update_fields.append("required_confirmations")
+        if int(existing.min_amount) != min_amount:
+            existing.min_amount = min_amount
+            update_fields.append("min_amount")
+        if int(existing.session_ttl_seconds) != session_ttl_seconds:
+            existing.session_ttl_seconds = session_ttl_seconds
+            update_fields.append("session_ttl_seconds")
+        if update_fields:
+            existing.save(update_fields=update_fields)
 
         return existing, False
 
@@ -3133,42 +3353,42 @@ def provision_deposit_addresses_batch(*, actor, address_rows):
 
 def list_available_deposit_options() -> list[dict]:
     rows = (
-        DepositAddress.objects.values(
-            "chain",
-            "asset_code",
-            "token_contract_address",
-            "required_confirmations",
-            "min_amount",
-            "session_ttl_seconds",
-        )
+        DepositAddress.objects.filter(status=DepositAddress.STATUS_AVAILABLE)
         .order_by(
             "chain",
             "asset_code",
             "token_contract_address",
             "required_confirmations",
-            "min_amount",
             "session_ttl_seconds",
+            "id",
         )
-        .distinct()
     )
 
+    seen = set()
     options = []
     for row in rows:
         option_key = build_deposit_option_key(
-            chain=row["chain"],
-            asset_code=row["asset_code"],
-            token_contract_address=row["token_contract_address"],
+            chain=row.chain,
+            asset_code=row.asset_code,
+            token_contract_address=row.token_contract_address,
         )
+        canonical_min_amount, onchain_min_amount = _deposit_address_min_amounts(row)
+        dedupe_key = (
+            option_key,
+            int(row.required_confirmations),
+            int(canonical_min_amount),
+            int(row.session_ttl_seconds),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
         route_label = _build_route_label(
-            chain=row["chain"],
-            asset_code=row["asset_code"],
+            chain=row.chain,
+            asset_code=row.asset_code,
         )
-        network_label = _get_network_display_label(row["chain"])
-        min_amount_display = _format_deposit_display_amount(
-            raw_amount=row["min_amount"],
-            chain=row["chain"],
-            asset_code=row["asset_code"],
-        )
+        network_label = _get_network_display_label(row.chain)
+        min_amount_display = _format_canonical_stable_display_amount(canonical_min_amount)
 
         options.append(
             {
@@ -3176,14 +3396,17 @@ def list_available_deposit_options() -> list[dict]:
                 "label": route_label,
                 "route_label": route_label,
                 "network_label": network_label,
-                "chain": row["chain"],
-                "asset_code": row["asset_code"],
-                "token_contract_address": row["token_contract_address"],
-                "required_confirmations": row["required_confirmations"],
-                "min_amount": row["min_amount"],
+                "chain": row.chain,
+                "asset_code": row.asset_code,
+                "token_contract_address": row.token_contract_address,
+                "required_confirmations": row.required_confirmations,
+                "min_amount": canonical_min_amount,
+                "onchain_min_amount": str(onchain_min_amount),
+                "amount_unit": "canonical_stable",
+                "onchain_amount_unit": "raw_onchain",
                 "min_amount_display": min_amount_display,
-                "session_ttl_seconds": row["session_ttl_seconds"],
-                "network_slug": _normalize_chain(row["chain"]),
+                "session_ttl_seconds": row.session_ttl_seconds,
+                "network_slug": _normalize_chain(row.chain),
             }
         )
 
@@ -3218,13 +3441,15 @@ def open_user_deposit_session(
     )
 
     token_pack_snapshot = _build_token_pack_snapshot(token_pack=token_pack)
-    expected_min_amount = _convert_canonical_stable_to_route_raw_amount(
+    template_min_canonical_amount, template_min_onchain_amount = _deposit_address_min_amounts(template)
+    expected_canonical_amount = int(token_pack_snapshot["gross_stable_amount"])
+    expected_onchain_amount = _convert_canonical_stable_to_route_raw_amount(
         chain=chain,
         asset_code=asset_code,
-        canonical_amount=token_pack_snapshot["gross_stable_amount"],
+        canonical_amount=expected_canonical_amount,
     )
 
-    if expected_min_amount < int(template.min_amount):
+    if expected_canonical_amount < int(template_min_canonical_amount):
         raise ValidationError("Selected token pack is below the minimum deposit for this payment route")
 
     existing_session = _find_reusable_active_session(
@@ -3233,7 +3458,7 @@ def open_user_deposit_session(
         asset_code=asset_code,
         token_contract_address=token_contract_address,
         token_pack_code=token_pack_snapshot["code"],
-        expected_min_amount=expected_min_amount,
+        expected_min_amount=expected_canonical_amount,
     )
     if existing_session is not None:
         return existing_session
@@ -3277,7 +3502,8 @@ def open_user_deposit_session(
         derivation_index=derivation_index,
         derivation_path=derivation_path,
         status=DepositSession.STATUS_AWAITING_PAYMENT,
-        min_amount=int(expected_min_amount),
+        min_amount=int(expected_canonical_amount),
+        expected_onchain_raw_amount=expected_onchain_amount,
         required_confirmations=int(template.required_confirmations),
         expires_at=expires_at,
         created_by=actor,
@@ -3288,8 +3514,15 @@ def open_user_deposit_session(
             "chain_family": "evm",
             "token_pack": token_pack_snapshot,
             "payment_method": payment_method_snapshot,
-            "expected_canonical_stable_amount": int(token_pack_snapshot["gross_stable_amount"]),
-            "expected_route_raw_amount": int(expected_min_amount),
+            "amount_unit": "canonical_stable",
+            "expected_canonical_stable_amount": int(expected_canonical_amount),
+            "expected_route_raw_amount": str(int(expected_onchain_amount)),
+            "template_min_canonical_stable_amount": int(template_min_canonical_amount),
+            "template_min_onchain_raw_amount": str(int(template_min_onchain_amount)),
+            "route_onchain_decimals": int(_get_route_onchain_decimals(chain=chain, asset_code=asset_code)),
+            "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
+            "platform_token_decimals": PLATFORM_TOKEN_DECIMALS,
+            "platform_tokens_per_stablecoin": PLATFORM_TOKENS_PER_STABLECOIN,
         },
         metadata_version=LEDGER_METADATA_VERSION,
     )
@@ -3344,11 +3577,13 @@ def ingest_deposit_observation_event(
     observed_transfer.refresh_from_db()
 
     ledger_txn = None
+    observed_canonical_amount, _observed_raw_amount = _observed_transfer_amounts(observed_transfer)
+    session_min_canonical_amount, _session_min_raw_amount = _deposit_session_min_amounts(deposit_session)
     should_credit = (
         observed_transfer.status != ObservedOnchainTransfer.STATUS_CREDITED
         and not _is_residual_observed_transfer(observed_transfer)
         and int(observed_transfer.confirmations) >= int(deposit_session.required_confirmations)
-        and int(observed_transfer.amount) >= int(deposit_session.min_amount)
+        and int(observed_canonical_amount) >= int(session_min_canonical_amount)
     )
 
     if should_credit:
@@ -3391,11 +3626,22 @@ def get_deposit_stats(*, actor, option_rows):
         )
 
         counter = DepositRouteCounter.objects.filter(route_key=route_key).first()
+
+        address_qs = DepositAddress.objects.filter(
+            chain=chain,
+            asset_code=asset_code,
+            token_contract_address=token_contract_address,
+        )
+
         active_sessions = DepositSession.objects.filter(
             route_key=route_key,
             status__in=ACTIVE_DEPOSIT_SESSION_STATUSES,
         ).count()
         total_sessions = DepositSession.objects.filter(route_key=route_key).count()
+
+        max_derivation_index = address_qs.aggregate(
+            value=Max("derivation_index")
+        ).get("value")
 
         results.append(
             {
@@ -3404,6 +3650,8 @@ def get_deposit_stats(*, actor, option_rows):
                 "token_contract_address": token_contract_address,
                 "route_key": route_key,
                 "next_derivation_index": int(counter.next_derivation_index) if counter is not None else 0,
+                "provisioned_address_count": int(address_qs.count()),
+                "max_derivation_index": None if max_derivation_index is None else int(max_derivation_index),
                 "active_session_count": active_sessions,
                 "total_session_count": total_sessions,
             }
@@ -3460,18 +3708,32 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
                 "min_amount",
                 "status",
                 "expires_at",
+                "expected_onchain_raw_amount",
+                "metadata",
             )
         )
 
         targets = []
         for session in sessions:
             is_residual_watch = session["status"] in RESIDUAL_DEPOSIT_WATCH_STATUSES
+            canonical_min_amount, onchain_min_amount = _canonical_and_raw_amounts_from_stored_route_value(
+                chain=chain,
+                asset_code=asset_code,
+                stored_amount=session["min_amount"],
+                raw_amount=session.get("expected_onchain_raw_amount"),
+                metadata=session.get("metadata") or {},
+                canonical_metadata_keys=("expected_canonical_stable_amount", "canonical_min_amount"),
+                raw_metadata_keys=("expected_route_raw_amount", "expected_onchain_raw_amount", "onchain_min_amount"),
+            )
             targets.append(
                 {
                     "session_public_id": str(session["public_id"]),
                     "deposit_address": session["deposit_address"],
                     "required_confirmations": session["required_confirmations"],
-                    "min_amount": session["min_amount"],
+                    "min_amount": canonical_min_amount,
+                    "onchain_min_amount": str(onchain_min_amount),
+                    "amount_unit": "canonical_stable",
+                    "onchain_amount_unit": "raw_onchain",
                     "status": session["status"],
                     "expires_at": session["expires_at"].isoformat(),
                     "watch_reason": "residual" if is_residual_watch else "active",
@@ -3554,7 +3816,8 @@ def _coalesce_residual_balance_observation_into_active_sweep_job(
                 "txid": observed_transfer.txid,
                 "detection_method": observed_transfer.detection_method,
                 "detected_block_number": observed_transfer.detected_block_number,
-                "amount": int(observed_transfer.amount),
+                "amount": int(_observed_transfer_amounts(observed_transfer)[0]),
+                "onchain_raw_amount": str(int(_observed_transfer_amounts(observed_transfer)[1])),
                 "confirmations": int(observed_transfer.confirmations),
                 "coalesced_at": timezone.now().isoformat(),
             }
@@ -3562,7 +3825,9 @@ def _coalesce_residual_balance_observation_into_active_sweep_job(
 
     metadata["coalesced_residual_balance_observations"] = coalesced[-50:]
     metadata["has_coalesced_residual_balance_observations"] = True
-    metadata["latest_residual_balance_observed_amount"] = int(observed_transfer.amount)
+    latest_residual_canonical_amount, latest_residual_raw_amount = _observed_transfer_amounts(observed_transfer)
+    metadata["latest_residual_balance_observed_amount"] = int(latest_residual_canonical_amount)
+    metadata["latest_residual_balance_observed_onchain_raw_amount"] = str(int(latest_residual_raw_amount))
     metadata["latest_residual_balance_observed_event_key"] = observed_transfer.event_key
     metadata["latest_residual_balance_observed_at"] = timezone.now().isoformat()
 
@@ -3573,12 +3838,16 @@ def _coalesce_residual_balance_observation_into_active_sweep_job(
         DepositSweepJob.STATUS_FUNDING_BROADCASTED,
         DepositSweepJob.STATUS_READY_TO_SWEEP,
     }:
-        observed_amount = int(observed_transfer.amount)
-        if observed_amount > int(job.amount):
+        observed_amount, observed_raw_amount = _observed_transfer_amounts(observed_transfer)
+        job_canonical_amount, job_raw_amount = _sweep_job_amounts(job)
+        if observed_amount > int(job_canonical_amount):
             job.amount = observed_amount
-            update_fields.append("amount")
+            job.onchain_raw_amount = observed_raw_amount
+            update_fields.extend(["amount", "onchain_raw_amount"])
             metadata["amount_increased_by_residual_balance_observation"] = True
             metadata["latest_amount_increase_event_key"] = observed_transfer.event_key
+            metadata["canonical_stable_amount"] = int(observed_amount)
+            metadata["onchain_raw_amount"] = str(int(observed_raw_amount))
 
     job.metadata = metadata
     job.save(update_fields=update_fields)
@@ -3599,6 +3868,8 @@ def _get_or_create_sweep_job_for_observed_transfer(
     if derivation_index is None:
         derivation_index = _parse_derivation_index_from_ref(deposit_session.address_derivation_ref)
 
+    observed_canonical_amount, observed_raw_amount = _observed_transfer_amounts(observed_transfer)
+
     job, created = DepositSweepJob.objects.get_or_create(
         observed_transfer=observed_transfer,
         defaults={
@@ -3609,7 +3880,8 @@ def _get_or_create_sweep_job_for_observed_transfer(
             "source_address": deposit_session.deposit_address,
             "address_derivation_ref": deposit_session.address_derivation_ref,
             "derivation_index": derivation_index,
-            "amount": observed_transfer.amount,
+            "amount": observed_canonical_amount,
+            "onchain_raw_amount": observed_raw_amount,
             "status": DepositSweepJob.STATUS_PENDING,
             "metadata": {
                 "source": metadata_source,
@@ -3617,20 +3889,50 @@ def _get_or_create_sweep_job_for_observed_transfer(
                 "observed_transfer_event_key": observed_transfer.event_key,
                 "auto_credit": metadata_source == "credited_deposit",
                 "credit_policy": "credited" if metadata_source == "credited_deposit" else "manual_review",
+                "amount_unit": "canonical_stable",
+                "canonical_stable_amount": int(observed_canonical_amount),
+                "onchain_raw_amount": str(int(observed_raw_amount)),
+                "route_onchain_decimals": int(
+                    _get_route_onchain_decimals(
+                        chain=deposit_session.chain,
+                        asset_code=deposit_session.asset_code,
+                    )
+                ),
+                "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
             },
             "metadata_version": LEDGER_METADATA_VERSION,
         },
     )
 
     if not created:
+        job_metadata = job.metadata if isinstance(job.metadata, dict) else {}
+        job_amount_unit = str(job_metadata.get("amount_unit", "") or "").strip().lower()
+
+        job_has_new_amount_shape = (
+                getattr(job, "onchain_raw_amount", None) is not None
+                or job_amount_unit in {"canonical_stable", "canonical_stable_6"}
+                or "canonical_stable_amount" in job_metadata
+                or "claimed_canonical_amount" in job_metadata
+        )
+
+        if job_has_new_amount_shape:
+            job_canonical_amount = int(job.amount)
+            if getattr(job, "onchain_raw_amount", None) is not None:
+                job_raw_amount = int(job.onchain_raw_amount)
+            else:
+                _ignored_canonical_amount, job_raw_amount = _sweep_job_amounts(job)
+        else:
+            job_canonical_amount, job_raw_amount = _sweep_job_amounts(job)
+
         immutable_mismatch = (
-            job.deposit_session_id != deposit_session.id
-            or job.chain != deposit_session.chain
-            or job.asset_code != deposit_session.asset_code
-            or job.token_contract_address != deposit_session.token_contract_address
-            or job.source_address != deposit_session.deposit_address
-            or job.address_derivation_ref != deposit_session.address_derivation_ref
-            or int(job.amount) != int(observed_transfer.amount)
+                job.deposit_session_id != deposit_session.id
+                or job.chain != deposit_session.chain
+                or job.asset_code != deposit_session.asset_code
+                or job.token_contract_address != deposit_session.token_contract_address
+                or job.source_address != deposit_session.deposit_address
+                or job.address_derivation_ref != deposit_session.address_derivation_ref
+                or int(job_canonical_amount) != int(observed_canonical_amount)
+                or int(job_raw_amount) != int(observed_raw_amount)
         )
         if immutable_mismatch:
             raise ValidationError("Sweep job already exists with different immutable fields")
@@ -3825,6 +4127,7 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
                 ]
             )
 
+            canonical_amount, raw_amount = _sweep_job_amounts(job)
             claimed.append(
                 {
                     "public_id": str(job.public_id),
@@ -3837,11 +4140,19 @@ def claim_deposit_sweep_jobs(*, actor, service_name: str, option_rows, limit: in
                     "source_address": job.source_address,
                     "address_derivation_ref": job.address_derivation_ref,
                     "derivation_index": job.derivation_index,
-                    "amount": job.amount,
+                    "amount": str(int(raw_amount)),
+                    "onchain_amount": str(int(raw_amount)),
+                    "canonical_amount": int(canonical_amount),
+                    "amount_unit": "onchain_raw",
+                    "canonical_amount_unit": "canonical_stable",
                     "gas_funding_txid": job.gas_funding_txid,
                     "sweep_txid": job.sweep_txid,
                     "last_sweep_gas_limit": job.last_sweep_gas_limit,
-                    "metadata": job.metadata or {},
+                    "metadata": {
+                        **(job.metadata or {}),
+                        "claimed_canonical_amount": int(canonical_amount),
+                        "claimed_onchain_amount": str(int(raw_amount)),
+                    },
                 }
             )
 
@@ -4081,6 +4392,8 @@ def mark_sweep_job_sweep_broadcasted(
     job.next_retry_at = None
     if last_sweep_gas_limit is not None:
         job.last_sweep_gas_limit = int(last_sweep_gas_limit)
+    if amount is not None:
+        job.onchain_raw_amount = int(amount)
     _write_sweep_broadcast_metadata(
         job=job,
         key="sweep_broadcast",
@@ -4101,6 +4414,7 @@ def mark_sweep_job_sweep_broadcasted(
             "last_error_retryable",
             "next_retry_at",
             "last_sweep_gas_limit",
+            "onchain_raw_amount",
             "metadata",
             "updated_at",
         ]
@@ -4391,7 +4705,6 @@ def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
         session.save(update_fields=["status", "updated_at"])
         _abandon_open_sweep_jobs_for_session(deposit_session=session)
         expired_count += 1
-
     return expired_count
 
 @transaction.atomic

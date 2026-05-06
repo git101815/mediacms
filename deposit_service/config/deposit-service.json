@@ -50,7 +50,7 @@
         "${BSC_RPC_URL_FALLBACK_2}"
       ],
       "required_confirmations": 12,
-      "min_amount": 1000000000000000000,
+      "min_amount": 1000000,
       "observation_min_amount": 1000000000000000000,
       "session_ttl_seconds": 3600,
       "poll_interval_seconds": 15,
@@ -69,7 +69,7 @@
         "${BSC_RPC_URL_FALLBACK_2}"
       ],
       "required_confirmations": 12,
-      "min_amount": 1000000000000000000,
+      "min_amount": 1000000,
       "observation_min_amount": 1000000000000000000,
       "session_ttl_seconds": 3600,
       "poll_interval_seconds": 15,

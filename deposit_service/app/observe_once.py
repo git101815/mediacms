@@ -264,7 +264,9 @@ def _observe_token_option(
             deposit_address = target["deposit_address"]
             required_confirmations = int(target["required_confirmations"])
             min_amount = int(target["min_amount"])
-            observation_min_amount = int(option.observation_min_amount)
+            onchain_min_amount = int(target.get("onchain_min_amount", min_amount))
+            option_observation_min_amount = int(option.observation_min_amount)
+            observation_min_amount = max(option_observation_min_amount, onchain_min_amount)
 
             try:
                 checksum_deposit_address = Web3.to_checksum_address(deposit_address)
@@ -331,8 +333,11 @@ def _observe_token_option(
                     "latest_block": int(latest_block),
                     "detected_block_number": int(detected_block_number),
                     "observation_min_amount": str(observation_min_amount),
-                    "meets_min_amount": current_balance >= min_amount,
+                    "option_observation_min_amount": str(option_observation_min_amount),
+                    "meets_min_amount": current_balance >= onchain_min_amount,
                     "min_amount": str(min_amount),
+                    "onchain_min_amount": str(onchain_min_amount),
+                    "target_amount_unit": target.get("amount_unit", "canonical_stable"),
                 },
                 log_index=None,
             )
@@ -345,7 +350,7 @@ def _observe_token_option(
                 confirmations,
                 current_balance,
                 observation_min_amount,
-                current_balance >= min_amount,
+                current_balance >= onchain_min_amount,
             )
         return
 
@@ -359,7 +364,9 @@ def _observe_token_option(
         deposit_address = target["deposit_address"]
         required_confirmations = int(target["required_confirmations"])
         min_amount = int(target["min_amount"])
-        observation_min_amount = int(option.observation_min_amount)
+        onchain_min_amount = int(target.get("onchain_min_amount", min_amount))
+        option_observation_min_amount = int(option.observation_min_amount)
+        observation_min_amount = max(option_observation_min_amount, onchain_min_amount)
 
         try:
             checksum_deposit_address = Web3.to_checksum_address(deposit_address)
@@ -426,8 +433,11 @@ def _observe_token_option(
                 "latest_block": int(latest_block),
                 "detected_block_number": int(detected_block_number),
                 "observation_min_amount": str(observation_min_amount),
-                "meets_min_amount": current_balance >= min_amount,
+                "option_observation_min_amount": str(option_observation_min_amount),
+                "meets_min_amount": current_balance >= onchain_min_amount,
                 "min_amount": str(min_amount),
+                "onchain_min_amount": str(onchain_min_amount),
+                "target_amount_unit": target.get("amount_unit", "canonical_stable"),
             },
             log_index=None,
         )
@@ -440,7 +450,7 @@ def _observe_token_option(
             confirmations,
             current_balance,
             observation_min_amount,
-            current_balance >= min_amount,
+            current_balance >= onchain_min_amount,
         )
 
 

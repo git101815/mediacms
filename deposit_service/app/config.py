@@ -3,6 +3,20 @@ import os
 from dataclasses import dataclass
 
 
+STABLECOIN_CANONICAL_DECIMALS = 6
+
+ROUTE_ONCHAIN_DECIMALS = {
+    ("ethereum", "USDT"): 6,
+    ("ethereum", "USDC"): 6,
+    ("arbitrum", "USDT"): 6,
+    ("arbitrum", "USDC"): 6,
+    ("base", "USDT"): 6,
+    ("base", "USDC"): 6,
+    ("bsc", "USDT"): 18,
+    ("bsc", "USDC"): 18,
+}
+
+
 @dataclass(frozen=True)
 class DepositOptionConfig:
     key: str
@@ -106,6 +120,48 @@ def _build_display_label(*, chain: str, asset_code: str, raw_value: str | None) 
     return f"{chain_label} · {asset_label}"
 
 
+def _get_route_onchain_decimals(*, chain: str, asset_code: str) -> int:
+    key = (
+        str(chain or "").strip().lower(),
+        str(asset_code or "").strip().upper(),
+    )
+    try:
+        return int(ROUTE_ONCHAIN_DECIMALS[key])
+    except KeyError as exc:
+        raise RuntimeError(
+            f"Unsupported route decimals for option {chain}/{asset_code}"
+        ) from exc
+
+
+def _canonical_min_amount_to_onchain_raw_amount(
+    *,
+    chain: str,
+    asset_code: str,
+    canonical_amount: int,
+) -> int:
+    canonical_amount = int(canonical_amount)
+    if canonical_amount <= 0:
+        raise RuntimeError("Canonical minimum amount must be > 0")
+
+    route_decimals = _get_route_onchain_decimals(
+        chain=chain,
+        asset_code=asset_code,
+    )
+
+    if route_decimals == STABLECOIN_CANONICAL_DECIMALS:
+        return canonical_amount
+
+    if route_decimals > STABLECOIN_CANONICAL_DECIMALS:
+        return canonical_amount * (10 ** (route_decimals - STABLECOIN_CANONICAL_DECIMALS))
+
+    divisor = 10 ** (STABLECOIN_CANONICAL_DECIMALS - route_decimals)
+    if canonical_amount % divisor != 0:
+        raise RuntimeError(
+            f"min_amount cannot be represented exactly on-chain for option {chain}/{asset_code}"
+        )
+    return canonical_amount // divisor
+
+
 def load_config() -> ServiceConfig:
     config_path = _require_env("DEPOSIT_SERVICE_CONFIG_PATH")
 
@@ -151,10 +207,18 @@ def load_config() -> ServiceConfig:
             raise RuntimeError(f"min_amount must be > 0 for option {option.key}")
         if option.observation_min_amount < 0:
             raise RuntimeError(f"observation_min_amount must be >= 0 for option {option.key}")
-        if option.observation_min_amount > option.min_amount:
+
+        route_min_amount_raw = _canonical_min_amount_to_onchain_raw_amount(
+            chain=option.chain,
+            asset_code=option.asset_code,
+            canonical_amount=option.min_amount,
+        )
+        if option.observation_min_amount > route_min_amount_raw:
             raise RuntimeError(
-                f"observation_min_amount cannot be greater than min_amount for option {option.key}"
+                "observation_min_amount cannot be greater than the on-chain equivalent "
+                f"of min_amount for option {option.key}"
             )
+
         if option.session_ttl_seconds <= 0:
             raise RuntimeError(f"session_ttl_seconds must be > 0 for option {option.key}")
         if option.poll_interval_seconds <= 0:

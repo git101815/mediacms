@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.mail import EmailMessage
-from django.http import HttpResponseRedirect
+from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import render
 from drf_yasg import openapi as openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -27,7 +27,28 @@ from .models import Channel, User
 from .serializers import LoginSerializer, UserDetailSerializer, UserSerializer
 
 
+INTERNAL_SERVICE_USERNAMES = {
+    "deposit-service",
+    "sweeper-service",
+}
+
+
+def _normalize_username(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def _is_internal_service_username(username: str) -> bool:
+    return _normalize_username(username) in INTERNAL_SERVICE_USERNAMES
+
+
+def _raise_if_internal_service_username(username: str) -> None:
+    if _is_internal_service_username(username):
+        raise Http404
+
+
 def get_user(username):
+    if _is_internal_service_username(username):
+        return None
     try:
         user = User.objects.get(username=username)
         return user
@@ -36,6 +57,7 @@ def get_user(username):
 
 
 def view_user(request, username):
+    _raise_if_internal_service_username(username)
     context = {}
     user = get_user(username=username)
     if not user:
@@ -48,6 +70,7 @@ def view_user(request, username):
 
 
 def view_user_media(request, username):
+    _raise_if_internal_service_username(username)
     context = {}
     user = get_user(username=username)
     if not user:
@@ -61,6 +84,7 @@ def view_user_media(request, username):
 
 
 def view_user_playlists(request, username):
+    _raise_if_internal_service_username(username)
     context = {}
     user = get_user(username=username)
     if not user:
@@ -75,6 +99,7 @@ def view_user_playlists(request, username):
 
 
 def view_user_about(request, username):
+    _raise_if_internal_service_username(username)
     context = {}
     user = get_user(username=username)
     if not user:
@@ -90,6 +115,7 @@ def view_user_about(request, username):
 
 @login_required
 def edit_user(request, username):
+    _raise_if_internal_service_username(username)
     user = get_user(username=username)
     if not user or (user != request.user and not is_mediacms_manager(request.user)):
         return HttpResponseRedirect("/")
@@ -148,6 +174,9 @@ def contact_user(request, username):
             {"detail": "request need be authenticated"},
             status=status.HTTP_401_UNAUTHORIZED,
         )
+    if _is_internal_service_username(username):
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     user = User.objects.filter(username=username).first()
     if user and (user.allow_contact or is_mediacms_editor(request.user)):
         from_email = request.user.email
@@ -190,7 +219,7 @@ class UserList(APIView):
     def get(self, request, format=None):
         pagination_class = api_settings.DEFAULT_PAGINATION_CLASS
         paginator = pagination_class()
-        users = User.objects.filter()
+        users = User.objects.exclude(username__in=INTERNAL_SERVICE_USERNAMES)
         location = request.GET.get("location", "").strip()
         if location:
             users = users.filter(location=location)
@@ -204,16 +233,16 @@ class UserList(APIView):
 
 
 class UserDetail(APIView):
-    """"""
 
     permission_classes = (permissions.IsAuthenticatedOrReadOnly, IsUserOrManager)
     parser_classes = (MultiPartParser, FormParser, FileUploadParser)
 
     def get_user(self, username):
+        if _is_internal_service_username(username):
+            return Response({"detail": "user does not exist"}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             user = User.objects.get(username=username)
-            # this need be explicitly called, and will call
-            # has_object_permission() after has_permission has succeeded
             self.check_object_permissions(self.request, user)
             return user
         except PermissionDenied:
@@ -230,7 +259,6 @@ class UserDetail(APIView):
         operation_description='Get user details',
     )
     def get(self, request, username, format=None):
-        # Get user details
         user = self.get_user(username)
         if isinstance(user, Response):
             return user
@@ -251,7 +279,6 @@ class UserDetail(APIView):
         responses={201: openapi.Response('response description', UserDetailSerializer), 400: 'bad request'},
     )
     def post(self, request, username, format=None):
-        # USER
         user = self.get_user(username)
         if isinstance(user, Response):
             return user
@@ -274,7 +301,6 @@ class UserDetail(APIView):
         operation_description='to_be_written',
     )
     def put(self, request, uid, format=None):
-        # ADMIN
         user = self.get_user(uid)
         if isinstance(user, Response):
             return user
@@ -300,7 +326,6 @@ class UserDetail(APIView):
         operation_description='to_be_written',
     )
     def delete(self, request, username, format=None):
-        # Delete a user
         user = self.get_user(username)
         if isinstance(user, Response):
             return user

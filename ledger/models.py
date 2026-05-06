@@ -734,7 +734,10 @@ class DepositSession(models.Model):
         db_index=True,
     )
 
+    # Canonical stablecoin units, using STABLECOIN_CANONICAL_DECIMALS.
     min_amount = models.BigIntegerField(default=1)
+    # Raw on-chain token units. This may exceed signed bigint on 18-decimal routes.
+    expected_onchain_raw_amount = models.DecimalField(max_digits=78, decimal_places=0, null=True, blank=True)
     required_confirmations = models.PositiveIntegerField(default=1)
     expires_at = models.DateTimeField(db_index=True)
 
@@ -793,6 +796,10 @@ class DepositSession(models.Model):
                 name="depositsession_observed_amount_gt_0_if_present",
             ),
             models.CheckConstraint(
+                condition=models.Q(expected_onchain_raw_amount__isnull=True) | models.Q(expected_onchain_raw_amount__gt=0),
+                name="depositsession_expected_raw_amount_gt_0_if_present",
+            ),
+            models.CheckConstraint(
                 condition=models.Q(derivation_index__isnull=True) | models.Q(derivation_index__gte=0),
                 name="depositsession_derivation_index_gte_0_if_present",
             ),
@@ -834,7 +841,10 @@ class ObservedOnchainTransfer(models.Model):
     to_address = models.CharField(max_length=255)
     token_contract_address = models.CharField(max_length=255, blank=True)
     asset_code = models.CharField(max_length=32)
+    # Canonical stablecoin units, using STABLECOIN_CANONICAL_DECIMALS.
     amount = models.BigIntegerField()
+    # Raw on-chain token units. This may exceed signed bigint on 18-decimal routes.
+    onchain_raw_amount = models.DecimalField(max_digits=78, decimal_places=0, null=True, blank=True)
     confirmations = models.PositiveIntegerField(default=0)
     detection_method = models.CharField(max_length=32, default="event")
 
@@ -856,6 +866,16 @@ class ObservedOnchainTransfer(models.Model):
     metadata_version = models.PositiveIntegerField(default=LEDGER_METADATA_VERSION)
 
     class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="observedtransfer_amount_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(onchain_raw_amount__isnull=True) | models.Q(onchain_raw_amount__gt=0),
+                name="observedtransfer_raw_amount_gt_0_if_present",
+            ),
+        ]
         permissions = [
             ("can_record_onchain_observations", "Can record on-chain observations"),
             ("can_view_onchain_transfers", "Can view on-chain transfers"),
@@ -1043,7 +1063,10 @@ class DepositSweepJob(models.Model):
     address_derivation_ref = models.CharField(max_length=128)
     derivation_index = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
 
+    # Canonical stablecoin units, using STABLECOIN_CANONICAL_DECIMALS.
     amount = models.BigIntegerField()
+    # Raw on-chain token units used by the sweeper. This may exceed signed bigint on 18-decimal routes.
+    onchain_raw_amount = models.DecimalField(max_digits=78, decimal_places=0, null=True, blank=True)
 
     destination_address = models.CharField(max_length=128, blank=True, default="")
     gas_funding_txid = models.CharField(max_length=128, blank=True, default="", db_index=True)
@@ -1086,6 +1109,10 @@ class DepositSweepJob(models.Model):
             models.CheckConstraint(
                 condition=models.Q(amount__gt=0),
                 name="depositsweepjob_amount_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(onchain_raw_amount__isnull=True) | models.Q(onchain_raw_amount__gt=0),
+                name="depositsweepjob_raw_amount_gt_0_if_present",
             ),
         ]
         permissions = [

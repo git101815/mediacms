@@ -15,6 +15,7 @@ SERVICE_USER_SPECS = [
             "ledger.can_manage_deposit_sweep_jobs",
             "ledger.can_view_deposit_sessions",
             "ledger.can_view_onchain_transfers",
+            "ledger.can_manage_deposit_addresses",
         ],
     },
     {
