@@ -96,6 +96,8 @@ LEDGER_OPERATIONAL_FLAG_LABELS = {
 }
 
 DEFAULT_LEDGER_OPERATIONAL_FLAGS_FILENAME = "ledger_operational_flags.json"
+AD_FREE_LIFETIME_PRODUCT_CODE = "ad_free_lifetime"
+DEFAULT_AD_FREE_LIFETIME_PRICE_TOKENS = 500 * (10 ** 6)
 
 def _compute_next_retry_at() -> timezone.datetime:
     return timezone.now() + timedelta(seconds=LEDGER_OUTBOX_RETRY_DELAY_SECONDS)
@@ -4731,3 +4733,138 @@ def delete_user_deposit_session(*, actor, deposit_session: DepositSession) -> No
         raise ValidationError("Cannot delete a deposit session that already observed a transaction")
 
     deposit_session.delete()
+
+def get_ad_free_lifetime_price_tokens() -> int:
+    return _get_int_setting(
+        "AD_FREE_LIFETIME_PRICE_TOKENS",
+        DEFAULT_AD_FREE_LIFETIME_PRICE_TOKENS,
+        minimum=1,
+    )
+
+
+@transaction.atomic
+def purchase_ad_free_lifetime(*, actor) -> dict:
+    actor = _require_authenticated_actor(actor)
+
+    user_model = actor.__class__
+    user = user_model.objects.select_for_update().get(pk=actor.pk)
+
+    if getattr(user, "adFreeUser", False):
+        return {
+            "purchased": False,
+            "already_active": True,
+            "txn": None,
+            "price_tokens": 0,
+        }
+
+    price_tokens = get_ad_free_lifetime_price_tokens()
+
+    wallet, _created = TokenWallet.objects.get_or_create(
+        wallet_type=TokenWallet.TYPE_USER,
+        user=user,
+        defaults={
+            "allow_negative": False,
+        },
+    )
+    wallet = TokenWallet.objects.select_for_update().get(pk=wallet.pk)
+
+    platform_wallet = get_system_wallet(
+        TokenWallet.SYSTEM_PLATFORM_FEES,
+        allow_negative=False,
+    )
+    platform_wallet = TokenWallet.objects.select_for_update().get(pk=platform_wallet.pk)
+
+    _require_wallet_not_blocked(wallet)
+
+    if get_wallet_available_balance(wallet) < price_tokens:
+        raise ValidationError("Insufficient token balance")
+
+    enforce_wallet_velocity_limits(
+        wallet=wallet,
+        action=LEDGER_ACTION_PURCHASE,
+        amount=price_tokens,
+    )
+
+    external_id = f"purchase:{AD_FREE_LIFETIME_PRODUCT_CODE}:user:{user.pk}"
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "external_id": external_id,
+                "product": AD_FREE_LIFETIME_PRODUCT_CODE,
+                "user_id": user.pk,
+                "price_tokens": price_tokens,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    existing_txn = LedgerTransaction.objects.filter(external_id=external_id).first()
+    if existing_txn:
+        user.adFreeUser = True
+        user.save(update_fields=["adFreeUser"])
+        return {
+            "purchased": False,
+            "already_active": True,
+            "txn": existing_txn,
+            "price_tokens": 0,
+        }
+
+    wallet.balance = int(wallet.balance) - price_tokens
+    platform_wallet.balance = int(platform_wallet.balance) + price_tokens
+
+    wallet.save(update_fields=["balance", "updated_at"])
+    platform_wallet.save(update_fields=["balance", "updated_at"])
+
+    txn = LedgerTransaction.objects.create(
+        kind=LEDGER_ACTION_PURCHASE,
+        external_id=external_id,
+        request_hash=request_hash,
+        created_by=user,
+        memo="Ad-free lifetime purchase",
+        metadata={
+            "product": AD_FREE_LIFETIME_PRODUCT_CODE,
+            "price_tokens": price_tokens,
+            "user_id": user.pk,
+        },
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+    LedgerEntry.objects.create(
+        txn=txn,
+        wallet=wallet,
+        delta=-price_tokens,
+        balance_after=wallet.balance,
+    )
+    LedgerEntry.objects.create(
+        txn=txn,
+        wallet=platform_wallet,
+        delta=price_tokens,
+        balance_after=platform_wallet.balance,
+    )
+
+    record_wallet_velocity(
+        wallet=wallet,
+        action=LEDGER_ACTION_PURCHASE,
+        amount=price_tokens,
+    )
+
+    _create_outbox_event(
+        txn=txn,
+        topic="ledger.purchase",
+        payload={
+            "product": AD_FREE_LIFETIME_PRODUCT_CODE,
+            "user_id": user.pk,
+            "price_tokens": price_tokens,
+        },
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+    user.adFreeUser = True
+    user.save(update_fields=["adFreeUser"])
+
+    return {
+        "purchased": True,
+        "already_active": False,
+        "txn": txn,
+        "price_tokens": price_tokens,
+    }

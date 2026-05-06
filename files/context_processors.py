@@ -40,6 +40,10 @@ def stuff(request):
     ret["USE_RBAC"] = settings.USE_RBAC
     ret["USE_ROUNDED_CORNERS"] = settings.USE_ROUNDED_CORNERS
     ret["VERSION"] = VERSION
+    ret["IS_AD_FREE_USER"] = (
+            request.user.is_authenticated
+            and getattr(request.user, "adFreeUser", False)
+    )
 
     if request.user.is_superuser:
         ret["DJANGO_ADMIN_URL"] = settings.DJANGO_ADMIN_URL
@@ -49,21 +53,31 @@ def stuff(request):
     return ret
 
 def ads_flags(request):
-    # 1) Advanced user or Googlebot: no ads
+    # Advanced user, paid ad-free user, or Googlebot: no ads
     is_gbot = getattr(request, "is_googlebot_verified", False)
+
     is_adv = (
         request.user.is_authenticated
         and getattr(request.user, "advancedUser", False)
     )
+
+    is_ad_free = (
+        request.user.is_authenticated
+        and getattr(request.user, "adFreeUser", False)
+    )
+
     if is_gbot:
         return {
             "IS_ADVANCED_USER": False,
+            "IS_AD_FREE_USER": False,
             "SHOW_PREROLL": False,
             "SHOW_TABUNDER": False,
         }
-    if is_adv:
+
+    if is_adv or is_ad_free:
         return {
-            "IS_ADVANCED_USER": True,
+            "IS_ADVANCED_USER": is_adv,
+            "IS_AD_FREE_USER": is_ad_free,
             "SHOW_PREROLL": False,
             "SHOW_TABUNDER": False,
         }
@@ -107,6 +121,7 @@ def ads_flags(request):
 
     return {
         "IS_ADVANCED_USER": False,
+        "IS_AD_FREE_USER": False,
         "SHOW_PREROLL": show_preroll,
         "SHOW_TABUNDER": show_tabunder,
     }
