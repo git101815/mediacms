@@ -2,11 +2,35 @@ import React from 'react';
 import { formatViewsNumber } from '../../utils/helpers/';
 import { PageStore, MediaPageStore } from '../../utils/stores/';
 import { MemberContext, PlaylistsContext } from '../../utils/contexts/';
-import { MediaLikeIcon, MediaDislikeIcon, OtherMediaDownloadLink, VideoMediaDownloadLink, MediaSaveButton, MediaShareButton, MediaMoreOptionsIcon } from '../media-actions/';
+import {
+  MediaLikeIcon,
+  MediaDislikeIcon,
+  OtherMediaDownloadLink,
+  VideoMediaDownloadLink,
+  MediaSaveButton,
+  MediaShareButton,
+  MediaMoreOptionsIcon,
+} from '../media-actions/';
 import ViewerInfoTitleBanner from './ViewerInfoTitleBanner';
 import { translateString } from '../../utils/helpers/';
+import './PremiumActions.scss';
 
 export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
+  constructor(props) {
+    super(props);
+
+    this.state = {
+      ...this.state,
+      premiumModalOpen: false,
+      premiumPurchasing: false,
+      premiumError: '',
+    };
+
+    this.openPremiumModal = this.openPremiumModal.bind(this);
+    this.closePremiumModal = this.closePremiumModal.bind(this);
+    this.openUnlockedPlayback = this.openUnlockedPlayback.bind(this);
+  }
+
   getCookie(name) {
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
@@ -16,14 +40,51 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
     return '';
   }
 
+  openPremiumModal(event) {
+    event.preventDefault();
+
+    this.setState({
+      premiumModalOpen: true,
+      premiumError: '',
+    });
+  }
+
+  closePremiumModal(event) {
+    if (event) {
+      event.preventDefault();
+    }
+
+    if (this.state.premiumPurchasing) {
+      return;
+    }
+
+    this.setState({
+      premiumModalOpen: false,
+      premiumError: '',
+    });
+  }
+
   openUnlockedPlayback(event) {
     event.preventDefault();
-    const baseUrl = window.location.pathname;
-    window.location.href = baseUrl + '?playback=premium';
+    window.location.href = window.location.pathname + '?playback=premium';
+  }
+
+  openLoginForPurchase(event) {
+    event.preventDefault();
+    window.location.href = '/accounts/login?next=' + encodeURIComponent(window.location.pathname);
   }
 
   purchaseWithTokens(event, purchaseUrl) {
     event.preventDefault();
+
+    if (this.state.premiumPurchasing) {
+      return;
+    }
+
+    this.setState({
+      premiumPurchasing: true,
+      premiumError: '',
+    });
 
     fetch(purchaseUrl, {
       method: 'POST',
@@ -36,33 +97,148 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
       .then((response) => response.json().then((payload) => ({ response, payload })))
       .then(({ response, payload }) => {
         if (!response.ok || !payload.ok) {
-          alert(payload.error || 'Purchase failed');
+          this.setState({
+            premiumPurchasing: false,
+            premiumError: payload.error || 'Purchase failed.',
+          });
           return;
         }
 
         window.location.href = window.location.pathname + '?playback=premium';
       })
       .catch(() => {
-        alert('Purchase failed');
+        this.setState({
+          premiumPurchasing: false,
+          premiumError: 'Purchase failed.',
+        });
       });
   }
+
+  renderPremiumModal({ premium, dfansUrl, plausibleClasses, variant, refCode }) {
+    if (!this.state.premiumModalOpen) {
+      return null;
+    }
+
+    const isAnonymous = MemberContext._currentValue.is.anonymous;
+
+    return (
+      <div className="premium-modal-backdrop" onClick={(event) => this.closePremiumModal(event)}>
+        <div className="premium-modal" onClick={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            className="premium-modal__close"
+            onClick={(event) => this.closePremiumModal(event)}
+            disabled={this.state.premiumPurchasing}
+            aria-label="Close"
+          >
+            ×
+          </button>
+
+          <div className="premium-modal__header">
+            <div className="premium-modal__eyebrow">Premium video</div>
+            <h2>Get the full video</h2>
+            <p>Choose how you want to unlock this video.</p>
+          </div>
+
+          <div className="premium-modal__options">
+            <button
+              type="button"
+              className="premium-option premium-option--tokens"
+              disabled={this.state.premiumPurchasing || !premium.purchase_url}
+              onClick={(event) =>
+                isAnonymous
+                  ? this.openLoginForPurchase(event)
+                  : this.purchaseWithTokens(event, premium.purchase_url)
+              }
+            >
+              <span className="premium-option__icon">
+                <i className="material-icons">lock_open</i>
+              </span>
+              <span className="premium-option__body">
+                <span className="premium-option__title">
+                  {isAnonymous ? 'Log in to pay with tokens' : 'Pay with tokens'}
+                </span>
+                <span className="premium-option__subtitle">
+                  Unlock permanently on this site
+                </span>
+              </span>
+              <span className="premium-option__price">
+                {premium.price_display || '—'}
+              </span>
+            </button>
+
+            {dfansUrl ? (
+              <a
+                className="premium-option premium-option--dfans"
+                href={dfansUrl}
+                target="_blank"
+                rel="nofollow noopener noreferrer sponsored"
+                onClick={() => {
+                  if (typeof window.plausible === 'function') {
+                    window.plausible('e2', {
+                      props: {
+                        variant,
+                        ref_code: refCode,
+                        page_path: window.location.pathname,
+                      },
+                    });
+                  }
+                }}
+              >
+                <span className="premium-option__icon">
+                  <i className="material-icons">open_in_new</i>
+                </span>
+                <span className="premium-option__body">
+                  <span className="premium-option__title">Pay on DFans</span>
+                  <span className="premium-option__subtitle">
+                    Continue to the creator page
+                  </span>
+                </span>
+                <span className="premium-option__price">DFans</span>
+              </a>
+            ) : null}
+          </div>
+
+          {this.state.premiumPurchasing ? (
+            <div className="premium-modal__status">Processing purchase…</div>
+          ) : null}
+
+          {this.state.premiumError ? (
+            <div className="premium-modal__error">{this.state.premiumError}</div>
+          ) : null}
+
+          <div className="premium-modal__footer">
+            <a href="/unlocked">View unlocked videos</a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   render() {
     const displayViews = PageStore.get('config-options').pages.media.displayViews && void 0 !== this.props.views;
 
-    const mediaState = MediaPageStore.get('media-data').state;
-
     const mediaData = MediaPageStore.get('media-data') || {};
+    const mediaState = mediaData.state;
+
     const dfansUrl = mediaData.author_dfans_url;
     const premium = mediaData.premium || {};
-    const variant   = 'cart';
+    const variant = 'cart';
+
     let refCode = 'none';
-    try { refCode = new URL(dfansUrl).searchParams.get('ref') || 'none'; } catch {}
+    try {
+      refCode = new URL(dfansUrl).searchParams.get('ref') || 'none';
+    } catch {}
+
     const plausibleClasses = [
-        'action-btn', 'action-btn--primary', 'action-btn--dfans',
-        'plausible-event-name=e2',
-        `plausible-event-variant=${variant}`,
-        `plausible-event-ref_code=${refCode}`,
+      'action-btn',
+      'action-btn--primary',
+      'action-btn--dfans',
+      'plausible-event-name=e2',
+      `plausible-event-variant=${variant}`,
+      `plausible-event-ref_code=${refCode}`,
     ].join(' ');
+
     let stateTooltip = '';
 
     switch (mediaState) {
@@ -74,6 +250,9 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
         break;
     }
 
+    const hasPremium = !!premium.enabled;
+    const hasUnlock = !!premium.viewer_has_unlock;
+
     return (
       <div className="media-title-banner">
         {displayViews && PageStore.get('config-options').pages.media.categoriesWithTitle
@@ -83,6 +262,11 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
         {void 0 !== this.props.title ? (
           <div className="media-title-row">
             <h1 className="media-title">{this.props.title}</h1>
+            {hasPremium ? (
+              <span className={'premium-badge' + (hasUnlock ? ' premium-badge--unlocked' : '')}>
+                {hasUnlock ? 'Unlocked' : 'Premium'}
+              </span>
+            ) : null}
             {displayViews ? (
               <span className="media-views-inline only-mobile">
                 {formatViewsNumber(this.props.views, true)}{' '}
@@ -90,7 +274,7 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
               </span>
             ) : null}
           </div>
-         ) : null}
+        ) : null}
 
         {'public' !== mediaState ? (
           <div className="media-labels-area">
@@ -125,9 +309,9 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
 
           <div className="media-actions">
             <div>
-              {premium.enabled && premium.viewer_has_unlock ? (
+              {hasPremium && hasUnlock ? (
                 <a
-                  className="action-btn action-btn--primary"
+                  className="action-btn action-btn--primary action-btn--premium-unlocked"
                   href={window.location.pathname + '?playback=premium'}
                   data-icon="play_arrow"
                   data-short="Unlocked"
@@ -138,20 +322,20 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
                 </a>
               ) : null}
 
-              {premium.enabled && !premium.viewer_has_unlock && premium.purchase_url ? (
+              {hasPremium && !hasUnlock ? (
                 <button
                   type="button"
-                  className="action-btn action-btn--primary"
+                  className="action-btn action-btn--primary action-btn--premium"
                   data-icon="lock_open"
-                  data-short="Tokens"
-                  title="Pay with tokens"
-                  onClick={(event) => this.purchaseWithTokens(event, premium.purchase_url)}
+                  data-short="Full Video"
+                  title="Get the full video"
+                  onClick={(event) => this.openPremiumModal(event)}
                 >
-                  Pay with tokens · {premium.price_display}
+                  Get full video
                 </button>
               ) : null}
 
-              {dfansUrl ? (
+              {!hasPremium && dfansUrl ? (
                 <a
                   className={plausibleClasses}
                   href={dfansUrl}
@@ -160,7 +344,7 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
                   target="_blank"
                   rel="nofollow noopener noreferrer sponsored"
                   title="Pay on DFans"
-                  onClick={(e) => {
+                  onClick={() => {
                     if (typeof window.plausible === 'function') {
                       window.plausible('e2', {
                         props: {
@@ -175,6 +359,7 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
                   Pay on DFans
                 </a>
               ) : null}
+
               {MemberContext._currentValue.can.likeMedia ? <MediaLikeIcon /> : null}
               {MemberContext._currentValue.can.dislikeMedia ? <MediaDislikeIcon /> : null}
               {MemberContext._currentValue.can.shareMedia ? <MediaShareButton isVideo={true} /> : null}
@@ -196,6 +381,14 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
             </div>
           </div>
         </div>
+
+        {this.renderPremiumModal({
+          premium,
+          dfansUrl,
+          plausibleClasses,
+          variant,
+          refCode,
+        })}
       </div>
     );
   }

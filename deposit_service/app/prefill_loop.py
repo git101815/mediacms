@@ -31,6 +31,11 @@ def _get_int(value, default: int = 0) -> int:
     except (TypeError, ValueError):
         return default
 
+def _get_float(value, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 def provision_deposit_addresses_once(*, client, options, batch_size: int) -> dict:
     selectors = [_build_option_selector(option) for option in options]
@@ -125,6 +130,7 @@ def main():
                 base_url=config.mediacms_base_url,
                 service_name=config.service_name,
                 shared_secret=config.shared_secret,
+                timeout=_get_float(os.environ.get("DEPOSIT_SERVICE_INTERNAL_API_TIMEOUT_SECONDS"), 30.0),
             )
 
             provision_result = provision_deposit_addresses_once(

@@ -2,28 +2,180 @@
 
 {% block headtitle %}Videos unlocked - {{ PORTAL_NAME }}{% endblock headtitle %}
 
+{% block topimports %}
+<style>
+.unlocked-page {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 32px 0 56px;
+}
+
+.unlocked-page__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-end;
+  margin-bottom: 26px;
+}
+
+.unlocked-page__eyebrow {
+  margin-bottom: 6px;
+  color: #f59e0b;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.unlocked-page h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.05;
+}
+
+.unlocked-page__subtitle {
+  margin: 10px 0 0;
+  max-width: 620px;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 15px;
+}
+
+.unlocked-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.unlocked-card {
+  overflow: hidden;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  text-decoration: none;
+}
+
+.unlocked-card:hover {
+  color: inherit;
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
+.unlocked-card__thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #111111;
+  overflow: hidden;
+}
+
+.unlocked-card__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.unlocked-card__badge {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: rgba(20, 83, 45, 0.92);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.unlocked-card__body {
+  padding: 13px 14px 15px;
+}
+
+.unlocked-card__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.unlocked-card__meta {
+  margin-top: 8px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 13px;
+}
+
+.unlocked-empty {
+  padding: 40px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  text-align: center;
+}
+
+.unlocked-empty h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.unlocked-empty p {
+  margin: 10px auto 0;
+  max-width: 420px;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+@media (max-width: 700px) {
+  .unlocked-page {
+    padding: 24px 0 40px;
+  }
+
+  .unlocked-page__header {
+    display: block;
+  }
+
+  .unlocked-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+  }
+}
+</style>
+{% endblock topimports %}
+
 {% block innercontent %}
-<div class="user-action-form-wrap">
-  <h1>Videos unlocked</h1>
+<div class="unlocked-page">
+  <div class="unlocked-page__header">
+    <div>
+      <div class="unlocked-page__eyebrow">Library</div>
+      <h1>Videos unlocked</h1>
+      <p class="unlocked-page__subtitle">
+        Videos bought with tokens or unlocked through subscriptions appear here.
+      </p>
+    </div>
+  </div>
 
   {% if unlocks %}
-    <div class="items-list">
+    <div class="unlocked-grid">
       {% for unlock in unlocks %}
-        <article class="media-item">
-          <a href="{{ unlock.media.get_absolute_url }}?playback=premium">
+        <a class="unlocked-card" href="{{ unlock.media.get_absolute_url }}?playback=premium">
+          <div class="unlocked-card__thumb">
             {% if unlock.media.thumbnail_url %}
               <img src="{{ unlock.media.thumbnail_url }}" alt="{{ unlock.media.title }}">
             {% endif %}
-            <h2>{{ unlock.media.title }}</h2>
-          </a>
-          <div>
-            {{ unlock.media.user.username }} · {{ unlock.source_type }} · {{ unlock.unlocked_at|date:"M d, Y H:i" }}
+            <span class="unlocked-card__badge">Unlocked</span>
           </div>
-        </article>
+          <div class="unlocked-card__body">
+            <h2 class="unlocked-card__title">{{ unlock.media.title }}</h2>
+            <div class="unlocked-card__meta">
+              {{ unlock.media.user.username }} · {{ unlock.source_type }} · {{ unlock.unlocked_at|date:"M d, Y" }}
+            </div>
+          </div>
+        </a>
       {% endfor %}
     </div>
   {% else %}
-    <p>No unlocked videos yet.</p>
+    <div class="unlocked-empty">
+      <h2>No unlocked videos yet</h2>
+      <p>Your purchased videos and subscription unlocks will appear here.</p>
+    </div>
   {% endif %}
 </div>
 {% endblock %}
