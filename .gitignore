@@ -9,7 +9,6 @@ postgres_data/
 celerybeat-schedule
 logs/
 pids/
-static/
 cms/local_settings.py
 deploy/docker/local_settings.py
 deploy/docker/local_settings.py.save
@@ -27,7 +26,6 @@ static/video_editor/videos/sample-video-10m.mp4
 static/video_editor/videos/sample-video-10s.mp4
 celerybeat-schedule-shm
 celerybeat-schedule-wal
-/static/
 /.env
 .env
 /backup
