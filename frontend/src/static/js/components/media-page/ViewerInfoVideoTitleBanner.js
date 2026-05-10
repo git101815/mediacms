@@ -7,12 +7,53 @@ import ViewerInfoTitleBanner from './ViewerInfoTitleBanner';
 import { translateString } from '../../utils/helpers/';
 
 export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
+  getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) {
+      return parts.pop().split(';').shift();
+    }
+    return '';
+  }
+
+  openUnlockedPlayback(event) {
+    event.preventDefault();
+    const baseUrl = window.location.pathname;
+    window.location.href = baseUrl + '?playback=premium';
+  }
+
+  purchaseWithTokens(event, purchaseUrl) {
+    event.preventDefault();
+
+    fetch(purchaseUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'X-CSRFToken': this.getCookie('csrftoken'),
+      },
+    })
+      .then((response) => response.json().then((payload) => ({ response, payload })))
+      .then(({ response, payload }) => {
+        if (!response.ok || !payload.ok) {
+          alert(payload.error || 'Purchase failed');
+          return;
+        }
+
+        window.location.href = window.location.pathname + '?playback=premium';
+      })
+      .catch(() => {
+        alert('Purchase failed');
+      });
+  }
   render() {
     const displayViews = PageStore.get('config-options').pages.media.displayViews && void 0 !== this.props.views;
 
     const mediaState = MediaPageStore.get('media-data').state;
 
-    const dfansUrl  = MediaPageStore.get('media-data')?.author_dfans_url;
+    const mediaData = MediaPageStore.get('media-data') || {};
+    const dfansUrl = mediaData.author_dfans_url;
+    const premium = mediaData.premium || {};
     const variant   = 'cart';
     let refCode = 'none';
     try { refCode = new URL(dfansUrl).searchParams.get('ref') || 'none'; } catch {}
@@ -84,15 +125,41 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
 
           <div className="media-actions">
             <div>
+              {premium.enabled && premium.viewer_has_unlock ? (
+                <a
+                  className="action-btn action-btn--primary"
+                  href={window.location.pathname + '?playback=premium'}
+                  data-icon="play_arrow"
+                  data-short="Unlocked"
+                  title="Watch unlocked video"
+                  onClick={(event) => this.openUnlockedPlayback(event)}
+                >
+                  Watch unlocked
+                </a>
+              ) : null}
+
+              {premium.enabled && !premium.viewer_has_unlock && premium.purchase_url ? (
+                <button
+                  type="button"
+                  className="action-btn action-btn--primary"
+                  data-icon="lock_open"
+                  data-short="Tokens"
+                  title="Pay with tokens"
+                  onClick={(event) => this.purchaseWithTokens(event, premium.purchase_url)}
+                >
+                  Pay with tokens · {premium.price_display}
+                </button>
+              ) : null}
+
               {dfansUrl ? (
                 <a
                   className={plausibleClasses}
                   href={dfansUrl}
                   data-icon={variant}
-                  data-short="Full Video"
+                  data-short="DFans"
                   target="_blank"
                   rel="nofollow noopener noreferrer sponsored"
-                  title="Get the Full Video here"
+                  title="Pay on DFans"
                   onClick={(e) => {
                     if (typeof window.plausible === 'function') {
                       window.plausible('e2', {
@@ -100,11 +167,13 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
                           variant,
                           ref_code: refCode,
                           page_path: window.location.pathname,
-                      },
-                    });
-                  }
-                }}
-                >Get the Full Video here!</a>
+                        },
+                      });
+                    }
+                  }}
+                >
+                  Pay on DFans
+                </a>
               ) : null}
               {MemberContext._currentValue.can.likeMedia ? <MediaLikeIcon /> : null}
               {MemberContext._currentValue.can.dislikeMedia ? <MediaDislikeIcon /> : null}

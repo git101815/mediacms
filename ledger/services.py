@@ -4757,6 +4757,19 @@ def purchase_ad_free_lifetime(*, actor) -> dict:
             "price_tokens": 0,
         }
 
+    external_id = f"purchase:{AD_FREE_LIFETIME_PRODUCT_CODE}:user:{user.pk}"
+
+    existing_txn = LedgerTransaction.objects.filter(external_id=external_id).first()
+    if existing_txn:
+        user.adFreeUser = True
+        user.save(update_fields=["adFreeUser"])
+        return {
+            "purchased": False,
+            "already_active": True,
+            "txn": existing_txn,
+            "price_tokens": 0,
+        }
+
     price_tokens = get_ad_free_lifetime_price_tokens()
 
     wallet, _created = TokenWallet.objects.get_or_create(
@@ -4797,17 +4810,6 @@ def purchase_ad_free_lifetime(*, actor) -> dict:
             sort_keys=True,
         ).encode("utf-8")
     ).hexdigest()
-
-    existing_txn = LedgerTransaction.objects.filter(external_id=external_id).first()
-    if existing_txn:
-        user.adFreeUser = True
-        user.save(update_fields=["adFreeUser"])
-        return {
-            "purchased": False,
-            "already_active": True,
-            "txn": existing_txn,
-            "price_tokens": 0,
-        }
 
     wallet.balance = int(wallet.balance) - price_tokens
     platform_wallet.balance = int(platform_wallet.balance) + price_tokens

@@ -291,6 +291,7 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "imagekit",
     "ledger.apps.LedgerConfig",
+    "premium.apps.PremiumConfig",
     "files.apps.FilesConfig",
     "users.apps.UsersConfig",
     "actions.apps.ActionsConfig",

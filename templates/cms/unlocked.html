@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block headtitle %}Videos unlocked - {{ PORTAL_NAME }}{% endblock headtitle %}
+
+{% block innercontent %}
+<div class="user-action-form-wrap">
+  <h1>Videos unlocked</h1>
+
+  {% if unlocks %}
+    <div class="items-list">
+      {% for unlock in unlocks %}
+        <article class="media-item">
+          <a href="{{ unlock.media.get_absolute_url }}?playback=premium">
+            {% if unlock.media.thumbnail_url %}
+              <img src="{{ unlock.media.thumbnail_url }}" alt="{{ unlock.media.title }}">
+            {% endif %}
+            <h2>{{ unlock.media.title }}</h2>
+          </a>
+          <div>
+            {{ unlock.media.user.username }} · {{ unlock.source_type }} · {{ unlock.unlocked_at|date:"M d, Y H:i" }}
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p>No unlocked videos yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
