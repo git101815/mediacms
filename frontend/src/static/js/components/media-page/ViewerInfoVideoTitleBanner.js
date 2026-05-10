@@ -344,8 +344,8 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
               {!hasUnlock && (hasPremium || dfansUrl) ? (
                 <button
                   type="button"
-                  className="action-btn action-btn--primary action-btn--premium"
-                  data-icon="lock_open"
+                  className="action-btn action-btn--primary action-btn--dfans action-btn--premium"
+                  data-icon="cart"
                   data-short="Full Video"
                   title="Get the full video"
                   onClick={(event) => this.openPremiumModal(event)}
