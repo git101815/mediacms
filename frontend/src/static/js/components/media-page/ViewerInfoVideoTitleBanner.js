@@ -141,31 +141,50 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
           </div>
 
           <div className="premium-modal__options">
-            <button
-              type="button"
-              className="premium-option premium-option--tokens"
-              disabled={this.state.premiumPurchasing || !premium.purchase_url}
-              onClick={(event) =>
-                isAnonymous
-                  ? this.openLoginForPurchase(event)
-                  : this.purchaseWithTokens(event, premium.purchase_url)
-              }
-            >
-              <span className="premium-option__icon">
-                <i className="material-icons">lock_open</i>
-              </span>
-              <span className="premium-option__body">
-                <span className="premium-option__title">
-                  {isAnonymous ? 'Log in to pay with tokens' : 'Pay with tokens'}
+                        {premium.enabled && premium.purchase_url ? (
+              <button
+                type="button"
+                className="premium-option premium-option--tokens"
+                disabled={this.state.premiumPurchasing}
+                onClick={(event) =>
+                  isAnonymous
+                    ? this.openLoginForPurchase(event)
+                    : this.purchaseWithTokens(event, premium.purchase_url)
+                }
+              >
+                <span className="premium-option__icon">
+                  <i className="material-icons">lock_open</i>
                 </span>
-                <span className="premium-option__subtitle">
-                  Unlock permanently on this site
+                <span className="premium-option__body">
+                  <span className="premium-option__title">
+                    {isAnonymous ? 'Log in to pay with tokens' : 'Pay with tokens'}
+                  </span>
+                  <span className="premium-option__subtitle">
+                    Unlock permanently on this site
+                  </span>
                 </span>
-              </span>
-              <span className="premium-option__price">
-                {premium.price_display || '—'}
-              </span>
-            </button>
+                <span className="premium-option__price">
+                  {premium.price_display || '—'}
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="premium-option premium-option--tokens premium-option--disabled"
+                disabled
+              >
+                <span className="premium-option__icon">
+                  <i className="material-icons">lock</i>
+                </span>
+                <span className="premium-option__body">
+                  <span className="premium-option__title">Pay with tokens</span>
+                  <span className="premium-option__subtitle">
+                    Not available for this video yet
+                  </span>
+                </span>
+                <span className="premium-option__price">—</span>
+              </button>
+            )}
 
             {dfansUrl ? (
               <a
@@ -322,7 +341,7 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
                 </a>
               ) : null}
 
-              {hasPremium && !hasUnlock ? (
+              {!hasUnlock && (hasPremium || dfansUrl) ? (
                 <button
                   type="button"
                   className="action-btn action-btn--primary action-btn--premium"
@@ -333,31 +352,6 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
                 >
                   Get full video
                 </button>
-              ) : null}
-
-              {!hasPremium && dfansUrl ? (
-                <a
-                  className={plausibleClasses}
-                  href={dfansUrl}
-                  data-icon={variant}
-                  data-short="DFans"
-                  target="_blank"
-                  rel="nofollow noopener noreferrer sponsored"
-                  title="Pay on DFans"
-                  onClick={() => {
-                    if (typeof window.plausible === 'function') {
-                      window.plausible('e2', {
-                        props: {
-                          variant,
-                          ref_code: refCode,
-                          page_path: window.location.pathname,
-                        },
-                      });
-                    }
-                  }}
-                >
-                  Pay on DFans
-                </a>
               ) : null}
 
               {MemberContext._currentValue.can.likeMedia ? <MediaLikeIcon /> : null}
