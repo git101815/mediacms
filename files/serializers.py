@@ -109,6 +109,7 @@ class MediaSerializer(serializers.ModelSerializer):
             "author_profile",
             "author_thumbnail",
             "author_dfans_url",
+            "premium",
             "encoding_status",
             "views",
             "likes",
