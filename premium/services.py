@@ -236,6 +236,11 @@ def build_premium_media_state(*, user, media: Media, request=None) -> dict:
     premium_playback_url = ""
     manage_url = ""
 
+    if request is not None and user_can_manage_premium_media(user=user, media=media):
+        manage_url = request.build_absolute_uri(
+            reverse("premium_media_asset_edit", kwargs={"friendly_token": media.friendly_token})
+        )
+
     if request is not None and enabled:
         purchase_url = request.build_absolute_uri(
             reverse("premium_media_purchase", kwargs={"friendly_token": media.friendly_token})
@@ -244,10 +249,6 @@ def build_premium_media_state(*, user, media: Media, request=None) -> dict:
         if has_unlock:
             premium_playback_url = request.build_absolute_uri(
                 reverse("premium_media_playback", kwargs={"friendly_token": media.friendly_token})
-            )
-        if request is not None and user_can_manage_premium_media(user=user, media=media):
-            manage_url = request.build_absolute_uri(
-                reverse("premium_media_asset_edit", kwargs={"friendly_token": media.friendly_token})
             )
 
     price_tokens = int(asset.price_tokens) if asset else 0

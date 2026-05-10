@@ -242,7 +242,6 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
 
     const dfansUrl = mediaData.author_dfans_url;
     const premium = mediaData.premium || {};
-    const premiumManageUrl = premium.manage_url;
     const variant = 'cart';
 
     let refCode = 'none';
@@ -354,17 +353,6 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
                   Get full video
                 </button>
               ) : null}
-               {premiumManageUrl ? (
-                  <a
-                    className="action-btn"
-                    href={premiumManageUrl}
-                    data-icon="settings"
-                    data-short="Premium"
-                    title="Manage premium video"
-                  >
-                    Manage premium
-                  </a>
-                ) : null}
               {MemberContext._currentValue.can.likeMedia ? <MediaLikeIcon /> : null}
               {MemberContext._currentValue.can.dislikeMedia ? <MediaDislikeIcon /> : null}
               {MemberContext._currentValue.can.shareMedia ? <MediaShareButton isVideo={true} /> : null}

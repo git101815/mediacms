@@ -100,9 +100,24 @@ function EditSubtitleButton(props) {
   );
 }
 
+function ManagePremiumButton(props) {
+  return (
+    <a href={props.link} rel="nofollow" title="Manage premium video" className="edit-media">
+      MANAGE PREMIUM
+    </a>
+  );
+}
+
 export default function ViewerInfoContent(props) {
   const { userCan } = useUser();
+    const mediaData = MediaPageStore.get('media-data') || {};
+    const viewerPermissions = mediaData.viewer_permissions || {};
 
+    const canEditThisMedia = !!viewerPermissions.can_edit_media;
+    const canDeleteThisMedia = !!viewerPermissions.can_delete_media;
+    const canEditSubtitleForThisMedia = !!viewerPermissions.can_edit_subtitle;
+    const canManagePremiumForThisMedia = !!viewerPermissions.can_manage_premium;
+    const premiumManageUrl = mediaData.premium ? mediaData.premium.manage_url : '';
   const description = props.description.trim();
   const tagsContent =
     !PageStore.get('config-enabled').taxonomies.tags || PageStore.get('config-enabled').taxonomies.tags.enabled
@@ -231,38 +246,47 @@ export default function ViewerInfoContent(props) {
             />
           ) : null}
 
-          {userCan.editMedia || userCan.editSubtitle || userCan.deleteMedia ? (
-            <div className="media-author-actions">
-              {userCan.editMedia ? <EditMediaButton link={MediaPageStore.get('media-data').edit_url} /> : null}
-              {userCan.editSubtitle && 'video' === MediaPageStore.get('media-data').media_type ? (
-                <EditSubtitleButton
-                  link={MediaPageStore.get('media-data').edit_url.replace('edit?', 'add_subtitle?')}
-                />
-              ) : null}
+        {canEditThisMedia || canEditSubtitleForThisMedia || canManagePremiumForThisMedia || canDeleteThisMedia ? (
+          <div className="media-author-actions">
+            {canEditThisMedia ? <EditMediaButton link={mediaData.edit_url} /> : null}
 
-              <PopupTrigger contentRef={popupContentRef}>
-                <button className="remove-media">{translateString('DELETE MEDIA')}</button>
-              </PopupTrigger>
+            {canEditSubtitleForThisMedia ? (
+              <EditSubtitleButton
+                link={mediaData.edit_url.replace('edit?', 'add_subtitle?')}
+              />
+            ) : null}
 
-              <PopupContent contentRef={popupContentRef}>
-                <PopupMain>
-                  <div className="popup-message">
-                    <span className="popup-message-title">Media removal</span>
-                    <span className="popup-message-main">You're willing to remove media permanently?</span>
-                  </div>
-                  <hr />
-                  <span className="popup-message-bottom">
-                    <button className="button-link cancel-comment-removal" onClick={cancelMediaRemoval}>
-                      CANCEL
-                    </button>
-                    <button className="button-link proceed-comment-removal" onClick={proceedMediaRemoval}>
-                      PROCEED
-                    </button>
-                  </span>
-                </PopupMain>
-              </PopupContent>
-            </div>
-          ) : null}
+            {canManagePremiumForThisMedia && premiumManageUrl ? (
+              <ManagePremiumButton link={premiumManageUrl} />
+            ) : null}
+
+            {canDeleteThisMedia ? (
+              <>
+                <PopupTrigger contentRef={popupContentRef}>
+                  <button className="remove-media">{translateString('DELETE MEDIA')}</button>
+                </PopupTrigger>
+
+                <PopupContent contentRef={popupContentRef}>
+                  <PopupMain>
+                    <div className="popup-message">
+                      <span className="popup-message-title">Media removal</span>
+                      <span className="popup-message-main">You're willing to remove media permanently?</span>
+                    </div>
+                    <hr />
+                    <span className="popup-message-bottom">
+                      <button className="button-link cancel-comment-removal" onClick={cancelMediaRemoval}>
+                        CANCEL
+                      </button>
+                      <button className="button-link proceed-comment-removal" onClick={proceedMediaRemoval}>
+                        PROCEED
+                      </button>
+                    </span>
+                  </PopupMain>
+                </PopupContent>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         </div>
       </div>
 

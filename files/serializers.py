@@ -8,6 +8,7 @@ from premium.services import (
     build_premium_media_state,
     build_premium_playback_payload,
     user_can_access_premium_media,
+    user_can_manage_premium_media,
 )
 # TODO: put them in a more DRY way
 
@@ -146,6 +147,7 @@ class SingleMediaSerializer(serializers.ModelSerializer):
     premium = serializers.SerializerMethodField()
     encodings_info = serializers.SerializerMethodField()
     hls_info = serializers.SerializerMethodField()
+    viewer_permissions = serializers.SerializerMethodField()
 
     def get_url(self, obj):
         return self.context["request"].build_absolute_uri(obj.get_absolute_url())
@@ -216,6 +218,25 @@ class SingleMediaSerializer(serializers.ModelSerializer):
         except DjangoValidationError:
             return obj.hls_info
 
+    def get_viewer_permissions(self, obj):
+        request = self.context.get("request")
+        user = request.user if request is not None else None
+
+        can_manage = user_can_manage_premium_media(user=user, media=obj)
+        can_staff_manage = bool(
+            getattr(user, "is_authenticated", False)
+            and is_mediacms_editor(user)
+        )
+
+        can_edit = bool(can_manage or can_staff_manage)
+
+        return {
+            "can_edit_media": can_edit,
+            "can_delete_media": can_edit,
+            "can_edit_subtitle": can_edit and obj.media_type == "video",
+            "can_manage_premium": can_manage,
+        }
+
     class Meta:
         model = Media
         read_only_fields = (
@@ -270,6 +291,7 @@ class SingleMediaSerializer(serializers.ModelSerializer):
             "categories_info",
             "is_reviewed",
             "edit_url",
+            "viewer_permissions",
             "tags_info",
             "hls_info",
             "license",
