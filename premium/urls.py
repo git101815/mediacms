@@ -5,6 +5,11 @@ from . import views
 
 urlpatterns = [
     re_path(
+        r"^premium/media/(?P<friendly_token>[\w\-_]*)/edit$",
+        views.creator_premium_asset_edit,
+        name="premium_media_asset_edit",
+    ),
+    re_path(
         r"^api/v1/media/(?P<friendly_token>[\w\-_]*)/purchase$",
         views.purchase_media,
         name="premium_media_purchase",

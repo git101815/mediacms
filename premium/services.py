@@ -1,6 +1,7 @@
 import hashlib
 import json
 from datetime import timedelta
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -33,7 +34,7 @@ from .models import (
     PremiumMediaAsset,
     PremiumMediaUnlock,
 )
-
+from .storage import upload_premium_file_to_private_s3
 
 PLATFORM_TOKEN_DECIMALS = 6
 DEFAULT_PREMIUM_CREATOR_SHARE_BPS = 8000
@@ -233,6 +234,7 @@ def build_premium_media_state(*, user, media: Media, request=None) -> dict:
 
     purchase_url = ""
     premium_playback_url = ""
+    manage_url = ""
 
     if request is not None and enabled:
         purchase_url = request.build_absolute_uri(
@@ -242,6 +244,10 @@ def build_premium_media_state(*, user, media: Media, request=None) -> dict:
         if has_unlock:
             premium_playback_url = request.build_absolute_uri(
                 reverse("premium_media_playback", kwargs={"friendly_token": media.friendly_token})
+            )
+        if request is not None and user_can_manage_premium_media(user=user, media=media):
+            manage_url = request.build_absolute_uri(
+                reverse("premium_media_asset_edit", kwargs={"friendly_token": media.friendly_token})
             )
 
     price_tokens = int(asset.price_tokens) if asset else 0
@@ -254,6 +260,7 @@ def build_premium_media_state(*, user, media: Media, request=None) -> dict:
         "price_display": format_token_amount(price_tokens),
         "purchase_url": purchase_url,
         "premium_playback_url": premium_playback_url,
+        "manage_url": manage_url,
     }
 
 
@@ -522,3 +529,117 @@ def grant_subscription_unlocks_for_media(*, media: Media) -> int:
             created_count += 1
 
     return created_count
+
+def user_can_manage_premium_media(*, user, media: Media) -> bool:
+    if not getattr(user, "is_authenticated", False):
+        return False
+
+    if getattr(user, "is_superuser", False):
+        return True
+
+    return media.user_id == user.id
+
+
+def parse_token_display_amount(raw_value) -> int:
+    text = str(raw_value or "").strip().replace(",", ".")
+    if not text:
+        raise ValidationError("Price is required")
+
+    try:
+        value = Decimal(text)
+    except Exception as exc:
+        raise ValidationError("Price must be a valid token amount") from exc
+
+    if value <= 0:
+        raise ValidationError("Price must be greater than zero")
+
+    return int(value * (10 ** PLATFORM_TOKEN_DECIMALS))
+
+
+def create_or_update_creator_premium_asset(
+    *,
+    actor,
+    media: Media,
+    uploaded_file,
+    price_display,
+    publish_now: bool,
+) -> PremiumMediaAsset:
+    if not user_can_manage_premium_media(user=actor, media=media):
+        raise ValidationError("You cannot manage this premium media")
+
+    price_tokens = parse_token_display_amount(price_display)
+    upload_result = upload_premium_file_to_private_s3(
+        media=media,
+        uploaded_file=uploaded_file,
+    )
+
+    status = (
+        PremiumMediaAsset.STATUS_READY
+        if publish_now
+        else PremiumMediaAsset.STATUS_DRAFT
+    )
+
+    premium_published_at = timezone.now() if publish_now else None
+
+    asset, _created = PremiumMediaAsset.objects.update_or_create(
+        media=media,
+        defaults={
+            "price_tokens": price_tokens,
+            "status": status,
+            "storage_backend": PremiumMediaAsset.STORAGE_S3,
+            "playback_format": PremiumMediaAsset.PLAYBACK_MP4,
+            "direct_url": "",
+            "storage_bucket": upload_result["storage_bucket"],
+            "storage_key": upload_result["storage_key"],
+            "file_name": upload_result["file_name"],
+            "content_type": upload_result["content_type"],
+            "codec": "h264",
+            "video_height": 1080,
+            "size_bytes": upload_result["size_bytes"],
+            "premium_published_at": premium_published_at,
+        },
+    )
+
+    return asset
+
+
+def update_creator_premium_asset_settings(
+    *,
+    actor,
+    media: Media,
+    price_display,
+    publish_now: bool,
+) -> PremiumMediaAsset:
+    if not user_can_manage_premium_media(user=actor, media=media):
+        raise ValidationError("You cannot manage this premium media")
+
+    asset = get_ready_or_draft_premium_asset(media)
+    if asset is None:
+        raise ValidationError("Premium asset does not exist yet")
+
+    asset.price_tokens = parse_token_display_amount(price_display)
+
+    if publish_now:
+        asset.status = PremiumMediaAsset.STATUS_READY
+        if asset.premium_published_at is None:
+            asset.premium_published_at = timezone.now()
+    else:
+        asset.status = PremiumMediaAsset.STATUS_DRAFT
+
+    asset.save(
+        update_fields=[
+            "price_tokens",
+            "status",
+            "premium_published_at",
+            "updated_at",
+        ]
+    )
+
+    return asset
+
+
+def get_ready_or_draft_premium_asset(media: Media) -> PremiumMediaAsset | None:
+    try:
+        return media.premium_asset
+    except PremiumMediaAsset.DoesNotExist:
+        return None

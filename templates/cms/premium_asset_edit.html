@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block headtitle %}Premium video - {{ media.title }} - {{ PORTAL_NAME }}{% endblock headtitle %}
+
+{% block topimports %}
+<style>
+.premium-edit-page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 32px 0 56px;
+}
+
+.premium-edit-card {
+  border-radius: 18px;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.premium-edit-header {
+  margin-bottom: 22px;
+}
+
+.premium-edit-eyebrow {
+  color: #f59e0b;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.premium-edit-header h1 {
+  margin: 8px 0 0;
+  font-size: 32px;
+  line-height: 1.1;
+}
+
+.premium-edit-header p {
+  margin: 10px 0 0;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.premium-edit-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.premium-edit-field label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.premium-edit-field input,
+.premium-edit-field select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 0 12px;
+  background: rgba(0, 0, 0, 0.22);
+  color: #ffffff;
+}
+
+.premium-edit-help {
+  margin-top: 7px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 13px;
+}
+
+.premium-edit-status {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.premium-edit-status strong {
+  color: #ffffff;
+}
+
+.premium-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.premium-edit-button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 18px;
+  background: #f59e0b;
+  color: #111111;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.premium-edit-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: rgba(255, 255, 255, 0.76);
+  text-decoration: underline;
+}
+</style>
+{% endblock topimports %}
+
+{% block innercontent %}
+<div class="premium-edit-page">
+  <div class="premium-edit-card">
+    <div class="premium-edit-header">
+      <div class="premium-edit-eyebrow">Creator premium</div>
+      <h1>Premium video</h1>
+      <p>
+        This upload is stored separately from the public preview. It is only used for unlocked playback.
+      </p>
+    </div>
+
+    <div class="premium-edit-status">
+      <div><strong>Preview:</strong> {{ media.title }}</div>
+      <div><strong>Current premium status:</strong> {% if asset %}{{ asset.status }}{% else %}not configured{% endif %}</div>
+      {% if asset %}
+        <div><strong>Storage:</strong> {{ asset.storage_backend }}</div>
+        <div><strong>File:</strong> {{ asset.file_name|default:"stored premium file" }}</div>
+      {% endif %}
+    </div>
+
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+
+      <div class="premium-edit-grid">
+        <div class="premium-edit-field">
+          <label for="premium_file">Premium MP4 file</label>
+          <input id="premium_file" name="premium_file" type="file" accept="video/mp4">
+          <div class="premium-edit-help">
+            Uploading a new file replaces the premium source for this preview. Creators never receive S3 credentials.
+          </div>
+        </div>
+
+        <div class="premium-edit-field">
+          <label for="price_tokens">Token price</label>
+          <input
+            id="price_tokens"
+            name="price_tokens"
+            type="number"
+            min="1"
+            step="1"
+            value="{{ price_display|default:'500' }}"
+            required
+          >
+          <div class="premium-edit-help">
+            Example: 500 means 500 platform tokens.
+          </div>
+        </div>
+
+        <div class="premium-edit-field">
+          <label for="publish_state">Premium state</label>
+          <select id="publish_state" name="publish_state">
+            <option value="draft" {% if not asset or asset.status != "ready" %}selected{% endif %}>Draft</option>
+            <option value="ready" {% if asset and asset.status == "ready" %}selected{% endif %}>Ready / purchasable</option>
+          </select>
+          <div class="premium-edit-help">
+            Draft keeps the token option disabled. Ready enables token purchase on the public page.
+          </div>
+        </div>
+      </div>
+
+      <div class="premium-edit-actions">
+        <button class="premium-edit-button" type="submit">Save premium video</button>
+        <a class="premium-edit-link" href="{{ media.get_absolute_url }}">Back to preview</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
