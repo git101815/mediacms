@@ -44,7 +44,6 @@
       <div><strong>Preview:</strong> {{ media.title }}</div>
       <div><strong>Current premium status:</strong> {% if asset %}{{ asset.status }}{% else %}not configured{% endif %}</div>
       {% if asset %}
-        <div><strong>Storage:</strong> {{ asset.storage_backend }}</div>
         <div><strong>File:</strong> {{ asset.file_name|default:"stored premium file" }}</div>
         <div><strong>Price:</strong> {{ price_display|default:"0" }} tokens</div>
       {% endif %}

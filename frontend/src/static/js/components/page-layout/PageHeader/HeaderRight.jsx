@@ -24,7 +24,7 @@ function headerPopupPages(user, popupNavItems, hasHeaderThemeSwitcher) {
     itemType: 'link',
     text: translateString('Unlocked media'),
     link: unlockedUrl,
-    icon: 'video_library',
+    icon: 'lock_open',
   };
   if (user.is.anonymous) {
     pages.main = (
