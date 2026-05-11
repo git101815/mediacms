@@ -2,6 +2,7 @@ import hashlib
 import json
 from datetime import timedelta
 from decimal import Decimal
+from botocore.config import Config
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -164,6 +165,25 @@ def build_s3_presigned_url(asset: PremiumMediaAsset) -> str:
         client_kwargs["aws_access_key_id"] = access_key
     if secret_key:
         client_kwargs["aws_secret_access_key"] = secret_key
+
+    signature_version = getattr(
+        settings,
+        "PREMIUM_S3_SIGNATURE_VERSION",
+        getattr(settings, "AWS_S3_SIGNATURE_VERSION", "s3v4"),
+    )
+
+    addressing_style = getattr(
+        settings,
+        "PREMIUM_S3_ADDRESSING_STYLE",
+        getattr(settings, "AWS_S3_ADDRESSING_STYLE", "path"),
+    )
+
+    client_kwargs["config"] = Config(
+        signature_version=signature_version,
+        s3={
+            "addressing_style": addressing_style,
+        },
+    )
 
     client = boto3.client("s3", **client_kwargs)
 

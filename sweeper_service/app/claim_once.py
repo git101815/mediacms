@@ -1392,6 +1392,7 @@ def main() -> None:
         base_url=config.mediacms_base_url,
         service_name=config.service_name,
         shared_secret=config.shared_secret,
+        timeout=config.internal_api_timeout_seconds,
     )
     try:
         while True:
