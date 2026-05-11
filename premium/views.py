@@ -1,3 +1,15 @@
+import os
+import shutil
+
+from django.conf import settings
+from django.core.exceptions import PermissionDenied
+from django.core.files import File
+from django.views import generic
+
+from files.helpers import rm_file
+from uploader.fineuploader import ChunkedFineUploader
+from uploader.forms import FineUploaderUploadForm, FineUploaderUploadSuccessForm
+
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
@@ -21,6 +33,7 @@ from .services import (
     get_ready_or_draft_premium_asset,
     update_creator_premium_asset_settings,
     user_can_manage_premium_media,
+    replace_creator_premium_asset_file,
 )
 from .storage import get_premium_max_upload_size_bytes
 
@@ -156,26 +169,16 @@ def creator_premium_asset_edit(request, friendly_token):
     asset = get_ready_or_draft_premium_asset(media)
 
     if request.method == "POST":
-        uploaded_file = request.FILES.get("premium_file")
         price_display = request.POST.get("price_tokens", "")
         publish_now = request.POST.get("publish_state") == "ready"
 
         try:
-            if uploaded_file:
-                asset = create_or_update_creator_premium_asset(
-                    actor=request.user,
-                    media=media,
-                    uploaded_file=uploaded_file,
-                    price_display=price_display,
-                    publish_now=publish_now,
-                )
-            else:
-                asset = update_creator_premium_asset_settings(
-                    actor=request.user,
-                    media=media,
-                    price_display=price_display,
-                    publish_now=publish_now,
-                )
+            asset = update_creator_premium_asset_settings(
+                actor=request.user,
+                media=media,
+                price_display=price_display,
+                publish_now=publish_now,
+            )
         except ValidationError as exc:
             messages.error(
                 request,
@@ -199,5 +202,114 @@ def creator_premium_asset_edit(request, friendly_token):
             "asset": asset,
             "price_display": price_display,
             "max_upload_size_bytes": get_premium_max_upload_size_bytes(),
+            "premium_upload_url": reverse(
+                "premium_media_asset_upload",
+                kwargs={"friendly_token": media.friendly_token},
+            ),
         },
+
     )
+
+class PremiumFineUploaderView(generic.FormView):
+    http_method_names = ("post",)
+    form_class_upload = FineUploaderUploadForm
+    form_class_upload_success = FineUploaderUploadSuccessForm
+
+    @property
+    def concurrent(self):
+        return settings.CONCURRENT_UPLOADS
+
+    @property
+    def chunks_done(self):
+        return self.chunks_done_param_name in self.request.GET
+
+    @property
+    def chunks_done_param_name(self):
+        return settings.CHUNKS_DONE_PARAM_NAME
+
+    def make_response(self, data, **kwargs):
+        return JsonResponse(data, **kwargs)
+
+    def get_form(self, form_class=None):
+        if self.chunks_done:
+            form_class = self.form_class_upload_success
+        else:
+            form_class = self.form_class_upload
+        return form_class(**self.get_form_kwargs())
+
+    def dispatch(self, request, *args, **kwargs):
+        self.media = get_object_or_404(
+            Media,
+            friendly_token=kwargs.get("friendly_token"),
+        )
+
+        if not user_can_manage_premium_media(user=request.user, media=self.media):
+            raise PermissionDenied
+
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        self.upload = ChunkedFineUploader(form.cleaned_data, self.concurrent)
+
+        if self.upload.concurrent and self.chunks_done:
+            try:
+                self.upload.combine_chunks()
+            except FileNotFoundError:
+                return self.make_response(
+                    {
+                        "success": False,
+                        "error": "Error with premium file uploading",
+                    },
+                    status=400,
+                )
+        elif self.upload.total_parts == 1:
+            self.upload.save()
+        else:
+            self.upload.save()
+            return self.make_response({"success": True})
+
+        premium_file_path = os.path.join(settings.MEDIA_ROOT, self.upload.real_path)
+
+        try:
+            with open(premium_file_path, "rb") as source:
+                premium_file = File(source, name=self.upload.filename)
+                asset = replace_creator_premium_asset_file(
+                    actor=self.request.user,
+                    media=self.media,
+                    uploaded_file=premium_file,
+                )
+        except ValidationError as exc:
+            return self.make_response(
+                {
+                    "success": False,
+                    "error": exc.messages[0] if hasattr(exc, "messages") and exc.messages else str(exc),
+                },
+                status=400,
+            )
+        finally:
+            rm_file(premium_file_path)
+            shutil.rmtree(
+                os.path.join(settings.MEDIA_ROOT, self.upload.file_path),
+                ignore_errors=True,
+            )
+
+        return self.make_response(
+            {
+                "success": True,
+                "premium_asset": {
+                    "id": asset.id,
+                    "status": asset.status,
+                    "file_name": asset.file_name,
+                    "size_bytes": asset.size_bytes,
+                },
+            }
+        )
+
+    def form_invalid(self, form):
+        return self.make_response(
+            {
+                "success": False,
+                "error": "%s" % repr(form.errors),
+            },
+            status=400,
+        )

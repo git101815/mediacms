@@ -38,7 +38,7 @@ from .storage import upload_premium_file_to_private_s3
 
 PLATFORM_TOKEN_DECIMALS = 6
 DEFAULT_PREMIUM_CREATOR_SHARE_BPS = 8000
-
+DEFAULT_PREMIUM_MEDIA_PRICE_TOKENS = 500 * (10 ** PLATFORM_TOKEN_DECIMALS)
 
 def format_token_amount(value: int) -> str:
     scaled = int(value) / (10 ** PLATFORM_TOKEN_DECIMALS)
@@ -644,3 +644,59 @@ def get_ready_or_draft_premium_asset(media: Media) -> PremiumMediaAsset | None:
         return media.premium_asset
     except PremiumMediaAsset.DoesNotExist:
         return None
+
+def get_default_premium_media_price_tokens() -> int:
+    return int(
+        getattr(
+            settings,
+            "PREMIUM_DEFAULT_MEDIA_PRICE_TOKENS",
+            DEFAULT_PREMIUM_MEDIA_PRICE_TOKENS,
+        )
+    )
+
+
+def replace_creator_premium_asset_file(
+    *,
+    actor,
+    media: Media,
+    uploaded_file,
+) -> PremiumMediaAsset:
+    if not user_can_manage_premium_media(user=actor, media=media):
+        raise ValidationError("You cannot manage this premium media")
+
+    existing_asset = get_ready_or_draft_premium_asset(media)
+
+    upload_result = upload_premium_file_to_private_s3(
+        media=media,
+        uploaded_file=uploaded_file,
+    )
+
+    if existing_asset is not None:
+        price_tokens = existing_asset.price_tokens
+        status = existing_asset.status
+        premium_published_at = existing_asset.premium_published_at
+    else:
+        price_tokens = get_default_premium_media_price_tokens()
+        status = PremiumMediaAsset.STATUS_DRAFT
+        premium_published_at = None
+
+    asset, _created = PremiumMediaAsset.objects.update_or_create(
+        media=media,
+        defaults={
+            "price_tokens": price_tokens,
+            "status": status,
+            "storage_backend": PremiumMediaAsset.STORAGE_S3,
+            "playback_format": PremiumMediaAsset.PLAYBACK_MP4,
+            "direct_url": "",
+            "storage_bucket": upload_result["storage_bucket"],
+            "storage_key": upload_result["storage_key"],
+            "file_name": upload_result["file_name"],
+            "content_type": upload_result["content_type"],
+            "codec": "h264",
+            "video_height": 1080,
+            "size_bytes": upload_result["size_bytes"],
+            "premium_published_at": premium_published_at,
+        },
+    )
+
+    return asset
