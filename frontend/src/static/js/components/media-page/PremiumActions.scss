@@ -13,12 +13,9 @@
   vertical-align: middle;
 }
 
-.premium-badge--unlocked {
-  background: #14532d;
-}
-
 .action-btn--premium,
-.action-btn--premium-unlocked {
+.action-btn--premium-unlocked,
+.action-btn--premium-preview {
   border: 0;
   cursor: pointer;
   font-family: inherit;
@@ -42,6 +39,28 @@
 
   &:focus {
     outline: 2px solid #16a34a;
+    outline-offset: 2px;
+  }
+}
+
+.action-btn--dfans.action-btn--premium-preview {
+  background: linear-gradient(135deg, #374151 0%, #111827 100%) !important;
+  box-shadow: 0 6px 18px rgba(17, 24, 39, 0.28);
+
+  &::before {
+    content: 'play_circle' !important;
+  }
+
+  &:hover {
+    box-shadow: 0 10px 24px rgba(17, 24, 39, 0.38);
+  }
+
+  &:active {
+    box-shadow: 0 6px 18px rgba(17, 24, 39, 0.28);
+  }
+
+  &:focus {
+    outline: 2px solid #6b7280;
     outline-offset: 2px;
   }
 }
@@ -223,6 +242,15 @@
   text-decoration: underline;
 }
 
+.premium-option--disabled,
+.premium-option--disabled:hover,
+.premium-option--disabled:focus {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 @media (max-width: 600px) {
   .premium-modal {
     padding: 20px;
@@ -239,12 +267,4 @@
   .premium-option__price {
     grid-column: 2;
   }
-}
-.premium-option--disabled,
-.premium-option--disabled:hover,
-.premium-option--disabled:focus {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.035);
-  cursor: not-allowed;
-  opacity: 0.58;
 }

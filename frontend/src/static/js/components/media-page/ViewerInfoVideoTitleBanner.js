@@ -45,6 +45,16 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
     url.searchParams.set('playback', 'premium');
     return url.pathname + url.search + url.hash;
   }
+  isPremiumPlaybackMode() {
+    const url = new URL(window.location.href);
+    return url.searchParams.get('playback') === 'premium';
+  }
+
+  getPreviewPlaybackUrl() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('playback');
+    return url.pathname + url.search + url.hash;
+  }
 
   openPremiumModal(event) {
     event.preventDefault();
@@ -73,6 +83,11 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
   openUnlockedPlayback(event) {
     event.preventDefault();
     window.location.href = this.getPremiumPlaybackUrl();
+  }
+
+  openPreviewPlayback(event) {
+    event.preventDefault();
+    window.location.href = this.getPreviewPlaybackUrl();
   }
 
   openLoginForPurchase(event) {
@@ -268,7 +283,7 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
 
     const hasPremium = !!premium.enabled;
     const hasUnlock = !!premium.viewer_has_unlock;
-
+    const isPremiumPlayback = this.isPremiumPlaybackMode();
     return (
       <div className="media-title-banner">
         {displayViews && PageStore.get('config-options').pages.media.categoriesWithTitle
@@ -325,7 +340,19 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
 
           <div className="media-actions">
             <div>
-              {hasPremium && hasUnlock ? (
+            {hasPremium && hasUnlock ? (
+              isPremiumPlayback ? (
+                <a
+                  className="action-btn action-btn--primary action-btn--dfans action-btn--premium-preview"
+                  href={this.getPreviewPlaybackUrl()}
+                  data-icon="play_circle"
+                  data-short="Preview"
+                  title="Watch preview"
+                  onClick={(event) => this.openPreviewPlayback(event)}
+                >
+                  Watch preview
+                </a>
+              ) : (
                 <a
                   className="action-btn action-btn--primary action-btn--dfans action-btn--premium-unlocked"
                   href={this.getPremiumPlaybackUrl()}
@@ -336,7 +363,8 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
                 >
                   Watch unlocked
                 </a>
-              ) : null}
+              )
+            ) : null}
 
               {!hasUnlock && (hasPremium || dfansUrl) ? (
                 <button
