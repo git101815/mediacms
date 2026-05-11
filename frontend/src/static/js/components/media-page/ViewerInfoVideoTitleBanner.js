@@ -40,6 +40,12 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
     return '';
   }
 
+  getPremiumPlaybackUrl() {
+    const url = new URL(window.location.href);
+    url.searchParams.set('playback', 'premium');
+    return url.pathname + url.search + url.hash;
+  }
+
   openPremiumModal(event) {
     event.preventDefault();
 
@@ -66,12 +72,12 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
 
   openUnlockedPlayback(event) {
     event.preventDefault();
-    window.location.href = window.location.pathname + '?playback=premium';
+    window.location.href = this.getPremiumPlaybackUrl();
   }
 
   openLoginForPurchase(event) {
     event.preventDefault();
-    window.location.href = '/accounts/login?next=' + encodeURIComponent(window.location.pathname);
+    window.location.href = '/accounts/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
   }
 
   purchaseWithTokens(event, purchaseUrl) {
@@ -104,7 +110,7 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
           return;
         }
 
-        window.location.href = window.location.pathname + '?playback=premium';
+        window.location.href = this.getPremiumPlaybackUrl();
       })
       .catch(() => {
         this.setState({
@@ -114,7 +120,7 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
       });
   }
 
-  renderPremiumModal({ premium, dfansUrl, plausibleClasses, variant, refCode }) {
+  renderPremiumModal({ premium, dfansUrl, variant, refCode }) {
     if (!this.state.premiumModalOpen) {
       return null;
     }
@@ -141,7 +147,7 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
           </div>
 
           <div className="premium-modal__options">
-                        {premium.enabled && premium.purchase_url ? (
+            {premium.enabled && premium.purchase_url ? (
               <button
                 type="button"
                 className="premium-option premium-option--tokens"
@@ -249,15 +255,6 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
       refCode = new URL(dfansUrl).searchParams.get('ref') || 'none';
     } catch {}
 
-    const plausibleClasses = [
-      'action-btn',
-      'action-btn--primary',
-      'action-btn--dfans',
-      'plausible-event-name=e2',
-      `plausible-event-variant=${variant}`,
-      `plausible-event-ref_code=${refCode}`,
-    ].join(' ');
-
     let stateTooltip = '';
 
     switch (mediaState) {
@@ -331,7 +328,7 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
               {hasPremium && hasUnlock ? (
                 <a
                   className="action-btn action-btn--primary action-btn--premium-unlocked"
-                  href={window.location.pathname + '?playback=premium'}
+                  href={this.getPremiumPlaybackUrl()}
                   data-icon="play_arrow"
                   data-short="Unlocked"
                   title="Watch unlocked video"
@@ -353,6 +350,7 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
                   Get full video
                 </button>
               ) : null}
+
               {MemberContext._currentValue.can.likeMedia ? <MediaLikeIcon /> : null}
               {MemberContext._currentValue.can.dislikeMedia ? <MediaDislikeIcon /> : null}
               {MemberContext._currentValue.can.shareMedia ? <MediaShareButton isVideo={true} /> : null}
@@ -378,7 +376,6 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
         {this.renderPremiumModal({
           premium,
           dfansUrl,
-          plausibleClasses,
           variant,
           refCode,
         })}

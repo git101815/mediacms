@@ -1,5 +1,6 @@
 import os
 import shutil
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
@@ -23,7 +24,8 @@ from django.views.decorators.http import require_http_methods
 
 from files.models import Media
 
-from .models import PremiumMediaUnlock
+from .models import PremiumMediaAsset, PremiumMediaUnlock
+
 from .services import (
     build_premium_media_state,
     build_premium_playback_payload,
@@ -36,6 +38,21 @@ from .services import (
     replace_creator_premium_asset_file,
 )
 from .storage import get_premium_max_upload_size_bytes
+
+def build_premium_watch_url(media):
+    url = media.get_absolute_url()
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["playback"] = "premium"
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urlencode(query),
+            parts.fragment,
+        )
+    )
 
 @login_required
 @require_POST
@@ -107,18 +124,49 @@ def unlocked_media_api(request):
         .order_by("-unlocked_at")
     )
 
+    owned_assets = (
+        PremiumMediaAsset.objects.filter(
+            media__user=request.user,
+            status=PremiumMediaAsset.STATUS_READY,
+        )
+        .select_related("media", "media__user")
+        .order_by("-premium_published_at", "-updated_at")
+    )
+
     results = []
+    seen_media_ids = set()
+
     for unlock in unlocks[:100]:
         media = unlock.media
+        seen_media_ids.add(media.id)
         results.append(
             {
                 "friendly_token": media.friendly_token,
                 "title": media.title,
-                "url": media.get_absolute_url(),
+                "url": build_premium_watch_url(media),
                 "thumbnail_url": media.thumbnail_url,
                 "creator": media.user.username,
                 "source_type": unlock.source_type,
                 "unlocked_at": unlock.unlocked_at.isoformat(),
+            }
+        )
+
+    for asset in owned_assets[:100]:
+        media = asset.media
+        if media.id in seen_media_ids:
+            continue
+
+        results.append(
+            {
+                "friendly_token": media.friendly_token,
+                "title": media.title,
+                "url": build_premium_watch_url(media),
+                "thumbnail_url": media.thumbnail_url,
+                "creator": media.user.username,
+                "source_type": "creator",
+                "unlocked_at": (
+                    asset.premium_published_at or asset.updated_at
+                ).isoformat(),
             }
         )
 
@@ -143,11 +191,51 @@ def unlocked_media_page(request):
         .order_by("-unlocked_at")
     )
 
+    owned_assets = (
+        PremiumMediaAsset.objects.filter(
+            media__user=request.user,
+            status=PremiumMediaAsset.STATUS_READY,
+        )
+        .select_related("media", "media__user")
+        .order_by("-premium_published_at", "-updated_at")
+    )
+
+    items = []
+    seen_media_ids = set()
+
+    for unlock in unlocks:
+        media = unlock.media
+        seen_media_ids.add(media.id)
+        items.append(
+            {
+                "media": media,
+                "source_type": unlock.source_type,
+                "unlocked_at": unlock.unlocked_at,
+                "watch_url": build_premium_watch_url(media),
+            }
+        )
+
+    for asset in owned_assets:
+        media = asset.media
+        if media.id in seen_media_ids:
+            continue
+
+        items.append(
+            {
+                "media": media,
+                "source_type": "creator",
+                "unlocked_at": asset.premium_published_at or asset.updated_at,
+                "watch_url": build_premium_watch_url(media),
+            }
+        )
+
+    items.sort(key=lambda item: item["unlocked_at"], reverse=True)
+
     return render(
         request,
         "cms/unlocked.html",
         {
-            "unlocks": unlocks,
+            "items": items,
         },
     )
 
