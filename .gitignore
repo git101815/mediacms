@@ -39,3 +39,5 @@ static/mptt/
 static/rest_framework/
 static/drf-yasg/
 static/jazzmin/
+static/css/
+static/js/

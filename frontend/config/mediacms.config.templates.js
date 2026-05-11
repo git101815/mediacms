@@ -28,6 +28,7 @@ module.exports = {
   renderPageStaticContent: compileTmpl('renderPageStaticContent.ejs'),
   renderEmbedPageContent: compileTmpl('renderEmbedPageContent.ejs'),
   renderAddMediaPageContent: compileTmpl('renderAddMediaPageContent.ejs'),
+  renderPremiumAssetEditPageContent: compileTmpl('renderPremiumAssetEditPageContent.ejs'),
   static: {
     errorPage: compileStaticTmpl('errorPage.html'),
     aboutPage: compileStaticTmpl('aboutPage.html'),
