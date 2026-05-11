@@ -278,9 +278,9 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
         {void 0 !== this.props.title ? (
           <div className="media-title-row">
             <h1 className="media-title">{this.props.title}</h1>
-            {hasPremium ? (
-              <span className={'premium-badge' + (hasUnlock ? ' premium-badge--unlocked' : '')}>
-                {hasUnlock ? 'Unlocked' : 'Premium'}
+            {hasPremium && !hasUnlock ? (
+              <span className="premium-badge">
+                Premium
               </span>
             ) : null}
             {displayViews ? (
@@ -327,9 +327,9 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
             <div>
               {hasPremium && hasUnlock ? (
                 <a
-                  className="action-btn action-btn--primary action-btn--premium-unlocked"
+                  className="action-btn action-btn--primary action-btn--dfans action-btn--premium-unlocked"
                   href={this.getPremiumPlaybackUrl()}
-                  data-icon="play_arrow"
+                  data-icon="lock_open"
                   data-short="Unlocked"
                   title="Watch unlocked video"
                   onClick={(event) => this.openUnlockedPlayback(event)}

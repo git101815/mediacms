@@ -24,8 +24,26 @@
   font-family: inherit;
 }
 
-.action-btn--premium-unlocked {
-  background: #14532d !important;
+.action-btn--dfans.action-btn--premium-unlocked {
+  background: linear-gradient(135deg, #15803d 0%, #16a34a 100%) !important;
+  box-shadow: 0 6px 18px rgba(22, 163, 74, 0.25);
+
+  &::before {
+    content: 'lock_open' !important;
+  }
+
+  &:hover {
+    box-shadow: 0 10px 24px rgba(22, 163, 74, 0.35);
+  }
+
+  &:active {
+    box-shadow: 0 6px 18px rgba(22, 163, 74, 0.25);
+  }
+
+  &:focus {
+    outline: 2px solid #16a34a;
+    outline-offset: 2px;
+  }
 }
 
 .premium-modal-backdrop {

@@ -99,6 +99,11 @@ const PAGES = {
     title: 'Premium asset edit',
     renderer: templates.renderPremiumAssetEditPageContent(),
   },
+  'unlocked-page': {
+    id: 'unlocked-page',
+    title: 'Unlocked media',
+    renderer: templates.renderUnlockedPageContent(),
+  },
   embed: {
     id: 'embed',
     title: 'Embedded player',
