@@ -18,16 +18,30 @@
 <link href="{% static "css/add-media.css" %}" rel="stylesheet">
 
 <style>
+body {
+  background: #111111 !important;
+  color: #f5f5f5;
+}
+
+.page-main,
+.page-main-inner,
+.page-main-wrap {
+  background: #111111 !important;
+}
+
 .premium-edit-page {
   max-width: 960px;
   margin: 0 auto;
   padding: 32px 0 56px;
+  color: #f5f5f5;
 }
 
 .premium-edit-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;
   padding: 24px;
-  background: rgba(255, 255, 255, 0.05);
+  background: #181818;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.24);
 }
 
 .premium-edit-header {
@@ -35,7 +49,7 @@
 }
 
 .premium-edit-eyebrow {
-  color: #f59e0b;
+  color: #ff9800;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -44,13 +58,14 @@
 
 .premium-edit-header h1 {
   margin: 8px 0 0;
+  color: #ffffff;
   font-size: 32px;
   line-height: 1.1;
 }
 
 .premium-edit-header p {
   margin: 10px 0 0;
-  color: rgba(255, 255, 255, 0.66);
+  color: rgba(255, 255, 255, 0.68);
 }
 
 .premium-edit-messages {
@@ -87,6 +102,7 @@
 
 .premium-edit-section-title {
   margin: 0 0 12px;
+  color: #ffffff;
   font-size: 18px;
   font-weight: 800;
 }
@@ -94,6 +110,7 @@
 .premium-edit-field label {
   display: block;
   margin-bottom: 8px;
+  color: #ffffff;
   font-weight: 700;
 }
 
@@ -101,16 +118,27 @@
 .premium-edit-field select {
   width: 100%;
   min-height: 44px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 10px;
   padding: 0 12px;
-  background: rgba(0, 0, 0, 0.22);
+  background: #242424;
+  color: #ffffff;
+}
+
+.premium-edit-field input:focus,
+.premium-edit-field select:focus {
+  border-color: #ff9800;
+  outline: none;
+}
+
+.premium-edit-field select option {
+  background: #242424;
   color: #ffffff;
 }
 
 .premium-edit-help {
   margin-top: 7px;
-  color: rgba(255, 255, 255, 0.58);
+  color: rgba(255, 255, 255, 0.62);
   font-size: 13px;
 }
 
@@ -119,8 +147,10 @@
   gap: 8px;
   margin: 18px 0;
   padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
+  background: #202020;
+  color: rgba(255, 255, 255, 0.76);
 }
 
 .premium-edit-status strong {
@@ -139,10 +169,14 @@
   border: 0;
   border-radius: 10px;
   padding: 0 18px;
-  background: #f59e0b;
-  color: #111111;
+  background: linear-gradient(90deg, #ff8a00, #ff3d5a);
+  color: #ffffff;
   font-weight: 800;
   cursor: pointer;
+}
+
+.premium-edit-button:hover {
+  filter: brightness(1.06);
 }
 
 .premium-edit-link {
@@ -178,8 +212,137 @@
   color: #bfdbfe;
 }
 
+/* FineUploader dark overrides */
+.premium-edit-page .media-uploader {
+  background: transparent !important;
+}
+
 .premium-edit-page .media-uploader-bottom-wrap {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  gap: 18px;
   margin-top: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 18px;
+  background: #151515 !important;
+}
+
+.premium-edit-page .media-uploader-bottom-left-wrap,
+.premium-edit-page .media-uploader-bottom-right-wrap {
+  background: transparent !important;
+}
+
+.premium-edit-page .media-drag-drop-wrap {
+  background: transparent !important;
+}
+
+.premium-edit-page .media-drag-drop-inner {
+  min-height: 240px;
+  border: 1px dashed rgba(255, 152, 0, 0.48);
+  border-radius: 14px;
+  background: #202020 !important;
+}
+
+.premium-edit-page .media-drag-drop-content,
+.premium-edit-page .media-drag-drop-content-inner {
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
+.premium-edit-page .media-drag-drop-content-inner .material-icons {
+  color: rgba(255, 255, 255, 0.58) !important;
+}
+
+.premium-edit-page .browse-files-btn-wrap,
+.premium-edit-page .qq-upload-button-selector {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #ff7900 !important;
+  color: #ffffff !important;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.premium-edit-page .media-upload-items-list {
+  background: transparent !important;
+}
+
+.premium-edit-page .media-upload-items-list li {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: #202020 !important;
+  color: #ffffff !important;
+}
+
+.premium-edit-page .media-upload-item-main,
+.premium-edit-page .media-upload-item-details,
+.premium-edit-page .media-upload-item-name,
+.premium-edit-page .media-upload-item-details-bottom,
+.premium-edit-page .media-upload-item-top-actions,
+.premium-edit-page .media-upload-item-bottom-actions {
+  background: transparent !important;
+  color: #ffffff !important;
+}
+
+.premium-edit-page .media-upload-item-thumb {
+  background: #151515 !important;
+}
+
+.premium-edit-page .media-upload-item-filename,
+.premium-edit-page .media-upload-item-upload-size,
+.premium-edit-page .media-upload-item-status-text {
+  color: rgba(255, 255, 255, 0.78) !important;
+}
+
+.premium-edit-page .media-upload-item-filename-input {
+  background: #242424 !important;
+  color: #ffffff !important;
+}
+
+.premium-edit-page .media-upload-item-progress-bar-container {
+  background: rgba(255, 255, 255, 0.10) !important;
+}
+
+.premium-edit-page .media-upload-item-progress-bar {
+  background: linear-gradient(90deg, #ff8a00, #ff3d5a) !important;
+}
+
+.premium-edit-page .filename-edit,
+.premium-edit-page .delete-media-upload-item,
+.premium-edit-page .cancel-media-upload-item,
+.premium-edit-page .continue-media-upload-item,
+.premium-edit-page .pause-media-upload-item,
+.premium-edit-page .retry-media-upload-item {
+  color: rgba(255, 255, 255, 0.78) !important;
+}
+
+.premium-edit-page .delete-media-upload-item,
+.premium-edit-page .cancel-media-upload-item,
+.premium-edit-page .continue-media-upload-item,
+.premium-edit-page .pause-media-upload-item,
+.premium-edit-page .retry-media-upload-item {
+  border: 0;
+  background: transparent !important;
+}
+
+.premium-edit-page dialog {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: #202020;
+  color: #ffffff;
+}
+
+.premium-edit-page .qq-dialog-buttons button {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #ff7900;
+  color: #ffffff;
+  font-weight: 800;
 }
 
 @media (max-width: 700px) {
@@ -189,6 +352,14 @@
 
   .premium-edit-card {
     padding: 18px;
+  }
+
+  .premium-edit-page .media-uploader-bottom-wrap {
+    grid-template-columns: 1fr;
+  }
+
+  .premium-edit-page .media-drag-drop-inner {
+    min-height: 210px;
   }
 }
 </style>
