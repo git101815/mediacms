@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -38,6 +39,8 @@ from .services import (
     replace_creator_premium_asset_file,
 )
 from .storage import get_premium_max_upload_size_bytes
+
+logger = logging.getLogger(__name__)
 
 def build_premium_watch_url(media):
     url = media.get_absolute_url()
@@ -303,6 +306,9 @@ class PremiumFineUploaderView(generic.FormView):
     form_class_upload = FineUploaderUploadForm
     form_class_upload_success = FineUploaderUploadSuccessForm
 
+    def __init__(self):
+        self.upload = None
+
     @property
     def concurrent(self):
         return settings.CONCURRENT_UPLOADS
@@ -373,6 +379,15 @@ class PremiumFineUploaderView(generic.FormView):
                     "error": exc.messages[0] if hasattr(exc, "messages") and exc.messages else str(exc),
                 },
                 status=400,
+            )
+        except Exception:
+            logger.exception("Premium upload failed")
+            return self.make_response(
+                {
+                    "success": False,
+                    "error": "Premium upload failed. Please try again later.",
+                },
+                status=500,
             )
         finally:
             rm_file(premium_file_path)

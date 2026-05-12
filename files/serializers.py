@@ -180,7 +180,7 @@ class SingleMediaSerializer(serializers.ModelSerializer):
         if request is None:
             return False
 
-        if request.GET.get("playback") == "preview":
+        if request.GET.get("playback") != "premium":
             return False
 
         user = request.user

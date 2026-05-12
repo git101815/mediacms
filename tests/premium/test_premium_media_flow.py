@@ -455,3 +455,95 @@ def test_build_premium_watch_url_preserves_existing_media_query_parameter(django
 
     assert media.get_absolute_url() == "/view?m=urlpremium"
     assert build_premium_watch_url(media) == "/view?m=urlpremium&playback=premium"
+
+@pytest.mark.django_db
+def test_generic_media_detail_uses_preview_by_default_for_unlocked_user(client, django_user_model):
+    creator = django_user_model.objects.create_user(username="creator_preview_default", password="pass")
+    buyer = django_user_model.objects.create_user(username="buyer_preview_default", password="pass")
+
+    media = create_test_media(
+        user=creator,
+        friendly_token="previewdefault",
+        title="Preview default premium",
+    )
+
+    media.encodings_info = {
+        "720": {
+            "h264": {
+                "url": "https://cdn.example.com/preview.mp4",
+                "status": "success",
+                "progress": 100,
+            }
+        }
+    }
+    media.save(update_fields=["encodings_info"])
+
+    create_ready_asset(
+        media=media,
+        direct_url="https://private.example.com/full.mp4",
+    )
+
+    PremiumMediaUnlock.objects.create(
+        user=buyer,
+        media=media,
+        source_type=PremiumMediaUnlock.SOURCE_PURCHASE,
+    )
+
+    client.login(username="buyer_preview_default", password="pass")
+    response = client.get(reverse("api_get_media", kwargs={"friendly_token": media.friendly_token}))
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    serialized = str(payload)
+
+    assert "https://cdn.example.com/preview.mp4" in serialized
+    assert "https://private.example.com/full.mp4" not in serialized
+
+
+@pytest.mark.django_db
+def test_generic_media_detail_uses_premium_only_when_explicitly_requested(client, django_user_model):
+    creator = django_user_model.objects.create_user(username="creator_premium_explicit", password="pass")
+    buyer = django_user_model.objects.create_user(username="buyer_premium_explicit", password="pass")
+
+    media = create_test_media(
+        user=creator,
+        friendly_token="premiumexplicit",
+        title="Explicit premium playback",
+    )
+
+    media.encodings_info = {
+        "720": {
+            "h264": {
+                "url": "https://cdn.example.com/preview.mp4",
+                "status": "success",
+                "progress": 100,
+            }
+        }
+    }
+    media.save(update_fields=["encodings_info"])
+
+    create_ready_asset(
+        media=media,
+        direct_url="https://private.example.com/full.mp4",
+    )
+
+    PremiumMediaUnlock.objects.create(
+        user=buyer,
+        media=media,
+        source_type=PremiumMediaUnlock.SOURCE_PURCHASE,
+    )
+
+    client.login(username="buyer_premium_explicit", password="pass")
+    response = client.get(
+        reverse("api_get_media", kwargs={"friendly_token": media.friendly_token}),
+        {"playback": "premium"},
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    serialized = str(payload)
+
+    assert "https://private.example.com/full.mp4" in serialized
+    assert "https://cdn.example.com/preview.mp4" not in serialized
