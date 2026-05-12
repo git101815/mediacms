@@ -102,7 +102,7 @@ def _find_first_block_with_erc20_balance_above(
         address=deposit_address,
         block_number=high,
     )
-    if latest_balance <= threshold_amount:
+    if latest_balance < threshold_amount:
         return None
 
     while low < high:
@@ -112,7 +112,7 @@ def _find_first_block_with_erc20_balance_above(
             address=deposit_address,
             block_number=mid,
         )
-        if mid_balance > threshold_amount:
+        if mid_balance >= threshold_amount:
             high = mid
         else:
             low = mid + 1
@@ -141,7 +141,7 @@ def _find_first_block_with_native_balance_above(
         address=deposit_address,
         block_number=high,
     )
-    if latest_balance <= threshold_amount:
+    if latest_balance < threshold_amount:
         return None
 
     while low < high:
@@ -151,7 +151,7 @@ def _find_first_block_with_native_balance_above(
             address=deposit_address,
             block_number=mid,
         )
-        if mid_balance > threshold_amount:
+        if mid_balance >= threshold_amount:
             high = mid
         else:
             low = mid + 1
@@ -266,7 +266,7 @@ def _observe_token_option(
             min_amount = int(target["min_amount"])
             onchain_min_amount = int(target.get("onchain_min_amount", min_amount))
             option_observation_min_amount = int(option.observation_min_amount)
-            observation_min_amount = max(option_observation_min_amount, onchain_min_amount)
+            observation_min_amount = option_observation_min_amount
 
             try:
                 checksum_deposit_address = Web3.to_checksum_address(deposit_address)
@@ -290,7 +290,7 @@ def _observe_token_option(
                 )
                 continue
 
-            if current_balance <= observation_min_amount:
+            if current_balance < observation_min_amount:
                 continue
 
             from_block = max(0, int(latest_block) - int(option.lookback_blocks))
@@ -366,7 +366,7 @@ def _observe_token_option(
         min_amount = int(target["min_amount"])
         onchain_min_amount = int(target.get("onchain_min_amount", min_amount))
         option_observation_min_amount = int(option.observation_min_amount)
-        observation_min_amount = max(option_observation_min_amount, onchain_min_amount)
+        observation_min_amount = option_observation_min_amount
 
         try:
             checksum_deposit_address = Web3.to_checksum_address(deposit_address)
@@ -390,7 +390,7 @@ def _observe_token_option(
             )
             continue
 
-        if current_balance <= observation_min_amount:
+        if current_balance < observation_min_amount:
             continue
 
         from_block = max(0, int(latest_block) - int(option.lookback_blocks))
