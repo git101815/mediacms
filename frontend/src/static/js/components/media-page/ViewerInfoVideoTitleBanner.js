@@ -293,11 +293,6 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
         {void 0 !== this.props.title ? (
           <div className="media-title-row">
             <h1 className="media-title">{this.props.title}</h1>
-            {hasPremium && !hasUnlock ? (
-              <span className="premium-badge">
-                Premium
-              </span>
-            ) : null}
             {displayViews ? (
               <span className="media-views-inline only-mobile">
                 {formatViewsNumber(this.props.views, true)}{' '}
