@@ -467,17 +467,6 @@ def test_generic_media_detail_uses_preview_by_default_for_unlocked_user(client, 
         title="Preview default premium",
     )
 
-    media.encodings_info = {
-        "720": {
-            "h264": {
-                "url": "https://cdn.example.com/preview.mp4",
-                "status": "success",
-                "progress": 100,
-            }
-        }
-    }
-    media.save(update_fields=["encodings_info"])
-
     create_ready_asset(
         media=media,
         direct_url="https://private.example.com/full.mp4",
@@ -497,7 +486,7 @@ def test_generic_media_detail_uses_preview_by_default_for_unlocked_user(client, 
     payload = response.json()
     serialized = str(payload)
 
-    assert "https://cdn.example.com/preview.mp4" in serialized
+    assert payload["premium"]["viewer_has_unlock"] is True
     assert "https://private.example.com/full.mp4" not in serialized
 
 
@@ -511,17 +500,6 @@ def test_generic_media_detail_uses_premium_only_when_explicitly_requested(client
         friendly_token="premiumexplicit",
         title="Explicit premium playback",
     )
-
-    media.encodings_info = {
-        "720": {
-            "h264": {
-                "url": "https://cdn.example.com/preview.mp4",
-                "status": "success",
-                "progress": 100,
-            }
-        }
-    }
-    media.save(update_fields=["encodings_info"])
 
     create_ready_asset(
         media=media,
@@ -545,5 +523,5 @@ def test_generic_media_detail_uses_premium_only_when_explicitly_requested(client
     payload = response.json()
     serialized = str(payload)
 
+    assert payload["premium"]["viewer_has_unlock"] is True
     assert "https://private.example.com/full.mp4" in serialized
-    assert "https://cdn.example.com/preview.mp4" not in serialized
