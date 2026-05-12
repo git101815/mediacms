@@ -773,6 +773,12 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
     token_pack_token_amount = int(token_pack.get("token_amount") or 0)
     token_pack_price = int(token_pack.get("gross_stable_amount") or 0)
 
+    expected_raw_amount = session.expected_onchain_raw_amount
+    if expected_raw_amount in (None, ""):
+        expected_raw_amount = (session.metadata or {}).get("expected_route_raw_amount")
+    if expected_raw_amount in (None, ""):
+        expected_raw_amount = session.min_amount
+
     token_pack_label = ""
     if token_pack_name and token_pack_token_amount > 0:
         token_pack_label = (
@@ -802,7 +808,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "confirmations": session.confirmations,
         "min_amount": session.min_amount,
         "min_amount_display": _format_route_amount(
-            session.min_amount,
+            expected_raw_amount,
             chain=session.chain,
             asset_code=session.asset_code,
         ),

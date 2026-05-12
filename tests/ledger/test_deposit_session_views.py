@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.urls import reverse
 from django.utils import timezone
 
-from ledger.models import DepositAddress, DepositSession
+from ledger.models import DepositAddress, DepositSession, TokenPack
 from ledger.services import credit_confirmed_deposit_session, record_onchain_observation
 
 from .base import BaseLedgerTestCase
@@ -270,12 +270,24 @@ class TestDepositSessionViews(BaseLedgerTestCase):
             session_ttl_seconds=3600,
         )
 
+        bsc_pack = TokenPack.objects.create(
+            code="500_tokens",
+            name="500_tokens",
+            description="500 tokens",
+            badge_text="",
+            token_amount=500_000_000,
+            gross_stable_amount=7_000_000,
+            is_active=True,
+            sort_order=10,
+        )
+
         self.client.force_login(self.u1)
 
         response = self.client.post(
             reverse("wallet_deposit_request"),
             self.default_deposit_request_payload(
                 deposit_option_key="bsc:USDT:0x55d398326f99059ff775485246999027b3197955",
+                token_pack_key=bsc_pack.code,
             ),
         )
 
@@ -283,7 +295,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
 
         session = DepositSession.objects.get(wallet=self.w1)
 
-        expected_canonical_amount = int(self.default_token_pack.gross_stable_amount)
+        expected_canonical_amount = int(bsc_pack.gross_stable_amount)
         expected_onchain_amount = expected_canonical_amount * 10 ** 12
 
         self.assertEqual(session.chain, "bsc")
@@ -298,3 +310,14 @@ class TestDepositSessionViews(BaseLedgerTestCase):
             int((session.metadata or {}).get("expected_route_raw_amount")),
             expected_onchain_amount,
         )
+
+        page_response = self.client.get(
+            reverse("wallet_deposit_session", kwargs={"public_id": session.public_id})
+        )
+
+        self.assertEqual(page_response.status_code, 200)
+        self.assertContains(page_response, "500_tokens")
+        self.assertContains(page_response, "500 tokens")
+        self.assertContains(page_response, "$7")
+        self.assertContains(page_response, "7.00 USDT")
+        self.assertNotContains(page_response, "0.00 USDT")
