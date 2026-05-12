@@ -2593,12 +2593,11 @@ def create_deposit_session(
     if wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
         raise PermissionDenied("Cannot create a deposit session for another user's wallet")
 
-    #if expires_at <= timezone.now():
-    #   raise ValidationError("Deposit session expiry must be in the future")
-
     chain = _normalize_chain(chain)
+    asset_code = (asset_code or "").strip().upper()
     token_contract_address = _normalize_evm_address(token_contract_address)
     deposit_address = _normalize_evm_address(deposit_address)
+    min_amount = int(min_amount)
 
     if min_amount <= 0:
         raise ValidationError("Minimum amount must be positive")
@@ -2610,12 +2609,12 @@ def create_deposit_session(
         user=wallet.user,
         wallet=wallet,
         chain=chain,
-        asset_code=(asset_code or "").strip().upper(),
+        asset_code=asset_code,
         token_contract_address=token_contract_address,
         deposit_address=deposit_address,
         address_derivation_ref=(address_derivation_ref or "").strip(),
         status=DepositSession.STATUS_AWAITING_PAYMENT,
-        min_amount=int(min_amount),
+        min_amount=min_amount,
         required_confirmations=int(required_confirmations),
         expires_at=expires_at,
         created_by=actor,
@@ -3430,12 +3429,15 @@ def open_user_deposit_session(
     require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_DEPOSIT_OPEN)
 
     wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
+
     if wallet.wallet_type != TokenWallet.TYPE_USER:
         raise ValidationError("Deposit sessions can only target user wallets")
+
     if wallet.user_id != actor.id:
         raise PermissionDenied("Cannot open a deposit session for another user's wallet")
 
     chain, asset_code, token_contract_address = parse_deposit_option_key(option_key)
+
     template = _get_route_template(
         chain=chain,
         asset_code=asset_code,
@@ -3443,7 +3445,9 @@ def open_user_deposit_session(
     )
 
     token_pack_snapshot = _build_token_pack_snapshot(token_pack=token_pack)
+
     template_min_canonical_amount, template_min_onchain_amount = _deposit_address_min_amounts(template)
+
     expected_canonical_amount = int(token_pack_snapshot["gross_stable_amount"])
     expected_onchain_amount = _convert_canonical_stable_to_route_raw_amount(
         chain=chain,
@@ -3462,6 +3466,7 @@ def open_user_deposit_session(
         token_pack_code=token_pack_snapshot["code"],
         expected_min_amount=expected_canonical_amount,
     )
+
     if existing_session is not None:
         return existing_session
 
@@ -3474,11 +3479,13 @@ def open_user_deposit_session(
     )
 
     expires_at = timezone.now() + timedelta(seconds=int(template.session_ttl_seconds))
+
     route_key = _build_deposit_route_key(
         chain=chain,
         asset_code=asset_code,
         token_contract_address=token_contract_address,
     )
+
     display_label = _build_route_label(
         chain=template.chain,
         asset_code=template.asset_code,
@@ -3505,7 +3512,7 @@ def open_user_deposit_session(
         derivation_path=derivation_path,
         status=DepositSession.STATUS_AWAITING_PAYMENT,
         min_amount=int(expected_canonical_amount),
-        expected_onchain_raw_amount=expected_onchain_amount,
+        expected_onchain_raw_amount=int(expected_onchain_amount),
         required_confirmations=int(template.required_confirmations),
         expires_at=expires_at,
         created_by=actor,

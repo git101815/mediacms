@@ -249,3 +249,52 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         self.assertEqual(payload["observed_txid"], "0xviewflow0001")
         self.assertEqual(payload["confirmations"], session.required_confirmations)
         self.assertFalse(payload["is_terminal"])
+
+    @patch("ledger.services._derive_session_deposit_address")
+    def test_open_deposit_session_converts_canonical_pack_amount_to_bsc_raw_amount(self, mocked_derive):
+        mocked_derive.return_value = (
+            "0xbfebace943c8adc81341f4e5f34f9f89dbdbee64",
+            "m/44'/60'/0'/0/99",
+        )
+
+        DepositAddress.objects.create(
+            chain="bsc",
+            asset_code="USDT",
+            token_contract_address="0x55d398326f99059ff775485246999027b3197955",
+            display_label="BNB Chain · USDT",
+            address="0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            address_derivation_ref="m/44'/60'/0'/0/99",
+            derivation_index=99,
+            required_confirmations=12,
+            min_amount=100,
+            session_ttl_seconds=3600,
+        )
+
+        self.client.force_login(self.u1)
+
+        response = self.client.post(
+            reverse("wallet_deposit_request"),
+            self.default_deposit_request_payload(
+                deposit_option_key="bsc:USDT:0x55d398326f99059ff775485246999027b3197955",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 302)
+
+        session = DepositSession.objects.get(wallet=self.w1)
+
+        expected_canonical_amount = int(self.default_token_pack.gross_stable_amount)
+        expected_onchain_amount = expected_canonical_amount * 10 ** 12
+
+        self.assertEqual(session.chain, "bsc")
+        self.assertEqual(session.asset_code, "USDT")
+        self.assertEqual(session.min_amount, expected_canonical_amount)
+        self.assertEqual(session.expected_onchain_raw_amount, expected_onchain_amount)
+        self.assertEqual(
+            int((session.metadata or {}).get("expected_canonical_stable_amount")),
+            expected_canonical_amount,
+        )
+        self.assertEqual(
+            int((session.metadata or {}).get("expected_route_raw_amount")),
+            expected_onchain_amount,
+        )
