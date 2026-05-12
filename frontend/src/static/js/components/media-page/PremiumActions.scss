@@ -211,8 +211,25 @@
 }
 
 .premium-modal__error {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
   background: rgba(239, 68, 68, 0.14);
   color: #fecaca;
+}
+
+.premium-modal__error-action {
+  flex: 0 0 auto;
+  color: #ffffff;
+  font-weight: 800;
+  text-decoration: underline;
+
+  &:hover,
+  &:focus {
+    color: #ffffff;
+    text-decoration: underline;
+  }
 }
 
 .premium-modal__footer {

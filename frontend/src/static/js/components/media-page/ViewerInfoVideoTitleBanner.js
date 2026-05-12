@@ -243,9 +243,17 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
             <div className="premium-modal__status">Processing purchase…</div>
           ) : null}
 
-          {this.state.premiumError ? (
-            <div className="premium-modal__error">{this.state.premiumError}</div>
-          ) : null}
+        {this.state.premiumError ? (
+          <div className="premium-modal__error">
+            <span>{this.state.premiumError}</span>
+
+            {this.state.premiumError.toLowerCase().indexOf('insufficient token balance') !== -1 ? (
+              <a className="premium-modal__error-action" href="/wallet">
+                Buy tokens
+              </a>
+            ) : null}
+          </div>
+        ) : null}
 
           <div className="premium-modal__footer">
             <a href="/unlocked">View unlocked videos</a>
