@@ -448,11 +448,7 @@ def _build_wallet_deposit_options() -> list[dict]:
                 "payment_method_key": payment_method_key,
                 "payment_method_label": payment_method_label,
                 "payment_method_type": payment_method_type,
-                "min_amount_display": _format_route_amount(
-                    option["min_amount"],
-                    chain=chain,
-                    asset_code=asset_code,
-                ),
+                "min_amount_display": _format_canonical_stable_amount(option["min_amount"]),
             }
         )
 
@@ -815,11 +811,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "observed_txid": session.observed_txid or "",
         "observed_amount": session.observed_amount,
         "observed_amount_display": (
-            _format_route_amount(
-                session.observed_amount,
-                chain=session.chain,
-                asset_code=session.asset_code,
-            )
+            _format_canonical_stable_amount(session.observed_amount)
             if session.observed_amount is not None
             else ""
         ),
