@@ -1255,3 +1255,27 @@ class OrphanDepositRecoveryAudit(models.Model):
 
     def __str__(self):
         return f"OrphanRecovery #{self.id} {self.chain}:{self.deposit_address} {self.status}"
+
+class TreasuryMetric(models.Model):
+    UNIT_PLATFORM_TOKEN = "platform_token"
+    UNIT_STABLE = "stable"
+
+    UNIT_CHOICES = (
+        (UNIT_PLATFORM_TOKEN, "Platform token"),
+        (UNIT_STABLE, "Stable"),
+    )
+
+    metric_key = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=128)
+    amount = models.BigIntegerField(default=0)
+    unit = models.CharField(max_length=32, choices=UNIT_CHOICES, default=UNIT_PLATFORM_TOKEN)
+    display_order = models.PositiveIntegerField(default=100)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("display_order", "metric_key")
+        verbose_name = "Treasury metric"
+        verbose_name_plural = "Treasury metrics"
+
+    def __str__(self):
+        return self.label

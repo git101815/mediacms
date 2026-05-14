@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 from django import forms
 from django.contrib import admin, messages
+from django.db.models import Sum
 
 from .models import (
     TokenWallet,
@@ -17,8 +18,13 @@ from .models import (
     DepositAddress,
     InternalAPIRequestNonce,
     TokenPack,
+    TreasuryMetric,
 )
-from .services import complete_wallet_withdrawal_request, reject_wallet_request
+from .services import (
+    PLATFORM_TOKENS_PER_STABLECOIN,
+    complete_wallet_withdrawal_request,
+    reject_wallet_request,
+)
 
 HUMAN_AMOUNT_SCALE = Decimal("1000000")
 
@@ -686,3 +692,167 @@ class TokenPackAdmin(admin.ModelAdmin):
     @admin.display(description="Gross stable amount", ordering="gross_stable_amount")
     def gross_stable_amount_display(self, obj):
         return _format_admin_human_amount(obj.gross_stable_amount)
+
+def _sum_wallet_amount(qs, field_name: str) -> int:
+    return int(qs.aggregate(total=Sum(field_name)).get("total") or 0)
+
+
+def _get_system_wallet_balance_for_admin(system_key: str) -> int:
+    wallet = TokenWallet.objects.filter(
+        wallet_type=TokenWallet.TYPE_SYSTEM,
+        system_key=system_key,
+    ).first()
+    return int(wallet.balance or 0) if wallet else 0
+
+
+def _refresh_treasury_metrics_for_admin():
+    terminal_deposit_statuses = {
+        DepositSession.STATUS_EXPIRED,
+        DepositSession.STATUS_FAILED,
+        DepositSession.STATUS_CANCELED,
+    }
+
+    platform_fees = _get_system_wallet_balance_for_admin(TokenWallet.SYSTEM_PLATFORM_FEES)
+    orphans_recovered = _get_system_wallet_balance_for_admin(TokenWallet.SYSTEM_ORPHANS_RECOVERED)
+    external_asset_clearing = _get_system_wallet_balance_for_admin(TokenWallet.SYSTEM_EXTERNAL_ASSET_CLEARING)
+
+    creator_liabilities = _sum_wallet_amount(
+        TokenWallet.objects.filter(
+            wallet_type=TokenWallet.TYPE_USER,
+            user__media_count__gt=0,
+            balance__gt=0,
+        ),
+        "balance",
+    )
+
+    user_liabilities = _sum_wallet_amount(
+        TokenWallet.objects.filter(
+            wallet_type=TokenWallet.TYPE_USER,
+            user__media_count__lte=0,
+            balance__gt=0,
+        ),
+        "balance",
+    )
+
+    held_withdrawals = _sum_wallet_amount(
+        LedgerHold.objects.filter(released=False),
+        "amount",
+    )
+
+    pending_partial_deposits = _sum_wallet_amount(
+        DepositSession.objects.filter(
+            observed_amount__gt=0,
+            credited_ledger_txn__isnull=True,
+        ).exclude(status__in=terminal_deposit_statuses),
+        "observed_amount",
+    )
+
+    metrics = [
+        {
+            "metric_key": "platform_fees",
+            "label": "Platform fees balance",
+            "amount": platform_fees,
+            "unit": TreasuryMetric.UNIT_PLATFORM_TOKEN,
+            "display_order": 10,
+        },
+        {
+            "metric_key": "orphans_recovered",
+            "label": "Orphans recovered balance",
+            "amount": orphans_recovered,
+            "unit": TreasuryMetric.UNIT_PLATFORM_TOKEN,
+            "display_order": 20,
+        },
+        {
+            "metric_key": "external_asset_clearing",
+            "label": "External asset clearing balance",
+            "amount": external_asset_clearing,
+            "unit": TreasuryMetric.UNIT_PLATFORM_TOKEN,
+            "display_order": 30,
+        },
+        {
+            "metric_key": "user_liabilities",
+            "label": "User liabilities",
+            "amount": user_liabilities,
+            "unit": TreasuryMetric.UNIT_PLATFORM_TOKEN,
+            "display_order": 40,
+        },
+        {
+            "metric_key": "creator_liabilities",
+            "label": "Creator liabilities",
+            "amount": creator_liabilities,
+            "unit": TreasuryMetric.UNIT_PLATFORM_TOKEN,
+            "display_order": 50,
+        },
+        {
+            "metric_key": "held_withdrawals",
+            "label": "Held withdrawals",
+            "amount": held_withdrawals,
+            "unit": TreasuryMetric.UNIT_PLATFORM_TOKEN,
+            "display_order": 60,
+        },
+        {
+            "metric_key": "pending_partial_deposits",
+            "label": "Pending partial deposits",
+            "amount": pending_partial_deposits,
+            "unit": TreasuryMetric.UNIT_STABLE,
+            "display_order": 70,
+        },
+    ]
+
+    active_keys = []
+
+    for metric in metrics:
+        active_keys.append(metric["metric_key"])
+        TreasuryMetric.objects.update_or_create(
+            metric_key=metric["metric_key"],
+            defaults={
+                "label": metric["label"],
+                "amount": metric["amount"],
+                "unit": metric["unit"],
+                "display_order": metric["display_order"],
+            },
+        )
+
+    TreasuryMetric.objects.exclude(metric_key__in=active_keys).delete()
+
+
+@admin.register(TreasuryMetric)
+class TreasuryMetricAdmin(ReadOnlyAdmin):
+    list_display = (
+        "display_order",
+        "label",
+        "human_amount",
+        "stable_equivalent",
+        "unit",
+        "amount",
+        "updated_at",
+    )
+    list_filter = (
+        "unit",
+    )
+    search_fields = (
+        "metric_key",
+        "label",
+    )
+    ordering = (
+        "display_order",
+        "metric_key",
+    )
+
+    def changelist_view(self, request, extra_context=None):
+        _refresh_treasury_metrics_for_admin()
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def human_amount(self, obj):
+        return _format_admin_human_amount(obj.amount)
+
+    human_amount.short_description = "Human amount"
+
+    def stable_equivalent(self, obj):
+        if obj.unit == TreasuryMetric.UNIT_STABLE:
+            return _format_admin_human_amount(obj.amount)
+
+        stable_amount = Decimal(int(obj.amount or 0)) / Decimal(int(PLATFORM_TOKENS_PER_STABLECOIN))
+        return _format_admin_human_amount(int(stable_amount))
+
+    stable_equivalent.short_description = "Stable equivalent"
