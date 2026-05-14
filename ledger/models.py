@@ -107,6 +107,7 @@ WALLET_REQUEST_STATUS_CHOICES = (
     (WALLET_REQUEST_STATUS_COMPLETED, "Completed"),
 )
 SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING = "external_asset_clearing"
+SYSTEM_WALLET_ORPHANS_RECOVERED = "orphans_recovered"
 
 class ImmutableLedgerRow(models.Model):
     class Meta:
@@ -142,10 +143,12 @@ class TokenWallet(models.Model):
     SYSTEM_ISSUANCE = SYSTEM_WALLET_ISSUANCE
     SYSTEM_PLATFORM_FEES = SYSTEM_WALLET_PLATFORM_FEES
     SYSTEM_EXTERNAL_ASSET_CLEARING = SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING
+    SYSTEM_ORPHANS_RECOVERED = SYSTEM_WALLET_ORPHANS_RECOVERED
     SYSTEM_CHOICES = (
         (SYSTEM_ISSUANCE, "Issuance"),
         (SYSTEM_PLATFORM_FEES, "Platform fees"),
         (SYSTEM_EXTERNAL_ASSET_CLEARING, "External asset clearing"),
+        (SYSTEM_ORPHANS_RECOVERED, "Orphans recovered"),
     )
 
     wallet_type = models.CharField(max_length=16, choices=TYPE_CHOICES, default=TYPE_USER, db_index=True)
