@@ -1,7 +1,7 @@
 import logging
 import time
 from dataclasses import dataclass
-
+from urllib.parse import urlsplit
 
 from .evm_rpc import build_web3
 
@@ -11,6 +11,18 @@ class RpcProbeResult:
     rpc_url: str
     latest_block: int
     latency_seconds: float
+
+
+def _redact_rpc_url(rpc_url: str) -> str:
+    try:
+        parsed = urlsplit(str(rpc_url or ""))
+    except Exception:
+        return "<invalid-rpc-url>"
+
+    if not parsed.scheme or not parsed.netloc:
+        return "<invalid-rpc-url>"
+
+    return f"{parsed.scheme}://{parsed.netloc}/<redacted>"
 
 
 def _probe_rpc(
@@ -56,14 +68,17 @@ def choose_best_rpc_url(
             logging.warning(
                 "rpc probe failed option=%s rpc=%s error=%s",
                 option_key,
-                rpc_url,
+                _redact_rpc_url(rpc_url),
                 exc,
             )
 
     if not successes:
         raise RuntimeError(
             f"All RPC probes failed for option {option_key}: "
-            + ", ".join(f"{url} -> {error}" for url, error in failures)
+            + ", ".join(
+                f"{_redact_rpc_url(url)} -> {error}"
+                for url, error in failures
+            )
         )
 
     best_head = max(item.latest_block for item in successes)
@@ -88,7 +103,7 @@ def choose_best_rpc_url(
             logging.warning(
                 "rpc excluded as unhealthy option=%s rpc=%s latest_block=%s best_head=%s lag=%s max_lag_blocks=%s",
                 option_key,
-                item.rpc_url,
+                _redact_rpc_url(item.rpc_url),
                 item.latest_block,
                 best_head,
                 internal_lag,
@@ -102,7 +117,7 @@ def choose_best_rpc_url(
                 logging.warning(
                     "rpc excluded by reference head option=%s rpc=%s latest_block=%s reference_head=%s lag=%s max_reference_lag_blocks=%s",
                     option_key,
-                    item.rpc_url,
+                    _redact_rpc_url(item.rpc_url),
                     item.latest_block,
                     reference_head,
                     reference_lag,
@@ -137,7 +152,7 @@ def choose_best_rpc_url(
         logging.info(
             "rpc selected without reference option=%s rpc=%s latest_block=%s best_head=%s latency_ms=%s",
             option_key,
-            chosen.rpc_url,
+            _redact_rpc_url(chosen.rpc_url),
             chosen.latest_block,
             best_head,
             int(chosen.latency_seconds * 1000),
@@ -146,7 +161,7 @@ def choose_best_rpc_url(
         logging.info(
             "rpc selected option=%s rpc=%s latest_block=%s best_head=%s reference_head=%s latency_ms=%s",
             option_key,
-            chosen.rpc_url,
+            _redact_rpc_url(chosen.rpc_url),
             chosen.latest_block,
             best_head,
             reference_head,
