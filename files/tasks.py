@@ -14,7 +14,6 @@ import gzip
 import io
 import subprocess
 from pathlib import Path
-from django.core.management import call_command
 # from celery.task.control import revoke
 from celery.utils.log import get_task_logger
 from django.conf import settings
@@ -24,6 +23,8 @@ from django.db import DatabaseError
 from django.db.models import Q
 from django.utils.module_loading import import_string
 from django.core.exceptions import ImproperlyConfigured
+from django.core.management import call_command
+from django.utils import timezone
 
 from actions.models import USER_MEDIA_ACTIONS, MediaAction
 from users.models import User

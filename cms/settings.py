@@ -455,10 +455,6 @@ CELERY_BEAT_SCHEDULE = {
         "task": "update_listings_thumbnails",
         "schedule": crontab(minute=2, hour="*/30"),
     },
-    "ledger_expire_stale_deposit_sessions": {
-        "task": "ledger_expire_stale_deposit_sessions",
-        "schedule": crontab(minute="*/5"),
-    },
 }
 # TODO: beat, delete chunks from media root
 # chunks_dir after xx days...(also uploads_dir)
