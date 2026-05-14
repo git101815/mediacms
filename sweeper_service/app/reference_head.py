@@ -1,8 +1,9 @@
 import datetime as dt
 import logging
-
+import re
 import httpx
 
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 def _parse_iso8601(value: str) -> dt.datetime:
     text = str(value or "").strip()
@@ -17,6 +18,17 @@ def _parse_iso8601(value: str) -> dt.datetime:
         raise RuntimeError("reference updated_at must include timezone")
     return parsed
 
+def _redact_http_error(error) -> str:
+    text = str(error or "")
+
+    text = text.replace("\n", " ")
+    text = re.sub(
+        r"(https?://[^/\s\)]+)/(?!<redacted>)[^\s\)]*",
+        r"\1/<redacted>",
+        text,
+    )
+
+    return text
 
 def get_reference_head(
     *,
@@ -60,6 +72,6 @@ def get_reference_head(
         logging.warning(
             "reference head unavailable chain=%s error=%s fallback=internal-rpc-health-checks",
             chain,
-            exc,
+            _redact_http_error(exc),
         )
         return None

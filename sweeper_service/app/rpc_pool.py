@@ -2,7 +2,7 @@ import logging
 import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
-
+import re
 from .evm import build_web3
 
 
@@ -24,6 +24,22 @@ def _redact_rpc_url(rpc_url: str) -> str:
 
     return f"{parsed.scheme}://{parsed.netloc}/<redacted>"
 
+def _redact_rpc_error(error) -> str:
+    text = str(error or "")
+
+    text = re.sub(
+        r"(https?://[^/\s\)]+)/(?!<redacted>)[^\s\)]*",
+        r"\1/<redacted>",
+        text,
+    )
+    text = re.sub(
+        r"(url:\s*)/[^\s\)]*",
+        r"\1/<redacted>",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    return text
 
 def _probe_rpc(
     *,
@@ -71,12 +87,13 @@ def choose_best_rpc_url(
             )
             successes.append(result)
         except Exception as exc:
-            failures.append((rpc_url, str(exc)))
+            redacted_error = _redact_rpc_error(exc)
+            failures.append((rpc_url, redacted_error))
             logging.warning(
                 "rpc probe failed option=%s rpc=%s error=%s",
                 option_key,
                 _redact_rpc_url(rpc_url),
-                exc,
+                redacted_error,
             )
 
     if not successes:
