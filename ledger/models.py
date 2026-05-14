@@ -370,6 +370,7 @@ class LedgerTransaction(models.Model):
             ("can_create_pending_ledger_transaction", "Can create pending ledger transactions"),
             ("can_reverse_ledger_transaction", "Can reverse ledger transactions"),
             ("can_impersonate_ledger_creator", "Can set created_by to another user"),
+            ("can_book_platform_fee_adjustments", "Can book platform fee adjustments"),
         ]
 
     def __str__(self):

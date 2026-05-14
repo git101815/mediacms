@@ -19,6 +19,7 @@ from django.core.files import File
 from django.db import DatabaseError
 from django.db.models import Q
 from django.utils.module_loading import import_string
+from django.core.exceptions import ImproperlyConfigured
 
 from actions.models import USER_MEDIA_ACTIONS, MediaAction
 from users.models import User
@@ -1297,6 +1298,45 @@ def push_all_media_to_storj():
             pass
 
     return True
+
+def _get_ledger_deposit_service_actor():
+    username = str(getattr(settings, "LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME", "") or "").strip()
+    if not username:
+        raise ImproperlyConfigured("LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME is not configured")
+
+    actor = User.objects.filter(username=username, is_active=True).first()
+    if actor is None:
+        raise ImproperlyConfigured("LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME does not match an active user")
+
+    return actor
+
+@task(
+    name="ledger_expire_stale_deposit_sessions",
+    queue="short_tasks",
+    soft_time_limit=60 * 5,
+)
+def ledger_expire_stale_deposit_sessions():
+    from ledger.services import (
+        expire_stale_deposit_sessions,
+        forfeit_dead_partial_deposit_sessions,
+    )
+
+    actor = _get_ledger_deposit_service_actor()
+    limit = int(getattr(settings, "LEDGER_DEPOSIT_SESSION_EXPIRATION_TASK_LIMIT", 500))
+
+    expired_count = expire_stale_deposit_sessions(actor=actor, limit=limit)
+    forfeited_count = forfeit_dead_partial_deposit_sessions(actor=actor, limit=limit)
+
+    logger.info(
+        "ledger deposit session maintenance completed expired=%s forfeited=%s",
+        expired_count,
+        forfeited_count,
+    )
+
+    return {
+        "expired_count": expired_count,
+        "forfeited_count": forfeited_count,
+    }
 
 # TODO LIST
 # 1 chunks are deleted from original server when file is fully encoded.

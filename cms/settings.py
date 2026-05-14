@@ -42,6 +42,10 @@ LEDGER_DEPOSIT_OPEN_COOLDOWN_THRESHOLD = 3
 LEDGER_DEPOSIT_OPEN_COOLDOWN_WINDOW_SECONDS = 5 * 60
 LEDGER_DEPOSIT_OPEN_COOLDOWN_SECONDS = 15 * 60
 
+LEDGER_DEPOSIT_SESSION_EXPIRATION_TASK_LIMIT = int(
+    os.environ.get("LEDGER_DEPOSIT_SESSION_EXPIRATION_TASK_LIMIT", "500")
+)
+
 # These are passed on every request
 # if set to False will not fetch external content
 # this is only for the static files, as fonts/css/js files loaded from CDNs
@@ -443,6 +447,10 @@ CELERY_BEAT_SCHEDULE = {
     "update_listings_thumbnails": {
         "task": "update_listings_thumbnails",
         "schedule": crontab(minute=2, hour="*/30"),
+    },
+    "ledger_expire_stale_deposit_sessions": {
+        "task": "ledger_expire_stale_deposit_sessions",
+        "schedule": crontab(minute="*/5"),
     },
 }
 # TODO: beat, delete chunks from media root

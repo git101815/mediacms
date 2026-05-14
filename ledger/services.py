@@ -4690,12 +4690,7 @@ def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> De
         raise ValidationError("Cannot cancel a credited deposit session")
 
     if deposit_session.status in terminal_statuses:
-        forfeit_dead_partial_deposit_to_platform_fees(
-            actor=actor,
-            deposit_session=deposit_session,
-            reason="terminal_deposit_session_rechecked",
-        )
-        return DepositSession.objects.get(id=deposit_session.id)
+        return deposit_session
 
     observed_amount = int(deposit_session.observed_amount or 0)
     expected_amount = int(deposit_session.min_amount or 0)
@@ -4708,14 +4703,7 @@ def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> De
 
     _abandon_open_sweep_jobs_for_session(deposit_session=deposit_session)
 
-    if observed_amount > 0:
-        forfeit_dead_partial_deposit_to_platform_fees(
-            actor=actor,
-            deposit_session=deposit_session,
-            reason="user_canceled_partial_deposit_session",
-        )
-
-    return DepositSession.objects.get(id=deposit_session.id)
+    return deposit_session
 
 
 @transaction.atomic
@@ -4749,13 +4737,6 @@ def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
 
         _abandon_open_sweep_jobs_for_session(deposit_session=session)
 
-        if observed_amount > 0:
-            forfeit_dead_partial_deposit_to_platform_fees(
-                actor=actor,
-                deposit_session=session,
-                reason="expired_partial_deposit_session",
-            )
-
         expired_count += 1
 
     return expired_count
@@ -4770,7 +4751,10 @@ def delete_user_deposit_session(*, actor, deposit_session: DepositSession) -> No
         .get(id=deposit_session.id)
     )
 
-    if deposit_session.wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
+    if (
+        deposit_session.wallet.user_id != actor.id
+        and not actor.has_perm("ledger.can_manage_deposit_sessions")
+    ):
         raise PermissionDenied("Cannot delete another user's deposit session")
 
     allowed_statuses = {
@@ -4780,10 +4764,125 @@ def delete_user_deposit_session(*, actor, deposit_session: DepositSession) -> No
     if deposit_session.status not in allowed_statuses:
         raise ValidationError("Only pending or canceled deposit sessions can be deleted")
 
-    if deposit_session.observed_txid:
-        raise ValidationError("Cannot delete a deposit session that already observed a transaction")
+    if deposit_session.observed_txid or int(deposit_session.observed_amount or 0) > 0:
+        raise ValidationError("Cannot delete a deposit session that already observed funds")
 
     deposit_session.delete()
+
+@transaction.atomic
+def forfeit_dead_partial_deposit_to_platform_fees(
+    *,
+    actor,
+    deposit_session: DepositSession,
+    reason: str = "",
+) -> LedgerTransaction | None:
+    _require_perm(actor, "ledger.can_book_platform_fee_adjustments")
+
+    deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
+
+    terminal_statuses = {
+        DepositSession.STATUS_EXPIRED,
+        DepositSession.STATUS_CANCELED,
+        DepositSession.STATUS_FAILED,
+    }
+
+    if deposit_session.status not in terminal_statuses:
+        raise ValidationError("Deposit session is not terminal")
+
+    if deposit_session.credited_ledger_txn_id:
+        raise ValidationError("Credited deposit sessions cannot be forfeited")
+
+    observed_amount = int(deposit_session.observed_amount or 0)
+    if observed_amount <= 0:
+        return None
+
+    expected_amount = int(deposit_session.min_amount or 0)
+    if expected_amount > 0 and observed_amount >= expected_amount:
+        raise ValidationError("Deposit session received the expected amount and cannot be forfeited as partial")
+
+    metadata = dict(deposit_session.metadata or {})
+    resolution = metadata.get("partial_deposit_resolution") or {}
+    if resolution.get("status") == "forfeited_to_platform_fees":
+        linked_txn_id = resolution.get("ledger_txn_id")
+        if linked_txn_id:
+            return LedgerTransaction.objects.get(id=linked_txn_id)
+        raise ValidationError("Partial deposit is already marked as forfeited")
+
+    token_amount = _convert_canonical_stable_to_platform_tokens(observed_amount)
+
+    txn = book_platform_fee_from_recovered_funds(
+        actor=actor,
+        amount=token_amount,
+        source="abandoned_partial_deposit",
+        reference=str(deposit_session.public_id),
+        memo=f"Forfeited abandoned partial deposit {deposit_session.public_id}",
+        metadata={
+            "deposit_session_id": deposit_session.id,
+            "deposit_session_public_id": str(deposit_session.public_id),
+            "chain": deposit_session.chain,
+            "asset_code": deposit_session.asset_code,
+            "observed_amount_canonical_stable": observed_amount,
+            "token_amount": token_amount,
+            "reason": (reason or "").strip(),
+        },
+    )
+
+    metadata["partial_deposit_resolution"] = {
+        "status": "forfeited_to_platform_fees",
+        "ledger_txn_id": txn.id,
+        "resolved_at": timezone.now().isoformat(),
+        "resolved_by": getattr(actor, "username", ""),
+        "reason": (reason or "").strip(),
+    }
+    deposit_session.metadata = metadata
+    deposit_session.save(update_fields=["metadata", "updated_at"])
+
+    return txn
+
+
+@transaction.atomic
+def forfeit_dead_partial_deposit_sessions(*, actor, limit: int = 500) -> int:
+    _require_perm(actor, "ledger.can_book_platform_fee_adjustments")
+
+    terminal_statuses = {
+        DepositSession.STATUS_EXPIRED,
+        DepositSession.STATUS_CANCELED,
+        DepositSession.STATUS_FAILED,
+    }
+
+    sessions = (
+        DepositSession.objects.select_for_update(skip_locked=True)
+        .filter(
+            status__in=terminal_statuses,
+            credited_ledger_txn__isnull=True,
+            observed_amount__gt=0,
+        )
+        .order_by("id")[: int(limit)]
+    )
+
+    forfeited_count = 0
+
+    for session in sessions:
+        metadata = dict(session.metadata or {})
+        resolution = metadata.get("partial_deposit_resolution") or {}
+        if resolution.get("status") == "forfeited_to_platform_fees":
+            continue
+
+        observed_amount = int(session.observed_amount or 0)
+        expected_amount = int(session.min_amount or 0)
+
+        if expected_amount > 0 and observed_amount >= expected_amount:
+            continue
+
+        txn = forfeit_dead_partial_deposit_to_platform_fees(
+            actor=actor,
+            deposit_session=session,
+            reason="dead_partial_deposit_batch",
+        )
+        if txn is not None:
+            forfeited_count += 1
+
+    return forfeited_count
 
 def get_ad_free_lifetime_price_tokens() -> int:
     return _get_int_setting(
@@ -4975,72 +5074,3 @@ def book_platform_fee_from_recovered_funds(
             "amount": normalized_amount,
         },
     )
-
-def forfeit_dead_partial_deposit_to_platform_fees(
-    *,
-    actor,
-    deposit_session: DepositSession,
-    reason: str = "",
-    require_admin_permission: bool = False,
-) -> LedgerTransaction | None:
-    if require_admin_permission:
-        _require_perm(actor, "ledger.can_book_platform_fee_adjustments")
-    else:
-        _require_authenticated_actor(actor)
-
-    deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
-
-    terminal_statuses = {
-        DepositSession.STATUS_EXPIRED,
-        DepositSession.STATUS_CANCELED,
-        DepositSession.STATUS_FAILED,
-    }
-
-    if deposit_session.status not in terminal_statuses:
-        raise ValidationError("Deposit session is not terminal")
-
-    if deposit_session.credited_ledger_txn_id:
-        raise ValidationError("Credited deposit sessions cannot be forfeited")
-
-    observed_amount = int(deposit_session.observed_amount or 0)
-    if observed_amount <= 0:
-        return None
-
-    metadata = dict(deposit_session.metadata or {})
-    resolution = metadata.get("partial_deposit_resolution") or {}
-    if resolution.get("status") == "forfeited_to_platform_fees":
-        linked_txn_id = resolution.get("ledger_txn_id")
-        if linked_txn_id:
-            return LedgerTransaction.objects.get(id=linked_txn_id)
-        raise ValidationError("Partial deposit is already marked as forfeited")
-
-    token_amount = _convert_canonical_stable_to_platform_tokens(observed_amount)
-
-    txn = book_platform_fee_from_recovered_funds(
-        actor=actor,
-        amount=token_amount,
-        source="abandoned_partial_deposit",
-        reference=str(deposit_session.public_id),
-        memo=f"Forfeited abandoned partial deposit {deposit_session.public_id}",
-        metadata={
-            "deposit_session_id": deposit_session.id,
-            "deposit_session_public_id": str(deposit_session.public_id),
-            "chain": deposit_session.chain,
-            "asset_code": deposit_session.asset_code,
-            "observed_amount_canonical_stable": observed_amount,
-            "token_amount": token_amount,
-            "reason": (reason or "").strip(),
-        },
-    )
-
-    metadata["partial_deposit_resolution"] = {
-        "status": "forfeited_to_platform_fees",
-        "ledger_txn_id": txn.id,
-        "resolved_at": timezone.now().isoformat(),
-        "resolved_by": getattr(actor, "username", ""),
-        "reason": (reason or "").strip(),
-    }
-    deposit_session.metadata = metadata
-    deposit_session.save(update_fields=["metadata", "updated_at"])
-
-    return txn
