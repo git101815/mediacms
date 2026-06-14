@@ -211,6 +211,16 @@ export function SidebarNavigationMenu() {
       className: 'nav-item-about',
     });
     items.push({
+      link: 'https://forum.celebfakes.ru',
+      icon: 'forum',
+      text: translateString('Forum'),
+      className: 'nav-item-forum',
+      linkAttr: {
+        rel: 'noopener noreferrer',
+        target: '_blank',
+      },
+    });
+    items.push({
       link: '/partnership',
       icon: 'verified',
       text: translateString("Our partners"),
