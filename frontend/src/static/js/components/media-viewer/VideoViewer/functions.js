@@ -216,7 +216,7 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
                 console.warn('VIDEO DEBUG:', 'STATUS value is', data[k][validVideoFormats[i]].status);
               }
 
-              fileExt = data[k][validVideoFormats[i]].url.split('.');
+              fileExt = data[k][validVideoFormats[i]].url.split('?')[0].split('#')[0].split('.');
 
               if (
                 fileExt.length &&

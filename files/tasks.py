@@ -10,7 +10,10 @@ import logging
 from celery import Task
 from celery import shared_task as task
 from celery.signals import task_revoked
-
+import gzip
+import io
+import subprocess
+from pathlib import Path
 # from celery.task.control import revoke
 from celery.utils.log import get_task_logger
 from django.conf import settings
@@ -19,6 +22,9 @@ from django.core.files import File
 from django.db import DatabaseError
 from django.db.models import Q
 from django.utils.module_loading import import_string
+from django.core.exceptions import ImproperlyConfigured
+from django.core.management import call_command
+from django.utils import timezone
 
 from actions.models import USER_MEDIA_ACTIONS, MediaAction
 from users.models import User
@@ -1298,6 +1304,232 @@ def push_all_media_to_storj():
 
     return True
 
+def _get_ledger_deposit_service_actor():
+    username = str(getattr(settings, "LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME", "") or "").strip()
+    if not username:
+        raise ImproperlyConfigured("LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME is not configured")
+
+    actor = User.objects.filter(username=username, is_active=True).first()
+    if actor is None:
+        raise ImproperlyConfigured("LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME does not match an active user")
+
+    return actor
+
+@task(
+    name="ledger_expire_stale_deposit_sessions",
+    queue="short_tasks",
+    soft_time_limit=60 * 5,
+)
+def ledger_expire_stale_deposit_sessions():
+    from ledger.services import (
+        expire_stale_deposit_sessions,
+        forfeit_dead_partial_deposit_sessions,
+    )
+
+    actor = _get_ledger_deposit_service_actor()
+    limit = int(getattr(settings, "LEDGER_DEPOSIT_SESSION_EXPIRATION_TASK_LIMIT", 500))
+
+    expired_count = expire_stale_deposit_sessions(actor=actor, limit=limit)
+    forfeited_count = forfeit_dead_partial_deposit_sessions(actor=actor, limit=limit)
+
+    logger.info(
+        "ledger deposit session maintenance completed expired=%s forfeited=%s",
+        expired_count,
+        forfeited_count,
+    )
+
+    return {
+        "expired_count": expired_count,
+        "forfeited_count": forfeited_count,
+    }
+def _run_management_command(command_name, *args, **options):
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    call_command(
+        command_name,
+        *args,
+        stdout=stdout,
+        stderr=stderr,
+        **options,
+    )
+
+    return {
+        "command": command_name,
+        "stdout": stdout.getvalue(),
+        "stderr": stderr.getvalue(),
+    }
+
+
+def _prune_database_backups(backup_dir: Path, keep_count: int) -> int:
+    keep_count = int(keep_count)
+
+    if keep_count <= 0:
+        return 0
+
+    backups = sorted(
+        backup_dir.glob("mediacmsdb*.dump.gz"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+
+    removed_count = 0
+
+    for backup_path in backups[keep_count:]:
+        backup_path.unlink()
+        removed_count += 1
+
+    return removed_count
+
+
+@task(
+    name="maintenance_sync_categories_ws",
+    queue="short_tasks",
+    soft_time_limit=60 * 15,
+)
+def maintenance_sync_categories_ws():
+    result = _run_management_command("sync_categories_ws")
+    logger.info("sync_categories_ws completed")
+    return result
+
+
+@task(
+    name="maintenance_sync_celebrities_ws",
+    queue="short_tasks",
+    soft_time_limit=60 * 15,
+)
+def maintenance_sync_celebrities_ws():
+    result = _run_management_command("sync_celebrities_ws")
+    logger.info("sync_celebrities_ws completed")
+    return result
+
+
+@task(
+    name="maintenance_recover_orphan_deposit_addresses",
+    queue="long_tasks",
+    soft_time_limit=60 * 30,
+)
+def maintenance_recover_orphan_deposit_addresses():
+    enabled = bool(getattr(settings, "LEDGER_ORPHAN_RECOVERY_TASK_ENABLED", False))
+    if not enabled:
+        logger.info("orphan deposit address recovery skipped because LEDGER_ORPHAN_RECOVERY_TASK_ENABLED is false")
+        return {
+            "skipped": True,
+            "reason": "LEDGER_ORPHAN_RECOVERY_TASK_ENABLED is false",
+        }
+
+    result = _run_management_command("recover_orphan_deposit_addresses")
+    logger.info("recover_orphan_deposit_addresses completed")
+    return result
+
+
+@task(
+    name="maintenance_backup_database",
+    queue="long_tasks",
+    soft_time_limit=60 * 30,
+)
+def maintenance_backup_database():
+    db_config = settings.DATABASES["default"]
+
+    database_name = str(db_config.get("NAME") or "").strip()
+    database_user = str(db_config.get("USER") or "").strip()
+    database_password = str(db_config.get("PASSWORD") or "")
+    database_host = str(db_config.get("HOST") or "").strip()
+    database_port = str(db_config.get("PORT") or "").strip()
+
+    if not database_name:
+        raise ImproperlyConfigured("DATABASES['default']['NAME'] is not configured")
+    if not database_user:
+        raise ImproperlyConfigured("DATABASES['default']['USER'] is not configured")
+
+    pg_dump_command = str(getattr(settings, "PG_DUMP_COMMAND", "pg_dump") or "pg_dump").strip()
+    resolved_pg_dump = pg_dump_command
+
+    if os.path.sep not in pg_dump_command:
+        resolved_pg_dump = shutil.which(pg_dump_command) or ""
+
+    if not resolved_pg_dump:
+        raise ImproperlyConfigured("pg_dump is not installed in the Celery worker container")
+
+    backup_dir = Path(
+        str(
+            getattr(
+                settings,
+                "DB_BACKUP_DIR",
+                os.path.join(settings.BASE_DIR, "backup"),
+            )
+        )
+    )
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = timezone.now().strftime("%Y-%m-%d_%H%M%S")
+    backup_path = backup_dir / f"mediacmsdb{timestamp}.dump.gz"
+    tmp_path = backup_dir / f".{backup_path.name}.tmp"
+
+    command = [
+        resolved_pg_dump,
+        "-U",
+        database_user,
+        "-d",
+        database_name,
+        "-F",
+        "c",
+    ]
+
+    if database_host:
+        command.extend(["-h", database_host])
+    if database_port:
+        command.extend(["-p", database_port])
+
+    env = os.environ.copy()
+    if database_password:
+        env["PGPASSWORD"] = database_password
+
+    logger.info("starting database backup to %s", backup_path)
+
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+
+    try:
+        with gzip.open(tmp_path, "wb") as gzip_file:
+            shutil.copyfileobj(process.stdout, gzip_file)
+
+        stderr = process.stderr.read().decode("utf-8", errors="replace")
+        return_code = process.wait()
+
+        if return_code != 0:
+            raise RuntimeError(f"pg_dump failed with exit code {return_code}: {stderr}")
+
+        os.replace(tmp_path, backup_path)
+
+        keep_count = int(getattr(settings, "DB_BACKUP_KEEP_COUNT", 14) or 14)
+        removed_count = _prune_database_backups(backup_dir, keep_count)
+
+        logger.info(
+            "database backup completed path=%s removed_old_backups=%s",
+            backup_path,
+            removed_count,
+        )
+
+        return {
+            "backup_path": str(backup_path),
+            "removed_old_backups": removed_count,
+        }
+    finally:
+        try:
+            process.stdout.close()
+        except Exception:
+            pass
+        try:
+            process.stderr.close()
+        except Exception:
+            pass
+        if tmp_path.exists():
+            tmp_path.unlink()
 # TODO LIST
 # 1 chunks are deleted from original server when file is fully encoded.
 # however need to enter this logic in cases of fail as well

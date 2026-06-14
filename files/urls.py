@@ -26,6 +26,7 @@ urlpatterns = [
     re_path(r"^featured$", views.featured_media),
     re_path(r"^wallet/deposit-request$", views.wallet_deposit_request, name="wallet_deposit_request"),
     re_path(r"^wallet/withdrawal-request$", views.wallet_withdrawal_request, name="wallet_withdrawal_request"),
+    re_path(r"^wallet/ad-free/purchase$", views.wallet_purchase_ad_free, name="wallet_purchase_ad_free"),
     re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/$", views.wallet_deposit_session, name="wallet_deposit_session"),
     re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/status/$", views.wallet_deposit_session_status, name="wallet_deposit_session_status"),
     re_path(
@@ -140,6 +141,7 @@ urlpatterns = [
     re_path(r"^view", views.view_media, name="get_media"),
     re_path(r"^upload", views.upload_media, name="upload_media"),
     # API VIEWS
+    re_path(r"^", include("premium.urls")),
     re_path(r"^api/v1/media$", views.MediaList.as_view()),
     re_path(r"^api/v1/media/$", views.MediaList.as_view()),
     re_path(

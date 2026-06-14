@@ -1,5 +1,7 @@
 import os
 import httpx
+import logging
+import time
 
 from .signing import build_signed_json_request
 
@@ -26,7 +28,15 @@ class MediaCMSInternalClient:
             os.environ.get("MEDIACMS_INTERNAL_GATEWAY_SECRET", "").strip()
             or os.environ.get("LEDGER_INTERNAL_GATEWAY_SECRET", "").strip()
         )
-        self._client = httpx.Client(timeout=timeout)
+        self._client = httpx.Client(
+            timeout=httpx.Timeout(
+                timeout,
+                connect=min(timeout, 5.0),
+                read=timeout,
+                write=timeout,
+                pool=timeout,
+            )
+        )
 
     def close(self) -> None:
         self._client.close()
@@ -40,11 +50,36 @@ class MediaCMSInternalClient:
         if self._gateway_secret:
             headers[self._gateway_header] = self._gateway_secret
 
-        response = self._client.post(f"{self._base_url}{path}", content=body, headers=headers)
+        started_at = time.monotonic()
+
+        try:
+            response = self._client.post(
+                f"{self._base_url}{path}",
+                content=body,
+                headers=headers,
+            )
+        except httpx.TimeoutException:
+            elapsed = time.monotonic() - started_at
+            logging.exception(
+                "Internal API timeout path=%s elapsed=%.3fs",
+                path,
+                elapsed,
+            )
+            raise
+
+        elapsed = time.monotonic() - started_at
+        logging.info(
+            "Internal API response path=%s status=%s elapsed=%.3fs",
+            path,
+            response.status_code,
+            elapsed,
+        )
+
         if response.status_code >= 400:
             raise RuntimeError(
                 f"Internal API error {response.status_code} for {path}: {response.text}"
             )
+
         return response.json()
 
     def claim_jobs(self, *, options: list[dict], limit: int) -> list[dict]:

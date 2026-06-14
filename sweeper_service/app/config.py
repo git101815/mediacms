@@ -47,6 +47,7 @@ class ServiceConfig:
     reference_heads_max_age_seconds: int
     options: list[SweepOptionConfig]
     request_timeout_seconds: float
+    internal_api_timeout_seconds: float
 
 
 def _require_env(name: str) -> str:
@@ -232,6 +233,12 @@ def load_config() -> ServiceConfig:
     if reference_heads_max_age_seconds <= 0:
         raise RuntimeError("SWEEPER_REFERENCE_HEADS_MAX_AGE_SECONDS must be > 0")
 
+    internal_api_timeout_seconds = float(
+        os.environ.get("SWEEPER_INTERNAL_API_TIMEOUT_SECONDS", "30")
+    )
+    if internal_api_timeout_seconds <= 0:
+        raise RuntimeError("SWEEPER_INTERNAL_API_TIMEOUT_SECONDS must be > 0")
+
     return ServiceConfig(
         mediacms_base_url=_require_env("MEDIACMS_INTERNAL_BASE_URL").rstrip("/"),
         service_name=os.environ.get("MEDIACMS_INTERNAL_SERVICE", "sweeper-service").strip() or "sweeper-service",
@@ -249,4 +256,5 @@ def load_config() -> ServiceConfig:
         reference_heads_max_age_seconds=reference_heads_max_age_seconds,
         options=options,
         request_timeout_seconds=request_timeout_seconds,
+        internal_api_timeout_seconds=internal_api_timeout_seconds,
     )

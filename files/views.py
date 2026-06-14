@@ -101,7 +101,6 @@ from ledger.models import (
 from ledger.services import (
     get_wallet_available_balance,
     get_wallet_velocity_amount,
-    create_wallet_deposit_request,
     create_wallet_withdrawal_request,
     open_user_deposit_session,
     ingest_deposit_observation_event,
@@ -124,6 +123,8 @@ from ledger.services import (
     cancel_user_deposit_session,
     delete_user_deposit_session,
     expire_stale_deposit_sessions,
+    get_ad_free_lifetime_price_tokens,
+    purchase_ad_free_lifetime,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
@@ -447,11 +448,7 @@ def _build_wallet_deposit_options() -> list[dict]:
                 "payment_method_key": payment_method_key,
                 "payment_method_label": payment_method_label,
                 "payment_method_type": payment_method_type,
-                "min_amount_display": _format_route_amount(
-                    option["min_amount"],
-                    chain=chain,
-                    asset_code=asset_code,
-                ),
+                "min_amount_display": _format_canonical_stable_amount(option["min_amount"]),
             }
         )
 
@@ -772,6 +769,12 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
     token_pack_token_amount = int(token_pack.get("token_amount") or 0)
     token_pack_price = int(token_pack.get("gross_stable_amount") or 0)
 
+    expected_raw_amount = session.expected_onchain_raw_amount
+    if expected_raw_amount in (None, ""):
+        expected_raw_amount = (session.metadata or {}).get("expected_route_raw_amount")
+    if expected_raw_amount in (None, ""):
+        expected_raw_amount = session.min_amount
+
     token_pack_label = ""
     if token_pack_name and token_pack_token_amount > 0:
         token_pack_label = (
@@ -801,18 +804,14 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "confirmations": session.confirmations,
         "min_amount": session.min_amount,
         "min_amount_display": _format_route_amount(
-            session.min_amount,
+            expected_raw_amount,
             chain=session.chain,
             asset_code=session.asset_code,
         ),
         "observed_txid": session.observed_txid or "",
         "observed_amount": session.observed_amount,
         "observed_amount_display": (
-            _format_route_amount(
-                session.observed_amount,
-                chain=session.chain,
-                asset_code=session.asset_code,
-            )
+            _format_canonical_stable_amount(session.observed_amount)
             if session.observed_amount is not None
             else ""
         ),
@@ -1169,6 +1168,19 @@ def wallet(request):
         "deposit_options": deposit_options,
         "recent_deposit_session_rows": _build_recent_deposit_session_rows(wallet_obj,active_status=active_status),
         "token_pack_rows": token_pack_rows,
+    }
+    ad_free_price_tokens = get_ad_free_lifetime_price_tokens()
+
+    context["ad_free"] = {
+        "active": bool(getattr(request.user, "adFreeUser", False)),
+        "price_tokens": ad_free_price_tokens,
+        "price_display": _format_platform_token_amount(ad_free_price_tokens),
+        "purchase_url": reverse("wallet_purchase_ad_free"),
+        "can_purchase": (
+                not getattr(request.user, "adFreeUser", False)
+                and wallet_actions.get("can_deposit", False)
+                and available_balance >= ad_free_price_tokens
+        ),
     }
     return render(request, "cms/wallet.html", context)
 
@@ -3383,3 +3395,22 @@ def wallet_deposit_session_cancel(request, public_id):
         messages.error(request, _extract_wallet_form_error(exc))
 
     return redirect("wallet")
+
+@login_required
+@require_POST
+def wallet_purchase_ad_free(request):
+    try:
+        result = purchase_ad_free_lifetime(actor=request.user)
+    except DjangoValidationError as exc:
+        messages.error(request, _extract_wallet_form_error(exc))
+    except DjangoPermissionDenied as exc:
+        messages.error(request, str(exc))
+    else:
+        if result.get("already_active"):
+            messages.info(request, "Ad-free is already active on your account.")
+        else:
+            messages.success(request, "Ad-free is now active forever on your account.")
+
+    return HttpResponseRedirect(
+        f"{reverse('wallet')}?{_build_wallet_querystring(tab='purchases', status=WALLET_STATUS_ALL)}"
+    )

@@ -42,6 +42,10 @@ LEDGER_DEPOSIT_OPEN_COOLDOWN_THRESHOLD = 3
 LEDGER_DEPOSIT_OPEN_COOLDOWN_WINDOW_SECONDS = 5 * 60
 LEDGER_DEPOSIT_OPEN_COOLDOWN_SECONDS = 15 * 60
 
+LEDGER_DEPOSIT_SESSION_EXPIRATION_TASK_LIMIT = int(
+    os.environ.get("LEDGER_DEPOSIT_SESSION_EXPIRATION_TASK_LIMIT", "500")
+)
+
 # These are passed on every request
 # if set to False will not fetch external content
 # this is only for the static files, as fonts/css/js files loaded from CDNs
@@ -291,6 +295,7 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "imagekit",
     "ledger.apps.LedgerConfig",
+    "premium.apps.PremiumConfig",
     "files.apps.FilesConfig",
     "users.apps.UsersConfig",
     "actions.apps.ActionsConfig",
@@ -427,6 +432,13 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_SOFT_TIME_LIMIT = 2 * 60 * 60
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERYD_PREFETCH_MULTIPLIER = 1
+
+DB_BACKUP_DIR = os.path.join(BASE_DIR, "backup")
+DB_BACKUP_KEEP_COUNT = 14
+PG_DUMP_COMMAND = "pg_dump"
+
+LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = False
+LEDGER_DEPOSIT_SESSION_EXPIRATION_TASK_LIMIT = 500
 
 CELERY_BEAT_SCHEDULE = {
     # clear expired sessions, every sunday 1.01am. By default Django has 2week

@@ -107,6 +107,7 @@ WALLET_REQUEST_STATUS_CHOICES = (
     (WALLET_REQUEST_STATUS_COMPLETED, "Completed"),
 )
 SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING = "external_asset_clearing"
+SYSTEM_WALLET_ORPHANS_RECOVERED = "orphans_recovered"
 
 class ImmutableLedgerRow(models.Model):
     class Meta:
@@ -142,10 +143,12 @@ class TokenWallet(models.Model):
     SYSTEM_ISSUANCE = SYSTEM_WALLET_ISSUANCE
     SYSTEM_PLATFORM_FEES = SYSTEM_WALLET_PLATFORM_FEES
     SYSTEM_EXTERNAL_ASSET_CLEARING = SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING
+    SYSTEM_ORPHANS_RECOVERED = SYSTEM_WALLET_ORPHANS_RECOVERED
     SYSTEM_CHOICES = (
         (SYSTEM_ISSUANCE, "Issuance"),
         (SYSTEM_PLATFORM_FEES, "Platform fees"),
         (SYSTEM_EXTERNAL_ASSET_CLEARING, "External asset clearing"),
+        (SYSTEM_ORPHANS_RECOVERED, "Orphans recovered"),
     )
 
     wallet_type = models.CharField(max_length=16, choices=TYPE_CHOICES, default=TYPE_USER, db_index=True)
@@ -367,6 +370,7 @@ class LedgerTransaction(models.Model):
             ("can_create_pending_ledger_transaction", "Can create pending ledger transactions"),
             ("can_reverse_ledger_transaction", "Can reverse ledger transactions"),
             ("can_impersonate_ledger_creator", "Can set created_by to another user"),
+            ("can_book_platform_fee_adjustments", "Can book platform fee adjustments"),
         ]
 
     def __str__(self):
@@ -1251,3 +1255,27 @@ class OrphanDepositRecoveryAudit(models.Model):
 
     def __str__(self):
         return f"OrphanRecovery #{self.id} {self.chain}:{self.deposit_address} {self.status}"
+
+class TreasuryMetric(models.Model):
+    UNIT_PLATFORM_TOKEN = "platform_token"
+    UNIT_STABLE = "stable"
+
+    UNIT_CHOICES = (
+        (UNIT_PLATFORM_TOKEN, "Platform token"),
+        (UNIT_STABLE, "Stable"),
+    )
+
+    metric_key = models.CharField(max_length=64, unique=True)
+    label = models.CharField(max_length=128)
+    amount = models.BigIntegerField(default=0)
+    unit = models.CharField(max_length=32, choices=UNIT_CHOICES, default=UNIT_PLATFORM_TOKEN)
+    display_order = models.PositiveIntegerField(default=100)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("display_order", "metric_key")
+        verbose_name = "Treasury metric"
+        verbose_name_plural = "Treasury metrics"
+
+    def __str__(self):
+        return self.label

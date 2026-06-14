@@ -94,6 +94,16 @@ const PAGES = {
     headLinks: [{ rel: 'preload', href: './static/lib/file-uploader/5.13.0/fine-uploader.min.js', as: 'script' }],
     bodyScripts: [{ src: './static/lib/file-uploader/5.13.0/fine-uploader.min.js' }],
   },
+  'premium-asset-edit': {
+    id: 'premium-asset-edit',
+    title: 'Premium asset edit',
+    renderer: templates.renderPremiumAssetEditPageContent(),
+  },
+  'unlocked-page': {
+    id: 'unlocked-page',
+    title: 'Unlocked media',
+    renderer: templates.renderUnlockedPageContent(),
+  },
   embed: {
     id: 'embed',
     title: 'Embedded player',

@@ -96,6 +96,8 @@ LEDGER_OPERATIONAL_FLAG_LABELS = {
 }
 
 DEFAULT_LEDGER_OPERATIONAL_FLAGS_FILENAME = "ledger_operational_flags.json"
+AD_FREE_LIFETIME_PRODUCT_CODE = "ad_free_lifetime"
+DEFAULT_AD_FREE_LIFETIME_PRICE_TOKENS = 500 * (10 ** 6)
 
 def _compute_next_retry_at() -> timezone.datetime:
     return timezone.now() + timedelta(seconds=LEDGER_OUTBOX_RETRY_DELAY_SECONDS)
@@ -386,6 +388,11 @@ def get_wallet_velocity_amount(*, wallet: TokenWallet, action: str, window_secon
     ).first()
     return int(obj.amount) if obj else 0
 
+def get_orphans_recovered_wallet() -> TokenWallet:
+    return get_system_wallet(
+        TokenWallet.SYSTEM_ORPHANS_RECOVERED,
+        allow_negative=True,
+    )
 
 def enforce_wallet_velocity_limits(*, wallet: TokenWallet, action: str, amount: int):
     if amount <= 0:
@@ -2591,12 +2598,11 @@ def create_deposit_session(
     if wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
         raise PermissionDenied("Cannot create a deposit session for another user's wallet")
 
-    #if expires_at <= timezone.now():
-    #   raise ValidationError("Deposit session expiry must be in the future")
-
     chain = _normalize_chain(chain)
+    asset_code = (asset_code or "").strip().upper()
     token_contract_address = _normalize_evm_address(token_contract_address)
     deposit_address = _normalize_evm_address(deposit_address)
+    min_amount = int(min_amount)
 
     if min_amount <= 0:
         raise ValidationError("Minimum amount must be positive")
@@ -2608,12 +2614,12 @@ def create_deposit_session(
         user=wallet.user,
         wallet=wallet,
         chain=chain,
-        asset_code=(asset_code or "").strip().upper(),
+        asset_code=asset_code,
         token_contract_address=token_contract_address,
         deposit_address=deposit_address,
         address_derivation_ref=(address_derivation_ref or "").strip(),
         status=DepositSession.STATUS_AWAITING_PAYMENT,
-        min_amount=int(min_amount),
+        min_amount=min_amount,
         required_confirmations=int(required_confirmations),
         expires_at=expires_at,
         created_by=actor,
@@ -3428,12 +3434,15 @@ def open_user_deposit_session(
     require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_DEPOSIT_OPEN)
 
     wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
+
     if wallet.wallet_type != TokenWallet.TYPE_USER:
         raise ValidationError("Deposit sessions can only target user wallets")
+
     if wallet.user_id != actor.id:
         raise PermissionDenied("Cannot open a deposit session for another user's wallet")
 
     chain, asset_code, token_contract_address = parse_deposit_option_key(option_key)
+
     template = _get_route_template(
         chain=chain,
         asset_code=asset_code,
@@ -3441,7 +3450,9 @@ def open_user_deposit_session(
     )
 
     token_pack_snapshot = _build_token_pack_snapshot(token_pack=token_pack)
+
     template_min_canonical_amount, template_min_onchain_amount = _deposit_address_min_amounts(template)
+
     expected_canonical_amount = int(token_pack_snapshot["gross_stable_amount"])
     expected_onchain_amount = _convert_canonical_stable_to_route_raw_amount(
         chain=chain,
@@ -3460,6 +3471,7 @@ def open_user_deposit_session(
         token_pack_code=token_pack_snapshot["code"],
         expected_min_amount=expected_canonical_amount,
     )
+
     if existing_session is not None:
         return existing_session
 
@@ -3472,11 +3484,13 @@ def open_user_deposit_session(
     )
 
     expires_at = timezone.now() + timedelta(seconds=int(template.session_ttl_seconds))
+
     route_key = _build_deposit_route_key(
         chain=chain,
         asset_code=asset_code,
         token_contract_address=token_contract_address,
     )
+
     display_label = _build_route_label(
         chain=template.chain,
         asset_code=template.asset_code,
@@ -3503,7 +3517,7 @@ def open_user_deposit_session(
         derivation_path=derivation_path,
         status=DepositSession.STATUS_AWAITING_PAYMENT,
         min_amount=int(expected_canonical_amount),
-        expected_onchain_raw_amount=expected_onchain_amount,
+        expected_onchain_raw_amount=int(expected_onchain_amount),
         required_confirmations=int(template.required_confirmations),
         expires_at=expires_at,
         created_by=actor,
@@ -4659,28 +4673,36 @@ def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> De
         .get(id=deposit_session.id)
     )
 
-    if deposit_session.wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
+    if (
+        deposit_session.wallet.user_id != actor.id
+        and not actor.has_perm("ledger.can_manage_deposit_sessions")
+    ):
         raise PermissionDenied("Cannot cancel another user's deposit session")
 
     terminal_statuses = {
         DepositSession.STATUS_EXPIRED,
         DepositSession.STATUS_FAILED,
-        DEPOSIT_SESSION_STATUS_CANCELED,
+        DepositSession.STATUS_CANCELED,
         getattr(DepositSession, "STATUS_SWEPT", "swept"),
     }
-    if deposit_session.status in terminal_statuses:
-        return deposit_session
 
     if deposit_session.status == DepositSession.STATUS_CREDITED:
         raise ValidationError("Cannot cancel a credited deposit session")
 
-    if deposit_session.observed_txid:
-        raise ValidationError("Cannot cancel a deposit session that already has an observed transaction")
+    if deposit_session.status in terminal_statuses:
+        return deposit_session
 
-    deposit_session.status = DEPOSIT_SESSION_STATUS_CANCELED
+    observed_amount = int(deposit_session.observed_amount or 0)
+    expected_amount = int(deposit_session.min_amount or 0)
+
+    if expected_amount > 0 and observed_amount >= expected_amount:
+        raise ValidationError("Cannot cancel a deposit session that already received the expected amount")
+
+    deposit_session.status = DepositSession.STATUS_CANCELED
     deposit_session.save(update_fields=["status", "updated_at"])
 
     _abandon_open_sweep_jobs_for_session(deposit_session=deposit_session)
+
     return deposit_session
 
 
@@ -4701,10 +4723,22 @@ def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
     )
 
     for session in sessions:
+        observed_amount = int(session.observed_amount or 0)
+        expected_amount = int(session.min_amount or 0)
+
+        if session.status == DepositSession.STATUS_CREDITED:
+            continue
+
+        if expected_amount > 0 and observed_amount >= expected_amount:
+            continue
+
         session.status = DepositSession.STATUS_EXPIRED
         session.save(update_fields=["status", "updated_at"])
+
         _abandon_open_sweep_jobs_for_session(deposit_session=session)
+
         expired_count += 1
+
     return expired_count
 
 @transaction.atomic
@@ -4717,7 +4751,10 @@ def delete_user_deposit_session(*, actor, deposit_session: DepositSession) -> No
         .get(id=deposit_session.id)
     )
 
-    if deposit_session.wallet.user_id != actor.id and not actor.has_perm("ledger.can_manage_deposit_sessions"):
+    if (
+        deposit_session.wallet.user_id != actor.id
+        and not actor.has_perm("ledger.can_manage_deposit_sessions")
+    ):
         raise PermissionDenied("Cannot delete another user's deposit session")
 
     allowed_statuses = {
@@ -4727,7 +4764,313 @@ def delete_user_deposit_session(*, actor, deposit_session: DepositSession) -> No
     if deposit_session.status not in allowed_statuses:
         raise ValidationError("Only pending or canceled deposit sessions can be deleted")
 
-    if deposit_session.observed_txid:
-        raise ValidationError("Cannot delete a deposit session that already observed a transaction")
+    if deposit_session.observed_txid or int(deposit_session.observed_amount or 0) > 0:
+        raise ValidationError("Cannot delete a deposit session that already observed funds")
 
     deposit_session.delete()
+
+@transaction.atomic
+def forfeit_dead_partial_deposit_to_platform_fees(
+    *,
+    actor,
+    deposit_session: DepositSession,
+    reason: str = "",
+) -> LedgerTransaction | None:
+    _require_perm(actor, "ledger.can_book_platform_fee_adjustments")
+
+    deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
+
+    terminal_statuses = {
+        DepositSession.STATUS_EXPIRED,
+        DepositSession.STATUS_CANCELED,
+        DepositSession.STATUS_FAILED,
+    }
+
+    if deposit_session.status not in terminal_statuses:
+        raise ValidationError("Deposit session is not terminal")
+
+    if deposit_session.credited_ledger_txn_id:
+        raise ValidationError("Credited deposit sessions cannot be forfeited")
+
+    observed_amount = int(deposit_session.observed_amount or 0)
+    if observed_amount <= 0:
+        return None
+
+    expected_amount = int(deposit_session.min_amount or 0)
+    if expected_amount > 0 and observed_amount >= expected_amount:
+        raise ValidationError("Deposit session received the expected amount and cannot be forfeited as partial")
+
+    metadata = dict(deposit_session.metadata or {})
+    resolution = metadata.get("partial_deposit_resolution") or {}
+    if resolution.get("status") == "forfeited_to_platform_fees":
+        linked_txn_id = resolution.get("ledger_txn_id")
+        if linked_txn_id:
+            return LedgerTransaction.objects.get(id=linked_txn_id)
+        raise ValidationError("Partial deposit is already marked as forfeited")
+
+    token_amount = _convert_canonical_stable_to_platform_tokens(observed_amount)
+
+    txn = book_platform_fee_from_recovered_funds(
+        actor=actor,
+        amount=token_amount,
+        source="abandoned_partial_deposit",
+        reference=str(deposit_session.public_id),
+        memo=f"Forfeited abandoned partial deposit {deposit_session.public_id}",
+        metadata={
+            "deposit_session_id": deposit_session.id,
+            "deposit_session_public_id": str(deposit_session.public_id),
+            "chain": deposit_session.chain,
+            "asset_code": deposit_session.asset_code,
+            "observed_amount_canonical_stable": observed_amount,
+            "token_amount": token_amount,
+            "reason": (reason or "").strip(),
+        },
+    )
+
+    metadata["partial_deposit_resolution"] = {
+        "status": "forfeited_to_platform_fees",
+        "ledger_txn_id": txn.id,
+        "resolved_at": timezone.now().isoformat(),
+        "resolved_by": getattr(actor, "username", ""),
+        "reason": (reason or "").strip(),
+    }
+    deposit_session.metadata = metadata
+    deposit_session.save(update_fields=["metadata", "updated_at"])
+
+    return txn
+
+
+@transaction.atomic
+def forfeit_dead_partial_deposit_sessions(*, actor, limit: int = 500) -> int:
+    _require_perm(actor, "ledger.can_book_platform_fee_adjustments")
+
+    terminal_statuses = {
+        DepositSession.STATUS_EXPIRED,
+        DepositSession.STATUS_CANCELED,
+        DepositSession.STATUS_FAILED,
+    }
+
+    sessions = (
+        DepositSession.objects.select_for_update(skip_locked=True)
+        .filter(
+            status__in=terminal_statuses,
+            credited_ledger_txn__isnull=True,
+            observed_amount__gt=0,
+        )
+        .order_by("id")[: int(limit)]
+    )
+
+    forfeited_count = 0
+
+    for session in sessions:
+        metadata = dict(session.metadata or {})
+        resolution = metadata.get("partial_deposit_resolution") or {}
+        if resolution.get("status") == "forfeited_to_platform_fees":
+            continue
+
+        observed_amount = int(session.observed_amount or 0)
+        expected_amount = int(session.min_amount or 0)
+
+        if expected_amount > 0 and observed_amount >= expected_amount:
+            continue
+
+        txn = forfeit_dead_partial_deposit_to_platform_fees(
+            actor=actor,
+            deposit_session=session,
+            reason="dead_partial_deposit_batch",
+        )
+        if txn is not None:
+            forfeited_count += 1
+
+    return forfeited_count
+
+def get_ad_free_lifetime_price_tokens() -> int:
+    return _get_int_setting(
+        "AD_FREE_LIFETIME_PRICE_TOKENS",
+        DEFAULT_AD_FREE_LIFETIME_PRICE_TOKENS,
+        minimum=1,
+    )
+
+
+@transaction.atomic
+def purchase_ad_free_lifetime(*, actor) -> dict:
+    actor = _require_authenticated_actor(actor)
+
+    user_model = actor.__class__
+    user = user_model.objects.select_for_update().get(pk=actor.pk)
+
+    if getattr(user, "adFreeUser", False):
+        return {
+            "purchased": False,
+            "already_active": True,
+            "txn": None,
+            "price_tokens": 0,
+        }
+
+    external_id = f"purchase:{AD_FREE_LIFETIME_PRODUCT_CODE}:user:{user.pk}"
+
+    existing_txn = LedgerTransaction.objects.filter(external_id=external_id).first()
+    if existing_txn:
+        user.adFreeUser = True
+        user.save(update_fields=["adFreeUser"])
+        return {
+            "purchased": False,
+            "already_active": True,
+            "txn": existing_txn,
+            "price_tokens": 0,
+        }
+
+    price_tokens = get_ad_free_lifetime_price_tokens()
+
+    wallet, _created = TokenWallet.objects.get_or_create(
+        wallet_type=TokenWallet.TYPE_USER,
+        user=user,
+        defaults={
+            "allow_negative": False,
+        },
+    )
+    wallet = TokenWallet.objects.select_for_update().get(pk=wallet.pk)
+
+    platform_wallet = get_system_wallet(
+        TokenWallet.SYSTEM_PLATFORM_FEES,
+        allow_negative=False,
+    )
+    platform_wallet = TokenWallet.objects.select_for_update().get(pk=platform_wallet.pk)
+
+    _require_wallet_not_blocked(wallet)
+
+    if get_wallet_available_balance(wallet) < price_tokens:
+        raise ValidationError("Insufficient token balance")
+
+    enforce_wallet_velocity_limits(
+        wallet=wallet,
+        action=LEDGER_ACTION_PURCHASE,
+        amount=price_tokens,
+    )
+
+    external_id = f"purchase:{AD_FREE_LIFETIME_PRODUCT_CODE}:user:{user.pk}"
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "external_id": external_id,
+                "product": AD_FREE_LIFETIME_PRODUCT_CODE,
+                "user_id": user.pk,
+                "price_tokens": price_tokens,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    wallet.balance = int(wallet.balance) - price_tokens
+    platform_wallet.balance = int(platform_wallet.balance) + price_tokens
+
+    wallet.save(update_fields=["balance", "updated_at"])
+    platform_wallet.save(update_fields=["balance", "updated_at"])
+
+    txn = LedgerTransaction.objects.create(
+        kind=LEDGER_ACTION_PURCHASE,
+        external_id=external_id,
+        request_hash=request_hash,
+        created_by=user,
+        memo="Ad-free lifetime purchase",
+        metadata={
+            "product": AD_FREE_LIFETIME_PRODUCT_CODE,
+            "price_tokens": price_tokens,
+            "user_id": user.pk,
+        },
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+    LedgerEntry.objects.create(
+        txn=txn,
+        wallet=wallet,
+        delta=-price_tokens,
+        balance_after=wallet.balance,
+    )
+    LedgerEntry.objects.create(
+        txn=txn,
+        wallet=platform_wallet,
+        delta=price_tokens,
+        balance_after=platform_wallet.balance,
+    )
+
+    record_wallet_velocity(
+        wallet=wallet,
+        action=LEDGER_ACTION_PURCHASE,
+        amount=price_tokens,
+    )
+
+    _create_outbox_event(
+        txn=txn,
+        topic="ledger.purchase",
+        payload={
+            "product": AD_FREE_LIFETIME_PRODUCT_CODE,
+            "user_id": user.pk,
+            "price_tokens": price_tokens,
+        },
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+    user.adFreeUser = True
+    user.save(update_fields=["adFreeUser"])
+
+    return {
+        "purchased": True,
+        "already_active": False,
+        "txn": txn,
+        "price_tokens": price_tokens,
+    }
+
+@transaction.atomic
+def book_platform_fee_from_recovered_funds(
+    *,
+    actor,
+    amount: int,
+    source: str,
+    reference: str,
+    memo: str = "",
+    metadata=None,
+) -> LedgerTransaction:
+    _require_perm(actor, "ledger.can_book_platform_fee_adjustments")
+
+    if metadata is None:
+        metadata = {}
+
+    normalized_amount = _normalize_positive_int(amount, field_name="Recovered platform fee amount")
+    normalized_source = (source or "").strip()
+
+    allowed_sources = {
+        "orphan_recovery",
+        "abandoned_partial_deposit",
+        "manual_admin_adjustment",
+    }
+    if normalized_source not in allowed_sources:
+        raise ValidationError("Invalid recovered platform fee source")
+
+    normalized_reference = (reference or "").strip()
+    if not normalized_reference:
+        raise ValidationError("Reference is required")
+
+    platform_fees_wallet = get_system_wallet(
+        TokenWallet.SYSTEM_PLATFORM_FEES,
+        allow_negative=False,
+    )
+    orphans_recovered_wallet = get_orphans_recovered_wallet()
+
+    return apply_ledger_transaction(
+        actor=actor,
+        kind="platform_fee_recovery",
+        entries=[
+            (orphans_recovered_wallet, -normalized_amount),
+            (platform_fees_wallet, normalized_amount),
+        ],
+        created_by=actor,
+        external_id=f"platform-fee-recovery:{normalized_source}:{normalized_reference}",
+        memo=memo or f"Recovered platform funds from {normalized_source}",
+        metadata={
+            **metadata,
+            "source": normalized_source,
+            "reference": normalized_reference,
+            "amount": normalized_amount,
+        },
+    )

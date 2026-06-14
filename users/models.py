@@ -32,6 +32,7 @@ class User(AbstractUser):
 
     title = models.CharField("Title", max_length=250, blank=True)
     advancedUser = models.BooleanField("advanced user", default=False, db_index=True)
+    adFreeUser = models.BooleanField("ad-free user", default=False, db_index=True)
     media_count = models.IntegerField(default=0)  # save number of videos
     notification_on_comments = models.BooleanField(
         "Whether you will receive email notifications for comments added to your content",

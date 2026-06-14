@@ -11,11 +11,20 @@ function headerPopupPages(user, popupNavItems, hasHeaderThemeSwitcher) {
     main: null,
   };
   const walletUrl = '/wallet';
+  const unlockedUrl = '/unlocked';
+
   const walletItem = {
     itemType: 'link',
     text: translateString('My tokens'),
     link: walletUrl,
     icon: 'account_balance_wallet',
+  };
+
+  const unlockedItem = {
+    itemType: 'link',
+    text: translateString('Unlocked media'),
+    link: unlockedUrl,
+    icon: 'lock_open',
   };
   if (user.is.anonymous) {
     pages.main = (
@@ -39,13 +48,19 @@ function headerPopupPages(user, popupNavItems, hasHeaderThemeSwitcher) {
     }
     const top = Array.isArray(popupNavItems?.top) ? popupNavItems.top : [];
     const middle = Array.isArray(popupNavItems?.middle) ? popupNavItems.middle : [];
-    const bottom = Array.isArray(popupNavItems?.bottom) ? popupNavItems.bottom : []
-    const middleWithWallet = middle.some((i) => i && i.link === walletUrl) ? middle : [walletItem, ...middle];
+    const bottom = Array.isArray(popupNavItems?.bottom) ? popupNavItems.bottom : [];
 
-    insertNavMenus('top', top);
+    const topWithUnlocked = top.some((i) => i && i.link === unlockedUrl)
+      ? top
+      : [unlockedItem, ...top];
+
+    const middleWithWallet = middle.some((i) => i && i.link === walletUrl)
+      ? middle
+      : [walletItem, ...middle];
+
+    insertNavMenus('top', topWithUnlocked);
     insertNavMenus('middle', middleWithWallet);
     insertNavMenus('bottom', bottom);
-
     pages.main = (
       <div>
         <PopupTop>

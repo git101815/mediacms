@@ -1,10 +1,15 @@
 from django.conf import settings
 from rest_framework import serializers
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
-
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .methods import is_mediacms_editor
 from .models import Category, Celebrity, CelebrityGroup, Comment, EncodeProfile, Media, Playlist, Tag
-
+from premium.services import (
+    build_premium_media_state,
+    build_premium_playback_payload,
+    user_can_access_premium_media,
+    user_can_manage_premium_media,
+)
 # TODO: put them in a more DRY way
 
 def _dfans_with_ref(raw_url: str, ref_code: str):
@@ -25,6 +30,7 @@ class MediaSerializer(serializers.ModelSerializer):
     author_thumbnail = serializers.SerializerMethodField()
     author_dfans_url = serializers.SerializerMethodField()
     description = serializers.SerializerMethodField()
+    premium = serializers.SerializerMethodField()
 
     def get_url(self, obj):
         return self.context["request"].build_absolute_uri(obj.get_absolute_url())
@@ -61,6 +67,11 @@ class MediaSerializer(serializers.ModelSerializer):
         if gd.strip():
             return gd
         return obj.description or ""
+
+    def get_premium(self, obj):
+        request = self.context.get("request")
+        user = request.user if request is not None else None
+        return build_premium_media_state(user=user, media=obj, request=request)
 
     class Meta:
         model = Media
@@ -99,6 +110,7 @@ class MediaSerializer(serializers.ModelSerializer):
             "author_profile",
             "author_thumbnail",
             "author_dfans_url",
+            "premium",
             "encoding_status",
             "views",
             "likes",
@@ -132,6 +144,10 @@ class SingleMediaSerializer(serializers.ModelSerializer):
     url = serializers.SerializerMethodField()
     author_dfans_url = serializers.SerializerMethodField()
     description = serializers.SerializerMethodField()
+    premium = serializers.SerializerMethodField()
+    encodings_info = serializers.SerializerMethodField()
+    hls_info = serializers.SerializerMethodField()
+    viewer_permissions = serializers.SerializerMethodField()
 
     def get_url(self, obj):
         return self.context["request"].build_absolute_uri(obj.get_absolute_url())
@@ -153,6 +169,73 @@ class SingleMediaSerializer(serializers.ModelSerializer):
         if gd.strip():
             return gd
         return obj.description or ""
+
+    def get_premium(self, obj):
+        request = self.context.get("request")
+        user = request.user if request is not None else None
+        return build_premium_media_state(user=user, media=obj, request=request)
+
+    def _use_premium_playback(self, obj):
+        request = self.context.get("request")
+        if request is None:
+            return False
+
+        if request.GET.get("playback") != "premium":
+            return False
+
+        user = request.user
+        return user_can_access_premium_media(user=user, media=obj)
+
+    def _get_premium_playback_payload(self, obj):
+        cache_key = f"_premium_payload_{obj.pk}"
+        if hasattr(self, cache_key):
+            return getattr(self, cache_key)
+
+        request = self.context.get("request")
+        payload = build_premium_playback_payload(
+            user=request.user,
+            media=obj,
+            request=request,
+        )
+        setattr(self, cache_key, payload)
+        return payload
+
+    def get_encodings_info(self, obj):
+        if not self._use_premium_playback(obj):
+            return obj.encodings_info
+
+        try:
+            return self._get_premium_playback_payload(obj)["encodings_info"]
+        except DjangoValidationError:
+            return obj.encodings_info
+
+    def get_hls_info(self, obj):
+        if not self._use_premium_playback(obj):
+            return obj.hls_info
+
+        try:
+            return self._get_premium_playback_payload(obj)["hls_info"]
+        except DjangoValidationError:
+            return obj.hls_info
+
+    def get_viewer_permissions(self, obj):
+        request = self.context.get("request")
+        user = request.user if request is not None else None
+
+        can_manage = user_can_manage_premium_media(user=user, media=obj)
+        can_staff_manage = bool(
+            getattr(user, "is_authenticated", False)
+            and is_mediacms_editor(user)
+        )
+
+        can_edit = bool(can_manage or can_staff_manage)
+
+        return {
+            "can_edit_media": can_edit,
+            "can_delete_media": can_edit,
+            "can_edit_subtitle": can_edit and obj.media_type == "video",
+            "can_manage_premium": can_manage,
+        }
 
     class Meta:
         model = Media
@@ -187,6 +270,7 @@ class SingleMediaSerializer(serializers.ModelSerializer):
             "poster_url",
             "thumbnail_time",
             "url",
+            "premium",
             "sprites_url",
             "preview_url",
             "author_name",
@@ -207,6 +291,7 @@ class SingleMediaSerializer(serializers.ModelSerializer):
             "categories_info",
             "is_reviewed",
             "edit_url",
+            "viewer_permissions",
             "tags_info",
             "hls_info",
             "license",

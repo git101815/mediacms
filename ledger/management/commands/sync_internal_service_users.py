@@ -16,6 +16,8 @@ SERVICE_USER_SPECS = [
             "ledger.can_view_deposit_sessions",
             "ledger.can_view_onchain_transfers",
             "ledger.can_manage_deposit_addresses",
+            "ledger.can_manage_deposit_sessions",
+            "ledger.can_book_platform_fee_adjustments",
         ],
     },
     {

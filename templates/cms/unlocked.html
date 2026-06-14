@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% load static %}
+{% block headtitle %}Videos unlocked - {{ PORTAL_NAME }}{% endblock headtitle %}
+
+{% block topimports %}
+<link href="{% static "css/unlocked-page.css" %}" rel="preload" as="style">
+<link href="{% static "css/unlocked-page.css" %}" rel="stylesheet">
+{% endblock topimports %}
+
+{% block innercontent %}
+<div class="unlocked-page">
+  <div class="unlocked-page__header">
+    <div>
+      <div class="unlocked-page__eyebrow">Library</div>
+      <h1>Videos unlocked</h1>
+      <p class="unlocked-page__subtitle">
+        Videos bought with tokens, unlocked through subscriptions, or published by you appear here.
+      </p>
+    </div>
+  </div>
+
+{% if items %}
+  <div class="unlocked-grid">
+    {% for item in items %}
+      <a class="unlocked-card" href="{{ item.watch_url }}">
+        <div class="unlocked-card__thumb">
+          {% if item.media.thumbnail_url %}
+            <img src="{{ item.media.thumbnail_url }}" alt="">
+          {% endif %}
+        </div>
+        <div class="unlocked-card__body">
+          <h2 class="unlocked-card__title">{{ item.media.title }}</h2>
+          <div class="unlocked-card__meta">
+            {{ item.media.user.username }} · {{ item.source_type }} · {{ item.unlocked_at|date:"M d, Y" }}
+          </div>
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="unlocked-empty">
+    <h2>No unlocked videos yet</h2>
+    <p>Your purchased videos, subscription unlocks, and creator premium videos will appear here.</p>
+  </div>
+{% endif %}
+</div>
+{% endblock %}

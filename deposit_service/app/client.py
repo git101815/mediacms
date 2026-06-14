@@ -51,7 +51,15 @@ class MediaCMSInternalClient:
 
         )
 
-        self._client = httpx.Client(timeout=timeout)
+        self._client = httpx.Client(
+            timeout=httpx.Timeout(
+                timeout,
+                connect=min(timeout, 10.0),
+                read=timeout,
+                write=timeout,
+                pool=timeout,
+            )
+        )
 
 
     def close(self) -> None:

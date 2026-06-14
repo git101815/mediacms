@@ -61,6 +61,31 @@
                 <i class="material-icons" aria-hidden="true">add_circle</i>
                 <span>Buy tokens</span>
               </button>
+
+              {% if ad_free.active %}
+              <button
+                type="button"
+                class="wallet-btn wallet-btn--secondary"
+                disabled
+              >
+                <i class="material-icons" aria-hidden="true">block</i>
+                <span>Ads removed forever</span>
+              </button>
+              {% else %}
+              <form method="post" action="{{ ad_free.purchase_url }}" style="display:inline">
+                {% csrf_token %}
+                <button
+                  type="submit"
+                  class="wallet-btn wallet-btn--secondary"
+                  {% if not ad_free.can_purchase %}disabled{% endif %}
+                  onclick="return confirm('Remove ads forever for {{ ad_free.price_display }} tokens?');"
+                >
+                  <i class="material-icons" aria-hidden="true">block</i>
+                  <span>Remove ads forever · {{ ad_free.price_display }} tokens</span>
+                </button>
+              </form>
+              {% endif %}
+
                 {% if wallet_actions.show_withdraw %}
                 <button
                   type="button"
