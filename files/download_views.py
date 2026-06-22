@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import hmac
 import time
 from urllib.parse import unquote, urlsplit
 
