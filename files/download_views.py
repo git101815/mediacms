@@ -2,7 +2,7 @@ import base64
 import hashlib
 import hmac
 import time
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -164,7 +164,7 @@ def build_bunny_download_url(source_url):
 
     raw_path = urlsplit(source_url).path
     url_path = iri_to_uri(raw_path)
-    signature_path = unquote(url_path)
+    signature_path = url_path
 
     if not url_path.startswith("/mediafiles/"):
         raise ImproperlyConfigured("Only /mediafiles/ downloads can be signed")
