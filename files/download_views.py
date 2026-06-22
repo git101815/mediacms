@@ -169,10 +169,14 @@ def build_bunny_download_url(source_url):
         raise ImproperlyConfigured("Only /mediafiles/ downloads can be signed")
 
     expires = int(time.time()) + ttl_seconds
-    hash_base = f"{token_key}{signature_path}{expires}"
+    hash_base = f"{signature_path}{expires}"
 
-    token = base64.b64encode(hashlib.sha256(hash_base.encode("utf-8")).digest())
-    token = token.decode("utf-8").replace("\n", "")
+    token = hmac.new(
+        token_key.encode("utf-8"),
+        hash_base.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    token = "HS256-" + base64.b64encode(token).decode("utf-8").replace("\n", "")
     token = token.replace("+", "-").replace("/", "_").replace("=", "")
 
     return f"{base_url}{url_path}?token={token}&expires={expires}"
