@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block headtitle %}Download video - {{ PORTAL_NAME }}{% endblock headtitle %}
+
+{% block headermeta %}
+<meta name="robots" content="noindex,nofollow,noarchive">
+{% endblock headermeta %}
+
+{% block innercontent %}
+<div class="custom-page-wrapper">
+  <h2>Download video</h2>
+
+  <p>
+    <a href="{{ media.get_absolute_url }}">Back to video</a>
+  </p>
+
+  {% if download_options %}
+    {% for option in download_options %}
+      <form
+        method="post"
+        action="{% url 'media_download_start' friendly_token=media.friendly_token download_id=option.id %}"
+        target="_blank"
+      >
+        {% csrf_token %}
+        <p>
+          <button type="submit">
+            {{ option.label }}{% if option.size %} ({{ option.size }}){% endif %}
+          </button>
+        </p>
+      </form>
+    {% endfor %}
+  {% else %}
+    <p>No downloadable file is available for this video.</p>
+  {% endif %}
+</div>
+{% endblock %}
