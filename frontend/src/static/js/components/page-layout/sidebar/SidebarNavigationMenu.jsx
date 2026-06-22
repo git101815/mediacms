@@ -210,15 +210,16 @@ export function SidebarNavigationMenu() {
       text: translateString("About"),
       className: 'nav-item-about',
     });
-/*
     items.push({
-      link: 'https://theporndude.com/',
-      icon: 'verified',
-      text: translateString("Reviewed on PornDude"),
-      className: 'nav-item-reviewed',
-      linkAttr: { rel: 'nofollow noopener noreferrer', target: '_blank' },
+      link: 'https://forum.celebfakes.ru',
+      icon: 'forum',
+      text: translateString('Forum'),
+      className: 'nav-item-forum',
+      linkAttr: {
+        rel: 'noopener noreferrer',
+        target: '_blank',
+      },
     });
-*/
     items.push({
       link: '/partnership',
       icon: 'verified',

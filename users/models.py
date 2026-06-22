@@ -43,7 +43,7 @@ class User(AbstractUser):
     is_manager = models.BooleanField("MediaCMS Manager", default=False, db_index=True)
     allow_contact = models.BooleanField("Whether allow contact will be shown on profile page", default=False)
 
-    dfans_url = models.URLField("Dfans URL", blank=True, default="https://dfans.co/")
+    dfans_url = models.URLField("Dfans URL", blank=True, default="")
 
     class Meta:
         ordering = ["-date_added", "name"]

@@ -108,6 +108,12 @@ class MediaPageStore extends EventEmitter {
     }
 
     this.mediaAPIUrl = this.mediacms_config.api.media + '/' + MediaPageStoreData[this.id].mediaId;
+    try {
+      const pageUrl = new URL(window.location.href);
+      if (pageUrl.searchParams.get('playback') === 'premium') {
+        this.mediaAPIUrl += '?playback=premium';
+      }
+    } catch {}
     this.dataResponse = this.dataResponse.bind(this);
     this.dataErrorResponse = this.dataErrorResponse.bind(this);
     getRequest(this.mediaAPIUrl, !1, this.dataResponse, this.dataErrorResponse);

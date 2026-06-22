@@ -96,7 +96,7 @@
                     <div class="media-upload-item-details">
                       <div class="media-upload-item-name">
                         <span class="media-upload-item-filename qq-upload-file-selector"></span>
-                        <input class="media-upload-item-filename-input qq-edit-filename-selector" tab-index="0" type="text" />
+                        <input class="media-upload-item-filename-input qq-edit-filename-selector" tab-index="0" type="text">
                       </div>
 
                       <div class="media-upload-item-details-bottom">
@@ -221,6 +221,12 @@
 {% block bottomimports %}
 <script>
 document.addEventListener("DOMContentLoaded", function () {
+  var uploadEndpoint = "{{ premium_upload_url|escapejs }}";
+  var uploadSuccess = document.querySelector(".premium-upload-success");
+  var uploadError = document.querySelector(".premium-upload-error");
+  var uploadInfo = document.querySelector(".premium-upload-info");
+  var pollingTimers = {};
+
   function getCSRFToken() {
     var i;
     var cookies;
@@ -231,11 +237,14 @@ document.addEventListener("DOMContentLoaded", function () {
       cookies = document.cookie.split(";");
 
       i = 0;
+
       while (i < cookies.length) {
         cookie = cookies[i].trim();
 
         if ("csrftoken=" === cookie.substring(0, 10)) {
-          cookieVal = decodeURIComponent(cookie.substring(10));
+          cookieVal = decodeURIComponent(
+            cookie.substring(10)
+          );
           break;
         }
 
@@ -245,10 +254,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
     return cookieVal;
   }
-
-  var uploadSuccess = document.querySelector(".premium-upload-success");
-  var uploadError = document.querySelector(".premium-upload-error");
-  var uploadInfo = document.querySelector(".premium-upload-info");
 
   function hideUploadMessages() {
     if (uploadSuccess) {
@@ -262,14 +267,183 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (uploadInfo) {
       uploadInfo.style.display = "none";
+      uploadInfo.textContent = (
+        "Finalizing premium upload. " +
+        "The server is moving the file to private storage."
+      );
     }
+  }
+
+  function showUploadProcessing(message) {
+    if (uploadSuccess) {
+      uploadSuccess.style.display = "none";
+    }
+
+    if (uploadError) {
+      uploadError.style.display = "none";
+      uploadError.textContent = "";
+    }
+
+    if (uploadInfo) {
+      uploadInfo.textContent = (
+        message ||
+        "Finalizing premium upload. " +
+        "The server is moving the file to private storage."
+      );
+      uploadInfo.style.display = "block";
+    }
+  }
+
+  function showUploadSuccess() {
+    if (uploadInfo) {
+      uploadInfo.style.display = "none";
+    }
+
+    if (uploadError) {
+      uploadError.style.display = "none";
+      uploadError.textContent = "";
+    }
+
+    if (uploadSuccess) {
+      uploadSuccess.style.display = "block";
+    }
+  }
+
+  function showUploadError(message) {
+    if (uploadInfo) {
+      uploadInfo.style.display = "none";
+    }
+
+    if (uploadSuccess) {
+      uploadSuccess.style.display = "none";
+    }
+
+    if (uploadError) {
+      uploadError.textContent = (
+        message ||
+        "Premium upload failed."
+      );
+      uploadError.style.display = "block";
+    }
+  }
+
+  function getUploadStatusUrl(uploadUuid) {
+    return (
+      uploadEndpoint +
+      encodeURIComponent(uploadUuid) +
+      "/status/"
+    );
+  }
+
+  function clearUploadPolling(uploadUuid) {
+    if (!pollingTimers[uploadUuid]) {
+      return;
+    }
+
+    window.clearTimeout(
+      pollingTimers[uploadUuid]
+    );
+    delete pollingTimers[uploadUuid];
+  }
+
+  function scheduleUploadStatusPoll(
+    uploadUuid,
+    attempt
+  ) {
+    clearUploadPolling(uploadUuid);
+
+    pollingTimers[uploadUuid] = window.setTimeout(
+      function () {
+        pollUploadStatus(
+          uploadUuid,
+          attempt
+        );
+      },
+      2000
+    );
+  }
+
+  function pollUploadStatus(
+    uploadUuid,
+    attempt
+  ) {
+    var maxAttempts = 1800;
+
+    if (attempt >= maxAttempts) {
+      clearUploadPolling(uploadUuid);
+      showUploadError(
+        "Premium upload finalization is taking too long. Reload the page to check its status."
+      );
+      return;
+    }
+
+    fetch(
+      getUploadStatusUrl(uploadUuid),
+      {
+        method: "GET",
+        credentials: "same-origin",
+        headers: {
+          "Accept": "application/json",
+        },
+      }
+    )
+      .then(function (response) {
+        return response
+          .json()
+          .then(function (payload) {
+            return {
+              response: response,
+              payload: payload,
+            };
+          });
+      })
+      .then(function (result) {
+        var payload = result.payload || {};
+
+        if (
+          payload.state === "success" &&
+          payload.success &&
+          payload.premium_asset
+        ) {
+          clearUploadPolling(uploadUuid);
+          showUploadSuccess();
+          return;
+        }
+
+        if (
+          payload.state === "error" ||
+          payload.success === false
+        ) {
+          clearUploadPolling(uploadUuid);
+          showUploadError(
+            payload.error ||
+            "Premium upload failed."
+          );
+          return;
+        }
+
+        showUploadProcessing(
+          payload.message
+        );
+
+        scheduleUploadStatusPoll(
+          uploadUuid,
+          attempt + 1
+        );
+      })
+      .catch(function () {
+        scheduleUploadStatusPoll(
+          uploadUuid,
+          attempt + 1
+        );
+      });
   }
 
   new qq.FineUploader({
     debug: false,
     element: document.querySelector(".premium-uploader"),
     request: {
-      endpoint: "{{ premium_upload_url }}",
+      endpoint: uploadEndpoint,
       customHeaders: {
         "X-CSRFToken": getCSRFToken(),
       },
@@ -289,48 +463,63 @@ document.addEventListener("DOMContentLoaded", function () {
         enabled: true,
       },
       success: {
-        endpoint: "{{ premium_upload_url }}?done",
+        endpoint: uploadEndpoint + "?done",
       },
     },
     callbacks: {
       onSubmitted: function () {
         hideUploadMessages();
       },
-      onComplete: function (id, name, response) {
-        if (response.success && response.premium_asset) {
-          if (uploadInfo) {
-            uploadInfo.style.display = "none";
-          }
+      onComplete: function (
+        id,
+        name,
+        response
+      ) {
+        if (
+          response.success &&
+          response.premium_asset
+        ) {
+          showUploadSuccess();
+          return;
+        }
 
-          if (uploadSuccess) {
-            uploadSuccess.style.display = "block";
-          }
+        if (
+          response.success &&
+          response.processing &&
+          response.upload_uuid
+        ) {
+          showUploadProcessing(
+            response.message
+          );
 
+          pollUploadStatus(
+            response.upload_uuid,
+            0
+          );
           return;
         }
 
         if (response.success) {
-          if (uploadInfo) {
-            uploadInfo.style.display = "block";
-          }
-
+          showUploadProcessing(
+            response.message
+          );
           return;
         }
 
-        if (uploadError) {
-          uploadError.style.display = "block";
-          uploadError.textContent = response.error || "Premium upload failed.";
-        }
+        showUploadError(
+          response.error ||
+          "Premium upload failed."
+        );
       },
-      onError: function (id, name, errorReason) {
-        if (uploadInfo) {
-          uploadInfo.style.display = "none";
-        }
-
-        if (uploadError) {
-          uploadError.style.display = "block";
-          uploadError.textContent = errorReason || "Premium upload failed.";
-        }
+      onError: function (
+        id,
+        name,
+        errorReason
+      ) {
+        showUploadError(
+          errorReason ||
+          "Premium upload failed."
+        );
       },
     },
   });

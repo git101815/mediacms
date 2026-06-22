@@ -83,6 +83,11 @@ services:
       PREMIUM_S3_UPLOAD_PREFIX: ${PREMIUM_S3_UPLOAD_PREFIX}
       PREMIUM_SIGNED_URL_TTL_SECONDS: ${PREMIUM_SIGNED_URL_TTL_SECONDS}
       PREMIUM_MAX_UPLOAD_SIZE_BYTES: ${PREMIUM_MAX_UPLOAD_SIZE_BYTES}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: mediacms
+      POSTGRES_USER: mediacms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mediacms}
     ports:
       - "80:80"
     volumes:
@@ -274,7 +279,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: mediacms
-      POSTGRES_PASSWORD: mediacms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: mediacms
       TZ: Europe/London
     healthcheck:
