@@ -1,11 +1,24 @@
-version: "3"
+x-mediacms-app: &mediacms_app
+  image: mediacms-local:latest
+  build:
+    context: .
+    dockerfile: ./Dockerfile
+
+x-mediacms-db-env: &mediacms_db_env
+  POSTGRES_HOST: db
+  POSTGRES_USER: mediacms
+  POSTGRES_DB: mediacms
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 
 services:
   migrations:
-    image: mediacms/mediacms:latest
+    <<: *mediacms_app
+    mem_limit: 3g
+    mem_reservation: 512m
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
+      <<: *mediacms_db_env
       ENABLE_UWSGI: "no"
       ENABLE_NGINX: "no"
       ENABLE_CELERY_SHORT: "no"
@@ -30,12 +43,15 @@ services:
         condition: service_healthy
 
   web:
-    image: mediacms/mediacms:latest
+    <<: *mediacms_app
+    mem_limit: 4g
+    mem_reservation: 2g
     deploy:
       replicas: 1
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
+      <<: *mediacms_db_env
       ENABLE_CELERY_BEAT: "no"
       ENABLE_CELERY_SHORT: "no"
       ENABLE_CELERY_LONG: "no"
@@ -86,6 +102,8 @@ services:
     build:
       context: .
       dockerfile: ./deposit_service/Dockerfile
+    mem_limit: 512m
+    mem_reservation: 128m
     environment:
       MEDIACMS_INTERNAL_BASE_URL: http://web
       MEDIACMS_INTERNAL_SERVICE: deposit-service
@@ -143,6 +161,8 @@ services:
     build:
       context: .
       dockerfile: ./sweeper_service/Dockerfile
+    mem_limit: 768m
+    mem_reservation: 256m
     environment:
       MEDIACMS_INTERNAL_BASE_URL: http://web
       MEDIACMS_INTERNAL_SERVICE: sweeper-service
@@ -209,10 +229,13 @@ services:
     restart: unless-stopped
 
   celery_beat:
-    image: mediacms/mediacms:latest
+    <<: *mediacms_app
+    mem_limit: 512m
+    mem_reservation: 128m
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
+      <<: *mediacms_db_env
       ENABLE_UWSGI: "no"
       ENABLE_NGINX: "no"
       ENABLE_CELERY_SHORT: "no"
@@ -232,12 +255,15 @@ services:
     restart: unless-stopped
 
   celery_worker:
-    image: mediacms/mediacms:latest
+    <<: *mediacms_app
+    mem_limit: 14g
+    mem_reservation: 6g
     deploy:
       replicas: 1
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
+      <<: *mediacms_db_env
       ENABLE_UWSGI: "no"
       ENABLE_NGINX: "no"
       ENABLE_CELERY_BEAT: "no"
@@ -245,6 +271,17 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME:-mediafiles}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD}
+      PREMIUM_S3_BUCKET: ${PREMIUM_S3_BUCKET}
+      PREMIUM_S3_ENDPOINT_URL: ${PREMIUM_S3_ENDPOINT_URL}
+      PREMIUM_S3_REGION_NAME: ${PREMIUM_S3_REGION_NAME}
+      PREMIUM_S3_ADDRESSING_STYLE: ${PREMIUM_S3_ADDRESSING_STYLE}
+      PREMIUM_S3_SIGNATURE_VERSION: ${PREMIUM_S3_SIGNATURE_VERSION}
+      PREMIUM_S3_ACCESS_KEY_ID: ${PREMIUM_S3_ACCESS_KEY_ID}
+      PREMIUM_S3_SECRET_ACCESS_KEY: ${PREMIUM_S3_SECRET_ACCESS_KEY}
+      PREMIUM_S3_UPLOAD_PREFIX: ${PREMIUM_S3_UPLOAD_PREFIX}
+      PREMIUM_SIGNED_URL_TTL_SECONDS: ${PREMIUM_SIGNED_URL_TTL_SECONDS}
+      PREMIUM_MAX_UPLOAD_SIZE_BYTES: ${PREMIUM_MAX_UPLOAD_SIZE_BYTES}
     depends_on:
       redis:
         condition: service_healthy
@@ -258,6 +295,8 @@ services:
 
   db:
     image: postgres:17.2-alpine
+    mem_limit: 4g
+    mem_reservation: 1g
     volumes:
       - ../postgres_data:/var/lib/postgresql/data/
     restart: always
@@ -274,6 +313,8 @@ services:
 
   redis:
     image: redis:alpine
+    mem_limit: 512m
+    mem_reservation: 128m
     restart: always
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -283,6 +324,8 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
+    mem_limit: 256m
+    mem_reservation: 64m
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
     restart: unless-stopped
     environment:

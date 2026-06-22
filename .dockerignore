@@ -1,5 +1,32 @@
+```dockerignore
 node_modules
 npm-debug.log
+
+# Python/cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Git/CI/editor metadata
+.git/
+.github/
+.vscode/
+.idea/
+
+# Local env/secrets must not enter the image
+.env
+*.env
+mediacms-secrets/
+../mediacms-secrets/
+
+# Runtime media/data
 media_files/
 media/
 mediafiles/
@@ -8,4 +35,28 @@ encoded/
 original/
 uploads/
 chunks/
+
+# Logs/runtime state
 logs/
+*.log
+celerybeat-schedule
+celerybeat-schedule-shm
+celerybeat-schedule-wal
+
+# Backups and database data
+backup/
+*.tar
+*.tar.gz
+*.tgz
+*.dump
+*.dump.gz
+*.backup
+postgres_data/
+../postgres_data/
+
+# Build/generated frontend deps
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+static_collected/
+```
