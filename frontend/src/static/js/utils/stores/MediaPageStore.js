@@ -454,12 +454,6 @@ class MediaPageStore extends EventEmitter {
             ? MediaPageStoreData[this.id].data.url
             : 'N/A';
         break;
-      case 'media-public-url':
-        r =
-          void 0 !== MediaPageStoreData[this.id].data && void 0 !== MediaPageStoreData[this.id].data.public_media_url
-            ? MediaPageStoreData[this.id].data.public_media_url
-            : null;
-        break;
       case 'media-edit-subtitle-url':
         r =
           void 0 !== MediaPageStoreData[this.id].data &&
