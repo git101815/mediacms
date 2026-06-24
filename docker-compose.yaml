@@ -1,8 +1,11 @@
 version: "3"
 
 x-mediacms-app: &mediacms_app
-  build: .
   image: mediacms-local:dev
+  pull_policy: never
+  build:
+    context: .
+    dockerfile: ./Dockerfile
 
 
 x-mediacms-db-env: &mediacms_db_env

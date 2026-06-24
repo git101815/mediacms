@@ -1,10 +1,11 @@
 x-mediacms-app: &mediacms_app
+  image: mediacms-local:dev
+  pull_policy: never
   build:
     context: .
     dockerfile: ./Dockerfile
     args:
       - DEVELOPMENT_MODE=True
-  image: mediacms-local:dev
 
 x-mediacms-db-env: &mediacms_db_env
   POSTGRES_HOST: db
