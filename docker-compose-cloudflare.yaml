@@ -1,5 +1,5 @@
 x-mediacms-app: &mediacms_app
-  image: mediacms-local:production
+  image: mediacms-local:prod
   build:
     context: .
     dockerfile: ./Dockerfile
