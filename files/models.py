@@ -895,6 +895,7 @@ class Media(models.Model):
                     "thumbnail_url": item.thumbnail_url,
                     "title": item.title,
                     "original_media_url": item.original_media_url,
+                    "public_media_url": item.public_media_url,
                 }
                 for item in qs
             ]
@@ -906,6 +907,7 @@ class Media(models.Model):
                     "thumbnail_url": self.thumbnail_url,
                     "title": self.title,
                     "original_media_url": self.original_media_url,
+                    "public_media_url": self.public_media_url,
                 },
             )
         return items
