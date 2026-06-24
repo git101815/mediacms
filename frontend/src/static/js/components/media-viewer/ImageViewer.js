@@ -30,7 +30,7 @@ export default function ImageViewer() {
     let imgUrl =
       media_data.poster_url?.trim() ||
       media_data.thumbnail_url?.trim() ||
-      MediaPageStore.get('media-original-url')?.trim() ||
+      MediaPageStore.get('media-public-url')?.trim() ||
       '#';
 
     return site.url + '/' + imgUrl.replace(/^\//g, '');
