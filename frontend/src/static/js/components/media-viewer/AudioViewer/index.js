@@ -23,7 +23,7 @@ export default class AudioViewer extends React.PureComponent {
 
     this.audioStartedPlaying = false;
 
-    let audioURL = formatInnerLink(mediaData.original_media_url, SiteContext._currentValue.url);
+    let audioURL = formatInnerLink(mediaData.public_media_url, SiteContext._currentValue.url);
 
     this.videoSources = [{ src: audioURL, type: extractAudioFileFormat(audioURL) }];
 

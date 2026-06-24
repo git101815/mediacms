@@ -4,33 +4,121 @@
 
 {% block headermeta %}
 <meta name="robots" content="noindex,nofollow,noarchive">
+<style>
+.download-page {
+  width: min(100%, 1240px);
+  margin: 0 auto;
+  padding: 48px 24px 96px;
+}
+
+.download-page__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 22px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #f5f5f5;
+}
+
+.download-page__panel {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 36px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.download-page__options {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.download-page__form {
+  margin: 0;
+}
+
+.download-page__button {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 9px;
+  padding: 0 18px;
+  background: #242424;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+}
+
+.download-page__button:hover,
+.download-page__button:focus {
+  background: #303030;
+}
+
+.download-page__empty {
+  margin: 0;
+  color: #aaa;
+  font-size: 16px;
+}
+
+.download-page__back {
+  display: inline-block;
+  margin-top: 18px;
+  color: #ff9800;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.download-page__back:hover,
+.download-page__back:focus {
+  text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  .download-page {
+    padding: 28px 14px 64px;
+  }
+
+  .download-page__panel {
+    padding: 22px 14px;
+  }
+
+  .download-page__button {
+    min-height: 46px;
+    font-size: 16px;
+  }
+}
+</style>
 {% endblock headermeta %}
 
 {% block innercontent %}
-<div class="custom-page-wrapper">
-  <h2>Download video</h2>
+<div class="download-page">
+<h2 class="download-page__title">Download video</h2>
 
-  <p>
-    <a href="{{ media.get_absolute_url }}">Back to video</a>
-  </p>
+  <div class="download-page__panel">
+    {% if download_options %}
+      <div class="download-page__options">
+        {% for option in download_options %}
+          <form
+            class="download-page__form"
+            method="post"
+            action="{% url 'media_download_start' friendly_token=media.friendly_token download_id=option.id %}"
+            target="_blank"
+          >
+            {% csrf_token %}
+            <button class="download-page__button" type="submit">
+              {{ option.label }}{% if option.size %} ({{ option.size }}){% endif %}
+            </button>
+          </form>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="download-page__empty">No downloadable file is available for this video.</p>
+    {% endif %}
+  </div>
 
-  {% if download_options %}
-    {% for option in download_options %}
-      <form
-        method="post"
-        action="{% url 'media_download_start' friendly_token=media.friendly_token download_id=option.id %}"
-        target="_blank"
-      >
-        {% csrf_token %}
-        <p>
-          <button type="submit">
-            {{ option.label }}{% if option.size %} ({{ option.size }}){% endif %}
-          </button>
-        </p>
-      </form>
-    {% endfor %}
-  {% else %}
-    <p>No downloadable file is available for this video.</p>
-  {% endif %}
+  <a class="download-page__back" href="{{ media.get_absolute_url }}">Back to video</a>
 </div>
 {% endblock %}
