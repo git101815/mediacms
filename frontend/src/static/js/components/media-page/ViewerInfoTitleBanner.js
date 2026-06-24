@@ -51,11 +51,10 @@ export default class ViewerInfoTitleBanner extends React.PureComponent {
 
     this.downloadLink =
       'video' !== MediaPageStore.get('media-type')
-        ? formatInnerLink(MediaPageStore.get('media-original-url'), SiteContext._currentValue.url)
+        ? formatInnerLink(MediaPageStore.get('media-data').public_media_url, SiteContext._currentValue.url)
         : null;
-
-    this.updateStateValues = this.updateStateValues.bind(this);
-  }
+        this.updateStateValues = this.updateStateValues.bind(this);
+      }
 
   componentDidMount() {
     MediaPageStore.on('liked_media', this.updateStateValues);
