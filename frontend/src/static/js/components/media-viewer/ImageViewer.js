@@ -120,7 +120,7 @@ export default function ImageViewer() {
             <div className="slideshow-image">
               {isImgLoading && <SpinnerLoader size="large" />}
               <img
-                src={site.url + '/' + slideshowItems[currentIndex]?.original_media_url}
+                src={site.url + '/' + slideshowItems[currentIndex]?.public_media_url
                 alt={`Slide ${currentIndex + 1}`}
                 onClick={() => handleImageClick(currentIndex)}
                 onLoad={() => setIsImgLoading(false)}
