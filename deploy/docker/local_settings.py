@@ -26,6 +26,7 @@ CAN_ADD_MEDIA = "advancedUser"
 CAN_COMMENT = "email_verified"
 PORTAL_WORKFLOW = "public"
 DEFAULT_VISIBILITY = "public"
+SHOW_ORIGINAL_MEDIA = False
 
 MEDIA_GATE_COOKIE_NAME = "mc_gate"
 
