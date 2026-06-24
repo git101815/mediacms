@@ -2,7 +2,8 @@ version: "3"
 
 x-mediacms-app: &mediacms_app
   build: .
-  image: mediacms/mediacms:latest
+  image: mediacms-local:dev
+
 
 x-mediacms-db-env: &mediacms_db_env
   POSTGRES_HOST: db

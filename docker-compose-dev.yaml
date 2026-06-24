@@ -4,7 +4,7 @@ x-mediacms-app: &mediacms_app
     dockerfile: ./Dockerfile
     args:
       - DEVELOPMENT_MODE=True
-  image: mediacms/mediacms-dev:latest
+  image: mediacms-local:dev
 
 x-mediacms-db-env: &mediacms_db_env
   POSTGRES_HOST: db
