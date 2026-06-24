@@ -5,8 +5,9 @@ import time
 from urllib.parse import urlsplit
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
-from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect
+from django.http import Http404, HttpResponse, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.utils.encoding import iri_to_uri
 from django.views.decorators.cache import never_cache
@@ -200,6 +201,49 @@ def media_download_page(request, friendly_token):
         },
     )
 
+def get_download_cooldown_identity(request):
+    user = request.user
+
+    if getattr(user, "is_authenticated", False):
+        return f"user:{user.id}"
+
+    if not request.session.session_key:
+        request.session.create()
+
+    return f"session:{request.session.session_key}"
+
+
+def get_download_cooldown_response(request):
+    cooldown_seconds = int(getattr(settings, "DOWNLOAD_COOLDOWN_SECONDS", 0))
+
+    if cooldown_seconds <= 0:
+        return None
+
+    identity = get_download_cooldown_identity(request)
+    cache_key = f"download_cooldown:{identity}"
+
+    created = cache.add(cache_key, int(time.time()), cooldown_seconds)
+
+    if created:
+        return None
+
+    ttl = cooldown_seconds
+
+    if hasattr(cache, "ttl"):
+        cache_ttl = cache.ttl(cache_key)
+        if isinstance(cache_ttl, int) and cache_ttl > 0:
+            ttl = cache_ttl
+
+    response = HttpResponse(
+        f"Please wait {ttl} seconds before downloading again.",
+        status=429,
+        content_type="text/plain",
+    )
+    response["Retry-After"] = str(ttl)
+    response["Cache-Control"] = "private, no-store, max-age=0"
+    response["Pragma"] = "no-cache"
+
+    return response
 
 @never_cache
 @csrf_protect
@@ -207,6 +251,10 @@ def media_download_page(request, friendly_token):
 def media_download_start(request, friendly_token, download_id):
     if not has_gate_cookie(request):
         return HttpResponseForbidden("Age verification is required")
+
+    cooldown_response = get_download_cooldown_response(request)
+    if cooldown_response is not None:
+        return cooldown_response
 
     media = get_download_media(request, friendly_token)
     source_url = get_download_source(media, download_id)
