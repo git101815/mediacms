@@ -12,13 +12,13 @@ set -a
 . "$ENV_FILE"
 set +a
 
-: "${N8N_MAINTENANCE_ON_WEBHOOK:?Missing N8N_MAINTENANCE_ON_WEBHOOK}"
+: "${N8N_MAINTENANCE_SWITCH_WEBHOOK:?Missing N8N_MAINTENANCE_SWITCH_WEBHOOK}"
 : "${N8N_MAINTENANCE_SECRET:?Missing N8N_MAINTENANCE_SECRET}"
 
 docker compose --env-file "$ENV_FILE" -f docker-compose-maintenance.yaml --profile cloudflare up -d
 
 curl -fsS \
-  -X POST "$N8N_MAINTENANCE_ON_WEBHOOK" \
+  -X POST "$N8N_MAINTENANCE_SWITCH_WEBHOOK" \
   -H 'Content-Type: application/json' \
   -d "{\"mode\":\"on\",\"secret\":\"${N8N_MAINTENANCE_SECRET}\"}"
 
