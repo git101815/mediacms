@@ -26,6 +26,7 @@ celerybeat-schedule-shm
 celerybeat-schedule-wal
 /.env
 .env
+.env.maintenance
 /backup
 .idea/
 deposit_service/data/state.json

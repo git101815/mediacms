@@ -11,7 +11,20 @@ services:
       - ./maintenance/maintenance.html:/usr/share/nginx/html/maintenance.html:ro
       - ./maintenance/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
+
+  cloudflared-maintenance:
+    image: cloudflare/cloudflared:latest
+    container_name: mediacms-maintenance-cloudflared
+    restart: unless-stopped
+    profiles:
+      - cloudflare
+    command: tunnel --no-autoupdate run --token ${MAINTENANCE_TUNNEL_TOKEN}
+    environment:
+      TUNNEL_TOKEN: ${MAINTENANCE_TUNNEL_TOKEN}
+    depends_on:
+      maintenance:
+        condition: service_healthy
