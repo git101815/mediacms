@@ -1,15 +1,29 @@
+name: mediacms-dev
+
+x-mediacms-app: &mediacms_app
+  image: mediacms-local:dev
+  pull_policy: never
+  build:
+    context: .
+    dockerfile: ./Dockerfile
+    args:
+      - DEVELOPMENT_MODE=True
+
+x-mediacms-db-env: &mediacms_db_env
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: mediacms
+  POSTGRES_DB: mediacms
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
 services:
   migrations:
-    build:
-      context: .
-      dockerfile: ./Dockerfile
-      args:
-        - DEVELOPMENT_MODE=True
-    image: mediacms/mediacms-dev:latest
+    <<: *mediacms_app
     volumes:
       - ./:/home/mediacms.io/mediacms/
     command: "./deploy/docker/prestart.sh"
     environment:
+      <<: *mediacms_db_env
       DEVELOPMENT_MODE: True
       ENABLE_UWSGI: "no"
       ENABLE_NGINX: "no"
@@ -24,6 +38,8 @@ services:
       LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME: sweeper-service
       LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET}
       DEPOSIT_EVM_ACCOUNT_XPUB: ${DEPOSIT_EVM_ACCOUNT_XPUB}
+      BUNNY_DOWNLOAD_BASE_URL: ${BUNNY_DOWNLOAD_BASE_URL}
+      BUNNY_DOWNLOAD_TOKEN_KEY: ${BUNNY_DOWNLOAD_TOKEN_KEY}
     restart: on-failure
     depends_on:
       redis:
@@ -45,7 +61,7 @@ services:
       - web
 
   web:
-    image: mediacms/mediacms-dev:latest
+    <<: *mediacms_app
     command: "python manage.py runserver 0.0.0.0:80"
     healthcheck:
       test:
@@ -57,6 +73,7 @@ services:
       timeout: 5s
       retries: 12
     environment:
+      <<: *mediacms_db_env
       DEVELOPMENT_MODE: True
       ENABLE_CELERY_BEAT: "no"
       ENABLE_CELERY_SHORT: "no"
@@ -83,11 +100,8 @@ services:
       PREMIUM_S3_UPLOAD_PREFIX: ${PREMIUM_S3_UPLOAD_PREFIX}
       PREMIUM_SIGNED_URL_TTL_SECONDS: ${PREMIUM_SIGNED_URL_TTL_SECONDS}
       PREMIUM_MAX_UPLOAD_SIZE_BYTES: ${PREMIUM_MAX_UPLOAD_SIZE_BYTES}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: mediacms
-      POSTGRES_USER: mediacms
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mediacms}
+      BUNNY_DOWNLOAD_BASE_URL: ${BUNNY_DOWNLOAD_BASE_URL}
+      BUNNY_DOWNLOAD_TOKEN_KEY: ${BUNNY_DOWNLOAD_TOKEN_KEY}
     ports:
       - "80:80"
     volumes:
@@ -230,16 +244,19 @@ services:
     restart: unless-stopped
 
   celery_beat:
-    image: mediacms/mediacms-dev:latest
+    <<: *mediacms_app
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
+      <<: *mediacms_db_env
       DEVELOPMENT_MODE: True
       ENABLE_UWSGI: "no"
       ENABLE_NGINX: "no"
       ENABLE_CELERY_SHORT: "no"
       ENABLE_CELERY_LONG: "no"
       ENABLE_MIGRATIONS: "no"
+      BUNNY_DOWNLOAD_BASE_URL: ${BUNNY_DOWNLOAD_BASE_URL}
+      BUNNY_DOWNLOAD_TOKEN_KEY: ${BUNNY_DOWNLOAD_TOKEN_KEY}
     depends_on:
       redis:
         condition: service_healthy
@@ -250,17 +267,20 @@ services:
     restart: unless-stopped
 
   celery_worker:
-    image: mediacms/mediacms-dev:latest
+    <<: *mediacms_app
     deploy:
       replicas: 1
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
+      <<: *mediacms_db_env
       DEVELOPMENT_MODE: True
       ENABLE_UWSGI: "no"
       ENABLE_NGINX: "no"
       ENABLE_CELERY_BEAT: "no"
       ENABLE_MIGRATIONS: "no"
+      BUNNY_DOWNLOAD_BASE_URL: ${BUNNY_DOWNLOAD_BASE_URL}
+      BUNNY_DOWNLOAD_TOKEN_KEY: ${BUNNY_DOWNLOAD_TOKEN_KEY}
     depends_on:
       redis:
         condition: service_healthy
@@ -289,7 +309,7 @@ services:
       retries: 5
 
   redis:
-    image: "redis:alpine"
+    image: redis:alpine
     restart: always
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

@@ -54,7 +54,7 @@ export class MediaPage extends _VideoMediaPage {
       case 'image':
         return <ImageViewer />;
       case 'pdf':
-        const pdf_url = formatInnerLink(MediaPageStore.get('media-original-url'), SiteContext._currentValue.url);
+        const pdf_url = formatInnerLink(mediaData.public_media_url, SiteContext._currentValue.url);
         return <PdfViewer fileUrl={pdf_url} />;
     }
 

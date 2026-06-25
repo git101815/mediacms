@@ -10,8 +10,6 @@ celerybeat-schedule
 logs/
 pids/
 cms/local_settings.py
-deploy/docker/local_settings.py
-deploy/docker/local_settings.py.save
 yt.readme.md
 /frontend-tools/video-editor/node_modules
 /frontend-tools/video-editor/client/node_modules
@@ -28,6 +26,7 @@ celerybeat-schedule-shm
 celerybeat-schedule-wal
 /.env
 .env
+.env.maintenance
 /backup
 .idea/
 deposit_service/data/state.json

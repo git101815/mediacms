@@ -8,87 +8,29 @@ import { MediaPageStore } from '../../utils/stores/';
 import { CircleIconButton, MaterialIcon, NavigationContentApp, NavigationMenuList, PopupMain } from '../_shared/';
 import { ReportForm } from '../report-form/ReportForm';
 
-function downloadOptions(mediaData, allowDownload) {
-  const site = SiteContext._currentValue;
-
-  const encodingsInfo = mediaData.encodings_info;
-
-  const options = {};
-
-  let k, g;
-
-  for (k in encodingsInfo) {
-    if (encodingsInfo.hasOwnProperty(k)) {
-      if (Object.keys(encodingsInfo[k]).length) {
-        for (g in encodingsInfo[k]) {
-          if (encodingsInfo[k].hasOwnProperty(g)) {
-            if ('success' === encodingsInfo[k][g].status && 100 === encodingsInfo[k][g].progress && null !== encodingsInfo[k][g].url) {
-              options[encodingsInfo[k][g].title] = {
-                text: k + ' - ' + g.toUpperCase() + ' (' + encodingsInfo[k][g].size + ')',
-                link: formatInnerLink(encodingsInfo[k][g].url, site.url),
-                linkAttr: {
-                  target: '_blank',
-                  download: mediaData.title + '_' + k + '_' + g.toUpperCase(),
-                },
-              };
-            }
-          }
-        }
-      }
-    }
-  }
-
-  options.original_media_url = {
-    text: 'Original file (' + mediaData.size + ')',
-    link: formatInnerLink(mediaData.original_media_url, site.url),
-    linkAttr: {
-      target: '_blank',
-      download: mediaData.title,
-    },
-  };
-
-  return Object.values(options);
-}
-
 function optionsItems(userCan, mediaData, allowDownload, downloadLink, mediaReported) {
-
   const items = [];
 
   const mediaType = mediaData.media_type;
   const mediaIsVideo = 'video' === mediaType;
   const mediaReportedTimes = mediaData.reported_times;
 
-  if (allowDownload && userCan.downloadMedia) {
-    if (!mediaIsVideo) {
-      if (downloadLink) {
-        items.push({
-          itemType: 'link',
-          link: downloadLink,
-          text: 'Download',
-          icon: 'arrow_downward',
-          itemAttr: {
-            className: 'visible-only-in-small',
-          },
-          linkAttr: {
+  if (allowDownload && userCan.downloadMedia && downloadLink) {
+    items.push({
+      itemType: 'link',
+      link: downloadLink,
+      text: 'Download',
+      icon: 'arrow_downward',
+      itemAttr: {
+        className: 'visible-only-in-small',
+      },
+      linkAttr: mediaIsVideo
+        ? {}
+        : {
             target: '_blank',
             download: mediaData.title,
           },
-        });
-      }
-    } else {
-      items.push({
-        itemType: 'open-subpage',
-        text: 'Download',
-        icon: 'arrow_downward',
-        itemAttr: {
-          className: 'visible-only-in-small',
-        },
-        buttonAttr: {
-          className: 'change-page',
-          'data-page-id': 'videoDownloadOptions',
-        },
-      });
-    }
+    });
   }
 
   if (mediaIsVideo && userCan.editMedia) {
@@ -130,13 +72,12 @@ function optionsItems(userCan, mediaData, allowDownload, downloadLink, mediaRepo
 }
 
 function getPopupPages(userCan, mediaData, allowDownload, downloadLink, mediaReported, submitReportForm, cancelReportForm) {
-
   const mediaUrl = mediaData.url;
   const mediaType = mediaData.media_type;
   const mediaState = mediaData.state || 'N/A';
   const mediaEncodingStatus = mediaData.encoding_status || 'N/A';
-  const mediaReportedTimes = mediaData.reported_times;
   const mediaIsReviewed = mediaData.is_reviewed;
+  const mediaReportedTimes = mediaData.reported_times;
 
   const mediaIsVideo = 'video' === mediaType;
 
@@ -197,16 +138,6 @@ function getPopupPages(userCan, mediaData, allowDownload, downloadLink, mediaRep
     );
   }
 
-  if (allowDownload && userCan.downloadMedia && mediaIsVideo) {
-    pages.videoDownloadOptions = (
-      <div className="video-download-options">
-        <PopupMain>
-          <NavigationMenuList items={downloadOptions(mediaData, allowDownload)} />
-        </PopupMain>
-      </div>
-    );
-  }
-
   return pages;
 }
 
@@ -216,10 +147,13 @@ export function MediaMoreOptionsIcon(props) {
   const { userCan } = useUser();
 
   const site = SiteContext._currentValue;
-
-  const downloadLink = formatInnerLink(MediaPageStore.get('media-original-url'), site.url);
   const mediaData = MediaPageStore.get('media-data');
+  const mediaId = MediaPageStore.get('media-id');
   const mediaIsVideo = 'video' === mediaData.media_type;
+
+  const downloadLink = mediaIsVideo
+    ? '/download/' + encodeURIComponent(mediaId) + '/'
+    : formatInnerLink(mediaData.public_media_url, site.url);
 
   const [popupContentRef, PopupContent, PopupTrigger] = usePopup();
 
@@ -232,19 +166,21 @@ export function MediaMoreOptionsIcon(props) {
   function submitReportForm(reportDescription) {
     MediaPageActions.reportMedia(reportDescription);
   }
+
   function cancelReportFormSubmission() {
     popupContentRef.current.toggle();
   }
+
   function onPopupPageChange(newPage) {
     setPopupCurrentPage(newPage);
   }
+
   function onPopupHide() {
     setPopupCurrentPage('main');
   }
 
   function onCompleteMediaReport() {
     popupContentRef.current.tryToHide();
-    // FIXME: Without delay creates conflict [ Uncaught Error: Dispatch.dispatch(...): Cannot dispatch in the middle of a dispatch. ].
     setTimeout(function () {
       PageActions.addNotification('Media Reported', 'reportedMedia');
       setReported(true);
@@ -263,14 +199,12 @@ export function MediaMoreOptionsIcon(props) {
   }, [visible]);
 
   useEffect(() => {
-    setVisible(Object.keys(popupPages).length && props.allowDownload && userCan.downloadMedia);
+    setVisible(!!Object.keys(popupPages).length);
   }, [popupPages]);
 
   useEffect(() => {
     let classname = defaultContainerClassname;
-    if (props.allowDownload && userCan.downloadMedia && 'videoDownloadOptions' === popupCurrentPage) {
-      classname += ' video-downloads';
-    }
+
     if (
       1 === Object.keys(popupPages).length &&
       props.allowDownload &&
@@ -279,8 +213,9 @@ export function MediaMoreOptionsIcon(props) {
     ) {
       classname += ' visible-only-in-small';
     }
+
     setContainerClassname(classname);
-  }, [popupCurrentPage]);
+  }, [popupCurrentPage, popupPages]);
 
   useEffect(() => {
     setPopupPages(
@@ -308,6 +243,7 @@ export function MediaMoreOptionsIcon(props) {
         cancelReportFormSubmission
       )
     );
+
     return () => {
       if (visible && !reported) {
         MediaPageStore.removeListener('reported_media', onCompleteMediaReport);
@@ -343,8 +279,4 @@ export function MediaMoreOptionsIcon(props) {
 
 MediaMoreOptionsIcon.propTypes = {
   allowDownload: PropTypes.bool.isRequired,
-};
-
-MediaMoreOptionsIcon.defaultProps = {
-  allowDownload: false,
 };

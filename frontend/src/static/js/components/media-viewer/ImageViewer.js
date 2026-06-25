@@ -30,7 +30,7 @@ export default function ImageViewer() {
     let imgUrl =
       media_data.poster_url?.trim() ||
       media_data.thumbnail_url?.trim() ||
-      MediaPageStore.get('media-original-url')?.trim() ||
+      media_data.public_media_url?.trim() ||
       '#';
 
     return site.url + '/' + imgUrl.replace(/^\//g, '');
@@ -120,7 +120,7 @@ export default function ImageViewer() {
             <div className="slideshow-image">
               {isImgLoading && <SpinnerLoader size="large" />}
               <img
-                src={site.url + '/' + slideshowItems[currentIndex]?.original_media_url}
+                src={site.url + '/' + slideshowItems[currentIndex]?.public_media_url}
                 alt={`Slide ${currentIndex + 1}`}
                 onClick={() => handleImageClick(currentIndex)}
                 onLoad={() => setIsImgLoading(false)}

@@ -146,6 +146,7 @@ class SingleMediaSerializer(serializers.ModelSerializer):
     description = serializers.SerializerMethodField()
     premium = serializers.SerializerMethodField()
     encodings_info = serializers.SerializerMethodField()
+    public_media_url = serializers.ReadOnlyField()
     hls_info = serializers.SerializerMethodField()
     viewer_permissions = serializers.SerializerMethodField()
 
@@ -284,6 +285,7 @@ class SingleMediaSerializer(serializers.ModelSerializer):
             "dislikes",
             "reported_times",
             "user_featured",
+            "public_media_url",
             "original_media_url",
             "size",
             "video_height",

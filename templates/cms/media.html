@@ -16,7 +16,7 @@
 
 {% if media_object.media_type == "video" %}
 <meta property="og:type" content="video.other">
-<meta property="og:video" content="{{ media_object.original_media_url }}">
+<meta property="og:video" content="{{ media_object.public_media_url }}">
 <meta property="og:video:type" content="video/mp4">
 {% else %}
 <meta property="og:type" content="website">
@@ -43,7 +43,7 @@
         "uploadDate": "{{media_object.add_date|date:'c'}}",
         "dateModified": "{{media_object.edit_date|date:'c'}}",
         "duration": "PT{{media_object.duration}}S",
-        "contentUrl": "{{ media_object.original_media_url }}",
+        "contentUrl": "{{ media_object.public_media_url }}",
         "potentialAction": {
             "@type": "ViewAction",
             "target": "{{FRONTEND_HOST}}{{media_object.get_absolute_url}}"

@@ -816,6 +816,44 @@ class Media(models.Model):
         else:
             return None
 
+    def get_public_video_encoding(self):
+        if self.media_type != "video":
+            return None
+
+        encodings = (
+            self.encodings.select_related("profile")
+            .filter(
+                chunk=False,
+                status="success",
+                progress=100,
+                profile__extension="mp4",
+                profile__codec="h264",
+            )
+            .exclude(media_file="")
+        )
+
+        encoding = encodings.filter(profile__resolution=720).order_by("id").first()
+        if encoding:
+            return encoding
+
+        return encodings.order_by("-profile__resolution", "id").first()
+
+    @property
+    def public_media_url(self):
+        if self.media_type == "video":
+            encoding = self.get_public_video_encoding()
+            if encoding:
+                return encoding.media_encoding_url
+
+            if self.encoding_status in ["pending", "running"] or settings.DO_NOT_TRANSCODE_VIDEO:
+                return helpers.url_from_path(self.media_file.path)
+
+            return None
+
+        if self.media_type in ["audio", "image", "pdf"]:
+            return helpers.url_from_path(self.media_file.path)
+
+        return None
     @property
     def thumbnail_url(self):
         """Property used on serializers
@@ -857,6 +895,7 @@ class Media(models.Model):
                     "thumbnail_url": item.thumbnail_url,
                     "title": item.title,
                     "original_media_url": item.original_media_url,
+                    "public_media_url": item.public_media_url,
                 }
                 for item in qs
             ]
@@ -868,6 +907,7 @@ class Media(models.Model):
                     "thumbnail_url": self.thumbnail_url,
                     "title": self.title,
                     "original_media_url": self.original_media_url,
+                    "public_media_url": self.public_media_url,
                 },
             )
         return items
