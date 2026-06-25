@@ -1,3 +1,5 @@
+name: mediacms-prod
+
 x-mediacms-app: &mediacms_app
   image: mediacms-local:prod
   pull_policy: never
