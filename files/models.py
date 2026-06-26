@@ -25,7 +25,6 @@ from imagekit.processors import ResizeToFit
 from mptt.models import MPTTModel, TreeForeignKey
 
 from . import helpers
-from .remote_encoding import remote_encoding_enabled
 from .stop_words import STOP_WORDS
 
 logger = logging.getLogger(__name__)
@@ -595,6 +594,7 @@ class Media(models.Model):
         so that no EncodeProfile for highter heights than the video
         are created
         """
+        from .remote_encoding import remote_encoding_enabled
         if remote_encoding_enabled():
             from . import tasks
 
