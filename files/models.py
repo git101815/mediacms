@@ -1005,9 +1005,9 @@ class Media(models.Model):
             if getattr(self, "hls_hevc_file", ""):
                 res.setdefault("hevc", {})
                 res["hevc"]["master_file"] = helpers.url_from_path(self.hls_hevc_file)
-                if getattr(self, "hls_av1_file", ""):
-                    res.setdefault("av1", {})
-                    res["av1"]["master_file"] = helpers.url_from_path(self.hls_av1_file)
+            if getattr(self, "hls_av1_file", ""):
+                res.setdefault("av1", {})
+                res["av1"]["master_file"] = helpers.url_from_path(self.hls_av1_file)
         return res
 
     @property

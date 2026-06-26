@@ -105,6 +105,14 @@ CACHES = {
         },
     }
 }
+#cloud-storage
+STORJ_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+AWS_S3_ENDPOINT_URL = "https://gateway.storjshare.io"
+AWS_S3_ADDRESSING_STYLE = "path"
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_S3_SIGNATURE_VERSION = os.getenv("AWS_S3_SIGNATURE_VERSION")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
 
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@celebfakes.ru")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "mail.smtpbackend.ru")
@@ -125,7 +133,7 @@ CELERY_RESULT_BACKEND = BROKER_URL
 MP4HLS_COMMAND = "/home/mediacms.io/bento4/bin/mp4hls"
 MP4DASH_COMMAND = "/home/mediacms.io/bento4/bin/mp4dash"
 MP4FRAGMENT_COMMAND = "/home/mediacms.io/bento4/bin/mp4fragment"
-REMOTE_ENCODING_ENABLED = True
+REMOTE_ENCODING_ENABLED = False
 
 REMOTE_ENCODING_PROVIDER = "runpod"
 REMOTE_ENCODING_SOURCE_BASE_URL = "https://medias.celebfakes.ru/mediafiles"

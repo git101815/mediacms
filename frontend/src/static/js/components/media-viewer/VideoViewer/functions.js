@@ -1,7 +1,7 @@
 import { SiteContext } from '../../../utils/contexts/';
 import { formatInnerLink } from '../../../utils/helpers/';
 
-const validVideoFormats = ['hls', 'h265', 'vp9', 'h264', 'vp8', 'mp4', 'theora']; // NOTE: Keep array items order.
+const validVideoFormats = ['hls', 'av1', 'h264', 'h265', 'vp9', 'vp8', 'mp4', 'theora']; // NOTE: Keep array items order.
 
 function browserSupports_videoCodec(what, debugLog) {
   let ret = null,
@@ -13,6 +13,9 @@ function browserSupports_videoCodec(what, debugLog) {
         case 'hls':
           // ret = 'probably' === vid.canPlayType('application/x-mpegURL; codecs="avc1.42E01E"');
           ret = true; // NOTE: Return always 'true' and allow player to decide...
+          break;
+        case 'av1':
+          ret = !!vid.canPlayType('video/mp4; codecs="av01.0.05M.08"');
           break;
         case 'h265':
           ret =
@@ -99,7 +102,10 @@ export function orderedSupportedVideoFormats(includeAll) {
     supports.hls = !0; // NOTE: Return always 'true' and allow player to decide...
     order.push('hls');
     /*}*/
-
+    if (vid.canPlayType('video/mp4; codecs="av01.0.05M.08"')) {
+      supports.av1 = !0;
+      order.push('av1');
+    }
     if (
       vid.canPlayType('video/mp4; codecs="hvc1.1.L0.0"') ||
       'probably' === vid.canPlayType('video/mp4; codecs="hev1.1.L0.0"')
@@ -150,6 +156,7 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
 
   const supportedFormatsExtensions = {
     hls: ['m3u8'],
+    av1: ['mp4', 'm3u8'],
     h265: ['mp4', 'webm'],
     h264: ['mp4', 'webm'],
     vp9: ['mp4', 'webm'],
@@ -159,6 +166,25 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
   };
 
   hlsData = hlsData && 'object' === typeof hlsData ? hlsData : {};
+  const av1HlsData = hlsData.av1 && 'object' === typeof hlsData.av1 && supportedFormats.support && supportedFormats.support.av1 ? hlsData.av1 : null;
+  if (av1HlsData) {
+    for (i in av1HlsData) {
+      if (av1HlsData.hasOwnProperty(i)) {
+        k = null;
+        if ('master_file' === i) {
+          k = 'Auto';
+        } else {
+          k = i.split('_playlist');
+          k = 2 === k.length ? k[0] : null;
+        }
+        if (null !== k) {
+          ret[k] = void 0 === ret[k] ? { format: [], url: [] } : ret[k];
+          ret[k].format.push('hls');
+          ret[k].url.push(formatInnerLink(av1HlsData[i], SiteContext._currentValue.url));
+        }
+      }
+    }
+  }
   const hevcHlsData = hlsData.hevc && 'object' === typeof hlsData.hevc && supportedFormats.support && supportedFormats.support.h265 ? hlsData.hevc : null;
   if (hevcHlsData) {
     for (i in hevcHlsData) {
@@ -178,7 +204,7 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
 }
 
   for (i in hlsData) {
-    if (hlsData.hasOwnProperty(i) && 'hevc' !== i) {
+    if (hlsData.hasOwnProperty(i) && 'hevc' !== i && 'av1' !== i) {
       k = null;
 
       if ('master_file' === i) {

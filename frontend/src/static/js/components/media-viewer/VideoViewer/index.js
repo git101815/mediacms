@@ -99,7 +99,9 @@ export default class VideoViewer extends React.PureComponent {
       let defaultVideoResolution = extractDefaultVideoResolution(defaultResolution, this.videoInfo);
 
       if ('Auto' === defaultResolution && void 0 !== this.videoInfo['Auto']) {
-        this.videoSources.push({ src: this.videoInfo['Auto'].url[0] });
+        for (let sourceIndex = 0; sourceIndex < this.videoInfo['Auto'].url.length; sourceIndex += 1) {
+          this.videoSources.push({ src: this.videoInfo['Auto'].url[sourceIndex] });
+        }
       }
 
       const supportedFormats = orderedSupportedVideoFormats();
@@ -110,7 +112,6 @@ export default class VideoViewer extends React.PureComponent {
       while (k < this.videoInfo[defaultVideoResolution].format.length) {
         if ('hls' === this.videoInfo[defaultVideoResolution].format[k]) {
           this.videoSources.push({ src: this.videoInfo[defaultVideoResolution].url[k] });
-          break;
         }
         k += 1;
       }
