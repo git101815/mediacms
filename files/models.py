@@ -25,6 +25,7 @@ from imagekit.processors import ResizeToFit
 from mptt.models import MPTTModel, TreeForeignKey
 
 from . import helpers
+from .remote_encoding import remote_encoding_enabled
 from .stop_words import STOP_WORDS
 
 logger = logging.getLogger(__name__)
@@ -76,8 +77,9 @@ ENCODE_RESOLUTIONS = (
 )
 
 CODECS = (
-    ("h265", "h265"),
+    ("av1", "av1"),
     ("h264", "h264"),
+    ("h265", "h265"),
     ("vp9", "vp9"),
 )
 
@@ -167,6 +169,7 @@ class Media(models.Model):
 
     hls_file = models.CharField(max_length=1000, blank=True, help_text="Path to HLS file for videos")
     hls_hevc_file = models.CharField(max_length=500, blank=True, default="")
+    hls_av1_file = models.CharField(max_length=1000, blank=True, default="")
 
     is_reviewed = models.BooleanField(
         default=settings.MEDIA_IS_REVIEWED,
@@ -592,6 +595,13 @@ class Media(models.Model):
         so that no EncodeProfile for highter heights than the video
         are created
         """
+        if remote_encoding_enabled():
+            from . import tasks
+
+            self.encoding_status = "running"
+            self.save(update_fields=["encoding_status", "listable"])
+            tasks.submit_remote_encoding.delay(self.friendly_token)
+            return True
 
         if not profiles:
             profiles = EncodeProfile.objects.filter(active=True)
@@ -663,9 +673,6 @@ class Media(models.Model):
                 tasks.post_trim_action.delay(self.friendly_token)
                 vt_request.status = "success"
                 vt_request.save(update_fields=["status"])
-        if encoding and encoding.status == "success" and encoding.profile.codec == "h265" and action == "add" and not encoding.chunk:
-            from . import tasks
-            tasks.create_hls_hevc_fmp4.delay(self.friendly_token)
         return True
 
     def set_encoding_status(self):
@@ -998,6 +1005,9 @@ class Media(models.Model):
             if getattr(self, "hls_hevc_file", ""):
                 res.setdefault("hevc", {})
                 res["hevc"]["master_file"] = helpers.url_from_path(self.hls_hevc_file)
+                if getattr(self, "hls_av1_file", ""):
+                    res.setdefault("av1", {})
+                    res["av1"]["master_file"] = helpers.url_from_path(self.hls_av1_file)
         return res
 
     @property

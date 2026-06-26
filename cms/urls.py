@@ -7,6 +7,7 @@ from django.views.generic.base import TemplateView
 from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
 from rest_framework.permissions import AllowAny
+from files.remote_encoding_views import remote_encoding_callback
 
 schema_view = get_schema_view(
     openapi.Info(title="CelebFakes API", default_version='v1', contact=openapi.Contact(email="admin@celebfakes.ru"), x_logo={"url": "../../static/images/logo_dark.svg"}),
@@ -27,6 +28,11 @@ urlpatterns = [
     re_path(r"^accounts/", include("allauth.urls")),
     re_path(r"^api-auth/", include("rest_framework.urls")),
     path(settings.DJANGO_ADMIN_URL, admin.site.urls),
+    path(
+        "internal/encoding/<str:friendly_token>/callback/",
+        remote_encoding_callback,
+        name="remote_encoding_callback",
+    ),
     re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     re_path(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('docs/api/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),

@@ -1077,45 +1077,6 @@ def update_encoding_size(encoding_id):
     return False
 
 
-@task(name="produce_video_chapters", queue="short_tasks")
-def produce_video_chapters(chapter_id):
-    # this is not used
-    return False
-    chapter_object = VideoChapterData.objects.filter(id=chapter_id).first()
-    if not chapter_object:
-        return False
-
-    media = chapter_object.media
-    video_path = media.media_file.path
-    output_folder = media.video_chapters_folder
-
-    chapters = chapter_object.data
-
-    width = 336
-    height = 188
-
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-
-    results = []
-
-    for i, chapter in enumerate(chapters):
-        timestamp = chapter["start"]
-        title = chapter["title"]
-
-        output_filename = f"thumbnail_{i:02d}.jpg"  # noqa
-        output_path = os.path.join(output_folder, output_filename)
-
-        command = [settings.FFMPEG_COMMAND, "-y", "-ss", str(timestamp), "-i", video_path, "-vframes", "1", "-q:v", "2", "-s", f"{width}x{height}", output_path]
-        ret = run_command(command)  # noqa
-        if os.path.exists(output_path) and get_file_type(output_path) == "image":
-            results.append({"start": timestamp, "title": title, "thumbnail": output_path})
-
-    chapter_object.data = results
-    chapter_object.save(update_fields=["data"])
-    return True
-
-
 @task(name="post_trim_action", queue="short_tasks", soft_time_limit=600)
 def post_trim_action(friendly_token):
     """Perform post-processing actions after video trimming
@@ -1530,6 +1491,27 @@ def maintenance_backup_database():
             pass
         if tmp_path.exists():
             tmp_path.unlink()
+
+@task(name="submit_remote_encoding", queue="short_tasks")
+def submit_remote_encoding(friendly_token):
+    from .models import Media
+    from .remote_encoding import submit_runpod_job
+
+    try:
+        media = Media.objects.get(friendly_token=friendly_token)
+    except Media.DoesNotExist:
+        return False
+
+    try:
+        result = submit_runpod_job(media)
+    except Exception as exc:
+        logger.exception("Remote encoding submission failed token=%s", friendly_token)
+        media.encoding_status = "fail"
+        media.save(update_fields=["encoding_status", "listable"])
+        return {"ok": False, "error": str(exc)}
+
+    return {"ok": True, "result": result}
+
 # TODO LIST
 # 1 chunks are deleted from original server when file is fully encoded.
 # however need to enter this logic in cases of fail as well

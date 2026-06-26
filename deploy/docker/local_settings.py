@@ -125,6 +125,22 @@ CELERY_RESULT_BACKEND = BROKER_URL
 MP4HLS_COMMAND = "/home/mediacms.io/bento4/bin/mp4hls"
 MP4DASH_COMMAND = "/home/mediacms.io/bento4/bin/mp4dash"
 MP4FRAGMENT_COMMAND = "/home/mediacms.io/bento4/bin/mp4fragment"
+REMOTE_ENCODING_ENABLED = True
+
+REMOTE_ENCODING_PROVIDER = "runpod"
+REMOTE_ENCODING_SOURCE_BASE_URL = "https://medias.celebfakes.ru/mediafiles"
+REMOTE_ENCODING_PUBLIC_BASE_URL = "https://medias.celebfakes.ru/mediafiles"
+REMOTE_ENCODING_OUTPUT_PREFIX = "hls"
+REMOTE_ENCODING_HLS_SEGMENT_SECONDS = 4
+
+RUNPOD_ENDPOINT_URL = "https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/run"
+
+FFMPEG_AV1_ENCODER = "av1_nvenc"
+AV1_NVENC_PRESET = "p5"
+SVT_AV1_PRESET = 8
+
+REMOTE_ENCODING_CALLBACK_SECRET = os.environ["REMOTE_ENCODING_CALLBACK_SECRET"]
+RUNPOD_API_KEY = os.environ["RUNPOD_API_KEY"]
 
 DEBUG = False
 
