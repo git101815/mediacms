@@ -1,4 +1,4 @@
-ARG FFMPEG_BUILDER_IMAGE
+ARG FFMPEG_BUILDER_IMAGE=aad7xppz4fd4r8emr/cf-ffmpeg-builder:cuda12.4-ffmpeg7.1.1-nvcodec12.2.72.0
 
 FROM ${FFMPEG_BUILDER_IMAGE} AS ffmpeg_builder
 
@@ -17,7 +17,6 @@ RUN apt-get update \
         libnuma1 \
         libx264-163 \
         libx265-199 \
-        libsvtav1enc1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ffmpeg_builder /opt/ffmpeg /opt/ffmpeg

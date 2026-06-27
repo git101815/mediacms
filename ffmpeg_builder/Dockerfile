@@ -23,7 +23,6 @@ RUN apt-get update \
         libnuma-dev \
         libx264-dev \
         libx265-dev \
-        libsvtav1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -44,7 +43,6 @@ RUN ./configure \
         --enable-cuda-nvcc \
         --enable-libx264 \
         --enable-libx265 \
-        --enable-libsvtav1 \
         --extra-cflags=-I/usr/local/cuda/include \
         --extra-ldflags=-L/usr/local/cuda/lib64 \
     && make -j"$(nproc)" \
@@ -52,5 +50,4 @@ RUN ./configure \
 
 RUN /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep av1_nvenc
 RUN /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep h264_nvenc
-RUN /opt/ffmpeg/bin/ffmpeg -hide_banner -encoders | grep libsvtav1
 RUN /opt/ffmpeg/bin/ffprobe -hide_banner -version
