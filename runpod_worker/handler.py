@@ -23,9 +23,8 @@ S3_ADDRESSING_STYLE = os.environ.get("REMOTE_ENCODING_S3_ADDRESSING_STYLE", "pat
 AV1_ENCODER = "av1_nvenc"
 AV1_NVENC_PRESET = "p5"
 AV1_CQ = "30"
-H264_PRESET = "medium"
-H264_CRF = "23"
-
+H264_NVENC_PRESET = "p5"
+H264_CQ = "23"
 
 def run(cmd):
     process = subprocess.run(
@@ -105,11 +104,11 @@ def encode_profile(source_path, output_dir, codec, resolution, segment_seconds):
     if codec == "h264":
         codec_args = [
             "-c:v",
-            "libx264",
+            "h264_nvenc",
             "-preset",
-            H264_PRESET,
-            "-crf",
-            H264_CRF,
+            H264_NVENC_PRESET,
+            "-cq",
+            H264_CQ,
             "-profile:v",
             "main",
             "-pix_fmt",
