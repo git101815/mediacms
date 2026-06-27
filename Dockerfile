@@ -1,3 +1,4 @@
+ARG FFMPEG_CPU_BUILDER_IMAGE=cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0
 FROM python:3.13.5-bookworm AS build-image
 
 # Install system dependencies needed for downloading and extracting
@@ -28,7 +29,6 @@ RUN mkdir -p /home/mediacms.io/bento4 && \
     rm -rf /home/mediacms.io/bento4/docs && \
     rm -f "/tmp/${BENTO4_ZIP}"
 
-ARG FFMPEG_CPU_BUILDER_IMAGE=cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0
 FROM ${FFMPEG_CPU_BUILDER_IMAGE} AS ffmpeg_cpu_builder
 ############ RUNTIME IMAGE ############
 FROM python:3.13.5-bookworm AS runtime_image
@@ -39,7 +39,8 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV CELERY_APP='cms'
 ENV VIRTUAL_ENV=/home/mediacms.io
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV PATH="/opt/ffmpeg/bin:$VIRTUAL_ENV/bin:$PATH"
+ENV LD_LIBRARY_PATH="/opt/svt-av1/lib:${LD_LIBRARY_PATH}"
 
 # Install runtime system dependencies
 RUN apt-get update -y && \
