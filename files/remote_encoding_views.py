@@ -25,6 +25,9 @@ def remote_encoding_callback(request, friendly_token):
     except Media.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Media not found"}, status=404)
 
+    if payload.get("media_id") != media.id or payload.get("friendly_token") != media.friendly_token:
+        return JsonResponse({"ok": False, "error": "Media mismatch"}, status=400)
+
     if payload.get("status") != "success":
         media.encoding_status = "fail"
         media.save(update_fields=["encoding_status", "listable"])

@@ -972,42 +972,44 @@ class Media(models.Model):
 
         res = {}
         valid_resolutions = [144, 240, 360, 480, 720, 1080, 1440, 2160]
+
+        if self.hls_file:
+            res["master_file"] = helpers.url_from_path(self.hls_file)
+
+        if getattr(self, "hls_hevc_file", ""):
+            res.setdefault("hevc", {})
+            res["hevc"]["master_file"] = helpers.url_from_path(self.hls_hevc_file)
+
+        if getattr(self, "hls_av1_file", ""):
+            res.setdefault("av1", {})
+            res["av1"]["master_file"] = helpers.url_from_path(self.hls_av1_file)
+
         if not self.hls_file:
             return res
-        res["master_file"] = helpers.url_from_path(self.hls_file)
-        if self.hls_file:
-            if os.path.exists(self.hls_file):
-                hls_file = self.hls_file
-                p = os.path.dirname(hls_file)
-                m3u8_obj = m3u8.load(hls_file)
-                if os.path.exists(hls_file):
-                    res["master_file"] = helpers.url_from_path(hls_file)
-                    for iframe_playlist in m3u8_obj.iframe_playlists:
-                        uri = os.path.join(p, iframe_playlist.uri)
-                        if os.path.exists(uri):
-                            resolution = iframe_playlist.iframe_stream_info.resolution[1]
-                            # most probably video is vertical, getting the first value to
-                            # be the resolution
-                            if resolution not in valid_resolutions:
-                                resolution = iframe_playlist.iframe_stream_info.resolution[0]
 
-                            res[f"{resolution}_iframe"] = helpers.url_from_path(uri)
-                    for playlist in m3u8_obj.playlists:
-                        uri = os.path.join(p, playlist.uri)
-                        if os.path.exists(uri):
-                            resolution = playlist.stream_info.resolution[1]
-                            # same as above
-                            if resolution not in valid_resolutions:
-                                resolution = playlist.stream_info.resolution[0]
+        if os.path.exists(self.hls_file):
+            hls_file = self.hls_file
+            p = os.path.dirname(hls_file)
+            m3u8_obj = m3u8.load(hls_file)
 
-                            res[f"{resolution}_playlist"] = helpers.url_from_path(uri)
+            for iframe_playlist in m3u8_obj.iframe_playlists:
+                uri = os.path.join(p, iframe_playlist.uri)
+                if os.path.exists(uri):
+                    resolution = iframe_playlist.iframe_stream_info.resolution[1]
+                    if resolution not in valid_resolutions:
+                        resolution = iframe_playlist.iframe_stream_info.resolution[0]
 
-            if getattr(self, "hls_hevc_file", ""):
-                res.setdefault("hevc", {})
-                res["hevc"]["master_file"] = helpers.url_from_path(self.hls_hevc_file)
-            if getattr(self, "hls_av1_file", ""):
-                res.setdefault("av1", {})
-                res["av1"]["master_file"] = helpers.url_from_path(self.hls_av1_file)
+                    res[f"{resolution}_iframe"] = helpers.url_from_path(uri)
+
+            for playlist in m3u8_obj.playlists:
+                uri = os.path.join(p, playlist.uri)
+                if os.path.exists(uri):
+                    resolution = playlist.stream_info.resolution[1]
+                    if resolution not in valid_resolutions:
+                        resolution = playlist.stream_info.resolution[0]
+
+                    res[f"{resolution}_playlist"] = helpers.url_from_path(uri)
+
         return res
 
     @property

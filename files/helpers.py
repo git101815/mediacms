@@ -596,9 +596,13 @@ def get_base_ffmpeg_command(
     if enc_type == "twopass":
         base_cmd.extend(["-b:v", str(target_rate) + "k"])
     elif enc_type == "crf":
-        base_cmd.extend(["-crf", str(VIDEO_CRFS[codec])])
-        if encoder == "libvpx-vp9":
+        if encoder == "av1_nvenc":
+            base_cmd.extend(["-cq", str(VIDEO_CRFS[codec])])
             base_cmd.extend(["-b:v", str(target_rate) + "k"])
+        else:
+            base_cmd.extend(["-crf", str(VIDEO_CRFS[codec])])
+            if encoder == "libvpx-vp9":
+                base_cmd.extend(["-b:v", str(target_rate) + "k"])
 
     if has_audio:
         base_cmd.extend(
