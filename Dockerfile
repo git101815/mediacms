@@ -56,7 +56,10 @@ RUN apt-get update -y && \
         pkg-config \
         libxml2-dev \
         libxmlsec1-dev \
-        libxmlsec1-openssl && \
+        libxmlsec1-openssl \
+        libx264-164 \
+        libx265-199 \
+        libnuma1 && \
     install -d /usr/share/postgresql-common/pgdg && \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc && \
