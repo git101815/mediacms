@@ -28,6 +28,8 @@ RUN mkdir -p /home/mediacms.io/bento4 && \
     rm -rf /home/mediacms.io/bento4/docs && \
     rm -f "/tmp/${BENTO4_ZIP}"
 
+ARG FFMPEG_CPU_BUILDER_IMAGE=cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0
+FROM ${FFMPEG_CPU_BUILDER_IMAGE} AS ffmpeg_cpu_builder
 ############ RUNTIME IMAGE ############
 FROM python:3.13.5-bookworm AS runtime_image
 
@@ -65,8 +67,8 @@ RUN apt-get update -y && \
     apt-get purge --auto-remove -y && \
     apt-get clean
 # Copy ffmpeg and Bento4 from build image
-COPY --from=build-image /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
-COPY --from=build-image /usr/local/bin/ffprobe /usr/local/bin/ffprobe
+COPY --from=ffmpeg_cpu_builder /opt/ffmpeg /opt/ffmpeg
+COPY --from=ffmpeg_cpu_builder /opt/svt-av1 /opt/svt-av1
 COPY --from=build-image /usr/local/bin/qt-faststart /usr/local/bin/qt-faststart
 COPY --from=build-image /home/mediacms.io/bento4 /home/mediacms.io/bento4
 
