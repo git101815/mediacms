@@ -110,13 +110,18 @@ export default class VideoViewer extends React.PureComponent {
       const supportedFormats = orderedSupportedVideoFormats();
 
       let srcUrl, k;
+      let selectedResolutionHasHls = false;
 
       if (defaultVideoResolution && this.videoInfo[defaultVideoResolution]) {
         k = 0;
+
         while (k < this.videoInfo[defaultVideoResolution].format.length) {
           if ('hls' === this.videoInfo[defaultVideoResolution].format[k]) {
             this.videoSources.push({ src: this.videoInfo[defaultVideoResolution].url[k] });
+            selectedResolutionHasHls = true;
+            break;
           }
+
           k += 1;
         }
       }
@@ -128,18 +133,20 @@ export default class VideoViewer extends React.PureComponent {
           ? this.props.data.encodings_info[defaultVideoResolution]
           : {};
 
-      for (k in selectedEncodings) {
-        if (selectedEncodings.hasOwnProperty(k)) {
-          if (supportedFormats.support[k]) {
-            srcUrl = selectedEncodings[k].url;
+      if (!selectedResolutionHasHls) {
+        for (k in selectedEncodings) {
+          if (selectedEncodings.hasOwnProperty(k)) {
+            if (supportedFormats.support[k]) {
+              srcUrl = selectedEncodings[k].url;
 
-            if (!!srcUrl) {
-              srcUrl = formatInnerLink(srcUrl, this.props.siteUrl);
+              if (!!srcUrl) {
+                srcUrl = formatInnerLink(srcUrl, this.props.siteUrl);
 
-              this.videoSources.push({
-                src: srcUrl /*.replace("http://", "//").replace("https://", "//")*/,
-                encodings_status: selectedEncodings[k].status,
-              });
+                this.videoSources.push({
+                  src: srcUrl /*.replace("http://", "//").replace("https://", "//")*/,
+                  encodings_status: selectedEncodings[k].status,
+                });
+              }
             }
           }
         }

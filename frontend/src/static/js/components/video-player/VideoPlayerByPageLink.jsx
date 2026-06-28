@@ -90,38 +90,58 @@ export function VideoPlayerByPageLink(props) {
       const supportedFormats = orderedSupportedVideoFormats();
 
       let defaultResolution = playerStates.videoQuality;
+      const hasAuto = void 0 !== videoInfo['Auto'];
+      let defaultVideoResolution = null;
 
-      if (null === defaultResolution || ('Auto' === defaultResolution && void 0 === videoInfo['Auto'])) {
-        defaultResolution = 720; // Default resolution.
-      }
-
-      let defaultVideoResolution = extractDefaultVideoResolution(defaultResolution, videoInfo);
-
-      if ('Auto' === defaultResolution && void 0 !== videoInfo['Auto']) {
-        videoSources.push({ src: videoInfo['Auto'].url[0] });
-      }
-
-      k = 0;
-      while (k < videoInfo[defaultVideoResolution].format.length) {
-        if ('hls' === videoInfo[defaultVideoResolution].format[k]) {
-          videoSources.push({ src: videoInfo[defaultVideoResolution].url[k] });
-          break;
+      if (
+        hasAuto &&
+        (null === defaultResolution || 'Auto' === defaultResolution || void 0 === videoInfo[defaultResolution])
+      ) {
+        defaultVideoResolution = 'Auto';
+      } else {
+        if (null === defaultResolution || 'Auto' === defaultResolution) {
+          defaultResolution = 720;
         }
-        k += 1;
+
+        defaultVideoResolution = extractDefaultVideoResolution(defaultResolution, videoInfo);
       }
 
-      for (k in data.encodings_info[defaultVideoResolution]) {
-        if (data.encodings_info[defaultVideoResolution].hasOwnProperty(k)) {
-          if (supportedFormats.support[k]) {
-            srcUrl = data.encodings_info[defaultVideoResolution][k].url;
+      let selectedResolutionHasHls = false;
 
-            if (!!srcUrl) {
-              // NOTE: In some cases, url value is 'null'.
-              srcUrl = formatInnerLink(srcUrl, site.url);
-              videoSources.push({
-                src: srcUrl,
-                encodings_status: data.encodings_info[defaultVideoResolution][k].status,
-              });
+      if (defaultVideoResolution && videoInfo[defaultVideoResolution]) {
+        k = 0;
+
+        while (k < videoInfo[defaultVideoResolution].format.length) {
+          if ('hls' === videoInfo[defaultVideoResolution].format[k]) {
+            videoSources.push({ src: videoInfo[defaultVideoResolution].url[k] });
+            selectedResolutionHasHls = true;
+            break;
+          }
+
+          k += 1;
+        }
+      }
+
+      const selectedEncodings =
+        data.encodings_info && defaultVideoResolution && data.encodings_info[defaultVideoResolution]
+          ? data.encodings_info[defaultVideoResolution]
+          : {};
+
+      if (!selectedResolutionHasHls) {
+        for (k in selectedEncodings) {
+          if (selectedEncodings.hasOwnProperty(k)) {
+            if (supportedFormats.support[k]) {
+              srcUrl = selectedEncodings[k].url;
+
+              if (!!srcUrl) {
+                // NOTE: In some cases, url value is 'null'.
+                srcUrl = formatInnerLink(srcUrl, site.url);
+
+                videoSources.push({
+                  src: srcUrl,
+                  encodings_status: selectedEncodings[k].status,
+                });
+              }
             }
           }
         }

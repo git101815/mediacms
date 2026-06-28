@@ -166,67 +166,62 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
   };
 
   hlsData = hlsData && 'object' === typeof hlsData ? hlsData : {};
-  const av1HlsData = hlsData.av1 && 'object' === typeof hlsData.av1 && supportedFormats.support && supportedFormats.support.av1 ? hlsData.av1 : null;
-  if (av1HlsData) {
-    for (i in av1HlsData) {
-      if (av1HlsData.hasOwnProperty(i)) {
-        k = null;
-        if ('master_file' === i) {
-          k = 'Auto';
-        } else {
-          k = i.split('_playlist');
-          k = 2 === k.length ? k[0] : null;
-        }
-        if (null !== k) {
-          ret[k] = void 0 === ret[k] ? { format: [], url: [] } : ret[k];
-          ret[k].format.push('hls');
-          ret[k].url.push(formatInnerLink(av1HlsData[i], SiteContext._currentValue.url));
-        }
-      }
+
+  function hlsKeyFromInfoKey(infoKey) {
+    if ('master_file' === infoKey) {
+      return 'Auto';
     }
+
+    const parts = infoKey.split('_playlist');
+
+    return 2 === parts.length ? parts[0] : null;
   }
-  const hevcHlsData = hlsData.hevc && 'object' === typeof hlsData.hevc && supportedFormats.support && supportedFormats.support.h265 ? hlsData.hevc : null;
-  if (hevcHlsData) {
-    for (i in hevcHlsData) {
-      if (hevcHlsData.hasOwnProperty(i)) {
-        k = null;
-        if ('master_file' === i) {
-          k = 'Auto';
-          } else {
-          k = i.split('_playlist');
-          k = 2 === k.length ? k[0] : null;
-          }
-        if (null !== k) {
-          ret[k] = void 0 === ret[k] ? { format: [], url: [] } : ret[k];
-          ret[k].format.push('hls');
-          ret[k].url.push(formatInnerLink(hevcHlsData[i], SiteContext._currentValue.url));
-        }}}
-}
 
-  for (i in hlsData) {
-    if (hlsData.hasOwnProperty(i) && 'hevc' !== i && 'av1' !== i) {
-      k = null;
+  function addPreferredHlsData(hlsGroup) {
+    if (!hlsGroup || 'object' !== typeof hlsGroup) {
+      return;
+    }
 
-      if ('master_file' === i) {
-        k = 'Auto';
-      } else {
-        k = i.split('_playlist');
-        k = 2 === k.length ? k[0] : null;
-      }
+    for (i in hlsGroup) {
+      if (hlsGroup.hasOwnProperty(i)) {
+        k = hlsKeyFromInfoKey(i);
 
-      if (null !== k) {
+        if (null === k) {
+          continue;
+        }
+
         ret[k] = void 0 === ret[k] ? { format: [], url: [] } : ret[k];
-        ret[k].format.push('hls');
-        ret[k].url.push(formatInnerLink(hlsData[i], SiteContext._currentValue.url));
+
+        if (-1 === ret[k].format.indexOf('hls')) {
+          ret[k].format.push('hls');
+          ret[k].url.push(formatInnerLink(hlsGroup[i], SiteContext._currentValue.url));
+        }
       }
     }
   }
+
+  const av1HlsData =
+    hlsData.av1 && 'object' === typeof hlsData.av1 && supportedFormats.support && supportedFormats.support.av1
+      ? hlsData.av1
+      : null;
+
+  addPreferredHlsData(av1HlsData);
+
+  const hevcHlsData =
+    hlsData.hevc && 'object' === typeof hlsData.hevc && supportedFormats.support && supportedFormats.support.h265
+      ? hlsData.hevc
+      : null;
+
+  addPreferredHlsData(hevcHlsData);
+
+  addPreferredHlsData(hlsData);
 
   for (k in data) {
     if (data.hasOwnProperty(k) && Object.keys(data[k]).length) {
       // TODO: With HLS doesn't matter the height of screen?
       if (1080 >= parseInt(k, 10) || (1080 < window.screen.width && 1080 < window.screen.height)) {
         i = 0;
+
         while (i < validVideoFormats.length) {
           if (void 0 !== data[k][validVideoFormats[i]]) {
             if (
@@ -234,6 +229,11 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
               data[k][validVideoFormats[i]] &&
               data[k][validVideoFormats[i]].url
             ) {
+              if (ret[k] && -1 < ret[k].format.indexOf('hls')) {
+                i += 1;
+                continue;
+              }
+
               if (100 !== data[k][validVideoFormats[i]].progress) {
                 console.warn('VIDEO DEBUG:', 'PROGRESS value is', data[k][validVideoFormats[i]].progress);
               }
