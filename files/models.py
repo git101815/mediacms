@@ -990,7 +990,53 @@ class Media(models.Model):
         res = {}
         valid_resolutions = [144, 240, 360, 480, 720, 1080, 1440, 2160]
 
-        def add_hls_manifest_info(target, master_file):
+        def codec_resolutions(codec):
+            resolutions = []
+
+            encodings = (
+                self.encodings.select_related("profile")
+                .filter(
+                    chunk=False,
+                    status="success",
+                    progress=100,
+                    profile__extension="mp4",
+                    profile__codec=codec,
+                )
+                .exclude(media_file="")
+                .order_by("profile__resolution", "id")
+            )
+
+            for encoding in encodings:
+                resolution = encoding.profile.resolution
+
+                if resolution and resolution not in resolutions:
+                    resolutions.append(resolution)
+
+            return resolutions
+
+        def manifest_resolution(playlist, stream_info_attr):
+            stream_info = getattr(playlist, stream_info_attr, None)
+
+            if not stream_info or not getattr(stream_info, "resolution", None):
+                return None
+
+            resolution = stream_info.resolution[1]
+
+            if resolution not in valid_resolutions:
+                resolution = stream_info.resolution[0]
+
+            if resolution not in valid_resolutions:
+                return None
+
+            return resolution
+
+        def mapped_resolution(playlist, index, stream_info_attr, resolution_map):
+            if resolution_map and index < len(resolution_map):
+                return resolution_map[index]
+
+            return manifest_resolution(playlist, stream_info_attr)
+
+        def add_hls_manifest_info(target, master_file, resolution_map=None):
             if not master_file:
                 return
 
@@ -1002,37 +1048,59 @@ class Media(models.Model):
             hls_dir = os.path.dirname(master_file)
             m3u8_obj = m3u8.load(master_file)
 
-            for iframe_playlist in m3u8_obj.iframe_playlists:
+            for index, iframe_playlist in enumerate(m3u8_obj.iframe_playlists):
                 uri = os.path.join(hls_dir, iframe_playlist.uri)
 
-                if os.path.exists(uri):
-                    resolution = iframe_playlist.iframe_stream_info.resolution[1]
+                if not os.path.exists(uri):
+                    continue
 
-                    if resolution not in valid_resolutions:
-                        resolution = iframe_playlist.iframe_stream_info.resolution[0]
+                resolution = mapped_resolution(
+                    iframe_playlist,
+                    index,
+                    "iframe_stream_info",
+                    resolution_map,
+                )
 
-                    target[f"{resolution}_iframe"] = helpers.url_from_path(uri)
+                if resolution is None:
+                    continue
 
-            for playlist in m3u8_obj.playlists:
+                target[f"{resolution}_iframe"] = helpers.url_from_path(uri)
+
+            for index, playlist in enumerate(m3u8_obj.playlists):
                 uri = os.path.join(hls_dir, playlist.uri)
 
-                if os.path.exists(uri):
-                    resolution = playlist.stream_info.resolution[1]
+                if not os.path.exists(uri):
+                    continue
 
-                    if resolution not in valid_resolutions:
-                        resolution = playlist.stream_info.resolution[0]
+                resolution = mapped_resolution(
+                    playlist,
+                    index,
+                    "stream_info",
+                    resolution_map,
+                )
 
-                    target[f"{resolution}_playlist"] = helpers.url_from_path(uri)
+                if resolution is None:
+                    continue
+
+                target[f"{resolution}_playlist"] = helpers.url_from_path(uri)
 
         add_hls_manifest_info(res, self.hls_file)
 
         if getattr(self, "hls_hevc_file", ""):
-            res.setdefault("hevc", {})
-            add_hls_manifest_info(res["hevc"], self.hls_hevc_file)
+            res["hevc"] = {}
+            add_hls_manifest_info(
+                res["hevc"],
+                self.hls_hevc_file,
+                codec_resolutions("h265"),
+            )
 
         if getattr(self, "hls_av1_file", ""):
-            res.setdefault("av1", {})
-            add_hls_manifest_info(res["av1"], self.hls_av1_file)
+            res["av1"] = {}
+            add_hls_manifest_info(
+                res["av1"],
+                self.hls_av1_file,
+                codec_resolutions("av1"),
+            )
 
         return res
 

@@ -695,10 +695,13 @@ def create_hls_hevc_fmp4(friendly_token):
     in_files = []
     for e in qs:
         path = e.media_file.path
+        resolution = e.profile.resolution
+
         if not os.path.exists(path):
             logger.error("HEVC HLS: input missing: %s", path)
             return False
-        in_files.append(path)
+
+        in_files.append((resolution, path))
 
     if not in_files:
         logger.info("HEVC HLS: no inputs for %s", friendly_token)
@@ -710,8 +713,11 @@ def create_hls_hevc_fmp4(friendly_token):
         with tempfile.TemporaryDirectory(dir=temp_root) as workdir:
             frag_files = []
 
-            for src in in_files:
-                frag = os.path.join(workdir, os.path.basename(src) + ".frag.mp4")
+            for resolution, src in in_files:
+                frag = os.path.join(
+                    workdir,
+                    f"hevc-{resolution}-{os.path.basename(src)}.frag.mp4",
+                )
                 result = run_command([mp4fragment, src, frag])
 
                 if result.get("returncode", 0) != 0 or not os.path.exists(frag):
@@ -854,12 +860,13 @@ def create_hls_av1_fmp4(friendly_token):
     input_files = []
     for encoding in encodings:
         path = encoding.media_file.path
+        resolution = encoding.profile.resolution
 
         if not os.path.exists(path):
             logger.error("AV1 HLS: input missing: %s", path)
             return False
 
-        input_files.append(path)
+        input_files.append((resolution, path))
 
     if not input_files:
         logger.info("AV1 HLS: no inputs for %s", friendly_token)
@@ -871,8 +878,11 @@ def create_hls_av1_fmp4(friendly_token):
         with tempfile.TemporaryDirectory(dir=temp_root) as workdir:
             fragmented_files = []
 
-            for src in input_files:
-                fragmented = os.path.join(workdir, os.path.basename(src) + ".frag.mp4")
+            for resolution, src in input_files:
+                fragmented = os.path.join(
+                    workdir,
+                    f"av1-{resolution}-{os.path.basename(src)}.frag.mp4",
+                )
                 result = run_command([mp4fragment, src, fragmented])
 
                 if result.get("returncode", 0) != 0 or not os.path.exists(fragmented):
