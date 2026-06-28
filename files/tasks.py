@@ -822,6 +822,11 @@ def create_hls_av1_fmp4(friendly_token):
     final_output_dir = os.path.join(base_dir, "av1")
     final_master = os.path.join(final_output_dir, "master.m3u8")
 
+    if os.path.exists(final_master):
+        Media.objects.filter(pk=media.pk).update(hls_av1_file=final_master)
+        logger.info("AV1 HLS: already exists %s", final_master)
+        return True
+
     encodings = media.encodings.filter(
         profile__extension="mp4",
         profile__codec="av1",
