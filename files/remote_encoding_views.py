@@ -36,6 +36,10 @@ def remote_encoding_callback(request, friendly_token):
     outputs = payload.get("outputs") or {}
 
     h264_master = outputs.get("h264", {}).get("master_url", "")
+    h265_master = (
+        outputs.get("h265", {}).get("master_url", "")
+        or outputs.get("hevc", {}).get("master_url", "")
+    )
     av1_master = outputs.get("av1", {}).get("master_url", "")
 
     update_fields = ["encoding_status", "listable"]
@@ -43,6 +47,10 @@ def remote_encoding_callback(request, friendly_token):
     if h264_master:
         media.hls_file = h264_master
         update_fields.append("hls_file")
+
+    if h265_master:
+        media.hls_hevc_file = h265_master
+        update_fields.append("hls_hevc_file")
 
     if av1_master:
         media.hls_av1_file = av1_master
@@ -56,6 +64,7 @@ def remote_encoding_callback(request, friendly_token):
             "ok": True,
             "status": "success",
             "h264": bool(h264_master),
+            "h265": bool(h265_master),
             "av1": bool(av1_master),
         }
     )

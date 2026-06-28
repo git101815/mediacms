@@ -53,7 +53,7 @@ def get_remote_profiles_for_media(media):
         if profile.extension == "gif":
             continue
 
-        if profile.codec not in ("h264", "av1"):
+        if profile.codec not in ("h264", "h265", "av1"):
             continue
 
         if media.video_height and media.video_height < profile.resolution:
