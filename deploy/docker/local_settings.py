@@ -66,6 +66,7 @@ MAX_CHARS_FOR_COMMENT = 1000
 ALLOW_MENTION_IN_COMMENTS = True
 CANNOT_ADD_MEDIA_MESSAGE = "Only Creators can upload content, contact an admin to apply for our Creators program"
 MINIMUM_RESOLUTIONS_TO_ENCODE = [480, 720]
+ENABLED_ENCODING_CODECS = ("h264", "h265", "av1")
 
 ADMINS_NOTIFICATIONS = {
     "NEW_USER": False,

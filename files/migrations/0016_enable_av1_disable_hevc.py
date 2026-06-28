@@ -4,9 +4,6 @@ from django.db import migrations
 def forwards(apps, schema_editor):
     EncodeProfile = apps.get_model("files", "EncodeProfile")
 
-    EncodeProfile.objects.filter(codec="h265").update(active=False)
-    EncodeProfile.objects.filter(codec="vp9").update(active=False)
-
     for name, resolution in (
         ("av1-480", 480),
         ("av1-720", 720),

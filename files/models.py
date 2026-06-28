@@ -13,7 +13,7 @@ from django.contrib.postgres.search import SearchVectorField
 from django.core.exceptions import ValidationError
 from django.core.files import File
 from django.db import models
-from django.db.models import Func, Value
+from django.db.models import Func, Q, Value
 from django.db.models.signals import m2m_changed, post_delete, post_save, pre_delete
 from django.dispatch import receiver
 from django.urls import reverse
@@ -603,9 +603,18 @@ class Media(models.Model):
             tasks.submit_remote_encoding.delay(self.friendly_token)
             return True
 
+        enabled_codecs = tuple(getattr(settings, "ENABLED_ENCODING_CODECS", ("h264",)))
+
         if not profiles:
-            profiles = EncodeProfile.objects.filter(active=True)
-        profiles = list(profiles)
+            profiles = EncodeProfile.objects.filter(active=True).filter(
+                Q(extension="gif") | Q(codec__in=enabled_codecs)
+            )
+
+        profiles = [
+            profile
+            for profile in list(profiles)
+            if profile.extension == "gif" or profile.codec in enabled_codecs
+        ]
 
         from . import tasks
 

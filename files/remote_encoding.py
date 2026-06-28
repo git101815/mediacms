@@ -48,12 +48,13 @@ def build_callback_url(media):
 
 def get_remote_profiles_for_media(media):
     profiles = []
+    enabled_codecs = tuple(getattr(settings, "ENABLED_ENCODING_CODECS", ("h264",)))
 
     for profile in EncodeProfile.objects.filter(active=True).order_by("resolution"):
         if profile.extension == "gif":
             continue
 
-        if profile.codec not in ("h264", "h265", "av1"):
+        if profile.codec not in enabled_codecs:
             continue
 
         if media.video_height and media.video_height < profile.resolution:
