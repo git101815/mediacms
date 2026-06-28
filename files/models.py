@@ -662,17 +662,25 @@ class Media(models.Model):
 
         self.save(update_fields=["encoding_status", "listable", "preview_file_path"])
 
-        if encoding and encoding.status == "success" and encoding.profile.codec == "h264" and action == "add" and not encoding.chunk:
+        if encoding and encoding.status == "success" and action == "add" and not encoding.chunk:
             from . import tasks
 
-            tasks.create_hls.delay(self.friendly_token)
+            if encoding.profile.codec == "h264":
+                tasks.create_hls.delay(self.friendly_token)
 
-            # TODO: ideally would ensure this is run only at the end when the last encoding is done...
-            vt_request = VideoTrimRequest.objects.filter(media=self, status="running").first()
-            if vt_request:
-                tasks.post_trim_action.delay(self.friendly_token)
-                vt_request.status = "success"
-                vt_request.save(update_fields=["status"])
+                # TODO: ideally would ensure this is run only at the end when the last encoding is done...
+                vt_request = VideoTrimRequest.objects.filter(media=self, status="running").first()
+                if vt_request:
+                    tasks.post_trim_action.delay(self.friendly_token)
+                    vt_request.status = "success"
+                    vt_request.save(update_fields=["status"])
+
+            elif encoding.profile.codec == "h265":
+                tasks.create_hls_hevc_fmp4.delay(self.friendly_token)
+
+            elif encoding.profile.codec == "av1":
+                tasks.create_hls_av1_fmp4.delay(self.friendly_token)
+
         return True
 
     def set_encoding_status(self):

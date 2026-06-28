@@ -741,6 +741,161 @@ def create_hls_hevc_fmp4(friendly_token):
         if staging_dir and os.path.exists(staging_dir):
             shutil.rmtree(staging_dir, ignore_errors=True)
 
+@task(queue="long_tasks", name="create_hls_av1_fmp4")
+def create_hls_av1_fmp4(friendly_token):
+    logger.info("AV1 HLS: START token=%s", friendly_token)
+
+    mp4dash = getattr(settings, "MP4DASH_COMMAND", None)
+    mp4fragment = getattr(settings, "MP4FRAGMENT_COMMAND", None)
+    hls_dir = getattr(settings, "HLS_DIR", None)
+    temp_root = getattr(settings, "TEMP_DIRECTORY", "/tmp")
+
+    if not mp4dash or not os.path.exists(mp4dash):
+        logger.error("AV1 HLS: mp4dash missing: %s", mp4dash)
+        return False
+
+    if not mp4fragment or not os.path.exists(mp4fragment):
+        logger.error("AV1 HLS: mp4fragment missing: %s", mp4fragment)
+        return False
+
+    if not hls_dir:
+        logger.error("AV1 HLS: HLS_DIR missing")
+        return False
+
+    try:
+        media = Media.objects.get(friendly_token=friendly_token)
+    except Media.DoesNotExist:
+        logger.error("AV1 HLS: media not found: %s", friendly_token)
+        return False
+
+    os.makedirs(hls_dir, exist_ok=True)
+
+    base_dir = os.path.join(hls_dir, media.uid.hex)
+    os.makedirs(base_dir, exist_ok=True)
+
+    final_output_dir = os.path.join(base_dir, "av1")
+    final_master = os.path.join(final_output_dir, "master.m3u8")
+
+    encodings = media.encodings.filter(
+        profile__extension="mp4",
+        profile__codec="av1",
+        status="success",
+        chunk=False,
+    ).order_by("profile__resolution")
+
+    expected_profiles = EncodeProfile.objects.filter(
+        active=True,
+        extension="mp4",
+        codec="av1",
+    )
+
+    expected_resolutions = []
+    for profile in expected_profiles:
+        if media.video_height and media.video_height < profile.resolution:
+            if profile.resolution not in settings.MINIMUM_RESOLUTIONS_TO_ENCODE:
+                continue
+        expected_resolutions.append(profile.resolution)
+
+    available_resolutions = set(encodings.values_list("profile__resolution", flat=True))
+    missing_resolutions = [
+        resolution
+        for resolution in expected_resolutions
+        if resolution not in available_resolutions
+    ]
+
+    if missing_resolutions:
+        logger.info(
+            "AV1 HLS: waiting for missing AV1 renditions token=%s missing=%s",
+            friendly_token,
+            missing_resolutions,
+        )
+        return False
+
+    input_files = []
+    for encoding in encodings:
+        path = encoding.media_file.path
+
+        if not os.path.exists(path):
+            logger.error("AV1 HLS: input missing: %s", path)
+            return False
+
+        input_files.append(path)
+
+    if not input_files:
+        logger.info("AV1 HLS: no inputs for %s", friendly_token)
+        return False
+
+    staging_dir = tempfile.mkdtemp(prefix="av1_staging_", dir=base_dir)
+
+    try:
+        with tempfile.TemporaryDirectory(dir=temp_root) as workdir:
+            fragmented_files = []
+
+            for src in input_files:
+                fragmented = os.path.join(workdir, os.path.basename(src) + ".frag.mp4")
+                result = run_command([mp4fragment, src, fragmented])
+
+                if result.get("returncode", 0) != 0 or not os.path.exists(fragmented):
+                    logger.error("AV1 HLS: mp4fragment failed src=%s result=%s", src, result)
+                    return False
+
+                fragmented_files.append(fragmented)
+
+            cmd = [
+                mp4dash,
+                "--force",
+                "--hls",
+                "--output-dir",
+                staging_dir,
+                "--hls-master-playlist-name",
+                "master.m3u8",
+                "--hls-media-playlist-name",
+                "stream.m3u8",
+                "--hls-iframes-playlist-name",
+                "iframes.m3u8",
+                *fragmented_files,
+            ]
+
+            result = run_command(cmd)
+
+            if result.get("returncode", 0) != 0:
+                logger.error("AV1 HLS: mp4dash failed result=%s", result)
+                return False
+
+        staging_master = os.path.join(staging_dir, "master.m3u8")
+
+        if not os.path.exists(staging_master):
+            logger.error("AV1 HLS: master missing after mp4dash: %s", staging_master)
+            return False
+
+        if os.path.exists(final_output_dir):
+            result = run_command(["cp", "-rT", staging_dir, final_output_dir])
+            if result.get("returncode", 0) != 0:
+                logger.error("AV1 HLS: cp -rT failed result=%s", result)
+                return False
+        else:
+            try:
+                shutil.move(staging_dir, final_output_dir)
+                staging_dir = None
+            except Exception as exc:
+                logger.warning("AV1 HLS: move race (%r), fallback to cp", exc)
+                os.makedirs(final_output_dir, exist_ok=True)
+                result = run_command(["cp", "-rT", staging_dir, final_output_dir])
+                if result.get("returncode", 0) != 0:
+                    logger.error("AV1 HLS: cp -rT fallback failed result=%s", result)
+                    return False
+
+        if os.path.exists(final_master):
+            Media.objects.filter(pk=media.pk).update(hls_av1_file=final_master)
+            logger.info("AV1 HLS: OK %s", final_master)
+            return True
+
+        logger.error("AV1 HLS: final master missing: %s", final_master)
+        return False
+
+    finally:
+        if staging_dir and os.path.exists(staging_dir):
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
 @task(name="check_running_states", queue="short_tasks")
 def check_running_states():
