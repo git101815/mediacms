@@ -13,7 +13,7 @@ from django.contrib.postgres.search import SearchVectorField
 from django.core.exceptions import ValidationError
 from django.core.files import File
 from django.db import models
-from django.db.models import Func, Value
+from django.db.models import Func, Q, Value
 from django.db.models.signals import m2m_changed, post_delete, post_save, pre_delete
 from django.dispatch import receiver
 from django.urls import reverse
@@ -76,8 +76,9 @@ ENCODE_RESOLUTIONS = (
 )
 
 CODECS = (
-    ("h265", "h265"),
+    ("av1", "av1"),
     ("h264", "h264"),
+    ("h265", "h265"),
     ("vp9", "vp9"),
 )
 
@@ -167,6 +168,7 @@ class Media(models.Model):
 
     hls_file = models.CharField(max_length=1000, blank=True, help_text="Path to HLS file for videos")
     hls_hevc_file = models.CharField(max_length=500, blank=True, default="")
+    hls_av1_file = models.CharField(max_length=1000, blank=True, default="")
 
     is_reviewed = models.BooleanField(
         default=settings.MEDIA_IS_REVIEWED,
@@ -592,10 +594,27 @@ class Media(models.Model):
         so that no EncodeProfile for highter heights than the video
         are created
         """
+        from .remote_encoding import remote_encoding_enabled
+        if remote_encoding_enabled():
+            from . import tasks
+
+            self.encoding_status = "running"
+            self.save(update_fields=["encoding_status", "listable"])
+            tasks.submit_remote_encoding.delay(self.friendly_token)
+            return True
+
+        enabled_codecs = tuple(getattr(settings, "ENABLED_ENCODING_CODECS", ("h264",)))
 
         if not profiles:
-            profiles = EncodeProfile.objects.filter(active=True)
-        profiles = list(profiles)
+            profiles = EncodeProfile.objects.filter(active=True).filter(
+                Q(extension="gif") | Q(codec__in=enabled_codecs)
+            )
+
+        profiles = [
+            profile
+            for profile in list(profiles)
+            if profile.extension == "gif" or profile.codec in enabled_codecs
+        ]
 
         from . import tasks
 
@@ -652,20 +671,25 @@ class Media(models.Model):
 
         self.save(update_fields=["encoding_status", "listable", "preview_file_path"])
 
-        if encoding and encoding.status == "success" and encoding.profile.codec == "h264" and action == "add" and not encoding.chunk:
+        if encoding and encoding.status == "success" and action == "add" and not encoding.chunk:
             from . import tasks
 
-            tasks.create_hls.delay(self.friendly_token)
+            if encoding.profile.codec == "h264":
+                tasks.create_hls.delay(self.friendly_token)
 
-            # TODO: ideally would ensure this is run only at the end when the last encoding is done...
-            vt_request = VideoTrimRequest.objects.filter(media=self, status="running").first()
-            if vt_request:
-                tasks.post_trim_action.delay(self.friendly_token)
-                vt_request.status = "success"
-                vt_request.save(update_fields=["status"])
-        if encoding and encoding.status == "success" and encoding.profile.codec == "h265" and action == "add" and not encoding.chunk:
-            from . import tasks
-            tasks.create_hls_hevc_fmp4.delay(self.friendly_token)
+                # TODO: ideally would ensure this is run only at the end when the last encoding is done...
+                vt_request = VideoTrimRequest.objects.filter(media=self, status="running").first()
+                if vt_request:
+                    tasks.post_trim_action.delay(self.friendly_token)
+                    vt_request.status = "success"
+                    vt_request.save(update_fields=["status"])
+
+            elif encoding.profile.codec == "h265":
+                tasks.create_hls_hevc_fmp4.delay(self.friendly_token)
+
+            elif encoding.profile.codec == "av1":
+                tasks.create_hls_av1_fmp4.delay(self.friendly_token)
+
         return True
 
     def set_encoding_status(self):
@@ -965,39 +989,119 @@ class Media(models.Model):
 
         res = {}
         valid_resolutions = [144, 240, 360, 480, 720, 1080, 1440, 2160]
-        if not self.hls_file:
-            return res
-        res["master_file"] = helpers.url_from_path(self.hls_file)
-        if self.hls_file:
-            if os.path.exists(self.hls_file):
-                hls_file = self.hls_file
-                p = os.path.dirname(hls_file)
-                m3u8_obj = m3u8.load(hls_file)
-                if os.path.exists(hls_file):
-                    res["master_file"] = helpers.url_from_path(hls_file)
-                    for iframe_playlist in m3u8_obj.iframe_playlists:
-                        uri = os.path.join(p, iframe_playlist.uri)
-                        if os.path.exists(uri):
-                            resolution = iframe_playlist.iframe_stream_info.resolution[1]
-                            # most probably video is vertical, getting the first value to
-                            # be the resolution
-                            if resolution not in valid_resolutions:
-                                resolution = iframe_playlist.iframe_stream_info.resolution[0]
 
-                            res[f"{resolution}_iframe"] = helpers.url_from_path(uri)
-                    for playlist in m3u8_obj.playlists:
-                        uri = os.path.join(p, playlist.uri)
-                        if os.path.exists(uri):
-                            resolution = playlist.stream_info.resolution[1]
-                            # same as above
-                            if resolution not in valid_resolutions:
-                                resolution = playlist.stream_info.resolution[0]
+        def codec_resolutions(codec):
+            resolutions = []
 
-                            res[f"{resolution}_playlist"] = helpers.url_from_path(uri)
+            encodings = (
+                self.encodings.select_related("profile")
+                .filter(
+                    chunk=False,
+                    status="success",
+                    progress=100,
+                    profile__extension="mp4",
+                    profile__codec=codec,
+                )
+                .exclude(media_file="")
+                .order_by("profile__resolution", "id")
+            )
 
-            if getattr(self, "hls_hevc_file", ""):
-                res.setdefault("hevc", {})
-                res["hevc"]["master_file"] = helpers.url_from_path(self.hls_hevc_file)
+            for encoding in encodings:
+                resolution = encoding.profile.resolution
+
+                if resolution and resolution not in resolutions:
+                    resolutions.append(resolution)
+
+            return resolutions
+
+        def manifest_resolution(playlist, stream_info_attr):
+            stream_info = getattr(playlist, stream_info_attr, None)
+
+            if not stream_info or not getattr(stream_info, "resolution", None):
+                return None
+
+            resolution = stream_info.resolution[1]
+
+            if resolution not in valid_resolutions:
+                resolution = stream_info.resolution[0]
+
+            if resolution not in valid_resolutions:
+                return None
+
+            return resolution
+
+        def mapped_resolution(playlist, index, stream_info_attr, resolution_map):
+            if resolution_map and index < len(resolution_map):
+                return resolution_map[index]
+
+            return manifest_resolution(playlist, stream_info_attr)
+
+        def add_hls_manifest_info(target, master_file, resolution_map=None):
+            if not master_file:
+                return
+
+            target["master_file"] = helpers.url_from_path(master_file)
+
+            if not os.path.exists(master_file):
+                return
+
+            hls_dir = os.path.dirname(master_file)
+            m3u8_obj = m3u8.load(master_file)
+
+            for index, iframe_playlist in enumerate(m3u8_obj.iframe_playlists):
+                uri = os.path.join(hls_dir, iframe_playlist.uri)
+
+                if not os.path.exists(uri):
+                    continue
+
+                resolution = mapped_resolution(
+                    iframe_playlist,
+                    index,
+                    "iframe_stream_info",
+                    resolution_map,
+                )
+
+                if resolution is None:
+                    continue
+
+                target[f"{resolution}_iframe"] = helpers.url_from_path(uri)
+
+            for index, playlist in enumerate(m3u8_obj.playlists):
+                uri = os.path.join(hls_dir, playlist.uri)
+
+                if not os.path.exists(uri):
+                    continue
+
+                resolution = mapped_resolution(
+                    playlist,
+                    index,
+                    "stream_info",
+                    resolution_map,
+                )
+
+                if resolution is None:
+                    continue
+
+                target[f"{resolution}_playlist"] = helpers.url_from_path(uri)
+
+        add_hls_manifest_info(res, self.hls_file)
+
+        if getattr(self, "hls_hevc_file", ""):
+            res["hevc"] = {}
+            add_hls_manifest_info(
+                res["hevc"],
+                self.hls_hevc_file,
+                codec_resolutions("h265"),
+            )
+
+        if getattr(self, "hls_av1_file", ""):
+            res["av1"] = {}
+            add_hls_manifest_info(
+                res["av1"],
+                self.hls_av1_file,
+                codec_resolutions("av1"),
+            )
+
         return res
 
     @property

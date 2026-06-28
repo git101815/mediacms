@@ -42,9 +42,9 @@ VIDEO_CRFS = {
     "h264": 23,
     "h265": 28,
     "vp9": 32,
+    "av1": 30,
 }
 
-# video rates for 25 or 60 fps input, for different codecs, in kbps
 VIDEO_BITRATES = {
     "h264": {
         25: {
@@ -85,14 +85,28 @@ VIDEO_BITRATES = {
         },
         60: {720: 1800, 1080: 3000, 1440: 8000, 2160: 18000},
     },
+    "av1": {
+        25: {
+            480: 350,
+            720: 700,
+            1080: 1400,
+            1440: 2800,
+            2160: 6000,
+        },
+        60: {
+            720: 1100,
+            1080: 2200,
+            1440: 4500,
+            2160: 9000,
+        },
+    },
 }
 
+AUDIO_ENCODERS = {"h264": "aac", "h265": "aac", "vp9": "libopus", "av1": "aac"}
 
-AUDIO_ENCODERS = {"h264": "aac", "h265": "aac", "vp9": "libopus"}
+AUDIO_BITRATES = {"h264": 128, "h265": 128, "vp9": 96, "av1": 128}
 
-AUDIO_BITRATES = {"h264": 128, "h265": 128, "vp9": 96}
-
-EXTENSIONS = {"h264": "mp4", "h265": "mp4", "vp9": "webm"}
+EXTENSIONS = {"h264": "mp4", "h265": "mp4", "vp9": "webm", "av1": "mp4"}
 
 VIDEO_PROFILES = {"h264": "main", "h265": "main"}
 
@@ -582,9 +596,13 @@ def get_base_ffmpeg_command(
     if enc_type == "twopass":
         base_cmd.extend(["-b:v", str(target_rate) + "k"])
     elif enc_type == "crf":
-        base_cmd.extend(["-crf", str(VIDEO_CRFS[codec])])
-        if encoder == "libvpx-vp9":
+        if encoder == "av1_nvenc":
+            base_cmd.extend(["-cq", str(VIDEO_CRFS[codec])])
             base_cmd.extend(["-b:v", str(target_rate) + "k"])
+        else:
+            base_cmd.extend(["-crf", str(VIDEO_CRFS[codec])])
+            if encoder == "libvpx-vp9":
+                base_cmd.extend(["-b:v", str(target_rate) + "k"])
 
     if has_audio:
         base_cmd.extend(
@@ -667,6 +685,33 @@ def get_base_ffmpeg_command(
                 VIDEO_PROFILES[codec],
             ]
         )
+    elif encoder in ("libsvtav1", "av1_nvenc"):
+        if encoder == "libsvtav1":
+            cmd.extend(
+                [
+                    "-preset",
+                    str(settings.SVT_AV1_PRESET),
+                    "-g",
+                    str(keyframe_distance),
+                    "-keyint_min",
+                    str(keyframe_distance),
+                ]
+            )
+        else:
+            cmd.extend(
+                [
+                    "-preset",
+                    settings.AV1_NVENC_PRESET,
+                    "-g",
+                    str(keyframe_distance),
+                    "-keyint_min",
+                    str(keyframe_distance),
+                    "-maxrate",
+                    str(int(int(target_rate) * MAX_RATE_MULTIPLIER)) + "k",
+                    "-bufsize",
+                    str(int(int(target_rate) * BUF_SIZE_MULTIPLIER)) + "k",
+                ]
+            )
     elif encoder == "libvpx-vp9":
         cmd.extend(
             [
@@ -724,6 +769,9 @@ def produce_ffmpeg_commands(media_file, media_info, resolution, codec, output_fi
     elif codec == "vp9":
         encoder = "libvpx-vp9"
         # ext = "webm"
+    elif codec == "av1":
+        encoder = settings.FFMPEG_AV1_ENCODER
+        # ext = "mp4"
     else:
         return False
 

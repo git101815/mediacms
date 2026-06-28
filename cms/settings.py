@@ -476,6 +476,11 @@ if os.environ.get("TESTING"):
 # if True, only show original, don't perform any action on videos
 DO_NOT_TRANSCODE_VIDEO = False
 
+# Codec runtime switch.
+# EncodeProfile.active means the profile exists and can be used.
+# ENABLED_ENCODING_CODECS decides which codecs are actually encoded at runtime.
+ENABLED_ENCODING_CODECS = ("h264",)
+
 DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 
 LANGUAGES = [

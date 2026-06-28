@@ -91,51 +91,66 @@ export default class VideoViewer extends React.PureComponent {
       this.videoInfo = null;
     } else {
       let defaultResolution = VideoViewerStore.get('video-quality');
+      const hasAuto = void 0 !== this.videoInfo['Auto'];
+      let defaultVideoResolution = null;
 
-      if (null === defaultResolution || ('Auto' === defaultResolution && void 0 === this.videoInfo['Auto'])) {
-        defaultResolution = 720; // Default resolution.
-      }
+      if (
+        hasAuto &&
+        (null === defaultResolution || 'Auto' === defaultResolution || void 0 === this.videoInfo[defaultResolution])
+      ) {
+        defaultVideoResolution = 'Auto';
+      } else {
+        if (null === defaultResolution || 'Auto' === defaultResolution) {
+          defaultResolution = 720;
+        }
 
-      let defaultVideoResolution = extractDefaultVideoResolution(defaultResolution, this.videoInfo);
-
-      if ('Auto' === defaultResolution && void 0 !== this.videoInfo['Auto']) {
-        this.videoSources.push({ src: this.videoInfo['Auto'].url[0] });
+        defaultVideoResolution = extractDefaultVideoResolution(defaultResolution, this.videoInfo);
       }
 
       const supportedFormats = orderedSupportedVideoFormats();
 
       let srcUrl, k;
+      let selectedResolutionHasHls = false;
 
-      k = 0;
-      while (k < this.videoInfo[defaultVideoResolution].format.length) {
-        if ('hls' === this.videoInfo[defaultVideoResolution].format[k]) {
-          this.videoSources.push({ src: this.videoInfo[defaultVideoResolution].url[k] });
-          break;
+      if (defaultVideoResolution && this.videoInfo[defaultVideoResolution]) {
+        k = 0;
+
+        while (k < this.videoInfo[defaultVideoResolution].format.length) {
+          if ('hls' === this.videoInfo[defaultVideoResolution].format[k]) {
+            this.videoSources.push({ src: this.videoInfo[defaultVideoResolution].url[k] });
+            selectedResolutionHasHls = true;
+            break;
+          }
+
+          k += 1;
         }
-        k += 1;
       }
 
-      for (k in this.props.data.encodings_info[defaultVideoResolution]) {
-        if (this.props.data.encodings_info[defaultVideoResolution].hasOwnProperty(k)) {
-          if (supportedFormats.support[k]) {
-            srcUrl = this.props.data.encodings_info[defaultVideoResolution][k].url;
+      const selectedEncodings =
+        this.props.data.encodings_info &&
+        defaultVideoResolution &&
+        this.props.data.encodings_info[defaultVideoResolution]
+          ? this.props.data.encodings_info[defaultVideoResolution]
+          : {};
 
-            if (!!srcUrl) {
-              srcUrl = formatInnerLink(srcUrl, this.props.siteUrl);
+      if (!selectedResolutionHasHls) {
+        for (k in selectedEncodings) {
+          if (selectedEncodings.hasOwnProperty(k)) {
+            if (supportedFormats.support[k]) {
+              srcUrl = selectedEncodings[k].url;
 
-              this.videoSources.push({
-                src: srcUrl /*.replace("http://", "//").replace("https://", "//")*/,
-                encodings_status: this.props.data.encodings_info[defaultVideoResolution][k].status,
-              });
+              if (!!srcUrl) {
+                srcUrl = formatInnerLink(srcUrl, this.props.siteUrl);
+
+                this.videoSources.push({
+                  src: srcUrl /*.replace("http://", "//").replace("https://", "//")*/,
+                  encodings_status: selectedEncodings[k].status,
+                });
+              }
             }
           }
         }
       }
-
-      // console.log( supportedFormats );
-      // console.log( this.videoInfo );
-      // console.log( defaultVideoResolution );
-      // console.log( this.videoSources );
     }
 
     if (this.videoSources.length) {

@@ -1,3 +1,4 @@
+ARG FFMPEG_CPU_BUILDER_IMAGE=cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0
 FROM python:3.13.5-bookworm AS build-image
 
 # Install system dependencies needed for downloading and extracting
@@ -28,6 +29,7 @@ RUN mkdir -p /home/mediacms.io/bento4 && \
     rm -rf /home/mediacms.io/bento4/docs && \
     rm -f "/tmp/${BENTO4_ZIP}"
 
+FROM ${FFMPEG_CPU_BUILDER_IMAGE} AS ffmpeg_cpu_builder
 ############ RUNTIME IMAGE ############
 FROM python:3.13.5-bookworm AS runtime_image
 
@@ -37,7 +39,8 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV CELERY_APP='cms'
 ENV VIRTUAL_ENV=/home/mediacms.io
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV PATH="/opt/ffmpeg/bin:$VIRTUAL_ENV/bin:$PATH"
+ENV LD_LIBRARY_PATH="/opt/svt-av1/lib:${LD_LIBRARY_PATH}"
 
 # Install runtime system dependencies
 RUN apt-get update -y && \
@@ -53,7 +56,10 @@ RUN apt-get update -y && \
         pkg-config \
         libxml2-dev \
         libxmlsec1-dev \
-        libxmlsec1-openssl && \
+        libxmlsec1-openssl \
+        libx264-164 \
+        libx265-199 \
+        libnuma1 && \
     install -d /usr/share/postgresql-common/pgdg && \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc && \
@@ -65,8 +71,8 @@ RUN apt-get update -y && \
     apt-get purge --auto-remove -y && \
     apt-get clean
 # Copy ffmpeg and Bento4 from build image
-COPY --from=build-image /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
-COPY --from=build-image /usr/local/bin/ffprobe /usr/local/bin/ffprobe
+COPY --from=ffmpeg_cpu_builder /opt/ffmpeg /opt/ffmpeg
+COPY --from=ffmpeg_cpu_builder /opt/svt-av1 /opt/svt-av1
 COPY --from=build-image /usr/local/bin/qt-faststart /usr/local/bin/qt-faststart
 COPY --from=build-image /home/mediacms.io/bento4 /home/mediacms.io/bento4
 
