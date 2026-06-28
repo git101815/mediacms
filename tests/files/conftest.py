@@ -5,15 +5,6 @@ import pytest
 
 from files.models import EncodeProfile, Encoding, Media
 
-
-RESOLUTIONS = (480, 720, 1080)
-
-
-@pytest.fixture
-def multicodec_resolutions():
-    return RESOLUTIONS
-
-
 @pytest.fixture
 def media_factory(django_user_model):
     def _create_media(*, friendly_token="multicodechls", video_height=1080):
@@ -141,11 +132,7 @@ def write_hls_master():
             iframe_path.write_text("#EXTM3U\n#EXT-X-ENDLIST\n")
 
             manifest_height = forced_manifest_height or height
-            manifest_width = {
-                480: 854,
-                720: 1280,
-                1080: 1920,
-            }[manifest_height]
+            manifest_width = int(round(manifest_height * 16 / 9))
 
             lines.append(
                 f'#EXT-X-STREAM-INF:BANDWIDTH={manifest_height * 1000},'
