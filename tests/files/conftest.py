@@ -175,11 +175,3 @@ def fake_successful_hls_run_command(settings):
 
     _run_command.fragmented_outputs = fragmented_outputs
     return _run_command
-
-
-class DelayRecorder:
-    def __init__(self):
-        self.calls = []
-
-    def delay(self, *args, **kwargs):
-        self.calls.append((args, kwargs))
