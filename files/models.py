@@ -6,6 +6,7 @@ import random
 import re
 import tempfile
 import uuid
+import m3u8
 from urllib.parse import urljoin
 from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
@@ -1494,7 +1495,12 @@ class MediaHLSRendition(models.Model):
         if child_uri.startswith("http://") or child_uri.startswith("https://") or child_uri.startswith("//"):
             return child_uri
 
-        return os.path.normpath(os.path.join(os.path.dirname(master_file), child_uri))
+        master_value = str(master_file)
+
+        if master_value.startswith("http://") or master_value.startswith("https://") or master_value.startswith("//"):
+            return urljoin(master_value, child_uri)
+
+        return os.path.normpath(os.path.join(os.path.dirname(master_value), child_uri))
 
     @classmethod
     def _stream_resolution(cls, stream_info):
@@ -1516,8 +1522,9 @@ class MediaHLSRendition(models.Model):
         stream_info = getattr(playlist, stream_info_attr, None)
         resolution, width, height = cls._stream_resolution(stream_info)
 
-        if resolution_map and index < len(resolution_map):
+        if resolution is None and resolution_map and index < len(resolution_map):
             resolution = resolution_map[index]
+            height = height or resolution
 
         if resolution not in cls.VALID_RESOLUTIONS:
             return
@@ -1623,6 +1630,97 @@ class MediaHLSRendition(models.Model):
                 )
 
         return renditions
+
+    @classmethod
+    def _to_int(cls, value):
+        if value in (None, ""):
+            return None
+
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def build_from_payload(cls, media, codec, master_file, renditions):
+        if codec not in {"h264", "h265", "av1"}:
+            raise ValueError(f"Unsupported HLS codec: {codec}")
+
+        if not master_file:
+            raise ValueError("Missing HLS master file")
+
+        if not renditions:
+            raise ValueError(f"Missing HLS renditions payload for codec={codec}")
+
+        rows = []
+        seen_resolutions = set()
+
+        for item in renditions:
+            resolution = cls._to_int(item.get("resolution") or item.get("height"))
+
+            if resolution not in cls.VALID_RESOLUTIONS:
+                raise ValueError(f"Invalid HLS rendition resolution codec={codec}: {item}")
+
+            if resolution in seen_resolutions:
+                raise ValueError(f"Duplicate HLS rendition codec={codec} resolution={resolution}")
+
+            playlist_file = (
+                item.get("playlist_file")
+                or item.get("playlist_url")
+                or ""
+            )
+            playlist_uri = item.get("playlist_uri") or ""
+
+            iframe_file = (
+                item.get("iframe_file")
+                or item.get("iframe_url")
+                or ""
+            )
+            iframe_uri = item.get("iframe_uri") or ""
+
+            if not playlist_file and playlist_uri:
+                playlist_file = cls._child_path(master_file, playlist_uri)
+
+            if not iframe_file and iframe_uri:
+                iframe_file = cls._child_path(master_file, iframe_uri)
+
+            if not playlist_file:
+                raise ValueError(f"Missing HLS playlist for codec={codec} resolution={resolution}")
+
+            seen_resolutions.add(resolution)
+
+            rows.append(
+                cls(
+                    media=media,
+                    codec=codec,
+                    resolution=resolution,
+                    width=cls._to_int(item.get("width")),
+                    height=cls._to_int(item.get("height")) or resolution,
+                    master_file=cls.storage_path(master_file),
+                    playlist_file=cls.storage_path(playlist_file),
+                    iframe_file=cls.storage_path(iframe_file),
+                    bandwidth=cls._to_int(item.get("bandwidth")),
+                    average_bandwidth=cls._to_int(item.get("average_bandwidth")),
+                    codecs=item.get("codecs", "") or "",
+                )
+            )
+
+        return sorted(rows, key=lambda row: row.resolution)
+
+    @classmethod
+    def replace_from_payload(cls, media, codec, master_file, renditions):
+        rows = cls.build_from_payload(
+            media=media,
+            codec=codec,
+            master_file=master_file,
+            renditions=renditions,
+        )
+
+        with transaction.atomic():
+            cls.objects.filter(media=media, codec=codec).delete()
+            cls.objects.bulk_create(rows)
+
+        return rows
 
     @classmethod
     def replace_from_master(cls, media, codec, master_file, expected_resolutions=None):
