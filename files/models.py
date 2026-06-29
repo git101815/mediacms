@@ -12,7 +12,7 @@ from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.core.exceptions import ValidationError
 from django.core.files import File
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Func, Q, Value
 from django.db.models.signals import m2m_changed, post_delete, post_save, pre_delete
 from django.dispatch import receiver
@@ -985,88 +985,36 @@ class Media(models.Model):
     def hls_info(self):
         """Property used on serializers.
 
-        Returns HLS info for video.js from DB state and the project's HLS
-        layout contract.
+        Returns HLS info for video.js from the manifest index table.
+
+        Runtime rules:
+        - no local filesystem checks;
+        - no m3u8 parsing;
+        - no remote HTTP fetch;
+        - no layout guessing.
         """
 
         res = {}
 
-        def codec_resolutions(codec):
-            resolutions = []
+        for rendition in self.hls_renditions.all().order_by("codec", "resolution"):
+            if rendition.codec == "h264":
+                target = res
+            elif rendition.codec == "h265":
+                target = res.setdefault("hevc", {})
+            elif rendition.codec == "av1":
+                target = res.setdefault("av1", {})
+            else:
+                continue
 
-            encodings = (
-                self.encodings.select_related("profile")
-                .filter(
-                    chunk=False,
-                    status="success",
-                    progress=100,
-                    profile__extension="mp4",
-                    profile__codec=codec,
+            target["master_file"] = helpers.url_from_path(rendition.master_file)
+            target[f"{rendition.resolution}_playlist"] = helpers.url_from_path(
+                rendition.playlist_file
+            )
+
+            if rendition.iframe_file:
+                target[f"{rendition.resolution}_iframe"] = helpers.url_from_path(
+                    rendition.iframe_file
                 )
-                .exclude(media_file="")
-                .order_by("profile__resolution", "id")
-            )
-
-            for encoding in encodings:
-                resolution = encoding.profile.resolution
-
-                if resolution and resolution not in resolutions:
-                    resolutions.append(resolution)
-
-            return resolutions
-
-        def child_url(master_file, child_uri):
-            return urljoin(helpers.url_from_path(master_file), child_uri)
-
-        def h264_variant_uri(index):
-            return (
-                f"media-{index}/stream.m3u8",
-                f"media-{index}/iframes.m3u8",
-            )
-
-        def h265_variant_uri(index):
-            return (
-                f"video/hvc1/{index}/stream.m3u8",
-                f"video/hvc1/{index}/iframes.m3u8",
-            )
-
-        def av1_variant_uri(index):
-            return (
-                f"video/av01/{index}/stream.m3u8",
-                f"video/av01/{index}/iframes.m3u8",
-            )
-
-        def add_hls_info(target, master_file, codec, variant_uri):
-            if not master_file:
-                return
-
-            target["master_file"] = helpers.url_from_path(master_file)
-
-            for index, resolution in enumerate(codec_resolutions(codec), start=1):
-                playlist_uri, iframe_uri = variant_uri(index)
-
-                target[f"{resolution}_playlist"] = child_url(master_file, playlist_uri)
-                target[f"{resolution}_iframe"] = child_url(master_file, iframe_uri)
-
-        add_hls_info(res, self.hls_file, "h264", h264_variant_uri)
-
-        if getattr(self, "hls_hevc_file", ""):
-            res["hevc"] = {}
-            add_hls_info(
-                res["hevc"],
-                self.hls_hevc_file,
-                "h265",
-                h265_variant_uri,
-            )
-
-        if getattr(self, "hls_av1_file", ""):
-            res["av1"] = {}
-            add_hls_info(
-                res["av1"],
-                self.hls_av1_file,
-                "av1",
-                av1_variant_uri,
-            )
 
         return res
 
@@ -1465,6 +1413,231 @@ class Encoding(models.Model):
     def get_absolute_url(self):
         return reverse("api_get_encoding", kwargs={"encoding_id": self.id})
 
+class MediaHLSRendition(models.Model):
+    """Indexed HLS rendition extracted from a generated HLS master manifest.
+
+    This is not a runtime cache. It is the DB index of what the HLS writer
+    actually produced.
+    """
+
+    CODEC_CHOICES = (
+        ("h264", "H.264"),
+        ("h265", "H.265 / HEVC"),
+        ("av1", "AV1"),
+    )
+
+    VALID_RESOLUTIONS = (144, 240, 360, 480, 720, 1080, 1440, 2160)
+
+    media = models.ForeignKey(
+        Media,
+        related_name="hls_renditions",
+        on_delete=models.CASCADE,
+    )
+
+    codec = models.CharField(max_length=16, choices=CODEC_CHOICES, db_index=True)
+    resolution = models.PositiveIntegerField(db_index=True)
+
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+
+    master_file = models.CharField(max_length=1000)
+    playlist_file = models.CharField(max_length=1000)
+    iframe_file = models.CharField(max_length=1000, blank=True)
+
+    bandwidth = models.PositiveIntegerField(null=True, blank=True)
+    average_bandwidth = models.PositiveIntegerField(null=True, blank=True)
+    codecs = models.CharField(max_length=255, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["codec", "resolution"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["media", "codec", "resolution"],
+                name="unique_media_hls_rendition",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["media", "codec", "resolution"]),
+        ]
+
+    def __str__(self):
+        return f"{self.media_id}:{self.codec}:{self.resolution}"
+
+    @classmethod
+    def storage_path(cls, path):
+        if not path:
+            return ""
+
+        value = str(path).strip()
+
+        if value.startswith("/http://") or value.startswith("/https://"):
+            value = value[1:]
+
+        if value.startswith("http://") or value.startswith("https://") or value.startswith("//"):
+            return value
+
+        media_root = str(settings.MEDIA_ROOT).rstrip("/") + "/"
+
+        if value.startswith(media_root):
+            return os.path.relpath(value, settings.MEDIA_ROOT)
+
+        return value
+
+    @classmethod
+    def _child_path(cls, master_file, child_uri):
+        if not child_uri:
+            return ""
+
+        if child_uri.startswith("http://") or child_uri.startswith("https://") or child_uri.startswith("//"):
+            return child_uri
+
+        return os.path.normpath(os.path.join(os.path.dirname(master_file), child_uri))
+
+    @classmethod
+    def _stream_resolution(cls, stream_info):
+        if not stream_info or not getattr(stream_info, "resolution", None):
+            return None, None, None
+
+        width, height = stream_info.resolution
+
+        if height in cls.VALID_RESOLUTIONS:
+            return height, width, height
+
+        if width in cls.VALID_RESOLUTIONS:
+            return width, width, height
+
+        return None, width, height
+
+    @classmethod
+    def _add_manifest_item(cls, by_resolution, master_file, playlist, index, stream_info_attr, key, resolution_map):
+        stream_info = getattr(playlist, stream_info_attr, None)
+        resolution, width, height = cls._stream_resolution(stream_info)
+
+        if resolution_map and index < len(resolution_map):
+            resolution = resolution_map[index]
+
+        if resolution not in cls.VALID_RESOLUTIONS:
+            return
+
+        entry = by_resolution.setdefault(
+            resolution,
+            {
+                "resolution": resolution,
+                "width": width,
+                "height": height or resolution,
+                "master_file": cls.storage_path(master_file),
+                "playlist_file": "",
+                "iframe_file": "",
+                "bandwidth": None,
+                "average_bandwidth": None,
+                "codecs": "",
+            },
+        )
+
+        child_path = cls._child_path(master_file, playlist.uri)
+        entry[key] = cls.storage_path(child_path)
+
+        if key == "playlist_file" and stream_info:
+            entry["bandwidth"] = getattr(stream_info, "bandwidth", None)
+            entry["average_bandwidth"] = getattr(stream_info, "average_bandwidth", None)
+            entry["codecs"] = getattr(stream_info, "codecs", "") or ""
+
+    @classmethod
+    def build_from_master(cls, media, codec, master_file, expected_resolutions=None):
+        if codec not in {"h264", "h265", "av1"}:
+            raise ValueError(f"Unsupported HLS codec: {codec}")
+
+        if not master_file:
+            raise ValueError("Missing HLS master file")
+
+        if not os.path.exists(master_file):
+            raise ValueError(f"HLS master file does not exist locally: {master_file}")
+
+        resolution_map = None
+
+        if expected_resolutions:
+            resolution_map = list(expected_resolutions)
+
+        master = m3u8.load(master_file)
+        by_resolution = {}
+
+        for index, iframe_playlist in enumerate(master.iframe_playlists):
+            cls._add_manifest_item(
+                by_resolution,
+                master_file,
+                iframe_playlist,
+                index,
+                "iframe_stream_info",
+                "iframe_file",
+                resolution_map,
+            )
+
+        for index, playlist in enumerate(master.playlists):
+            cls._add_manifest_item(
+                by_resolution,
+                master_file,
+                playlist,
+                index,
+                "stream_info",
+                "playlist_file",
+                resolution_map,
+            )
+
+        renditions = []
+
+        for resolution in sorted(by_resolution):
+            data = by_resolution[resolution]
+
+            if not data["playlist_file"]:
+                continue
+
+            renditions.append(
+                cls(
+                    media=media,
+                    codec=codec,
+                    resolution=resolution,
+                    width=data["width"],
+                    height=data["height"],
+                    master_file=data["master_file"],
+                    playlist_file=data["playlist_file"],
+                    iframe_file=data["iframe_file"],
+                    bandwidth=data["bandwidth"],
+                    average_bandwidth=data["average_bandwidth"],
+                    codecs=data["codecs"],
+                )
+            )
+
+        if not renditions:
+            raise ValueError(f"No HLS renditions found in master: {master_file}")
+
+        if expected_resolutions is not None:
+            expected = set(expected_resolutions)
+            found = {rendition.resolution for rendition in renditions}
+
+            if found != expected:
+                raise ValueError(
+                    f"HLS rendition mismatch codec={codec} expected={sorted(expected)} found={sorted(found)}"
+                )
+
+        return renditions
+
+    @classmethod
+    def replace_from_master(cls, media, codec, master_file, expected_resolutions=None):
+        renditions = cls.build_from_master(
+            media=media,
+            codec=codec,
+            master_file=master_file,
+            expected_resolutions=expected_resolutions,
+        )
+
+        with transaction.atomic():
+            cls.objects.filter(media=media, codec=codec).delete()
+            cls.objects.bulk_create(renditions)
+
+        return renditions
 
 class Language(models.Model):
     """Language model

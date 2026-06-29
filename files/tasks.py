@@ -56,6 +56,7 @@ from .models import (
     EncodeProfile,
     Encoding,
     Media,
+    MediaHLSRendition,
     Rating,
     Tag,
     VideoChapterData,
@@ -603,9 +604,26 @@ def create_hls(self,friendly_token):
         master_exists = os.path.exists(pp)
         logger.info(f"[HLS] MASTER_CHECK token={friendly_token} path='{pp}' exists={master_exists}")
         if master_exists:
-            if media.hls_file != pp:
-                Media.objects.filter(pk=media.pk).update(hls_file=pp)
-                logger.info(f"[HLS] DB_UPDATE token={friendly_token} hls_file='{pp}'")
+            expected_resolutions = list(
+                encodings.values_list("profile__resolution", flat=True)
+            )
+
+            try:
+                MediaHLSRendition.replace_from_master(
+                    media=media,
+                    codec="h264",
+                    master_file=pp,
+                    expected_resolutions=expected_resolutions,
+                )
+            except ValueError as exc:
+                logger.error("[HLS] RENDITION_INDEX_FAILED token=%s error=%s", friendly_token, exc)
+                return False
+
+            hls_file = MediaHLSRendition.storage_path(pp)
+
+            if media.hls_file != hls_file:
+                Media.objects.filter(pk=media.pk).update(hls_file=hls_file)
+                logger.info(f"[HLS] DB_UPDATE token={friendly_token} hls_file='{hls_file}'")
         else:
             try:
                 entries = os.listdir(output_dir)[:200] if os.path.exists(output_dir) else None
@@ -652,11 +670,6 @@ def create_hls_hevc_fmp4(friendly_token):
     final_output_dir = os.path.join(base_dir, "hevc")
     final_master = os.path.join(final_output_dir, "master.m3u8")
 
-    if os.path.exists(final_master):
-        Media.objects.filter(pk=media.pk).update(hls_hevc_file=final_master)
-        logger.info("HEVC HLS: already exists %s", final_master)
-        return True
-
     qs = media.encodings.filter(
         profile__extension="mp4",
         profile__codec="h265",
@@ -676,6 +689,27 @@ def create_hls_hevc_fmp4(friendly_token):
             if profile.resolution not in settings.MINIMUM_RESOLUTIONS_TO_ENCODE:
                 continue
         expected_resolutions.append(profile.resolution)
+
+    if os.path.exists(final_master):
+        try:
+            MediaHLSRendition.replace_from_master(
+                media=media,
+                codec="h265",
+                master_file=final_master,
+                expected_resolutions=expected_resolutions,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "HEVC HLS: existing master is stale or invalid token=%s master=%s error=%s; regenerating",
+                friendly_token,
+                final_master,
+                exc,
+            )
+        else:
+            hls_hevc_file = MediaHLSRendition.storage_path(final_master)
+            Media.objects.filter(pk=media.pk).update(hls_hevc_file=hls_hevc_file)
+            logger.info("HEVC HLS: existing master valid %s", hls_hevc_file)
+            return True
 
     available_resolutions = set(qs.values_list("profile__resolution", flat=True))
     missing_resolutions = [
@@ -779,8 +813,20 @@ def create_hls_hevc_fmp4(friendly_token):
             logger.error("HEVC HLS: final master missing: %s", final_master)
             return False
 
-        Media.objects.filter(pk=media.pk).update(hls_hevc_file=final_master)
-        logger.info("HEVC HLS: OK %s", final_master)
+        try:
+            MediaHLSRendition.replace_from_master(
+                media=media,
+                codec="h265",
+                master_file=final_master,
+                expected_resolutions=expected_resolutions,
+            )
+        except ValueError as exc:
+            logger.error("HEVC HLS: generated master invalid token=%s error=%s", friendly_token, exc)
+            return False
+
+        hls_hevc_file = MediaHLSRendition.storage_path(final_master)
+        Media.objects.filter(pk=media.pk).update(hls_hevc_file=hls_hevc_file)
+        logger.info("HEVC HLS: OK %s", hls_hevc_file)
         return True
 
     finally:
@@ -822,11 +868,6 @@ def create_hls_av1_fmp4(friendly_token):
     final_output_dir = os.path.join(base_dir, "av1")
     final_master = os.path.join(final_output_dir, "master.m3u8")
 
-    if os.path.exists(final_master):
-        Media.objects.filter(pk=media.pk).update(hls_av1_file=final_master)
-        logger.info("AV1 HLS: already exists %s", final_master)
-        return True
-
     encodings = media.encodings.filter(
         profile__extension="mp4",
         profile__codec="av1",
@@ -846,6 +887,27 @@ def create_hls_av1_fmp4(friendly_token):
             if profile.resolution not in settings.MINIMUM_RESOLUTIONS_TO_ENCODE:
                 continue
         expected_resolutions.append(profile.resolution)
+
+    if os.path.exists(final_master):
+        try:
+            MediaHLSRendition.replace_from_master(
+                media=media,
+                codec="av1",
+                master_file=final_master,
+                expected_resolutions=expected_resolutions,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "AV1 HLS: existing master is stale or invalid token=%s master=%s error=%s; regenerating",
+                friendly_token,
+                final_master,
+                exc,
+            )
+        else:
+            hls_av1_file = MediaHLSRendition.storage_path(final_master)
+            Media.objects.filter(pk=media.pk).update(hls_av1_file=hls_av1_file)
+            logger.info("AV1 HLS: existing master valid %s", hls_av1_file)
+            return True
 
     available_resolutions = set(encodings.values_list("profile__resolution", flat=True))
     missing_resolutions = [
@@ -941,8 +1003,20 @@ def create_hls_av1_fmp4(friendly_token):
                     return False
 
         if os.path.exists(final_master):
-            Media.objects.filter(pk=media.pk).update(hls_av1_file=final_master)
-            logger.info("AV1 HLS: OK %s", final_master)
+            try:
+                MediaHLSRendition.replace_from_master(
+                    media=media,
+                    codec="av1",
+                    master_file=final_master,
+                    expected_resolutions=expected_resolutions,
+                )
+            except ValueError as exc:
+                logger.error("AV1 HLS: generated master invalid token=%s error=%s", friendly_token, exc)
+                return False
+
+            hls_av1_file = MediaHLSRendition.storage_path(final_master)
+            Media.objects.filter(pk=media.pk).update(hls_av1_file=hls_av1_file)
+            logger.info("AV1 HLS: OK %s", hls_av1_file)
             return True
 
         logger.error("AV1 HLS: final master missing: %s", final_master)
