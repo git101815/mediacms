@@ -162,6 +162,19 @@ def encode_profile(source_path, output_dir, codec, resolution, segment_seconds):
     )
 
 
+def codec_string(codec):
+    if codec == "h264":
+        return "avc1.4d401f"
+
+    if codec == "av1":
+        return "av01.0.08M.08"
+
+    if codec in ("h265", "hevc"):
+        return "hvc1.1.6.L93.B0"
+
+    return ""
+
+
 def write_master(output_dir, codec, profiles):
     codec_root = Path(output_dir) / codec
     master_path = codec_root / "master.m3u8"
@@ -172,7 +185,9 @@ def write_master(output_dir, codec, profiles):
     )
 
     if not renditions:
-        return False
+        return []
+
+    indexed_renditions = []
 
     with open(master_path, "w", encoding="utf-8") as master:
         master.write("#EXTM3U\n")
@@ -189,12 +204,27 @@ def write_master(output_dir, codec, profiles):
                 2160: 12000000,
             }.get(height, 2000000)
 
-            master.write(
-                f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={width}x{height}\n"
-            )
-            master.write(f"{height}/stream.m3u8\n")
+            playlist_uri = f"{height}/stream.m3u8"
+            codecs = codec_string(codec)
 
-    return True
+            master.write(
+                f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},'
+                f'RESOLUTION={width}x{height},CODECS="{codecs}"\n'
+            )
+            master.write(f"{playlist_uri}\n")
+
+            indexed_renditions.append(
+                {
+                    "resolution": height,
+                    "width": width,
+                    "height": height,
+                    "playlist_uri": playlist_uri,
+                    "bandwidth": bandwidth,
+                    "codecs": codecs,
+                }
+            )
+
+    return indexed_renditions
 
 
 def callback(callback_url, payload):
@@ -231,14 +261,26 @@ def handler(event):
                 )
 
             outputs = {}
+
             for codec in ("h264", "av1"):
-                if write_master(output_dir, codec, job["profiles"]):
+                renditions = write_master(output_dir, codec, job["profiles"])
+
+                if renditions:
+                    codec_base_url = (
+                        f"{job['public_base_url'].rstrip('/')}/"
+                        f"{job['output_prefix'].strip('/')}/"
+                        f"{codec}"
+                    )
+
                     outputs[codec] = {
-                        "master_url": (
-                            f"{job['public_base_url'].rstrip('/')}/"
-                            f"{job['output_prefix'].strip('/')}/"
-                            f"{codec}/master.m3u8"
-                        )
+                        "master_url": f"{codec_base_url}/master.m3u8",
+                        "renditions": [
+                            {
+                                **rendition,
+                                "playlist_url": f"{codec_base_url}/{rendition['playlist_uri']}",
+                            }
+                            for rendition in renditions
+                        ],
                     }
 
             upload_directory(output_dir, job["output_prefix"])
