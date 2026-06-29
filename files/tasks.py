@@ -541,7 +541,7 @@ def create_hls(self,friendly_token):
     )
     p = media.uid.hex
     output_dir = os.path.join(settings.HLS_DIR, p)
-    encodings = media.encodings.filter(profile__extension="mp4", status="success", chunk=False, profile__codec="h264")
+    encodings = media.encodings.filter(profile__extension="mp4", status="success", chunk=False, profile__codec="h264").order_by("profile__resolution", "id")
     enc_count = encodings.count() if hasattr(encodings, "count") else len(encodings)
     logger.info(f"[HLS] ENCODINGS token={friendly_token} count={enc_count} output_dir='{output_dir}'")
     files = []

@@ -6,7 +6,7 @@ import random
 import re
 import tempfile
 import uuid
-import m3u8
+from urllib.parse import urljoin
 from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
@@ -983,12 +983,13 @@ class Media(models.Model):
 
     @property
     def hls_info(self):
-        """Property used on serializers
-        Returns hls info, curated to be read by video.js
+        """Property used on serializers.
+
+        Returns HLS info for video.js from DB state and the project's HLS
+        layout contract.
         """
 
         res = {}
-        valid_resolutions = [144, 240, 360, 480, 720, 1080, 1440, 2160]
 
         def codec_resolutions(codec):
             resolutions = []
@@ -1014,92 +1015,57 @@ class Media(models.Model):
 
             return resolutions
 
-        def manifest_resolution(playlist, stream_info_attr):
-            stream_info = getattr(playlist, stream_info_attr, None)
+        def child_url(master_file, child_uri):
+            return urljoin(helpers.url_from_path(master_file), child_uri)
 
-            if not stream_info or not getattr(stream_info, "resolution", None):
-                return None
+        def h264_variant_uri(index):
+            return (
+                f"media-{index}/stream.m3u8",
+                f"media-{index}/iframes.m3u8",
+            )
 
-            resolution = stream_info.resolution[1]
+        def h265_variant_uri(index):
+            return (
+                f"video/hvc1/{index}/stream.m3u8",
+                f"video/hvc1/{index}/iframes.m3u8",
+            )
 
-            if resolution not in valid_resolutions:
-                resolution = stream_info.resolution[0]
+        def av1_variant_uri(index):
+            return (
+                f"video/av01/{index}/stream.m3u8",
+                f"video/av01/{index}/iframes.m3u8",
+            )
 
-            if resolution not in valid_resolutions:
-                return None
-
-            return resolution
-
-        def mapped_resolution(playlist, index, stream_info_attr, resolution_map):
-            if resolution_map and index < len(resolution_map):
-                return resolution_map[index]
-
-            return manifest_resolution(playlist, stream_info_attr)
-
-        def add_hls_manifest_info(target, master_file, resolution_map=None):
+        def add_hls_info(target, master_file, codec, variant_uri):
             if not master_file:
                 return
 
             target["master_file"] = helpers.url_from_path(master_file)
 
-            if not os.path.exists(master_file):
-                return
+            for index, resolution in enumerate(codec_resolutions(codec), start=1):
+                playlist_uri, iframe_uri = variant_uri(index)
 
-            hls_dir = os.path.dirname(master_file)
-            m3u8_obj = m3u8.load(master_file)
+                target[f"{resolution}_playlist"] = child_url(master_file, playlist_uri)
+                target[f"{resolution}_iframe"] = child_url(master_file, iframe_uri)
 
-            for index, iframe_playlist in enumerate(m3u8_obj.iframe_playlists):
-                uri = os.path.join(hls_dir, iframe_playlist.uri)
-
-                if not os.path.exists(uri):
-                    continue
-
-                resolution = mapped_resolution(
-                    iframe_playlist,
-                    index,
-                    "iframe_stream_info",
-                    resolution_map,
-                )
-
-                if resolution is None:
-                    continue
-
-                target[f"{resolution}_iframe"] = helpers.url_from_path(uri)
-
-            for index, playlist in enumerate(m3u8_obj.playlists):
-                uri = os.path.join(hls_dir, playlist.uri)
-
-                if not os.path.exists(uri):
-                    continue
-
-                resolution = mapped_resolution(
-                    playlist,
-                    index,
-                    "stream_info",
-                    resolution_map,
-                )
-
-                if resolution is None:
-                    continue
-
-                target[f"{resolution}_playlist"] = helpers.url_from_path(uri)
-
-        add_hls_manifest_info(res, self.hls_file)
+        add_hls_info(res, self.hls_file, "h264", h264_variant_uri)
 
         if getattr(self, "hls_hevc_file", ""):
             res["hevc"] = {}
-            add_hls_manifest_info(
+            add_hls_info(
                 res["hevc"],
                 self.hls_hevc_file,
-                codec_resolutions("h265"),
+                "h265",
+                h265_variant_uri,
             )
 
         if getattr(self, "hls_av1_file", ""):
             res["av1"] = {}
-            add_hls_manifest_info(
+            add_hls_info(
                 res["av1"],
                 self.hls_av1_file,
-                codec_resolutions("av1"),
+                "av1",
+                av1_variant_uri,
             )
 
         return res
