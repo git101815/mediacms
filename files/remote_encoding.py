@@ -63,8 +63,10 @@ def get_remote_profiles_for_media(media):
 
         profiles.append(
             {
+                "id": int(profile.id),
                 "name": profile.name,
                 "codec": profile.codec,
+                "extension": profile.extension,
                 "resolution": int(profile.resolution),
             }
         )
@@ -80,11 +82,15 @@ def build_runpod_payload(media):
     payload = {
         "version": 1,
         "media_id": media.id,
+        "media_uid": media.uid.hex,
         "friendly_token": media.friendly_token,
+        "username": media.user.username,
+        "source_name": media.media_file.name.split("/")[-1],
         "source_url": build_source_url(media),
         "callback_url": build_callback_url(media),
         "public_base_url": settings.REMOTE_ENCODING_PUBLIC_BASE_URL.rstrip("/"),
         "output_prefix": f"{settings.REMOTE_ENCODING_OUTPUT_PREFIX.strip('/')}/{media.uid.hex}",
+        "encoded_output_prefix": settings.MEDIA_ENCODING_DIR.strip("/"),
         "segment_seconds": int(settings.REMOTE_ENCODING_HLS_SEGMENT_SECONDS),
         "profiles": profiles,
     }

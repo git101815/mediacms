@@ -5,7 +5,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from files.models import Media, MediaHLSRendition
+from files import helpers
+from files.models import Encoding, Media, MediaHLSRendition
 from files.remote_encoding import verify_signature
 
 
@@ -17,6 +18,51 @@ def _output_for(outputs, *keys):
             return value
 
     return {}
+
+
+def _safe_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _update_encodings_from_payload(media, outputs):
+    for output in outputs.values():
+        for item in output.get("encodings") or []:
+            profile_id = _safe_int(item.get("profile_id"))
+            media_file = item.get("media_file") or item.get("media_url") or ""
+
+            if not profile_id or not media_file:
+                continue
+
+            update = {
+                "media_file": MediaHLSRendition.storage_path(media_file),
+                "status": "success",
+                "progress": 100,
+                "worker": "runpod",
+                "logs": "",
+            }
+
+            size_bytes = _safe_int(item.get("size_bytes"))
+            if size_bytes:
+                update["size"] = helpers.show_file_size(size_bytes)
+
+            qs = Encoding.objects.filter(
+                media=media,
+                profile_id=profile_id,
+                chunk=False,
+            )
+
+            if qs.exists():
+                qs.update(**update)
+            else:
+                Encoding.objects.create(
+                    media=media,
+                    profile_id=profile_id,
+                    chunk=False,
+                    **update,
+                )
 
 
 @csrf_exempt
@@ -41,6 +87,10 @@ def remote_encoding_callback(request, friendly_token):
         return JsonResponse({"ok": False, "error": "Media mismatch"}, status=400)
 
     if payload.get("status") != "success":
+        Encoding.objects.filter(media=media, worker="runpod").exclude(status="success").update(
+            status="fail",
+            logs=payload.get("error", ""),
+        )
         media.encoding_status = "fail"
         media.save(update_fields=["encoding_status", "listable"])
 
@@ -57,6 +107,8 @@ def remote_encoding_callback(request, friendly_token):
     try:
         with transaction.atomic():
             update_fields = ["encoding_status", "listable"]
+
+            _update_encodings_from_payload(media, outputs)
 
             for _output_key, codec, db_field, output in output_specs:
                 master_url = output.get("master_url", "")
