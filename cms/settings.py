@@ -480,7 +480,20 @@ DO_NOT_TRANSCODE_VIDEO = False
 # EncodeProfile.active means the profile exists and can be used.
 # ENABLED_ENCODING_CODECS decides which codecs are actually encoded at runtime.
 ENABLED_ENCODING_CODECS = ("h264",)
+REMOTE_ENCODING_ENCODERS = {
+    "h264": "h264_nvenc",
+    "h265": "hevc_nvenc",
+    "av1": "av1_nvenc",
+}
 
+REMOTE_ENCODING_ENCODER_PRESETS = {
+    "h264_nvenc": "p5",
+    "hevc_nvenc": "p5",
+    "av1_nvenc": "p5",
+    "libx264": FFMPEG_DEFAULT_PRESET,
+    "libx265": FFMPEG_DEFAULT_PRESET,
+    "libsvtav1": str(SVT_AV1_PRESET),
+}
 DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 
 LANGUAGES = [

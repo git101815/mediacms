@@ -93,42 +93,60 @@ def _update_media_from_payload(media, media_payload):
     return update_fields
 
 
-def _update_encodings_from_payload(media, outputs):
-    for output in outputs.values():
-        for item in output.get("encodings") or []:
-            profile_id = _safe_int(item.get("profile_id"))
-            media_file = item.get("media_file") or item.get("media_url") or ""
+def _update_encoding_row(media, item):
+    encoding_id = _safe_int(item.get("encoding_id"))
+    profile_id = _safe_int(item.get("profile_id"))
+    media_file = item.get("media_file") or item.get("media_url") or ""
 
-            if not profile_id or not media_file:
-                continue
+    if not profile_id or not media_file:
+        return None
 
-            update = {
-                "media_file": MediaHLSRendition.storage_path(media_file),
-                "status": "success",
-                "progress": 100,
-                "worker": "runpod",
-                "logs": "",
-            }
+    update = {
+        "media_file": MediaHLSRendition.storage_path(media_file),
+        "status": item.get("status") or "success",
+        "progress": 100,
+        "worker": "runpod",
+        "logs": item.get("logs") or "",
+        "commands": item.get("commands") or "",
+    }
 
-            size_bytes = _safe_int(item.get("size_bytes"))
-            if size_bytes:
-                update["size"] = helpers.show_file_size(size_bytes)
+    size_bytes = _safe_int(item.get("size_bytes"))
+    if size_bytes:
+        update["size"] = helpers.show_file_size(size_bytes)
 
-            qs = Encoding.objects.filter(
-                media=media,
-                profile_id=profile_id,
-                chunk=False,
-            )
+    qs = Encoding.objects.filter(media=media, profile_id=profile_id, chunk=False)
 
-            if qs.exists():
-                qs.update(**update)
-            else:
-                Encoding.objects.create(
-                    media=media,
-                    profile_id=profile_id,
-                    chunk=False,
-                    **update,
-                )
+    if encoding_id:
+        qs = qs.filter(id=encoding_id)
+
+    if qs.exists():
+        qs.update(**update)
+        return qs.first()
+
+    encoding = Encoding.objects.create(
+        media=media,
+        profile_id=profile_id,
+        chunk=False,
+        status="pending",
+        worker="runpod",
+    )
+    Encoding.objects.filter(pk=encoding.pk).update(**update)
+    return Encoding.objects.filter(pk=encoding.pk).first()
+
+
+def _update_encodings_from_payload(media, encodings):
+    preview_file_path = ""
+
+    for item in encodings or []:
+        encoding = _update_encoding_row(media, item)
+
+        if not encoding:
+            continue
+
+        if item.get("extension") == "gif" and item.get("media_file"):
+            preview_file_path = MediaHLSRendition.storage_path(item["media_file"])
+
+    return preview_file_path
 
 
 @csrf_exempt
@@ -157,12 +175,14 @@ def remote_encoding_callback(request, friendly_token):
             status="fail",
             logs=payload.get("error", ""),
         )
+
         media.encoding_status = "fail"
         media.save(update_fields=["encoding_status", "listable"])
 
         return JsonResponse({"ok": True, "status": "fail"})
 
     outputs = payload.get("outputs") or {}
+    encodings = payload.get("encodings") or []
 
     output_specs = [
         ("h264", "h264", "hls_file", _output_for(outputs, "h264")),
@@ -175,7 +195,11 @@ def remote_encoding_callback(request, friendly_token):
             update_fields = ["encoding_status", "listable"]
 
             update_fields.extend(_update_media_from_payload(media, payload.get("media") or {}))
-            _update_encodings_from_payload(media, outputs)
+
+            preview_file_path = _update_encodings_from_payload(media, encodings)
+            if preview_file_path:
+                media.preview_file_path = preview_file_path
+                update_fields.append("preview_file_path")
 
             for _output_key, codec, db_field, output in output_specs:
                 master_url = output.get("master_url", "")
@@ -195,6 +219,7 @@ def remote_encoding_callback(request, friendly_token):
 
             media.encoding_status = "success"
             media.save(update_fields=sorted(set(update_fields)))
+
     except ValueError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 

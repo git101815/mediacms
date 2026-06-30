@@ -1778,9 +1778,6 @@ def maintenance_backup_database():
 
 @task(name="submit_remote_encoding", bind=True, queue="short_tasks", max_retries=3)
 def submit_remote_encoding(self, friendly_token):
-    from .remote_encoding import submit_runpod_job, get_remote_profiles_for_media
-    from .models import Media, EncodeProfile, Encoding
-
     try:
         media = Media.objects.get(friendly_token=friendly_token)
     except Media.DoesNotExist:
@@ -1788,53 +1785,40 @@ def submit_remote_encoding(self, friendly_token):
         return False
 
     try:
-        profiles_payload = get_remote_profiles_for_media(media)
-
-        for profile_data in profiles_payload:
-            profile = EncodeProfile.objects.filter(
-                id=profile_data["id"],
-                active=True,
-                extension=profile_data.get("extension", "mp4"),
-            ).first()
-
-            if not profile:
-                continue
-
-            Encoding.objects.update_or_create(
-                media=media,
-                profile=profile,
-                chunk=False,
-                defaults={
-                    "status": "running",
-                    "progress": 0,
-                    "worker": "runpod",
-                },
-            )
-
-        media.encoding_status = "running"
-        media.save(update_fields=["encoding_status", "listable"])
+        from files.remote_encoding import submit_runpod_job
 
         response = submit_runpod_job(media)
 
-        job_id = response.get("id") or response.get("job_id") or ""
-        if job_id:
+        runpod_job_id = (
+            response.get("id")
+            or response.get("job_id")
+            or response.get("runpod_job_id")
+            or ""
+        )
+
+        if runpod_job_id:
             Encoding.objects.filter(
                 media=media,
                 worker="runpod",
                 status="running",
-            ).update(task_id=job_id)
+            ).update(task_id=runpod_job_id)
 
-        logger.info(
-            "Remote encoding submitted token=%s runpod_response=%s",
-            friendly_token,
-            response,
-        )
-        return True
+        media.encoding_status = "running"
+        media.save(update_fields=["encoding_status", "listable"])
+
+        return response
 
     except Exception as exc:
-        logger.exception("Remote encoding submit failed token=%s", friendly_token)
+        logger.exception(
+            "Remote encoding submit failed token=%s error=%s",
+            friendly_token,
+            exc,
+        )
 
-        Encoding.objects.filter(media=media, worker="runpod").update(
+        Encoding.objects.filter(
+            media=media,
+            worker="runpod",
+        ).exclude(status="success").update(
             status="fail",
             logs=str(exc),
         )
@@ -1842,7 +1826,7 @@ def submit_remote_encoding(self, friendly_token):
         media.encoding_status = "fail"
         media.save(update_fields=["encoding_status", "listable"])
 
-        raise self.retry(exc=exc, countdown=30)
+        raise self.retry(exc=exc, countdown=30, max_retries=3)
 
 # TODO LIST
 # 1 chunks are deleted from original server when file is fully encoded.

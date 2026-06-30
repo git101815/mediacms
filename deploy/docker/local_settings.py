@@ -148,6 +148,20 @@ RUNPOD_JOB_TTL_MS = 172800000
 FFMPEG_AV1_ENCODER = "libsvtav1"
 AV1_NVENC_PRESET = "p5"
 SVT_AV1_PRESET = 8
+REMOTE_ENCODING_ENCODERS = {
+    "h264": "h264_nvenc",
+    "h265": "hevc_nvenc",
+    "av1": "av1_nvenc",
+}
+
+REMOTE_ENCODING_ENCODER_PRESETS = {
+    "h264_nvenc": "p5",
+    "hevc_nvenc": "p5",
+    "av1_nvenc": "p5",
+    "libx264": FFMPEG_DEFAULT_PRESET,
+    "libx265": FFMPEG_DEFAULT_PRESET,
+    "libsvtav1": str(SVT_AV1_PRESET),
+}
 
 REMOTE_ENCODING_CALLBACK_SECRET = os.environ["REMOTE_ENCODING_CALLBACK_SECRET"]
 RUNPOD_API_KEY = os.environ["RUNPOD_API_KEY"]
