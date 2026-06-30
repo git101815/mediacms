@@ -34,63 +34,53 @@ def _safe_float(value):
         return None
 
 
-def _update_media_from_payload(media, media_payload):
+def _media_update_from_payload(media_payload):
     if not media_payload:
-        return []
+        return {}
 
-    update_fields = []
+    update = {}
 
     media_type = media_payload.get("media_type") or "video"
     if media_type:
-        media.media_type = media_type
-        update_fields.append("media_type")
+        update["media_type"] = media_type
 
     duration = _safe_int(media_payload.get("duration"))
     if duration is not None:
-        media.duration = duration
-        update_fields.append("duration")
+        update["duration"] = duration
 
     video_height = _safe_int(media_payload.get("video_height"))
     if video_height is not None:
-        media.video_height = video_height
-        update_fields.append("video_height")
+        update["video_height"] = video_height
 
     size_bytes = _safe_int(media_payload.get("size_bytes"))
     if size_bytes:
-        media.size = helpers.show_file_size(size_bytes)
-        update_fields.append("size")
+        update["size"] = helpers.show_file_size(size_bytes)
 
     md5sum = media_payload.get("md5sum")
     if md5sum:
-        media.md5sum = md5sum
-        update_fields.append("md5sum")
+        update["md5sum"] = md5sum
 
     media_info = media_payload.get("media_info")
     if media_info:
-        media.media_info = json.dumps(media_info)
-        update_fields.append("media_info")
+        update["media_info"] = json.dumps(media_info)
 
     thumbnail_time = _safe_float(media_payload.get("thumbnail_time"))
     if thumbnail_time is not None:
-        media.thumbnail_time = thumbnail_time
-        update_fields.append("thumbnail_time")
+        update["thumbnail_time"] = thumbnail_time
 
     thumbnail_file = media_payload.get("thumbnail_file")
     if thumbnail_file:
-        media.thumbnail = MediaHLSRendition.storage_path(thumbnail_file)
-        update_fields.append("thumbnail")
+        update["thumbnail"] = MediaHLSRendition.storage_path(thumbnail_file)
 
     poster_file = media_payload.get("poster_file")
     if poster_file:
-        media.poster = MediaHLSRendition.storage_path(poster_file)
-        update_fields.append("poster")
+        update["poster"] = MediaHLSRendition.storage_path(poster_file)
 
     sprites_file = media_payload.get("sprites_file")
     if sprites_file:
-        media.sprites = MediaHLSRendition.storage_path(sprites_file)
-        update_fields.append("sprites")
+        update["sprites"] = MediaHLSRendition.storage_path(sprites_file)
 
-    return update_fields
+    return update
 
 
 def _update_encoding_row(media, item):
@@ -148,7 +138,8 @@ def _update_encodings_from_payload(media, encodings):
 
     return preview_file_path
 
-def _mark_skipped_encodings(media, skipped):
+
+def _delete_skipped_encodings(media, skipped):
     for item in skipped or []:
         encoding_id = _safe_int(item.get("encoding_id"))
         profile_id = _safe_int(item.get("profile_id"))
@@ -166,11 +157,8 @@ def _mark_skipped_encodings(media, skipped):
         if encoding_id:
             qs = qs.filter(id=encoding_id)
 
-        qs.exclude(status="success").update(
-            status="fail",
-            progress=100,
-            logs=item.get("reason") or "Skipped by remote encoding policy",
-        )
+        qs.exclude(status="success").delete()
+
 
 @csrf_exempt
 @require_POST
@@ -199,8 +187,10 @@ def remote_encoding_callback(request, friendly_token):
             logs=payload.get("error", ""),
         )
 
-        media.encoding_status = "fail"
-        media.save(update_fields=["encoding_status", "listable"])
+        Media.objects.filter(pk=media.pk).update(
+            encoding_status="fail",
+            listable=False,
+        )
 
         return JsonResponse({"ok": True, "status": "fail"})
 
@@ -215,15 +205,13 @@ def remote_encoding_callback(request, friendly_token):
 
     try:
         with transaction.atomic():
-            update_fields = ["encoding_status", "listable"]
-
-            update_fields.extend(_update_media_from_payload(media, payload.get("media") or {}))
+            media_update = _media_update_from_payload(payload.get("media") or {})
 
             preview_file_path = _update_encodings_from_payload(media, encodings)
-            _mark_skipped_encodings(media, payload.get("skipped") or [])
             if preview_file_path:
-                media.preview_file_path = preview_file_path
-                update_fields.append("preview_file_path")
+                media_update["preview_file_path"] = preview_file_path
+
+            _delete_skipped_encodings(media, payload.get("skipped") or [])
 
             for _output_key, codec, db_field, output in output_specs:
                 master_url = output.get("master_url", "")
@@ -238,11 +226,15 @@ def remote_encoding_callback(request, friendly_token):
                     renditions=output.get("renditions") or [],
                 )
 
-                setattr(media, db_field, MediaHLSRendition.storage_path(master_url))
-                update_fields.append(db_field)
+                media_update[db_field] = MediaHLSRendition.storage_path(master_url)
 
-            media.encoding_status = "success"
-            media.save(update_fields=sorted(set(update_fields)))
+            media_update["encoding_status"] = "success"
+            media_update["listable"] = (
+                media.state == "public"
+                and media.is_reviewed is True
+            )
+
+            Media.objects.filter(pk=media.pk).update(**media_update)
 
     except ValueError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)

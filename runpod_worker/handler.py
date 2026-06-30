@@ -843,7 +843,7 @@ def encode_job(policy, source_path, media_info, job, temp_dir):
         "height": meta.get("height") or int(job.get("resolution") or 0),
         "bit_rate": meta.get("bit_rate") or 0,
         "status": "success",
-        "commands": json.dumps(commands),
+        "commands": json.dumps([[str(part) for part in command]for command in commands]),
         "local_path": str(output_path),
     }
 
