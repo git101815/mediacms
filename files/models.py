@@ -436,7 +436,15 @@ class Media(models.Model):
         """
         from .remote_encoding import remote_encoding_enabled
 
-        if remote_encoding_enabled():
+        kind = helpers.get_file_type(self.media_file.path)
+
+        if remote_encoding_enabled() and kind in ["image", "audio", "pdf"]:
+            self.set_media_type()
+            if self.media_type == "image":
+                self.set_thumbnail(force=True)
+            return True
+
+        if remote_encoding_enabled() and kind == "video":
             self.media_type = "video"
             self.encoding_status = "running"
             self.save(update_fields=["listable", "media_type", "encoding_status"])

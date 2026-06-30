@@ -95,6 +95,8 @@ def content_type_for(filename):
 
     if filename.endswith(".m3u8"):
         return "application/vnd.apple.mpegurl"
+    if filename.endswith(".ts"):
+        return "video/MP2T"
     if filename.endswith(".m4s"):
         return "video/iso.segment"
     if filename.endswith(".mp4"):
