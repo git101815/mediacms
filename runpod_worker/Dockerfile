@@ -23,9 +23,9 @@ COPY --from=ffmpeg_builder /opt/ffmpeg /opt/ffmpeg
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
+COPY runpod_worker/requirements.txt /app/requirements.txt
 RUN pip3 install --no-cache-dir -r /app/requirements.txt
 
-COPY handler.py /app/handler.py
+COPY runpod_worker/handler.py /app/handler.py
 
 CMD ["python3", "-u", "/app/handler.py"]
