@@ -97,7 +97,13 @@ def submit_runpod_job(media):
     if not settings.RUNPOD_ENDPOINT_URL:
         raise ValidationError("RUNPOD_ENDPOINT_URL is not configured")
 
-    request_payload = {"input": build_runpod_payload(media)}
+    request_payload = {
+        "input": build_runpod_payload(media),
+        "policy": {
+            "executionTimeout": int(settings.RUNPOD_EXECUTION_TIMEOUT_MS),
+            "ttl": int(settings.RUNPOD_JOB_TTL_MS),
+        },
+    }
     body = json.dumps(request_payload).encode("utf-8")
 
     request = Request(

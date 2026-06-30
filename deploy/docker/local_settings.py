@@ -135,7 +135,6 @@ MP4HLS_COMMAND = "/home/mediacms.io/bento4/bin/mp4hls"
 MP4DASH_COMMAND = "/home/mediacms.io/bento4/bin/mp4dash"
 MP4FRAGMENT_COMMAND = "/home/mediacms.io/bento4/bin/mp4fragment"
 REMOTE_ENCODING_ENABLED = False
-
 REMOTE_ENCODING_PROVIDER = "runpod"
 REMOTE_ENCODING_SOURCE_BASE_URL = "https://medias.celebfakes.ru/mediafiles"
 REMOTE_ENCODING_PUBLIC_BASE_URL = "https://medias.celebfakes.ru/mediafiles"
@@ -143,7 +142,9 @@ REMOTE_ENCODING_OUTPUT_PREFIX = "hls"
 REMOTE_ENCODING_HLS_SEGMENT_SECONDS = 4
 
 RUNPOD_ENDPOINT_URL = "https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/run"
+RUNPOD_EXECUTION_TIMEOUT_MS = 86400000
 
+RUNPOD_JOB_TTL_MS = 172800000
 FFMPEG_AV1_ENCODER = "libsvtav1"
 AV1_NVENC_PRESET = "p5"
 SVT_AV1_PRESET = 8
