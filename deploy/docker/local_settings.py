@@ -158,8 +158,8 @@ REMOTE_ENCODING_ENCODER_PRESETS = {
     "h264_nvenc": "p5",
     "hevc_nvenc": "p5",
     "av1_nvenc": "p5",
-    "libx264": FFMPEG_DEFAULT_PRESET,
-    "libx265": FFMPEG_DEFAULT_PRESET,
+    "libx264": "medium",
+    "libx265": "medium",
     "libsvtav1": str(SVT_AV1_PRESET),
 }
 

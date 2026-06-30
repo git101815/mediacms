@@ -148,6 +148,29 @@ def _update_encodings_from_payload(media, encodings):
 
     return preview_file_path
 
+def _mark_skipped_encodings(media, skipped):
+    for item in skipped or []:
+        encoding_id = _safe_int(item.get("encoding_id"))
+        profile_id = _safe_int(item.get("profile_id"))
+
+        if not profile_id:
+            continue
+
+        qs = Encoding.objects.filter(
+            media=media,
+            profile_id=profile_id,
+            chunk=False,
+            worker="runpod",
+        )
+
+        if encoding_id:
+            qs = qs.filter(id=encoding_id)
+
+        qs.exclude(status="success").update(
+            status="fail",
+            progress=100,
+            logs=item.get("reason") or "Skipped by remote encoding policy",
+        )
 
 @csrf_exempt
 @require_POST
@@ -197,6 +220,7 @@ def remote_encoding_callback(request, friendly_token):
             update_fields.extend(_update_media_from_payload(media, payload.get("media") or {}))
 
             preview_file_path = _update_encodings_from_payload(media, encodings)
+            _mark_skipped_encodings(media, payload.get("skipped") or [])
             if preview_file_path:
                 media.preview_file_path = preview_file_path
                 update_fields.append("preview_file_path")
