@@ -434,6 +434,15 @@ class Media(models.Model):
         Performs all related tasks, as check for media type,
         video duration, encode
         """
+        from .remote_encoding import remote_encoding_enabled
+
+        if remote_encoding_enabled():
+            self.media_type = "video"
+            self.encoding_status = "running"
+            self.save(update_fields=["listable", "media_type", "encoding_status"])
+            self.encode()
+            return True
+
         self.set_media_type()
         if self.media_type == "video":
             self.set_thumbnail(force=True)
