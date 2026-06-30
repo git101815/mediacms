@@ -618,7 +618,10 @@ class Media(models.Model):
 
             self.encoding_status = "running"
             self.save(update_fields=["encoding_status", "listable"])
-            tasks.submit_remote_encoding.delay(self.friendly_token)
+            tasks.submit_remote_encoding.apply_async(
+                args=[self.friendly_token],
+                countdown=int(getattr(settings, "REMOTE_ENCODING_SUBMIT_DELAY_SECONDS", 600)),
+            )
             return True
 
         enabled_codecs = tuple(getattr(settings, "ENABLED_ENCODING_CODECS", ("h264",)))

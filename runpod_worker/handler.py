@@ -44,11 +44,22 @@ def run(cmd):
     return output
 
 
+def _canonical_payload(value):
+    return json.loads(json.dumps(value, sort_keys=True, separators=(",", ":")))
+
+
+def _canonical_body(payload):
+    return json.dumps(
+        _canonical_payload(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
 def sign_payload(payload):
-    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hmac.new(
         CALLBACK_SECRET.encode("utf-8"),
-        body,
+        _canonical_body(payload),
         hashlib.sha256,
     ).hexdigest()
 
@@ -75,20 +86,44 @@ def download(url, output_path):
                     break
                 output.write(chunk)
 
+def download_source(job, output_path):
+    source = job.get("source") or {}
 
-def s3_client():
+    if source.get("type") == "s3":
+        bucket = source.get("bucket") or S3_BUCKET
+        key = source.get("key")
+
+        if not key:
+            raise RuntimeError("Missing S3 source key")
+
+        client = s3_client(
+            endpoint_url=source.get("endpoint_url"),
+            region_name=source.get("region_name"),
+            addressing_style=source.get("addressing_style"),
+        )
+
+        client.download_file(bucket, key, str(output_path))
+        return
+
+    source_url = job.get("source_url")
+
+    if not source_url:
+        raise RuntimeError("Missing source_url/source S3 object")
+
+    download(source_url, output_path)
+
+def s3_client(endpoint_url=None, region_name=None, addressing_style=None):
     return boto3.client(
         "s3",
-        endpoint_url=S3_ENDPOINT_URL,
-        region_name=S3_REGION_NAME,
+        endpoint_url=endpoint_url or S3_ENDPOINT_URL,
+        region_name=region_name or S3_REGION_NAME,
         aws_access_key_id=S3_ACCESS_KEY_ID,
         aws_secret_access_key=S3_SECRET_ACCESS_KEY,
         config=Config(
             signature_version="s3v4",
-            s3={"addressing_style": S3_ADDRESSING_STYLE},
+            s3={"addressing_style": addressing_style or S3_ADDRESSING_STYLE},
         ),
     )
-
 
 def content_type_for(filename):
     filename = str(filename).lower()
@@ -1131,6 +1166,41 @@ def clean_encoding_for_callback(item):
     cleaned.pop("local_path", None)
     return cleaned
 
+def is_mandatory_encoding(job_spec):
+    return (
+        job_spec.get("extension") == "mp4"
+        and job_spec.get("codec") == "h264"
+    )
+
+
+def failed_encoding_payload(job_spec, exc):
+    return {
+        "encoding_id": job_spec.get("encoding_id"),
+        "profile_id": job_spec.get("profile_id"),
+        "profile_name": job_spec.get("profile_name", ""),
+        "codec": job_spec.get("codec", ""),
+        "extension": job_spec.get("extension", ""),
+        "resolution": int(job_spec.get("resolution") or 0),
+        "status": "fail",
+        "progress": 0,
+        "logs": str(exc),
+        "commands": "",
+    }
+
+
+def has_successful_h264(encoded_items):
+    return any(
+        item.get("status") == "success"
+        and item.get("extension") == "mp4"
+        and item.get("codec") == "h264"
+        and item.get("media_file")
+        for item in encoded_items
+    )
+
+
+def h264_master_exists(outputs):
+    h264 = outputs.get("h264") or {}
+    return bool(h264.get("master_url"))
 
 def handler(event):
     job = event.get("input") or {}
@@ -1149,7 +1219,7 @@ def handler(event):
         hls_dir = temp_dir / "hls"
 
         try:
-            download(job["source_url"], source_path)
+            download_source(job, source_path)
 
             media_info = source_media_info(source_path)
             media_payload = generate_media_assets(
@@ -1162,24 +1232,57 @@ def handler(event):
             policy = job.get("encoding_policy") or {}
             encoded_items = []
             skipped_items = []
+            failed_items = []
+            mandatory_failures = []
 
             for encode_job_spec in job.get("jobs") or []:
-                item = encode_job(
-                    policy=policy,
-                    source_path=source_path,
-                    media_info=media_info,
-                    job=encode_job_spec,
-                    temp_dir=temp_dir,
-                )
+                try:
+                    item = encode_job(
+                        policy=policy,
+                        source_path=source_path,
+                        media_info=media_info,
+                        job=encode_job_spec,
+                        temp_dir=temp_dir,
+                    )
 
-                if item.get("skipped"):
-                    skipped_items.append(item)
+                    if item.get("skipped"):
+                        skipped_items.append(item)
+
+                        if is_mandatory_encoding(encode_job_spec):
+                            mandatory_failures.append(
+                                failed_encoding_payload(
+                                    encode_job_spec,
+                                    RuntimeError(item.get("reason") or "Mandatory H264 skipped"),
+                                )
+                            )
+
+                        continue
+
+                    item["media_url"] = public_url(job, item["media_file"])
+                    encoded_items.append(item)
+
+                except Exception as exc:
+                    failed_item = failed_encoding_payload(encode_job_spec, exc)
+                    failed_items.append(failed_item)
+
+                    if is_mandatory_encoding(encode_job_spec):
+                        mandatory_failures.append(failed_item)
+
                     continue
 
-                item["media_url"] = public_url(job, item["media_file"])
-                encoded_items.append(item)
+            if mandatory_failures or not has_successful_h264(encoded_items):
+                reason = "Mandatory H264 encoding failed"
+
+                if mandatory_failures:
+                    reason = mandatory_failures[0].get("logs") or reason
+
+                raise RuntimeError(reason)
 
             outputs = package_hls(job, hls_dir, encoded_items)
+
+            if not h264_master_exists(outputs):
+                raise RuntimeError("Mandatory H264 HLS packaging failed")
+
             upload_directory(hls_dir, job["output_prefix"])
 
             payload = {
@@ -1188,7 +1291,10 @@ def handler(event):
                 "friendly_token": job["friendly_token"],
                 "status": "success",
                 "media": media_payload,
-                "encodings": [clean_encoding_for_callback(item) for item in encoded_items],
+                "encodings": [
+                    *[clean_encoding_for_callback(item) for item in encoded_items],
+                    *failed_items,
+                ],
                 "skipped": skipped_items,
                 "outputs": outputs,
             }

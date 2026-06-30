@@ -86,19 +86,27 @@ def _media_update_from_payload(media_payload):
 def _update_encoding_row(media, item):
     encoding_id = _safe_int(item.get("encoding_id"))
     profile_id = _safe_int(item.get("profile_id"))
+    status = item.get("status") or "success"
     media_file = item.get("media_file") or item.get("media_url") or ""
 
-    if not profile_id or not media_file:
+    if not profile_id:
+        return None
+
+    if status == "success" and not media_file:
         return None
 
     update = {
-        "media_file": MediaHLSRendition.storage_path(media_file),
-        "status": item.get("status") or "success",
-        "progress": 100,
+        "status": status,
         "worker": "runpod",
         "logs": item.get("logs") or "",
         "commands": item.get("commands") or "",
     }
+
+    if status == "success":
+        update["progress"] = 100
+        update["media_file"] = MediaHLSRendition.storage_path(media_file)
+    else:
+        update["progress"] = _safe_int(item.get("progress")) or 0
 
     size_bytes = _safe_int(item.get("size_bytes"))
     if size_bytes:

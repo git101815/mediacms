@@ -1026,33 +1026,6 @@ def create_hls_av1_fmp4(friendly_token):
         if staging_dir and os.path.exists(staging_dir):
             shutil.rmtree(staging_dir, ignore_errors=True)
 
-@task(name="check_running_states", queue="short_tasks")
-def check_running_states():
-    # Experimental - unused
-    """Check stale running encodings and delete/reencode media"""
-
-    encodings = Encoding.objects.filter(status="running")
-
-    logger.info(f"got {encodings.count()} encodings that are in state running")
-    changed = 0
-    for encoding in encodings:
-        now = datetime.now(encoding.update_date.tzinfo)
-        if (now - encoding.update_date).seconds > settings.RUNNING_STATE_STALE:
-            media = encoding.media
-            profile = encoding.profile
-            # task_id = encoding.task_id
-            # terminate task
-            # TODO: not imported
-            # if task_id:
-            #    revoke(task_id, terminate=True)
-            encoding.delete()
-            media.encode(profiles=[profile])
-            # TODO: allign with new code + chunksize...
-            changed += 1
-    if changed:
-        logger.info(f"changed from running to pending on {changed} items")
-    return True
-
 
 @task(name="check_media_states", queue="short_tasks")
 def check_media_states():
@@ -1491,15 +1464,17 @@ def video_trim_task(self, trim_request_id):
 @task(name="push_all_media_to_storj", queue="long_tasks", soft_time_limit=900 )
 def push_all_media_to_storj():
     root = settings.MEDIA_ROOT
-    push_cutoff = time.time() - 30 * 60
-    chunk_dir = os.path.join(root, settings.CHUNKS_DIR) #ignore old chunks
+    push_cutoff = time.time() - 5 * 60
+    chunk_dir = os.path.join(root, settings.CHUNKS_DIR)  # ignore old chunks
     StorageClass = import_string(settings.STORJ_STORAGE)
     storj_storage = StorageClass()
-    default_avatar_rel = os.path.join('userlogos', 'user.jpg')
-    default_banner_rel = os.path.join('userlogos', 'banner.jpg')
+
+    default_avatar_rel = os.path.join("userlogos", "user.jpg")
+    default_banner_rel = os.path.join("userlogos", "banner.jpg")
+
     for dirpath, _, filenames in os.walk(root):
         if dirpath.startswith(chunk_dir):
-            continue #ignore old chunks
+            continue
 
         for fname in filenames:
             full_path = os.path.join(dirpath, fname)
@@ -1516,21 +1491,28 @@ def push_all_media_to_storj():
                 continue
             try:
                 if storj_storage.exists(rel_path):
-                    continue #dont duplicate on cloud storage
-            except Exception as e:
-                logger.error(f"{full_path} is pushable to {rel_path}")
-            if mtime < push_cutoff:
-                try:
-                    with open(full_path, "rb") as f:
-                        storj_storage.save(rel_path, File(f))
-                    os.remove(full_path)
-                except FileNotFoundError:
+                    try:
+                        os.remove(full_path)
+                    except FileNotFoundError:
+                        pass
+                    except Exception as e:
+                        logger.error(f"cleanup after existing Storj object failed for {full_path}: {e}")
                     continue
-                except Exception as e:
-                    logger.error(f"Failed push {full_path} to Storj : {e}")
+            except Exception as e:
+                logger.error(f"Storj exists check failed for {rel_path}: {e}")
+
+            try:
+                with open(full_path, "rb") as f:
+                    storj_storage.save(rel_path, File(f))
+                os.remove(full_path)
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                logger.error(f"Failed push {full_path} to Storj: {e}")
 
     delete_cutoff = time.time() - 60 * 60
-    for dirpath, dirnames, filenames in os.walk(root, topdown=False):
+
+    for dirpath, _dirnames, filenames in os.walk(root, topdown=False):
         for fname in filenames:
             full_path = os.path.join(dirpath, fname)
             try:
@@ -1539,13 +1521,12 @@ def push_all_media_to_storj():
             except FileNotFoundError:
                 pass
             except Exception as e:
-                logger.error(f"cleanup failed for {full_path} : {e}")
+                logger.error(f"cleanup failed for {full_path}: {e}")
         try:
             if not os.listdir(dirpath) and os.path.getmtime(dirpath) < delete_cutoff:
                 os.rmdir(dirpath)
         except Exception as e:
-            logger.error(f"Remove failed because : {e}")
-            pass
+            logger.error(f"Remove failed because: {e}")
 
     return True
 
@@ -1776,13 +1757,69 @@ def maintenance_backup_database():
         if tmp_path.exists():
             tmp_path.unlink()
 
-@task(name="submit_remote_encoding", bind=True, queue="short_tasks", max_retries=3)
+def _mark_remote_media_failed(media, message):
+    Encoding.objects.filter(
+        media=media,
+        worker="runpod",
+    ).exclude(status="success").update(
+        status="fail",
+        logs=message,
+    )
+
+    Media.objects.filter(pk=media.pk).update(
+        encoding_status="fail",
+        listable=False,
+    )
+
+
+def _remote_source_exists_on_storj(media):
+    StorageClass = import_string(settings.STORJ_STORAGE)
+    storj_storage = StorageClass()
+    return storj_storage.exists(media.media_file.name)
+
+@task(name="submit_remote_encoding", bind=True, queue="short_tasks", max_retries=15)
 def submit_remote_encoding(self, friendly_token):
     try:
         media = Media.objects.get(friendly_token=friendly_token)
     except Media.DoesNotExist:
         logger.error("Remote encoding: media not found token=%s", friendly_token)
         return False
+
+    max_retries = int(getattr(settings, "REMOTE_ENCODING_STORJ_WAIT_MAX_RETRIES", 15))
+    retry_seconds = int(getattr(settings, "REMOTE_ENCODING_STORJ_WAIT_RETRY_SECONDS", 60))
+
+    try:
+        source_exists = _remote_source_exists_on_storj(media)
+    except Exception as exc:
+        source_exists = False
+        logger.warning(
+            "Remote encoding: Storj source check failed token=%s key=%s error=%s",
+            friendly_token,
+            media.media_file.name,
+            exc,
+        )
+
+    if not source_exists:
+        message = f"Remote encoding source not available on Storj yet: {media.media_file.name}"
+
+        if self.request.retries >= max_retries:
+            logger.error(message)
+            _mark_remote_media_failed(media, message)
+            return False
+
+        logger.info(
+            "Remote encoding: waiting for Storj source token=%s key=%s retry=%s/%s",
+            friendly_token,
+            media.media_file.name,
+            self.request.retries + 1,
+            max_retries,
+        )
+
+        raise self.retry(
+            exc=RuntimeError(message),
+            countdown=retry_seconds,
+            max_retries=max_retries,
+        )
 
     try:
         from files.remote_encoding import submit_runpod_job
@@ -1803,8 +1840,10 @@ def submit_remote_encoding(self, friendly_token):
                 status="running",
             ).update(task_id=runpod_job_id)
 
-        media.encoding_status = "running"
-        media.save(update_fields=["encoding_status", "listable"])
+        Media.objects.filter(pk=media.pk).update(
+            encoding_status="running",
+            listable=False,
+        )
 
         return response
 
@@ -1815,16 +1854,7 @@ def submit_remote_encoding(self, friendly_token):
             exc,
         )
 
-        Encoding.objects.filter(
-            media=media,
-            worker="runpod",
-        ).exclude(status="success").update(
-            status="fail",
-            logs=str(exc),
-        )
-
-        media.encoding_status = "fail"
-        media.save(update_fields=["encoding_status", "listable"])
+        _mark_remote_media_failed(media, str(exc))
 
         raise self.retry(exc=exc, countdown=30, max_retries=3)
 

@@ -30,10 +30,9 @@ def _callback_secret():
 
 
 def sign_payload(payload):
-    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hmac.new(
         _callback_secret().encode("utf-8"),
-        body,
+        _canonical_body(payload),
         hashlib.sha256,
     ).hexdigest()
 
@@ -49,6 +48,16 @@ def _normalized_prefix(value):
 def _join_key(*parts):
     return "/".join(str(part).strip("/") for part in parts if str(part).strip("/"))
 
+def _canonical_payload(value):
+    return json.loads(json.dumps(value, sort_keys=True, separators=(",", ":")))
+
+
+def _canonical_body(payload):
+    return json.dumps(
+        _canonical_payload(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 def _source_name(media):
     return media.media_file.name.split("/")[-1]
@@ -61,6 +70,23 @@ def build_source_url(media):
         + media.media_file.name.lstrip("/")
     )
 
+def build_source_object(media):
+    return {
+        "type": "s3",
+        "bucket": getattr(
+            settings,
+            "REMOTE_ENCODING_SOURCE_BUCKET",
+            getattr(settings, "AWS_STORAGE_BUCKET_NAME", "mediafiles"),
+        ),
+        "key": media.media_file.name,
+        "endpoint_url": getattr(
+            settings,
+            "REMOTE_ENCODING_SOURCE_ENDPOINT_URL",
+            getattr(settings, "AWS_S3_ENDPOINT_URL", "https://gateway.storjshare.io"),
+        ),
+        "region_name": getattr(settings, "REMOTE_ENCODING_SOURCE_REGION_NAME", "auto"),
+        "addressing_style": getattr(settings, "REMOTE_ENCODING_SOURCE_ADDRESSING_STYLE", "path"),
+    }
 
 def build_callback_url(media):
     return settings.FRONTEND_HOST.rstrip("/") + reverse(
@@ -175,6 +201,41 @@ def get_remote_candidate_profiles(media):
 
     return profiles
 
+def _prepare_remote_encoding(media, profile):
+    from files.models import Encoding
+
+    qs = list(
+        Encoding.objects.filter(
+            media=media,
+            profile=profile,
+            chunk=False,
+        ).order_by("id")
+    )
+
+    if qs:
+        encoding = qs[0]
+        duplicate_ids = [item.id for item in qs[1:]]
+
+        if duplicate_ids:
+            Encoding.objects.filter(id__in=duplicate_ids).delete()
+    else:
+        encoding = Encoding.objects.create(
+            media=media,
+            profile=profile,
+            chunk=False,
+        )
+
+    Encoding.objects.filter(pk=encoding.pk).update(
+        status="running",
+        progress=0,
+        worker="runpod",
+        logs="",
+        commands="",
+        temp_file="",
+        task_id="",
+    )
+
+    return Encoding.objects.get(pk=encoding.pk)
 
 def build_runpod_payload(media):
     from files.models import Encoding
@@ -187,19 +248,7 @@ def build_runpod_payload(media):
     jobs = []
 
     for profile in profiles:
-        encoding, _created = Encoding.objects.update_or_create(
-            media=media,
-            profile=profile,
-            chunk=False,
-            defaults={
-                "status": "running",
-                "progress": 0,
-                "worker": "runpod",
-                "logs": "",
-                "commands": "",
-                "temp_file": "",
-            },
-        )
+        encoding = _prepare_remote_encoding(media, profile)
 
         output_key = _encoding_output_key(media, profile)
 
@@ -222,6 +271,7 @@ def build_runpod_payload(media):
         "friendly_token": media.friendly_token,
         "username": media.user.username,
         "source_name": _source_name(media),
+        "source": build_source_object(media),
         "source_url": build_source_url(media),
         "callback_url": build_callback_url(media),
         "public_base_url": settings.REMOTE_ENCODING_PUBLIC_BASE_URL.rstrip("/"),
