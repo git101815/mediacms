@@ -1792,10 +1792,9 @@ def submit_remote_encoding(self, friendly_token):
 
         for profile_data in profiles_payload:
             profile = EncodeProfile.objects.filter(
+                id=profile_data["id"],
                 active=True,
-                extension="mp4",
-                codec=profile_data["codec"],
-                resolution=profile_data["resolution"],
+                extension=profile_data.get("extension", "mp4"),
             ).first()
 
             if not profile:

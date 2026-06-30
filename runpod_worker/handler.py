@@ -20,7 +20,7 @@ S3_SECRET_ACCESS_KEY = os.environ["REMOTE_ENCODING_S3_SECRET_ACCESS_KEY"]
 
 # Non-secret config. This bucket MUST be the bucket served by
 # REMOTE_ENCODING_PUBLIC_BASE_URL on the MediaCMS side.
-S3_BUCKET = os.environ["AWS_STORAGE_BUCKET_NAME"]
+S3_BUCKET = "mediafiles"
 S3_ENDPOINT_URL = "https://gateway.storjshare.io"
 S3_REGION_NAME = "auto"
 S3_ADDRESSING_STYLE = "path"
