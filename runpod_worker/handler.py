@@ -1118,17 +1118,28 @@ def package_fragmented_hls(job, hls_dir, encoded_items, codec, folder):
 def package_hls(job, hls_dir, encoded_items):
     outputs = {}
 
+    hls_dir = Path(hls_dir)
+    hls_dir.mkdir(parents=True, exist_ok=True)
+
     h264 = package_h264(job, hls_dir, encoded_items)
-    if h264:
-        outputs["h264"] = h264
+    if not h264:
+        raise RuntimeError("Mandatory H264 HLS packaging failed")
 
-    h265 = package_fragmented_hls(job, hls_dir, encoded_items, "h265", "hevc")
-    if h265:
-        outputs["h265"] = h265
+    outputs["h264"] = h264
 
-    av1 = package_fragmented_hls(job, hls_dir, encoded_items, "av1", "av1")
-    if av1:
-        outputs["av1"] = av1
+    try:
+        h265 = package_fragmented_hls(job, hls_dir, encoded_items, "h265", "hevc")
+        if h265:
+            outputs["h265"] = h265
+    except Exception as exc:
+        outputs["h265_error"] = str(exc)
+
+    try:
+        av1 = package_fragmented_hls(job, hls_dir, encoded_items, "av1", "av1")
+        if av1:
+            outputs["av1"] = av1
+    except Exception as exc:
+        outputs["av1_error"] = str(exc)
 
     return outputs
 
@@ -1233,7 +1244,6 @@ def handler(event):
             encoded_items = []
             skipped_items = []
             failed_items = []
-            mandatory_failures = []
 
             for encode_job_spec in job.get("jobs") or []:
                 try:
@@ -1247,36 +1257,17 @@ def handler(event):
 
                     if item.get("skipped"):
                         skipped_items.append(item)
-
-                        if is_mandatory_encoding(encode_job_spec):
-                            mandatory_failures.append(
-                                failed_encoding_payload(
-                                    encode_job_spec,
-                                    RuntimeError(item.get("reason") or "Mandatory H264 skipped"),
-                                )
-                            )
-
                         continue
 
                     item["media_url"] = public_url(job, item["media_file"])
                     encoded_items.append(item)
 
                 except Exception as exc:
-                    failed_item = failed_encoding_payload(encode_job_spec, exc)
-                    failed_items.append(failed_item)
-
-                    if is_mandatory_encoding(encode_job_spec):
-                        mandatory_failures.append(failed_item)
-
+                    failed_items.append(failed_encoding_payload(encode_job_spec, exc))
                     continue
 
-            if mandatory_failures or not has_successful_h264(encoded_items):
-                reason = "Mandatory H264 encoding failed"
-
-                if mandatory_failures:
-                    reason = mandatory_failures[0].get("logs") or reason
-
-                raise RuntimeError(reason)
+            if not has_successful_h264(encoded_items):
+                raise RuntimeError("Mandatory H264 encoding failed")
 
             outputs = package_hls(job, hls_dir, encoded_items)
 

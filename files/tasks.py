@@ -1044,66 +1044,6 @@ def check_media_states():
         logger.info(f"changed encoding status to {changed} media items")
     return True
 
-
-@task(name="check_pending_states", queue="short_tasks")
-def check_pending_states():
-    # Experimental - unused
-    # check encoding profiles that are on state pending and not on a queue
-    encodings = Encoding.objects.filter(status="pending")
-
-    if not encodings:
-        return True
-
-    changed = 0
-    tasks = list_tasks()
-    task_ids = tasks["task_ids"]
-    media_profile_pairs = tasks["media_profile_pairs"]
-    for encoding in encodings:
-        if encoding.task_id and encoding.task_id in task_ids:
-            # encoding is in one of the active/reserved/scheduled tasks list
-            continue
-        elif (
-            encoding.media.friendly_token,
-            encoding.profile.id,
-        ) in media_profile_pairs:
-            continue
-            # encoding is in one of the reserved/scheduled tasks list.
-            # has no task_id but will be run, so need to re-enter the queue
-        else:
-            media = encoding.media
-            profile = encoding.profile
-            encoding.delete()
-            media.encode(profiles=[profile], force=False)
-            changed += 1
-    if changed:
-        logger.info(f"set to the encode queue {changed} encodings that were on pending state")
-    return True
-
-
-@task(name="check_missing_profiles", queue="short_tasks")
-def check_missing_profiles():
-    # Experimental - unused
-
-    # check if video files have missing profiles. If so, add them
-    media = Media.objects.filter(media_type="video")
-    profiles = list(EncodeProfile.objects.all())
-
-    changed = 0
-
-    for m in media:
-        existing_profiles = [p.profile for p in m.encodings.all()]
-        missing_profiles = [p for p in profiles if p not in existing_profiles]
-        if missing_profiles:
-            m.encode(profiles=missing_profiles, force=False)
-            # since we call with force=False
-            # encode_media won't delete existing profiles
-            # if they appear on the meanwhile (eg on a big queue)
-            changed += 1
-    if changed:
-        logger.info(f"set to the encode queue {changed} profiles")
-    return True
-
-
 @task(name="clear_sessions", queue="short_tasks")
 def clear_sessions():
     """Clear expired sessions"""
@@ -1849,14 +1789,22 @@ def submit_remote_encoding(self, friendly_token):
 
     except Exception as exc:
         logger.exception(
-            "Remote encoding submit failed token=%s error=%s",
+            "Remote encoding submit failed token=%s retry=%s/%s error=%s",
             friendly_token,
+            self.request.retries,
+            max_retries,
             exc,
         )
 
-        _mark_remote_media_failed(media, str(exc))
+        if self.request.retries >= max_retries:
+            _mark_remote_media_failed(media, str(exc))
+            return False
 
-        raise self.retry(exc=exc, countdown=30, max_retries=3)
+        raise self.retry(
+            exc=exc,
+            countdown=30,
+            max_retries=max_retries,
+        )
 
 # TODO LIST
 # 1 chunks are deleted from original server when file is fully encoded.
