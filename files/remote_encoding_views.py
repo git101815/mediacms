@@ -27,6 +27,72 @@ def _safe_int(value):
         return None
 
 
+def _safe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _update_media_from_payload(media, media_payload):
+    if not media_payload:
+        return []
+
+    update_fields = []
+
+    media_type = media_payload.get("media_type") or "video"
+    if media_type:
+        media.media_type = media_type
+        update_fields.append("media_type")
+
+    duration = _safe_int(media_payload.get("duration"))
+    if duration is not None:
+        media.duration = duration
+        update_fields.append("duration")
+
+    video_height = _safe_int(media_payload.get("video_height"))
+    if video_height is not None:
+        media.video_height = video_height
+        update_fields.append("video_height")
+
+    size_bytes = _safe_int(media_payload.get("size_bytes"))
+    if size_bytes:
+        media.size = helpers.show_file_size(size_bytes)
+        update_fields.append("size")
+
+    md5sum = media_payload.get("md5sum")
+    if md5sum:
+        media.md5sum = md5sum
+        update_fields.append("md5sum")
+
+    media_info = media_payload.get("media_info")
+    if media_info:
+        media.media_info = json.dumps(media_info)
+        update_fields.append("media_info")
+
+    thumbnail_time = _safe_float(media_payload.get("thumbnail_time"))
+    if thumbnail_time is not None:
+        media.thumbnail_time = thumbnail_time
+        update_fields.append("thumbnail_time")
+
+    thumbnail_file = media_payload.get("thumbnail_file")
+    if thumbnail_file:
+        media.thumbnail = MediaHLSRendition.storage_path(thumbnail_file)
+        update_fields.append("thumbnail")
+
+    poster_file = media_payload.get("poster_file")
+    if poster_file:
+        media.poster = MediaHLSRendition.storage_path(poster_file)
+        update_fields.append("poster")
+
+    sprites_file = media_payload.get("sprites_file")
+    if sprites_file:
+        media.sprites = MediaHLSRendition.storage_path(sprites_file)
+        update_fields.append("sprites")
+
+    return update_fields
+
+
 def _update_encodings_from_payload(media, outputs):
     for output in outputs.values():
         for item in output.get("encodings") or []:
@@ -108,6 +174,7 @@ def remote_encoding_callback(request, friendly_token):
         with transaction.atomic():
             update_fields = ["encoding_status", "listable"]
 
+            update_fields.extend(_update_media_from_payload(media, payload.get("media") or {}))
             _update_encodings_from_payload(media, outputs)
 
             for _output_key, codec, db_field, output in output_specs:
@@ -127,7 +194,7 @@ def remote_encoding_callback(request, friendly_token):
                 update_fields.append(db_field)
 
             media.encoding_status = "success"
-            media.save(update_fields=update_fields)
+            media.save(update_fields=sorted(set(update_fields)))
     except ValueError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 

@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 import boto3
 import runpod
 from botocore.config import Config
+from PIL import Image
 
 
 CALLBACK_SECRET = os.environ["REMOTE_ENCODING_CALLBACK_SECRET"]
@@ -109,6 +110,8 @@ def content_type_for(filename):
         return "video/iso.segment"
     if filename.endswith(".mp4"):
         return "video/mp4"
+    if filename.endswith(".jpg") or filename.endswith(".jpeg"):
+        return "image/jpeg"
     return "application/octet-stream"
 
 
@@ -174,6 +177,92 @@ def ffprobe(path):
     return json.loads(output)
 
 
+def md5sum(path):
+    h = hashlib.md5()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _frame_rate_parts(value):
+    value = str(value or "0/0")
+    if "/" not in value:
+        return value, "1"
+    n, d = value.split("/", 1)
+    return n or "0", d or "0"
+
+
+def _float_or_zero(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def source_media_info(path):
+    data = ffprobe(path)
+    streams = data.get("streams", [])
+    fmt = data.get("format") or {}
+
+    video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+    audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
+
+    if not video_stream:
+        raise RuntimeError(f"No video stream found in {path}")
+
+    duration = _float_or_zero(video_stream.get("duration")) or _float_or_zero(fmt.get("duration"))
+    audio_duration = _float_or_zero(audio_stream.get("duration")) if audio_stream else 0.0
+    file_size = os.path.getsize(path)
+
+    video_bit_rate = _float_or_zero(video_stream.get("bit_rate"))
+    if not video_bit_rate and fmt.get("bit_rate"):
+        video_bit_rate = _float_or_zero(fmt.get("bit_rate"))
+
+    frame_n, frame_d = _frame_rate_parts(video_stream.get("r_frame_rate") or video_stream.get("avg_frame_rate"))
+
+    interlaced = video_stream.get("field_order") in ("tt", "tb", "bt", "bb")
+
+    ret = {
+        "filename": str(path),
+        "file_size": file_size,
+        "video_duration": duration,
+        "video_frame_rate_n": frame_n,
+        "video_frame_rate_d": frame_d,
+        "video_bitrate": round(video_bit_rate / 1024.0, 2) if video_bit_rate else 0,
+        "video_width": int(video_stream.get("width") or 0),
+        "video_height": int(video_stream.get("height") or 0),
+        "video_codec": video_stream.get("codec_name", ""),
+        "has_video": True,
+        "has_audio": bool(audio_stream),
+        "color_range": video_stream.get("color_range"),
+        "color_space": video_stream.get("color_space"),
+        "color_transfer": video_stream.get("color_transfer"),
+        "color_primaries": video_stream.get("color_primaries"),
+        "interlaced": interlaced,
+        "display_aspect_ratio": video_stream.get("display_aspect_ratio"),
+        "sample_aspect_ratio": video_stream.get("sample_aspect_ratio"),
+        "video_info": video_stream,
+        "audio_info": audio_stream or {},
+        "is_video": True,
+        "md5sum": md5sum(path),
+    }
+
+    if audio_stream:
+        audio_bit_rate = _float_or_zero(audio_stream.get("bit_rate"))
+        ret.update(
+            {
+                "audio_duration": audio_duration or _float_or_zero(fmt.get("duration")),
+                "audio_sample_rate": audio_stream.get("sample_rate"),
+                "audio_codec": audio_stream.get("codec_name"),
+                "audio_bitrate": round(audio_bit_rate / 1024.0, 2) if audio_bit_rate else 0,
+                "audio_channels": audio_stream.get("channels"),
+            }
+        )
+
+    return ret
+
+
 def media_metadata(path):
     data = ffprobe(path)
     video_stream = None
@@ -187,7 +276,6 @@ def media_metadata(path):
         raise RuntimeError(f"No video stream found in {path}")
 
     fmt = data.get("format") or {}
-    duration = float(fmt.get("duration") or 0)
     bit_rate = int(float(fmt.get("bit_rate") or 0)) if fmt.get("bit_rate") else None
 
     width = int(video_stream.get("width") or 0)
@@ -196,9 +284,124 @@ def media_metadata(path):
     return {
         "width": width,
         "height": height,
-        "duration": duration,
         "bit_rate": bit_rate,
         "size_bytes": os.path.getsize(path),
+    }
+
+
+def thumbnail_time_for(media_info):
+    duration = _float_or_zero(media_info.get("video_duration"))
+    if duration <= 0.5:
+        return 0.0
+    return round(min(max(duration * 0.10, 1.0), max(duration - 0.1, 0.0)), 1)
+
+
+def extract_jpeg(source_path, output_path, seconds, width):
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    run(
+        [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            str(seconds),
+            "-i",
+            source_path,
+            "-vframes",
+            "1",
+            "-vf",
+            f"scale={width}:-2:flags=lanczos",
+            "-q:v",
+            "3",
+            output_path,
+        ]
+    )
+
+
+def extract_sprite(source_path, output_path, every_seconds):
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as frames_dir:
+        frames_dir = Path(frames_dir)
+        frame_pattern = frames_dir / "img_%05d.jpg"
+
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                source_path,
+                "-f",
+                "image2",
+                "-vf",
+                f"fps=1/{int(every_seconds)},scale=160:90:flags=lanczos",
+                frame_pattern,
+            ]
+        )
+
+        frames = sorted(frames_dir.glob("img_*.jpg"))
+        if not frames:
+            extract_jpeg(source_path, frames_dir / "img_00001.jpg", 0, 160)
+            frames = sorted(frames_dir.glob("img_*.jpg"))
+
+        images = [Image.open(frame).convert("RGB") for frame in frames]
+        try:
+            width = 160
+            height = 90 * len(images)
+            sprite = Image.new("RGB", (width, height))
+            for index, image in enumerate(images):
+                sprite.paste(image.resize((160, 90)), (0, index * 90))
+            sprite.save(output_path, "JPEG", quality=85)
+        finally:
+            for image in images:
+                image.close()
+
+
+def asset_key(job, source_name, suffix):
+    thumbnail_root = job.get("thumbnail_output_prefix", "original/thumbnails").strip("/")
+    media_uid = safe_part(job.get("media_uid") or job.get("friendly_token"), "media")
+    username = safe_part(job.get("username"), "user")
+    basename = safe_part(Path(source_name).stem, "source")
+    return f"{thumbnail_root}/user/{username}/{media_uid}.{basename}.{suffix}.jpg"
+
+
+def generate_media_assets(job, source_path, source_name, media_info, temp_dir):
+    asset_dir = Path(temp_dir) / "assets"
+    thumbnail_time = thumbnail_time_for(media_info)
+
+    thumbnail_path = asset_dir / "thumbnail.jpg"
+    poster_path = asset_dir / "poster.jpg"
+    sprites_path = asset_dir / "sprites.jpg"
+
+    extract_jpeg(source_path, thumbnail_path, thumbnail_time, 344)
+    extract_jpeg(source_path, poster_path, thumbnail_time, 720)
+    extract_sprite(
+        source_path=source_path,
+        output_path=sprites_path,
+        every_seconds=int(job.get("sprite_seconds") or 10),
+    )
+
+    thumbnail_key = asset_key(job, source_name, "thumbnail")
+    poster_key = asset_key(job, source_name, "poster")
+    sprites_key = asset_key(job, source_name, "sprites")
+
+    upload_file(thumbnail_path, thumbnail_key)
+    upload_file(poster_path, poster_key)
+    upload_file(sprites_path, sprites_key)
+
+    return {
+        "media_type": "video",
+        "duration": int(round(_float_or_zero(media_info.get("video_duration")))),
+        "video_height": int(media_info.get("video_height") or 0),
+        "media_info": media_info,
+        "md5sum": media_info.get("md5sum") or "",
+        "size_bytes": int(media_info.get("file_size") or 0),
+        "thumbnail_time": thumbnail_time,
+        "thumbnail_file": thumbnail_key,
+        "thumbnail_url": public_url(job, thumbnail_key),
+        "poster_file": poster_key,
+        "poster_url": public_url(job, poster_key),
+        "sprites_file": sprites_key,
+        "sprites_url": public_url(job, sprites_key),
     }
 
 
@@ -451,6 +654,15 @@ def handler(event):
         try:
             download(job["source_url"], source_path)
 
+            media_info = source_media_info(source_path)
+            media_payload = generate_media_assets(
+                job=job,
+                source_path=source_path,
+                source_name=source_name,
+                media_info=media_info,
+                temp_dir=temp_dir,
+            )
+
             encoded_profiles = []
             outputs = {}
 
@@ -535,6 +747,7 @@ def handler(event):
                 "media_id": job["media_id"],
                 "friendly_token": job["friendly_token"],
                 "status": "success",
+                "media": media_payload,
                 "outputs": outputs,
             }
             callback(job["callback_url"], payload)

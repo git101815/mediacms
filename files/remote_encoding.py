@@ -31,6 +31,10 @@ def verify_signature(payload, signature):
     return hmac.compare_digest(sign_payload(payload), signature or "")
 
 
+def _normalized_prefix(value):
+    return "/".join(part for part in str(value or "").split("/") if part)
+
+
 def build_source_url(media):
     return (
         settings.REMOTE_ENCODING_SOURCE_BASE_URL.rstrip("/")
@@ -90,8 +94,10 @@ def build_runpod_payload(media):
         "callback_url": build_callback_url(media),
         "public_base_url": settings.REMOTE_ENCODING_PUBLIC_BASE_URL.rstrip("/"),
         "output_prefix": f"{settings.REMOTE_ENCODING_OUTPUT_PREFIX.strip('/')}/{media.uid.hex}",
-        "encoded_output_prefix": settings.MEDIA_ENCODING_DIR.strip("/"),
+        "encoded_output_prefix": _normalized_prefix(settings.MEDIA_ENCODING_DIR),
+        "thumbnail_output_prefix": _normalized_prefix(settings.THUMBNAIL_UPLOAD_DIR),
         "segment_seconds": int(settings.REMOTE_ENCODING_HLS_SEGMENT_SECONDS),
+        "sprite_seconds": int(getattr(settings, "SPRITE_NUM_SECS", 10)),
         "profiles": profiles,
     }
 
