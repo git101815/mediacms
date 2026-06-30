@@ -1450,24 +1450,6 @@ def push_all_media_to_storj():
             except Exception as e:
                 logger.error(f"Failed push {full_path} to Storj: {e}")
 
-    delete_cutoff = time.time() - 60 * 60
-
-    for dirpath, _dirnames, filenames in os.walk(root, topdown=False):
-        for fname in filenames:
-            full_path = os.path.join(dirpath, fname)
-            try:
-                if os.path.getmtime(full_path) < delete_cutoff:
-                    os.remove(full_path)
-            except FileNotFoundError:
-                pass
-            except Exception as e:
-                logger.error(f"cleanup failed for {full_path}: {e}")
-        try:
-            if not os.listdir(dirpath) and os.path.getmtime(dirpath) < delete_cutoff:
-                os.rmdir(dirpath)
-        except Exception as e:
-            logger.error(f"Remove failed because: {e}")
-
     return True
 
 def _get_ledger_deposit_service_actor():
