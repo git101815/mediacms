@@ -434,6 +434,23 @@ class Media(models.Model):
         Performs all related tasks, as check for media type,
         video duration, encode
         """
+        from .remote_encoding import remote_encoding_enabled
+
+        kind = helpers.get_file_type(self.media_file.path)
+
+        if remote_encoding_enabled() and kind in ["image", "audio", "pdf"]:
+            self.set_media_type()
+            if self.media_type == "image":
+                self.set_thumbnail(force=True)
+            return True
+
+        if remote_encoding_enabled() and kind == "video":
+            self.media_type = "video"
+            self.encoding_status = "running"
+            self.save(update_fields=["listable", "media_type", "encoding_status"])
+            self.encode()
+            return True
+
         self.set_media_type()
         if self.media_type == "video":
             self.set_thumbnail(force=True)
@@ -601,7 +618,10 @@ class Media(models.Model):
 
             self.encoding_status = "running"
             self.save(update_fields=["encoding_status", "listable"])
-            tasks.submit_remote_encoding.delay(self.friendly_token)
+            tasks.submit_remote_encoding.apply_async(
+                args=[self.friendly_token],
+                countdown=int(getattr(settings, "REMOTE_ENCODING_SUBMIT_DELAY_SECONDS", 600)),
+            )
             return True
 
         enabled_codecs = tuple(getattr(settings, "ENABLED_ENCODING_CODECS", ("h264",)))

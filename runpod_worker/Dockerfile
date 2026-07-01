@@ -4,13 +4,17 @@ FROM ${FFMPEG_BUILDER_IMAGE} AS ffmpeg_builder
 
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PATH="/opt/ffmpeg/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
+ARG BENTO4_VERSION=1-6-0-641
+ARG BENTO4_ZIP=Bento4-SDK-${BENTO4_VERSION}.x86_64-unknown-linux.zip
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
+        curl \
+        unzip \
         python3 \
         python3-pip \
         libgomp1 \
@@ -20,6 +24,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ffmpeg_builder /opt/ffmpeg /opt/ffmpeg
+
+RUN curl -fsSL "https://www.bok.net/Bento4/binaries/${BENTO4_ZIP}" -o /tmp/bento4.zip \
+    && unzip -q /tmp/bento4.zip -d /tmp \
+    && mv "/tmp/Bento4-SDK-${BENTO4_VERSION}.x86_64-unknown-linux" /opt/bento4 \
+    && rm -f /tmp/bento4.zip
+
+ENV PATH="/opt/ffmpeg/bin:/opt/bento4/bin:${PATH}"
 
 WORKDIR /app
 
