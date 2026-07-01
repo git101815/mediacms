@@ -1328,6 +1328,12 @@ def preflight_gpu():
             "-f", "null",
             "-"
         ],
+        ["sh", "-lc", "echo NVIDIA_VISIBLE_DEVICES=$NVIDIA_VISIBLE_DEVICES"],
+        ["sh", "-lc", "echo NVIDIA_DRIVER_CAPABILITIES=$NVIDIA_DRIVER_CAPABILITIES"],
+        ["sh", "-lc", "ls -l /dev/nvidia* /dev/nvidia-caps/* 2>/dev/null || true"],
+        ["sh", "-lc", "ldconfig -p | grep -E 'libnvidia-encode|libnvcuvid|libcuda' || true"],
+        ["sh", "-lc",
+         "LD_DEBUG=libs ffmpeg -hide_banner -y -f lavfi -i testsrc2=size=1280x720:rate=30 -t 1 -c:v h264_nvenc -f null - 2>&1 | grep -E 'libnvidia-encode|libcuda|OpenEncodeSession|No capable|unsupported|Cannot load' || true"],
     ]
 
     for cmd in checks:

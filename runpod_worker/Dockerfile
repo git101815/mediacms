@@ -4,6 +4,9 @@ FROM ${FFMPEG_BUILDER_IMAGE} AS ffmpeg_builder
 
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
 ARG BENTO4_VERSION=1-6-0-641
 ARG BENTO4_ZIP=Bento4-SDK-${BENTO4_VERSION}.x86_64-unknown-linux.zip
 
