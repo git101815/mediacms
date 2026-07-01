@@ -146,7 +146,7 @@ from .stop_words import STOP_WORDS
 from .tasks import save_user_action, video_trim_task
 
 VALID_USER_ACTIONS = [action for action, name in USER_MEDIA_ACTIONS]
-cutoff = timezone.now() - timedelta(minutes=40)
+cutoff = timezone.now() - timedelta(minutes=4)
 WALLET_PAGE_SIZE = 20
 WALLET_TAB_ALL = "all"
 WALLET_STATUS_ALL = "all"
