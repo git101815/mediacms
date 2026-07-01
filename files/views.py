@@ -126,6 +126,12 @@ from ledger.services import (
     get_ad_free_lifetime_price_tokens,
     purchase_ad_free_lifetime,
 )
+from ledger.malum import (
+    MALUM_CHAIN,
+    MALUM_PROVIDER_KEY,
+    get_malum_deposit_option,
+    open_malum_deposit_session,
+)
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
     authenticate_internal_sweeper_request,
@@ -431,6 +437,15 @@ def _format_route_amount(value, *, chain: str, asset_code: str) -> str:
 def _build_wallet_deposit_options() -> list[dict]:
     options = []
 
+    malum_option = get_malum_deposit_option()
+    if malum_option is not None:
+        options.append(
+            {
+                **malum_option,
+                "min_amount_display": _format_canonical_stable_amount(malum_option["min_amount"]),
+            }
+        )
+
     for option in list_available_deposit_options():
         chain = option["chain"]
         asset_code = option["asset_code"]
@@ -731,7 +746,17 @@ def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_ST
 
     rows = []
     for session in sessions:
-        display_label = f"{_get_network_display_label(session.chain)} · {session.asset_code}"
+        metadata = session.metadata or {}
+        provider = metadata.get("payment_provider") or {}
+        is_provider_checkout = provider.get("key") == MALUM_PROVIDER_KEY or session.chain == MALUM_CHAIN
+
+        if is_provider_checkout:
+            display_label = metadata.get("display_label") or provider.get("label") or "Card / PayPal"
+            deposit_reference = provider.get("reference") or session.observed_txid or str(session.public_id)
+        else:
+            display_label = f"{_get_network_display_label(session.chain)} · {session.asset_code}"
+            deposit_reference = session.deposit_address
+
         public_status = _get_public_deposit_status(session)
 
         if active_status != WALLET_STATUS_ALL and public_status != active_status:
@@ -741,13 +766,19 @@ def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_ST
             {
                 "public_id": str(session.public_id),
                 "label": display_label,
+                "display_label": display_label,
                 "status": public_status,
                 "raw_status": session.status,
                 "status_label": PUBLIC_DEPOSIT_STATUS_LABELS.get(public_status, public_status),
                 "status_icon": PUBLIC_DEPOSIT_STATUS_ICONS.get(public_status, "schedule"),
-                "deposit_address": session.deposit_address,
+                "deposit_address": deposit_reference,
                 "created_at": session.created_at,
                 "url": reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}),
+                "show_view": public_status != PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE,
+                "show_amount": public_status == PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE and session.observed_amount is not None,
+                "credited_amount_display": _format_platform_token_amount(
+                    ((metadata.get("token_pack") or {}).get("token_amount") or 0)
+                ),
             }
         )
 
@@ -757,13 +788,20 @@ def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_ST
     return rows
 
 def _build_deposit_session_payload(session: DepositSession) -> dict:
-    network_display = _get_network_display_label(session.chain)
-    route_label = f"{network_display} · {session.asset_code}"
-    public_status = _get_public_deposit_status(session)
-
     metadata = session.metadata or {}
     token_pack = metadata.get("token_pack") or {}
     payment_method = metadata.get("payment_method") or {}
+    provider = metadata.get("payment_provider") or {}
+    is_provider_checkout = provider.get("key") == MALUM_PROVIDER_KEY or session.chain == MALUM_CHAIN
+
+    if is_provider_checkout:
+        network_display = provider.get("network_display") or "Hosted checkout"
+        route_label = metadata.get("display_label") or provider.get("label") or "Card / PayPal"
+    else:
+        network_display = _get_network_display_label(session.chain)
+        route_label = f"{network_display} · {session.asset_code}"
+
+    public_status = _get_public_deposit_status(session)
 
     token_pack_name = (token_pack.get("name") or "").strip()
     token_pack_token_amount = int(token_pack.get("token_amount") or 0)
@@ -771,7 +809,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
 
     expected_raw_amount = session.expected_onchain_raw_amount
     if expected_raw_amount in (None, ""):
-        expected_raw_amount = (session.metadata or {}).get("expected_route_raw_amount")
+        expected_raw_amount = metadata.get("expected_route_raw_amount")
     if expected_raw_amount in (None, ""):
         expected_raw_amount = session.min_amount
 
@@ -786,6 +824,15 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         token_pack_label = (
             f"{_format_pack_token_amount(token_pack_token_amount)} tokens · "
             f"${_format_canonical_stable_amount(token_pack_price)}"
+        )
+
+    if is_provider_checkout:
+        min_amount_display = _format_canonical_stable_amount(session.min_amount)
+    else:
+        min_amount_display = _format_route_amount(
+            expected_raw_amount,
+            chain=session.chain,
+            asset_code=session.asset_code,
         )
 
     return {
@@ -803,11 +850,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "required_confirmations": session.required_confirmations,
         "confirmations": session.confirmations,
         "min_amount": session.min_amount,
-        "min_amount_display": _format_route_amount(
-            expected_raw_amount,
-            chain=session.chain,
-            asset_code=session.asset_code,
-        ),
+        "min_amount_display": min_amount_display,
         "observed_txid": session.observed_txid or "",
         "observed_amount": session.observed_amount,
         "observed_amount_display": (
@@ -826,8 +869,13 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "wallet_url": reverse("wallet"),
         "token_pack_name": token_pack_name,
         "token_pack_label": token_pack_label,
-        "payment_method_label": (payment_method.get("label") or "").strip(),
-        "show_network_step": bool(payment_method.get("show_network_step", True)),
+        "payment_method_label": (payment_method.get("label") or provider.get("label") or "").strip(),
+        "show_network_step": bool(payment_method.get("show_network_step", True)) and not is_provider_checkout,
+        "is_provider_checkout": is_provider_checkout,
+        "provider_key": provider.get("key") or "",
+        "provider_reference": provider.get("reference") or "",
+        "provider_status": provider.get("status") or provider.get("last_status") or "",
+        "checkout_url": provider.get("checkout_url") or "",
     }
 
 def _parse_required_list(payload, key):
@@ -957,6 +1005,18 @@ def wallet_deposit_request(request):
         if token_pack is None:
             raise DjangoValidationError("Invalid token pack.")
 
+        if selected_option.get("payment_method_type") == "provider" and selected_option.get("provider_key") == MALUM_PROVIDER_KEY:
+            session = open_malum_deposit_session(
+                actor=request.user,
+                wallet=wallet_obj,
+                token_pack=token_pack,
+            )
+            provider = (session.metadata or {}).get("payment_provider") or {}
+            checkout_url = (provider.get("checkout_url") or "").strip()
+            if checkout_url and session.status == DepositSession.STATUS_AWAITING_PAYMENT:
+                return redirect(checkout_url)
+            return redirect("wallet_deposit_session", public_id=session.public_id)
+
         matching_payment_routes = [
             item for item in deposit_options
             if item["payment_method_key"] == selected_option["payment_method_key"]
@@ -985,8 +1045,8 @@ def wallet_deposit_request(request):
             payment_method_label=selected_option["payment_method_label"],
             show_network_step=show_network_step,
         )
-    except DjangoValidationError as exc:
-        messages.add_message(request, messages.ERROR, str(exc))
+    except (DjangoValidationError, DjangoPermissionDenied, ImproperlyConfigured) as exc:
+        messages.add_message(request, messages.ERROR, _extract_wallet_form_error(exc))
         return redirect(
             f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status, open_modal='deposit')}"
         )
