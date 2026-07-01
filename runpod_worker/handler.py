@@ -1312,5 +1312,30 @@ def handler(event):
             callback(job["callback_url"], payload)
             return payload
 
+def preflight_gpu():
+    checks = [
+        ["nvidia-smi"],
+        ["nvidia-smi", "--query-gpu=name,driver_version,compute_cap", "--format=csv,noheader"],
+        ["ffmpeg", "-hide_banner", "-encoders"],
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-y",
+            "-f", "lavfi",
+            "-i", "testsrc2=size=1280x720:rate=30",
+            "-t", "3",
+            "-c:v", "h264_nvenc",
+            "-f", "null",
+            "-"
+        ],
+    ]
 
+    for cmd in checks:
+        print("PREFLIGHT CMD:", " ".join(cmd), flush=True)
+        try:
+            print(run(cmd), flush=True)
+        except Exception as exc:
+            print("PREFLIGHT FAILED:", exc, flush=True)
+
+preflight_gpu()
 runpod.serverless.start({"handler": handler})
