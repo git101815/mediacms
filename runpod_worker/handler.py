@@ -1263,9 +1263,23 @@ def handler(event):
                     encoded_items.append(item)
 
                 except Exception as exc:
+                    print(
+                        "ENCODE_JOB_FAILED "
+                        f"profile_id={encode_job_spec.get('profile_id')} "
+                        f"codec={encode_job_spec.get('codec')} "
+                        f"extension={encode_job_spec.get('extension')} "
+                        f"resolution={encode_job_spec.get('resolution')} "
+                        f"error={exc}",
+                        flush=True,
+                    )
                     failed_items.append(failed_encoding_payload(encode_job_spec, exc))
                     continue
 
+            if not has_successful_h264(encoded_items):
+                print("ENCODED_ITEMS=", json.dumps(encoded_items, default=str), flush=True)
+                print("FAILED_ITEMS=", json.dumps(failed_items, default=str), flush=True)
+                print("SKIPPED_ITEMS=", json.dumps(skipped_items, default=str), flush=True)
+                raise RuntimeError("Mandatory H264 encoding failed")
             if not has_successful_h264(encoded_items):
                 raise RuntimeError("Mandatory H264 encoding failed")
 

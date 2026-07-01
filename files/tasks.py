@@ -1404,7 +1404,7 @@ def video_trim_task(self, trim_request_id):
 @task(name="push_all_media_to_storj", queue="long_tasks", soft_time_limit=900 )
 def push_all_media_to_storj():
     root = settings.MEDIA_ROOT
-    push_cutoff = time.time() - 5 * 60
+    push_cutoff = time.time() - 60
     chunk_dir = os.path.join(root, settings.CHUNKS_DIR)  # ignore old chunks
     StorageClass = import_string(settings.STORJ_STORAGE)
     storj_storage = StorageClass()

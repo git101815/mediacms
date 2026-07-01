@@ -1,6 +1,6 @@
 import os
 from celery.schedules import crontab
-
+from datetime import timedelta
 FRONTEND_HOST = "https://celebfakes.ru"
 ALLOWED_HOSTS = [
     "www.celebfakes.ru",
@@ -106,6 +106,12 @@ CACHES = {
         },
     }
 }
+CELERY_BEAT_SCHEDULE = {
+    "push_all_media_to_storj": {
+        "task": "push_all_media_to_storj",
+        "schedule": timedelta(minutes=3),
+    },
+}
 #cloud-storage
 STORJ_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 AWS_S3_ENDPOINT_URL = "https://gateway.storjshare.io"
@@ -134,13 +140,13 @@ CELERY_RESULT_BACKEND = BROKER_URL
 MP4HLS_COMMAND = "/home/mediacms.io/bento4/bin/mp4hls"
 MP4DASH_COMMAND = "/home/mediacms.io/bento4/bin/mp4dash"
 MP4FRAGMENT_COMMAND = "/home/mediacms.io/bento4/bin/mp4fragment"
-REMOTE_ENCODING_ENABLED = False
+REMOTE_ENCODING_ENABLED = True
 REMOTE_ENCODING_PROVIDER = "runpod"
 REMOTE_ENCODING_SOURCE_BASE_URL = "https://medias.celebfakes.ru/mediafiles"
 REMOTE_ENCODING_PUBLIC_BASE_URL = "https://medias.celebfakes.ru/mediafiles"
 REMOTE_ENCODING_OUTPUT_PREFIX = "hls"
 REMOTE_ENCODING_HLS_SEGMENT_SECONDS = 4
-REMOTE_ENCODING_SUBMIT_DELAY_SECONDS = 10 * 60
+REMOTE_ENCODING_SUBMIT_DELAY_SECONDS = 1 * 60
 REMOTE_ENCODING_STORJ_WAIT_RETRY_SECONDS = 60
 REMOTE_ENCODING_STORJ_WAIT_MAX_RETRIES = 15
 REMOTE_ENCODING_SOURCE_BUCKET = AWS_STORAGE_BUCKET_NAME
@@ -148,7 +154,7 @@ REMOTE_ENCODING_SOURCE_ENDPOINT_URL = AWS_S3_ENDPOINT_URL
 REMOTE_ENCODING_SOURCE_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "auto")
 REMOTE_ENCODING_SOURCE_ADDRESSING_STYLE = AWS_S3_ADDRESSING_STYLE
 
-RUNPOD_ENDPOINT_URL = "https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/run"
+RUNPOD_ENDPOINT_URL = "https://api.runpod.ai/v2/50qi4u98h4l7pj/run"
 RUNPOD_EXECUTION_TIMEOUT_MS = 86400000
 
 RUNPOD_JOB_TTL_MS = 172800000
