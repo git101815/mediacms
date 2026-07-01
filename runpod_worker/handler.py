@@ -1119,7 +1119,6 @@ def package_hls(job, hls_dir, encoded_items):
     outputs = {}
 
     hls_dir = Path(hls_dir)
-    hls_dir.mkdir(parents=True, exist_ok=True)
 
     h264 = package_h264(job, hls_dir, encoded_items)
     if not h264:
