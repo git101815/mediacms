@@ -1240,21 +1240,38 @@ def callback(callback_url, payload):
         return response.read().decode("utf-8")
 
 
-def build_fail_payload(job, exc):
+def build_fail_payload(
+    job,
+    exc,
+    encoded_items=None,
+    failed_items=None,
+    skipped_items=None,
+    outputs=None,
+):
+    encoded_items = encoded_items or []
+    failed_items = failed_items or []
+    skipped_items = skipped_items or []
+
     return {
         "version": 3,
         "media_id": job.get("media_id"),
         "friendly_token": job.get("friendly_token"),
         "status": "fail",
         "mode": job.get("mode", ""),
+        "requested_encoding_ids": job.get("requested_encoding_ids") or [],
+        "requested_profile_ids": job.get("requested_profile_ids") or [],
         "require_h264": require_h264(job),
         "strict_requested_jobs": strict_requested_jobs(job),
         "preserve_media_on_fail": preserve_media_on_fail(job),
         "merge_outputs": job.get("merge_outputs") is True,
         "error": str(exc),
         "media": {},
-        "encodings": [],
-        "outputs": {},
+        "encodings": [
+            *[clean_encoding_for_callback(item) for item in encoded_items],
+            *failed_items,
+        ],
+        "skipped": skipped_items,
+        "outputs": outputs or {},
     }
 
 
@@ -1388,6 +1405,13 @@ def handler(event):
                 "media_id": job["media_id"],
                 "friendly_token": job["friendly_token"],
                 "status": "success",
+                "mode": job.get("mode", ""),
+                "requested_encoding_ids": job.get("requested_encoding_ids") or [],
+                "requested_profile_ids": job.get("requested_profile_ids") or [],
+                "require_h264": require_h264(job),
+                "strict_requested_jobs": strict_requested_jobs(job),
+                "preserve_media_on_fail": preserve_media_on_fail(job),
+                "merge_outputs": job.get("merge_outputs") is True,
                 "media": media_payload,
                 "encodings": [
                     *[clean_encoding_for_callback(item) for item in encoded_items],
@@ -1395,18 +1419,20 @@ def handler(event):
                 ],
                 "skipped": skipped_items,
                 "outputs": outputs,
-                "mode": job.get("mode", ""),
-                "require_h264": require_h264(job),
-                "strict_requested_jobs": strict_requested_jobs(job),
-                "preserve_media_on_fail": preserve_media_on_fail(job),
-                "merge_outputs": job.get("merge_outputs") is True,
             }
 
             callback(job["callback_url"], payload)
             return payload
 
         except Exception as exc:
-            payload = build_fail_payload(job, exc)
+            payload = build_fail_payload(
+                job,
+                exc,
+                encoded_items=locals().get("encoded_items") or [],
+                failed_items=locals().get("failed_items") or [],
+                skipped_items=locals().get("skipped_items") or [],
+                outputs=locals().get("outputs") or {},
+            )
             callback(job["callback_url"], payload)
             return payload
 

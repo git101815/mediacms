@@ -167,6 +167,7 @@ def _delete_skipped_encodings(media, skipped):
 
         qs.exclude(status="success").delete()
 
+
 def _merge_hls_renditions(media, codec, master_file, renditions):
     rows = MediaHLSRendition.build_from_payload(
         media=media,
@@ -190,6 +191,28 @@ def _merge_hls_renditions(media, codec, master_file, renditions):
 
     return rows
 
+
+def _requested_encoding_ids_from_payload(payload):
+    ids = set()
+
+    for value in payload.get("requested_encoding_ids") or []:
+        item = _safe_int(value)
+        if item:
+            ids.add(item)
+
+    for item in payload.get("encodings") or []:
+        encoding_id = _safe_int(item.get("encoding_id"))
+        if encoding_id:
+            ids.add(encoding_id)
+
+    for item in payload.get("skipped") or []:
+        encoding_id = _safe_int(item.get("encoding_id"))
+        if encoding_id:
+            ids.add(encoding_id)
+
+    return sorted(ids)
+
+
 @csrf_exempt
 @require_POST
 def remote_encoding_callback(request, friendly_token):
@@ -212,16 +235,38 @@ def remote_encoding_callback(request, friendly_token):
         return JsonResponse({"ok": False, "error": "Media mismatch"}, status=400)
 
     if payload.get("status") != "success":
-        Encoding.objects.filter(media=media, worker="runpod").exclude(status="success").update(
-            status="fail",
-            logs=payload.get("error", ""),
-        )
+        requested_encoding_ids = _requested_encoding_ids_from_payload(payload)
 
-        if payload.get("preserve_media_on_fail") is not True:
-            Media.objects.filter(pk=media.pk).update(
-                encoding_status="fail",
-                listable=False,
+        with transaction.atomic():
+            _update_encodings_from_payload(
+                media,
+                payload.get("encodings") or [],
             )
+
+            if requested_encoding_ids:
+                Encoding.objects.filter(
+                    media=media,
+                    id__in=requested_encoding_ids,
+                ).exclude(status="success").update(
+                    status="fail",
+                    logs=payload.get("error", ""),
+                )
+            else:
+                # Legacy fallback only. New fill_missing payloads must always send IDs.
+                Encoding.objects.filter(
+                    media=media,
+                    worker="runpod",
+                    status="running",
+                ).update(
+                    status="fail",
+                    logs=payload.get("error", ""),
+                )
+
+            if payload.get("preserve_media_on_fail") is not True:
+                Media.objects.filter(pk=media.pk).update(
+                    encoding_status="fail",
+                    listable=False,
+                )
 
         return JsonResponse({"ok": True, "status": "fail"})
 

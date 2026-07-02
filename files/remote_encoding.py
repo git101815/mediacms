@@ -48,6 +48,7 @@ def _normalized_prefix(value):
 def _join_key(*parts):
     return "/".join(str(part).strip("/") for part in parts if str(part).strip("/"))
 
+
 def _canonical_payload(value):
     return json.loads(json.dumps(value, sort_keys=True, separators=(",", ":")))
 
@@ -59,6 +60,7 @@ def _canonical_body(payload):
         separators=(",", ":"),
     ).encode("utf-8")
 
+
 def _source_name(media):
     return media.media_file.name.split("/")[-1]
 
@@ -69,6 +71,7 @@ def build_source_url(media):
         + "/"
         + media.media_file.name.lstrip("/")
     )
+
 
 def build_source_object(media):
     return {
@@ -87,6 +90,7 @@ def build_source_object(media):
         "region_name": getattr(settings, "REMOTE_ENCODING_SOURCE_REGION_NAME", "auto"),
         "addressing_style": getattr(settings, "REMOTE_ENCODING_SOURCE_ADDRESSING_STYLE", "path"),
     }
+
 
 def build_callback_url(media):
     return settings.FRONTEND_HOST.rstrip("/") + reverse(
@@ -201,6 +205,7 @@ def get_remote_candidate_profiles(media):
 
     return profiles
 
+
 def _prepare_remote_encoding(media, profile):
     from files.models import Encoding
 
@@ -237,9 +242,8 @@ def _prepare_remote_encoding(media, profile):
 
     return Encoding.objects.get(pk=encoding.pk)
 
-def build_runpod_payload(media):
-    from files.models import Encoding
 
+def build_runpod_payload(media):
     profiles = get_remote_candidate_profiles(media)
 
     if not profiles:
@@ -249,7 +253,6 @@ def build_runpod_payload(media):
 
     for profile in profiles:
         encoding = _prepare_remote_encoding(media, profile)
-
         output_key = _encoding_output_key(media, profile)
 
         jobs.append(
@@ -316,21 +319,11 @@ def submit_runpod_job(media):
     with urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
-def _target_codecs_tuple(value):
-    if value is None:
-        return ("h264", "h265", "av1")
-
-    if isinstance(value, str):
-        value = value.split(",")
-
-    return tuple(
-        str(codec).strip()
-        for codec in value
-        if str(codec).strip()
-    )
-
 
 def _profile_has_hls_rendition(media, profile):
+    if profile.extension != "mp4":
+        return False
+
     resolution = int(profile.resolution or 0)
 
     if not resolution:
@@ -353,21 +346,33 @@ def _profile_has_successful_encoding(media, profile):
     ).exclude(media_file="").exists()
 
 
-def get_unpackaged_remote_profiles(media, target_codecs=None):
+def _profile_is_satisfied(media, profile):
     """
-    Profiles where MP4 already exists, but HLS row is missing.
+    A profile is satisfied if MediaCMS already has either:
+    - a successful Encoding file for this profile;
+    - or, for mp4 profiles, an HLS rendition row for this codec/resolution.
 
-    These must be fixed by local HLS packaging, not RunPod.
-    Re-encoding them would waste money.
+    This avoids paying RunPod for an output that is already usable.
     """
-    target_codecs = _target_codecs_tuple(target_codecs)
+    if _profile_has_successful_encoding(media, profile):
+        return True
+
+    if _profile_has_hls_rendition(media, profile):
+        return True
+
+    return False
+
+
+def get_unpackaged_remote_profiles(media):
+    """
+    MP4 exists but HLS row is missing.
+
+    This should be fixed by local HLS packaging, not by RunPod.
+    """
     profiles = []
 
     for profile in get_remote_candidate_profiles(media):
         if profile.extension != "mp4":
-            continue
-
-        if profile.codec not in target_codecs:
             continue
 
         if _profile_has_hls_rendition(media, profile):
@@ -379,26 +384,16 @@ def get_unpackaged_remote_profiles(media, target_codecs=None):
     return profiles
 
 
-def get_missing_remote_profiles(media, target_codecs=None):
+def get_missing_remote_profiles(media):
     """
-    Profiles where neither HLS row nor successful MP4 encoding exists.
+    Profiles MediaCMS expects, but this media does not have yet.
 
-    Only these profiles should be sent to RunPod.
+    This is the only list that RunPod should receive.
     """
-    target_codecs = _target_codecs_tuple(target_codecs)
     profiles = []
 
     for profile in get_remote_candidate_profiles(media):
-        if profile.extension != "mp4":
-            continue
-
-        if profile.codec not in target_codecs:
-            continue
-
-        if _profile_has_hls_rendition(media, profile):
-            continue
-
-        if _profile_has_successful_encoding(media, profile):
+        if _profile_is_satisfied(media, profile):
             continue
 
         profiles.append(profile)
@@ -406,15 +401,12 @@ def get_missing_remote_profiles(media, target_codecs=None):
     return profiles
 
 
-def build_runpod_fill_missing_payload(media, target_codecs=None):
-    unpackaged = get_unpackaged_remote_profiles(
-        media,
-        target_codecs=target_codecs,
-    )
+def build_runpod_fill_missing_payload(media):
+    unpackaged = get_unpackaged_remote_profiles(media)
 
     if unpackaged:
         labels = [
-            f"{profile.codec}:{int(profile.resolution or 0)}"
+            f"{profile.id}:{profile.codec}:{profile.extension}:{int(profile.resolution or 0)}"
             for profile in unpackaged
         ]
 
@@ -423,19 +415,19 @@ def build_runpod_fill_missing_payload(media, target_codecs=None):
             + ", ".join(labels)
         )
 
-    profiles = get_missing_remote_profiles(
-        media,
-        target_codecs=target_codecs,
-    )
+    profiles = get_missing_remote_profiles(media)
 
     if not profiles:
         raise ValidationError("No missing remote encoding profiles available")
 
     jobs = []
+    requested_encoding_ids = []
 
     for profile in profiles:
         encoding = _prepare_remote_encoding(media, profile)
         output_key = _encoding_output_key(media, profile)
+
+        requested_encoding_ids.append(encoding.id)
 
         jobs.append(
             {
@@ -450,9 +442,14 @@ def build_runpod_fill_missing_payload(media, target_codecs=None):
         )
 
     payload = {
-        "version": 2,
+        "version": 3,
         "mode": "fill_missing_profiles",
-        "require_h264": any(profile.codec == "h264" for profile in profiles),
+        "requested_encoding_ids": requested_encoding_ids,
+        "requested_profile_ids": [profile.id for profile in profiles],
+        "require_h264": any(
+            profile.codec == "h264" and profile.extension == "mp4"
+            for profile in profiles
+        ),
         "strict_requested_jobs": True,
         "merge_outputs": True,
         "preserve_media_on_fail": True,
@@ -481,15 +478,12 @@ def build_runpod_fill_missing_payload(media, target_codecs=None):
     return payload
 
 
-def submit_runpod_fill_missing_job(media, target_codecs=None):
+def submit_runpod_fill_missing_job(media):
     if not settings.RUNPOD_ENDPOINT_URL:
         raise ValidationError("RUNPOD_ENDPOINT_URL is not configured")
 
     request_payload = {
-        "input": build_runpod_fill_missing_payload(
-            media,
-            target_codecs=target_codecs,
-        ),
+        "input": build_runpod_fill_missing_payload(media),
         "policy": {
             "executionTimeout": int(settings.RUNPOD_EXECUTION_TIMEOUT_MS),
             "ttl": int(settings.RUNPOD_JOB_TTL_MS),
