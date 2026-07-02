@@ -1204,11 +1204,12 @@ def package_hls(job, hls_dir, encoded_items):
             if strict_requested_jobs(job):
                 raise
 
-    if not outputs:
+    expected_by_codec = requested_resolutions_by_codec(job)
+
+    if not outputs and expected_by_codec:
         raise RuntimeError("No HLS outputs generated")
 
     if strict_requested_jobs(job):
-        expected_by_codec = requested_resolutions_by_codec(job)
 
         for codec, expected in expected_by_codec.items():
             output = outputs.get(codec)
