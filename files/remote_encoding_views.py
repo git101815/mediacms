@@ -167,6 +167,28 @@ def _delete_skipped_encodings(media, skipped):
 
         qs.exclude(status="success").delete()
 
+def _merge_hls_renditions(media, codec, master_file, renditions):
+    rows = MediaHLSRendition.build_from_payload(
+        media=media,
+        codec=codec,
+        master_file=master_file,
+        renditions=renditions,
+    )
+
+    if not rows:
+        return []
+
+    resolutions = [row.resolution for row in rows]
+
+    MediaHLSRendition.objects.filter(
+        media=media,
+        codec=codec,
+        resolution__in=resolutions,
+    ).delete()
+
+    MediaHLSRendition.objects.bulk_create(rows)
+
+    return rows
 
 @csrf_exempt
 @require_POST
@@ -195,10 +217,11 @@ def remote_encoding_callback(request, friendly_token):
             logs=payload.get("error", ""),
         )
 
-        Media.objects.filter(pk=media.pk).update(
-            encoding_status="fail",
-            listable=False,
-        )
+        if payload.get("preserve_media_on_fail") is not True:
+            Media.objects.filter(pk=media.pk).update(
+                encoding_status="fail",
+                listable=False,
+            )
 
         return JsonResponse({"ok": True, "status": "fail"})
 
@@ -221,20 +244,33 @@ def remote_encoding_callback(request, friendly_token):
 
             _delete_skipped_encodings(media, payload.get("skipped") or [])
 
+            merge_outputs = payload.get("merge_outputs") is True
+
             for _output_key, codec, db_field, output in output_specs:
                 master_url = output.get("master_url", "")
 
                 if not master_url:
                     continue
 
-                MediaHLSRendition.replace_from_payload(
-                    media=media,
-                    codec=codec,
-                    master_file=master_url,
-                    renditions=output.get("renditions") or [],
-                )
+                if merge_outputs:
+                    _merge_hls_renditions(
+                        media=media,
+                        codec=codec,
+                        master_file=master_url,
+                        renditions=output.get("renditions") or [],
+                    )
 
-                media_update[db_field] = MediaHLSRendition.storage_path(master_url)
+                    if not getattr(media, db_field):
+                        media_update[db_field] = MediaHLSRendition.storage_path(master_url)
+                else:
+                    MediaHLSRendition.replace_from_payload(
+                        media=media,
+                        codec=codec,
+                        master_file=master_url,
+                        renditions=output.get("renditions") or [],
+                    )
+
+                    media_update[db_field] = MediaHLSRendition.storage_path(master_url)
 
             media_update["encoding_status"] = "success"
             media_update["listable"] = (

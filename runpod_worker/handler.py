@@ -1114,6 +1114,64 @@ def package_fragmented_hls(job, hls_dir, encoded_items, codec, folder):
         "encodings": files,
     }
 
+def normalize_codec(codec):
+    codec = str(codec or "")
+    if codec == "hevc":
+        return "h265"
+    return codec
+
+
+def require_h264(job):
+    return job.get("require_h264", True) is not False
+
+
+def strict_requested_jobs(job):
+    return job.get("strict_requested_jobs") is True
+
+
+def preserve_media_on_fail(job):
+    return job.get("preserve_media_on_fail") is True
+
+
+def has_encoded_codec(encoded_items, codec):
+    codec = normalize_codec(codec)
+
+    return any(
+        item.get("status") == "success"
+        and item.get("extension") == "mp4"
+        and normalize_codec(item.get("codec")) == codec
+        and item.get("local_path")
+        for item in encoded_items
+    )
+
+
+def requested_resolutions_by_codec(job):
+    ret = {}
+
+    for item in job.get("jobs") or []:
+        if item.get("extension") != "mp4":
+            continue
+
+        codec = normalize_codec(item.get("codec"))
+        resolution = int(item.get("resolution") or 0)
+
+        if codec not in ("h264", "h265", "av1"):
+            continue
+
+        if not resolution:
+            continue
+
+        ret.setdefault(codec, set()).add(resolution)
+
+    return ret
+
+
+def output_resolutions(output):
+    return {
+        int(item.get("resolution") or 0)
+        for item in output.get("renditions") or []
+        if int(item.get("resolution") or 0)
+    }
 
 def package_hls(job, hls_dir, encoded_items):
     outputs = {}
@@ -1121,24 +1179,48 @@ def package_hls(job, hls_dir, encoded_items):
     hls_dir = Path(hls_dir)
 
     h264 = package_h264(job, hls_dir, encoded_items)
-    if not h264:
+    if h264:
+        outputs["h264"] = h264
+    elif require_h264(job):
         raise RuntimeError("Mandatory H264 HLS packaging failed")
 
-    outputs["h264"] = h264
+    if has_encoded_codec(encoded_items, "h265"):
+        try:
+            h265 = package_fragmented_hls(job, hls_dir, encoded_items, "h265", "hevc")
+            if h265:
+                outputs["h265"] = h265
+        except Exception as exc:
+            outputs["h265_error"] = str(exc)
+            if strict_requested_jobs(job):
+                raise
 
-    try:
-        h265 = package_fragmented_hls(job, hls_dir, encoded_items, "h265", "hevc")
-        if h265:
-            outputs["h265"] = h265
-    except Exception as exc:
-        outputs["h265_error"] = str(exc)
+    if has_encoded_codec(encoded_items, "av1"):
+        try:
+            av1 = package_fragmented_hls(job, hls_dir, encoded_items, "av1", "av1")
+            if av1:
+                outputs["av1"] = av1
+        except Exception as exc:
+            outputs["av1_error"] = str(exc)
+            if strict_requested_jobs(job):
+                raise
 
-    try:
-        av1 = package_fragmented_hls(job, hls_dir, encoded_items, "av1", "av1")
-        if av1:
-            outputs["av1"] = av1
-    except Exception as exc:
-        outputs["av1_error"] = str(exc)
+    if not outputs:
+        raise RuntimeError("No HLS outputs generated")
+
+    if strict_requested_jobs(job):
+        expected_by_codec = requested_resolutions_by_codec(job)
+
+        for codec, expected in expected_by_codec.items():
+            output = outputs.get(codec)
+
+            if not output:
+                raise RuntimeError(f"Requested {codec} HLS output missing")
+
+            found = output_resolutions(output)
+            missing = sorted(expected - found)
+
+            if missing:
+                raise RuntimeError(f"Requested {codec} HLS resolutions missing: {missing}")
 
     return outputs
 
@@ -1160,10 +1242,15 @@ def callback(callback_url, payload):
 
 def build_fail_payload(job, exc):
     return {
-        "version": 2,
+        "version": 3,
         "media_id": job.get("media_id"),
         "friendly_token": job.get("friendly_token"),
         "status": "fail",
+        "mode": job.get("mode", ""),
+        "require_h264": require_h264(job),
+        "strict_requested_jobs": strict_requested_jobs(job),
+        "preserve_media_on_fail": preserve_media_on_fail(job),
+        "merge_outputs": job.get("merge_outputs") is True,
         "error": str(exc),
         "media": {},
         "encodings": [],
@@ -1217,7 +1304,7 @@ def handler(event):
 
     if not verify_payload_signature(job):
         return {
-            "version": 2,
+            "version": 3,
             "status": "fail",
             "error": "Invalid input signature",
         }
@@ -1232,12 +1319,15 @@ def handler(event):
             download_source(job, source_path)
 
             media_info = source_media_info(source_path)
-            media_payload = generate_media_assets(
-                job=job,
-                source_path=source_path,
-                media_info=media_info,
-                temp_dir=temp_dir,
-            )
+            if job.get("skip_assets") is True:
+                media_payload = {}
+            else:
+                media_payload = generate_media_assets(
+                    job=job,
+                    source_path=source_path,
+                    media_info=media_info,
+                    temp_dir=temp_dir,
+                )
 
             policy = job.get("encoding_policy") or {}
             encoded_items = []
@@ -1274,23 +1364,27 @@ def handler(event):
                     failed_items.append(failed_encoding_payload(encode_job_spec, exc))
                     continue
 
-            if not has_successful_h264(encoded_items):
+            if strict_requested_jobs(job) and (failed_items or skipped_items):
+                print("ENCODED_ITEMS=", json.dumps(encoded_items, default=str), flush=True)
+                print("FAILED_ITEMS=", json.dumps(failed_items, default=str), flush=True)
+                print("SKIPPED_ITEMS=", json.dumps(skipped_items, default=str), flush=True)
+                raise RuntimeError("Requested encoding failed or was skipped")
+
+            if require_h264(job) and not has_successful_h264(encoded_items):
                 print("ENCODED_ITEMS=", json.dumps(encoded_items, default=str), flush=True)
                 print("FAILED_ITEMS=", json.dumps(failed_items, default=str), flush=True)
                 print("SKIPPED_ITEMS=", json.dumps(skipped_items, default=str), flush=True)
                 raise RuntimeError("Mandatory H264 encoding failed")
-            if not has_successful_h264(encoded_items):
-                raise RuntimeError("Mandatory H264 encoding failed")
 
             outputs = package_hls(job, hls_dir, encoded_items)
 
-            if not h264_master_exists(outputs):
+            if require_h264(job) and not h264_master_exists(outputs):
                 raise RuntimeError("Mandatory H264 HLS packaging failed")
 
             upload_directory(hls_dir, job["output_prefix"])
 
             payload = {
-                "version": 2,
+                "version": 3,
                 "media_id": job["media_id"],
                 "friendly_token": job["friendly_token"],
                 "status": "success",
@@ -1301,6 +1395,11 @@ def handler(event):
                 ],
                 "skipped": skipped_items,
                 "outputs": outputs,
+                "mode": job.get("mode", ""),
+                "require_h264": require_h264(job),
+                "strict_requested_jobs": strict_requested_jobs(job),
+                "preserve_media_on_fail": preserve_media_on_fail(job),
+                "merge_outputs": job.get("merge_outputs") is True,
             }
 
             callback(job["callback_url"], payload)
