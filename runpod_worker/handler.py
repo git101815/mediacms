@@ -3,6 +3,7 @@ import hmac
 import json
 import os
 import re
+import stat
 import subprocess
 import tempfile
 from fractions import Fraction
@@ -43,6 +44,141 @@ def run(cmd):
 
     return output
 
+def _read_text(path):
+    try:
+        return Path(path).read_text(errors="replace")
+    except Exception:
+        return ""
+
+
+def _nvidia_caps_major():
+    text = _read_text("/proc/devices")
+
+    for line in text.splitlines():
+        parts = line.split()
+
+        if len(parts) == 2 and parts[1] == "nvidia-caps":
+            try:
+                return int(parts[0])
+            except ValueError:
+                return None
+
+    return None
+
+
+def _nvidia_capability_files():
+    root = Path("/proc/driver/nvidia/capabilities")
+
+    if not root.exists():
+        return []
+
+    files = []
+
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+
+        text = _read_text(path)
+
+        if "DeviceFileMinor" in text:
+            files.append(path)
+
+    return files
+
+
+def ensure_nvidia_cap_devices():
+    """
+    RunPod can expose CUDA + libnvidia-encode without exposing /dev/nvidia-caps.
+    NVENC then fails with OpenEncodeSessionEx unsupported device.
+
+    This creates the missing nvidia capability character devices when the host
+    exposes their metadata under /proc/driver/nvidia/capabilities.
+    """
+    print("ENSURE_NVIDIA_CAP_DEVICES start", flush=True)
+
+    dev_root = Path("/dev/nvidia-caps")
+    dev_root.mkdir(parents=True, exist_ok=True)
+
+    capability_files = _nvidia_capability_files()
+    print(
+        "NVIDIA_CAPABILITY_FILES=",
+        [str(path) for path in capability_files],
+        flush=True,
+    )
+
+    for path in capability_files:
+        text = _read_text(path)
+        print(
+            "NVIDIA_CAPABILITY_FILE",
+            str(path),
+            text.replace("\n", " | "),
+            flush=True,
+        )
+
+        try:
+            print(run(["nvidia-modprobe", "-f", str(path)]), flush=True)
+        except Exception as exc:
+            print(
+                "NVIDIA_MODPROBE_CAP_FAILED",
+                str(path),
+                str(exc),
+                flush=True,
+            )
+
+    major = _nvidia_caps_major()
+    print("NVIDIA_CAPS_MAJOR=", major, flush=True)
+
+    if major is not None:
+        for path in capability_files:
+            text = _read_text(path)
+            match = re.search(r"DeviceFileMinor:\s*(\d+)", text)
+
+            if not match:
+                continue
+
+            minor = int(match.group(1))
+            node = dev_root / f"nvidia-cap{minor}"
+
+            if not node.exists():
+                try:
+                    os.mknod(
+                        node,
+                        stat.S_IFCHR | 0o666,
+                        os.makedev(major, minor),
+                    )
+                    print(
+                        "NVIDIA_CAP_MKNOD_CREATED",
+                        str(node),
+                        f"major={major}",
+                        f"minor={minor}",
+                        flush=True,
+                    )
+                except FileExistsError:
+                    pass
+                except Exception as exc:
+                    print(
+                        "NVIDIA_CAP_MKNOD_FAILED",
+                        str(node),
+                        f"major={major}",
+                        f"minor={minor}",
+                        str(exc),
+                        flush=True,
+                    )
+
+            try:
+                os.chmod(node, 0o666)
+            except Exception as exc:
+                print("NVIDIA_CAP_CHMOD_FAILED", str(node), str(exc), flush=True)
+
+    try:
+        print(
+            run(["sh", "-lc", "ls -l /dev/nvidia* /dev/nvidia-caps/* 2>/dev/null || true"]),
+            flush=True,
+        )
+    except Exception as exc:
+        print("NVIDIA_CAP_LS_FAILED", str(exc), flush=True)
+
+    print("ENSURE_NVIDIA_CAP_DEVICES done", flush=True)
 
 def _canonical_payload(value):
     return json.loads(json.dumps(value, sort_keys=True, separators=(",", ":")))
@@ -1327,6 +1463,8 @@ def handler(event):
             "error": "Invalid input signature",
         }
 
+    ensure_nvidia_cap_devices()
+
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_dir = Path(temp_dir)
         source_name = source_name_from_job(job)
@@ -1490,5 +1628,6 @@ def preflight_gpu():
         except Exception as exc:
             print("PREFLIGHT FAILED:", exc, flush=True)
 
+ensure_nvidia_cap_devices()
 preflight_gpu()
 runpod.serverless.start({"handler": handler})

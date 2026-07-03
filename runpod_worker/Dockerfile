@@ -21,6 +21,7 @@ RUN apt-get update \
         libnuma1 \
         libx264-163 \
         libx265-199 \
+        nvidia-modprobe \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ffmpeg_builder /opt/ffmpeg /opt/ffmpeg
