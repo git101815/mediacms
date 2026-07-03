@@ -1453,6 +1453,28 @@ def preflight_gpu():
             "-f", "null",
             "-"
         ],
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-y",
+            "-f", "lavfi",
+            "-i", "testsrc2=size=1280x720:rate=30",
+            "-t", "3",
+            "-c:v", "hevc_nvenc",
+            "-f", "null",
+            "-"
+        ],
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-y",
+            "-f", "lavfi",
+            "-i", "testsrc2=size=1280x720:rate=30",
+            "-t", "3",
+            "-c:v", "av1_nvenc",
+            "-f", "null",
+            "-"
+        ],
         ["sh", "-lc", "echo NVIDIA_VISIBLE_DEVICES=$NVIDIA_VISIBLE_DEVICES"],
         ["sh", "-lc", "echo NVIDIA_DRIVER_CAPABILITIES=$NVIDIA_DRIVER_CAPABILITIES"],
         ["sh", "-lc", "ls -l /dev/nvidia* /dev/nvidia-caps/* 2>/dev/null || true"],
