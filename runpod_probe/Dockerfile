@@ -40,8 +40,9 @@ COPY --from=nvscope_builder /nvscope-root/usr/local/lib/nvscope/libnvscope.so /u
 COPY --from=nvscope_builder /nvscope-root/usr/local/bin/nvscope /usr/local/bin/nvscope
 COPY --from=nvscope_builder /nvscope-root/usr/local/bin/nvscope-probe /usr/local/bin/nvscope-probe
 
-ENV NVSCOPE_LIB=/usr/local/lib/nvscope/libnvscope.so
 ENV PATH="/opt/ffmpeg/bin:${PATH}"
+ENV NVSCOPE_LIB=/usr/local/lib/nvscope/libnvscope.so
+ENV NVSCOPE_BIN=/usr/local/bin/nvscope
 
 WORKDIR /app
 

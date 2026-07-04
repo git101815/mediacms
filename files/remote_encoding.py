@@ -386,13 +386,17 @@ def get_unpackaged_remote_profiles(media):
 
 def get_missing_remote_profiles(media):
     """
-    Profiles MediaCMS expects, but this media does not have yet.
+    MP4 profiles MediaCMS expects, but this media does not have yet.
 
-    This is the only list that RunPod should receive.
+    This fill-missing path is for video renditions only.
+    GIF previews/assets should not be sent to RunPod here.
     """
     profiles = []
 
     for profile in get_remote_candidate_profiles(media):
+        if profile.extension != "mp4":
+            continue
+
         if _profile_is_satisfied(media, profile):
             continue
 
