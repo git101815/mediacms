@@ -107,9 +107,41 @@ CACHES = {
     }
 }
 CELERY_BEAT_SCHEDULE = {
+    "clear_sessions": {
+        "task": "clear_sessions",
+        "schedule": crontab(hour=1, minute=1, day_of_week=6),
+    },
+    "get_list_of_popular_media": {
+        "task": "get_list_of_popular_media",
+        "schedule": crontab(minute=1, hour="*/10"),
+    },
+    "update_listings_thumbnails": {
+        "task": "update_listings_thumbnails",
+        "schedule": crontab(minute=2, hour="*/30"),
+    },
     "push_all_media_to_storj": {
         "task": "push_all_media_to_storj",
-        "schedule": timedelta(minutes=3),
+        "schedule": timedelta(minutes=5),
+    },
+    "ledger_expire_stale_deposit_sessions": {
+        "task": "ledger_expire_stale_deposit_sessions",
+        "schedule": crontab(hour=1, minute=45),
+    },
+    "maintenance_sync_categories_ws": {
+        "task": "maintenance_sync_categories_ws",
+        "schedule": crontab(hour=1, minute=10),
+    },
+    "maintenance_sync_celebrities_ws": {
+        "task": "maintenance_sync_celebrities_ws",
+        "schedule": crontab(hour=1, minute=30),
+    },
+    "maintenance_recover_orphan_deposit_addresses": {
+        "task": "maintenance_recover_orphan_deposit_addresses",
+        "schedule": crontab(hour=2, minute=0),
+    },
+    "maintenance_backup_database": {
+        "task": "maintenance_backup_database",
+        "schedule": crontab(hour=3, minute=0),
     },
 }
 #cloud-storage
@@ -187,3 +219,4 @@ if os.environ.get("TESTING"):
     DEBUG = False
     ALLOW_ANONYMOUS_ACTIONS = ["report", "like", "dislike", "watch"]
     MINIMUM_RESOLUTIONS_TO_ENCODE = [144, 240]
+    REMOTE_ENCODING_ENABLED = False
