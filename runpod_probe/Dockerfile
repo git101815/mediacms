@@ -13,7 +13,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch "${NVSCOPE_REF}" "${NVSCOPE_REPO}" /src/nvscope \
-    && make -C /src/nvscope
+    && make -C /src/nvscope \
+    && make -C /src/nvscope install DESTDIR=/nvscope-root
 
 FROM ${FFMPEG_BUILDER_IMAGE} AS ffmpeg_builder
 
@@ -35,9 +36,9 @@ RUN apt-get update \
 
 COPY --from=ffmpeg_builder /opt/ffmpeg /opt/ffmpeg
 
-COPY --from=nvscope_builder /src/nvscope/libnvscope.so /usr/local/lib/nvscope/libnvscope.so
-COPY --from=nvscope_builder /src/nvscope/tools/nvscope /usr/local/bin/nvscope
-COPY --from=nvscope_builder /src/nvscope/tools/nvscope-probe /usr/local/bin/nvscope-probe
+COPY --from=nvscope_builder /nvscope-root/usr/local/lib/nvscope/libnvscope.so /usr/local/lib/nvscope/libnvscope.so
+COPY --from=nvscope_builder /nvscope-root/usr/local/bin/nvscope /usr/local/bin/nvscope
+COPY --from=nvscope_builder /nvscope-root/usr/local/bin/nvscope-probe /usr/local/bin/nvscope-probe
 
 ENV PATH="/opt/ffmpeg/bin:${PATH}"
 
