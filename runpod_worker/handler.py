@@ -29,9 +29,33 @@ VALID_HLS_RESOLUTIONS = {144, 240, 360, 480, 720, 1080, 1440, 2160}
 NVENC_ENCODERS = {"h264_nvenc", "hevc_nvenc", "av1_nvenc"}
 
 
+def env_enabled(name, default=False):
+    value = os.environ.get(name)
+
+    if value is None:
+        return default
+
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def maybe_nvscope_command(cmd):
+    if not env_enabled("NVSCOPE_FFMPEG", default=True):
+        return cmd
+
+    if not cmd:
+        return cmd
+
+    if Path(str(cmd[0])).name != "ffmpeg":
+        return cmd
+
+    return [os.environ.get("NVSCOPE_BIN", "nvscope"), "--", *cmd]
+
+
 def run(cmd):
+    command = maybe_nvscope_command([str(part) for part in cmd])
+
     process = subprocess.run(
-        [str(part) for part in cmd],
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

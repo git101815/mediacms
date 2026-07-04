@@ -1,5 +1,21 @@
 ARG FFMPEG_BUILDER_IMAGE=aad7xppz4fd4r8emr/cf-ffmpeg-builder:cuda12.4-ffmpeg7.1.1-nvcodec12.2.72.0
 
+FROM ubuntu:22.04 AS nvscope_builder
+
+ARG NVSCOPE_REPO=https://github.com/MadiatorLabs/nvscope.git
+ARG NVSCOPE_REF=main
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch "${NVSCOPE_REF}" "${NVSCOPE_REPO}" /src/nvscope \
+    && make -C /src/nvscope \
+    && make -C /src/nvscope install DESTDIR=/nvscope-root
+
 FROM ${FFMPEG_BUILDER_IMAGE} AS ffmpeg_builder
 
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
@@ -25,12 +41,18 @@ RUN apt-get update \
 
 COPY --from=ffmpeg_builder /opt/ffmpeg /opt/ffmpeg
 
+COPY --from=nvscope_builder /nvscope-root/usr/local/lib/nvscope/libnvscope.so /usr/local/lib/nvscope/libnvscope.so
+COPY --from=nvscope_builder /nvscope-root/usr/local/bin/nvscope /usr/local/bin/nvscope
+COPY --from=nvscope_builder /nvscope-root/usr/local/bin/nvscope-probe /usr/local/bin/nvscope-probe
+
 RUN curl -fsSL "https://www.bok.net/Bento4/binaries/${BENTO4_ZIP}" -o /tmp/bento4.zip \
     && unzip -q /tmp/bento4.zip -d /tmp \
     && mv "/tmp/Bento4-SDK-${BENTO4_VERSION}.x86_64-unknown-linux" /opt/bento4 \
     && rm -f /tmp/bento4.zip
 
 ENV PATH="/opt/ffmpeg/bin:/opt/bento4/bin:${PATH}"
+ENV NVSCOPE_LIB=/usr/local/lib/nvscope/libnvscope.so
+ENV NVSCOPE_FFMPEG=1
 
 WORKDIR /app
 
