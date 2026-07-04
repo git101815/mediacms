@@ -5,7 +5,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from ledger.malum import process_malum_webhook
+from ledger.provider_deposits import process_malum_webhook
 
 
 @csrf_exempt

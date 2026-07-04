@@ -126,9 +126,8 @@ from ledger.services import (
     get_ad_free_lifetime_price_tokens,
     purchase_ad_free_lifetime,
 )
-from ledger.malum import (
-    MALUM_CHAIN,
-    MALUM_PROVIDER_KEY,
+from ledger.providers.malum import MALUM_CHAIN, MALUM_PROVIDER_KEY
+from ledger.provider_deposits import (
     get_malum_deposit_option,
     open_malum_deposit_session,
 )
@@ -959,6 +958,12 @@ def _get_public_deposit_status(session) -> str:
 
     if raw_status == getattr(DepositSession, "STATUS_SWEPT", "swept"):
         return PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
+
+    if raw_status == DepositSession.STATUS_CREDITED:
+        metadata = session.metadata or {}
+        provider = metadata.get("payment_provider") or {}
+        if provider.get("key") == MALUM_PROVIDER_KEY or session.chain == MALUM_CHAIN:
+            return PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
 
     if raw_status == DepositSession.STATUS_AWAITING_PAYMENT:
         observed_amount = int(getattr(session, "observed_amount", 0) or 0)
