@@ -12,23 +12,44 @@ import runpod
 def run(cmd, timeout=60):
     started = time.time()
 
-    process = subprocess.run(
-        [str(part) for part in cmd],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        process = subprocess.run(
+            [str(part) for part in cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+        )
 
-    output = (process.stdout or "") + (process.stderr or "")
+        output = (process.stdout or "") + (process.stderr or "")
 
-    return {
-        "cmd": [str(part) for part in cmd],
-        "returncode": process.returncode,
-        "seconds": round(time.time() - started, 3),
-        "output": output,
-        "ok": process.returncode == 0,
-    }
+        return {
+            "cmd": [str(part) for part in cmd],
+            "returncode": process.returncode,
+            "seconds": round(time.time() - started, 3),
+            "output": output,
+            "ok": process.returncode == 0,
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "cmd": [str(part) for part in cmd],
+            "returncode": None,
+            "seconds": round(time.time() - started, 3),
+            "output": (
+                f"TIMEOUT after {timeout}s\n"
+                f"stdout={exc.stdout or ''}\n"
+                f"stderr={exc.stderr or ''}"
+            ),
+            "ok": False,
+        }
+    except Exception as exc:
+        return {
+            "cmd": [str(part) for part in cmd],
+            "returncode": None,
+            "seconds": round(time.time() - started, 3),
+            "output": f"{type(exc).__name__}: {exc}",
+            "ok": False,
+        }
 
 
 def sh(command, timeout=60):
@@ -42,26 +63,34 @@ def read_text(path):
         return f"READ_ERROR: {type(exc).__name__}: {exc}"
 
 
-def ffmpeg_nvenc_test(codec):
-    return run(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc2=size=1280x720:rate=30",
-            "-t",
-            "3",
-            "-c:v",
-            codec,
-            "-f",
-            "null",
-            "-",
-        ],
-        timeout=90,
-    )
+def ffmpeg_nvenc_test(codec, wrapper=None):
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=1280x720:rate=30",
+        "-t",
+        "3",
+        "-c:v",
+        codec,
+        "-f",
+        "null",
+        "-",
+    ]
+
+    if wrapper == "nvscope":
+        cmd = ["nvscope", "--trace", "--", *cmd]
+    elif wrapper == "nvscope_no_ioctl":
+        cmd = ["nvscope", "--no-ioctl", "--trace", "--", *cmd]
+
+    return run(cmd, timeout=90)
+
+
+def all_ok(*items):
+    return all(item.get("ok") for item in items)
 
 
 def probe_once():
@@ -80,6 +109,10 @@ def probe_once():
             "RUNPOD_MEM_GB": os.environ.get("RUNPOD_MEM_GB", ""),
         },
         "proc_devices": read_text("/proc/devices"),
+        "proc_nvidia_gpus": sh(
+            "find /proc/driver/nvidia/gpus -maxdepth 3 -type f "
+            "-print -exec sh -c 'echo --- $1; cat $1' sh {} \\; 2>/dev/null || true"
+        ),
         "proc_nvidia_capabilities": sh(
             "find /proc/driver/nvidia/capabilities -maxdepth 4 -type f "
             "-print -exec sh -c 'echo --- $1; cat $1' sh {} \\; 2>/dev/null || true"
@@ -112,23 +145,79 @@ def probe_once():
         ),
         "ffmpeg_version": run(["ffmpeg", "-hide_banner", "-version"], timeout=60),
         "ffmpeg_encoders_nvenc": sh("ffmpeg -hide_banner -encoders | grep -E 'nvenc|libx264|libx265|libsvtav1' || true"),
-        "nvenc_h264": ffmpeg_nvenc_test("h264_nvenc"),
-        "nvenc_hevc": ffmpeg_nvenc_test("hevc_nvenc"),
-        "nvenc_av1": ffmpeg_nvenc_test("av1_nvenc"),
+        "nvscope_install": sh(
+            "command -v nvscope; "
+            "command -v nvscope-probe; "
+            "ls -la /usr/local/bin/nvscope /usr/local/bin/nvscope-probe /usr/local/lib/nvscope/libnvscope.so"
+        ),
+        "nvscope_probe": sh("nvscope-probe 2>&1 || true", timeout=60),
     }
 
-    nvenc_ok = (
-        checks["nvenc_h264"]["ok"]
-        and checks["nvenc_hevc"]["ok"]
-        and checks["nvenc_av1"]["ok"]
+    checks["raw_h264"] = ffmpeg_nvenc_test("h264_nvenc")
+    checks["raw_hevc"] = ffmpeg_nvenc_test("hevc_nvenc")
+    checks["raw_av1"] = ffmpeg_nvenc_test("av1_nvenc")
+
+    checks["nvscope_h264"] = ffmpeg_nvenc_test("h264_nvenc", wrapper="nvscope")
+    checks["nvscope_hevc"] = ffmpeg_nvenc_test("hevc_nvenc", wrapper="nvscope")
+    checks["nvscope_av1"] = ffmpeg_nvenc_test("av1_nvenc", wrapper="nvscope")
+
+    checks["nvscope_no_ioctl_h264"] = ffmpeg_nvenc_test("h264_nvenc", wrapper="nvscope_no_ioctl")
+    checks["nvscope_no_ioctl_hevc"] = ffmpeg_nvenc_test("hevc_nvenc", wrapper="nvscope_no_ioctl")
+    checks["nvscope_no_ioctl_av1"] = ffmpeg_nvenc_test("av1_nvenc", wrapper="nvscope_no_ioctl")
+
+    raw_nvenc_ok = all_ok(
+        checks["raw_h264"],
+        checks["raw_hevc"],
+        checks["raw_av1"],
+    )
+    nvscope_nvenc_ok = all_ok(
+        checks["nvscope_h264"],
+        checks["nvscope_hevc"],
+        checks["nvscope_av1"],
+    )
+    nvscope_no_ioctl_nvenc_ok = all_ok(
+        checks["nvscope_no_ioctl_h264"],
+        checks["nvscope_no_ioctl_hevc"],
+        checks["nvscope_no_ioctl_av1"],
     )
 
     checks["summary"] = {
-        "nvenc_ok": nvenc_ok,
-        "h264_nvenc_ok": checks["nvenc_h264"]["ok"],
-        "hevc_nvenc_ok": checks["nvenc_hevc"]["ok"],
-        "av1_nvenc_ok": checks["nvenc_av1"]["ok"],
+        "raw_nvenc_ok": raw_nvenc_ok,
+        "raw_h264_nvenc_ok": checks["raw_h264"]["ok"],
+        "raw_hevc_nvenc_ok": checks["raw_hevc"]["ok"],
+        "raw_av1_nvenc_ok": checks["raw_av1"]["ok"],
+        "nvscope_nvenc_ok": nvscope_nvenc_ok,
+        "nvscope_h264_nvenc_ok": checks["nvscope_h264"]["ok"],
+        "nvscope_hevc_nvenc_ok": checks["nvscope_hevc"]["ok"],
+        "nvscope_av1_nvenc_ok": checks["nvscope_av1"]["ok"],
+        "nvscope_no_ioctl_nvenc_ok": nvscope_no_ioctl_nvenc_ok,
+        "nvscope_no_ioctl_h264_nvenc_ok": checks["nvscope_no_ioctl_h264"]["ok"],
+        "nvscope_no_ioctl_hevc_nvenc_ok": checks["nvscope_no_ioctl_hevc"]["ok"],
+        "nvscope_no_ioctl_av1_nvenc_ok": checks["nvscope_no_ioctl_av1"]["ok"],
+        "best_nvenc_ok": raw_nvenc_ok or nvscope_nvenc_ok or nvscope_no_ioctl_nvenc_ok,
         "has_nvidia_caps": "nvidia-cap" in checks["dev_nvidia"]["output"],
+        "nvscope_installed": checks["nvscope_install"]["ok"],
+        "nvscope_filtered_rm": (
+            "filtered RM attached gpuIds" in checks["nvscope_h264"]["output"]
+            or "filtered RM attached gpuIds" in checks["nvscope_hevc"]["output"]
+            or "filtered RM attached gpuIds" in checks["nvscope_av1"]["output"]
+        ),
+        "nvscope_trace_seen": (
+            "[nvscope]" in checks["nvscope_h264"]["output"]
+            or "[nvscope]" in checks["nvscope_hevc"]["output"]
+            or "[nvscope]" in checks["nvscope_av1"]["output"]
+        ),
+        "nvscope_no_ioctl_trace_seen": (
+            "[nvscope]" in checks["nvscope_no_ioctl_h264"]["output"]
+            or "[nvscope]" in checks["nvscope_no_ioctl_hevc"]["output"]
+            or "[nvscope]" in checks["nvscope_no_ioctl_av1"]["output"]
+        ),
+
+        # Backward-compatible raw fields used by earlier jq snippets.
+        "nvenc_ok": raw_nvenc_ok,
+        "h264_nvenc_ok": checks["raw_h264"]["ok"],
+        "hevc_nvenc_ok": checks["raw_hevc"]["ok"],
+        "av1_nvenc_ok": checks["raw_av1"]["ok"],
     }
 
     return checks
