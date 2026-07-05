@@ -53,7 +53,7 @@ LEDGER_DEPOSIT_OPEN_COOLDOWN_THRESHOLD = 3
 LEDGER_DEPOSIT_OPEN_COOLDOWN_WINDOW_SECONDS = 5 * 60
 LEDGER_DEPOSIT_OPEN_COOLDOWN_SECONDS = 15 * 60
 
-MALUM_ENABLED = "false"
+MALUM_ENABLED = "true"
 MALUM_MERCHANT_ID = os.getenv("MALUM_MERCHANT_ID", "").strip()
 MALUM_PRIVATE_KEY = os.getenv("MALUM_PRIVATE_KEY", "").strip()
 MALUM_WEBHOOK_KEY = os.getenv("MALUM_WEBHOOK_KEY", "").strip()
@@ -119,6 +119,7 @@ CACHES = {
         },
     }
 }
+"""
 CELERY_BEAT_SCHEDULE = {
     "clear_sessions": {
         "task": "clear_sessions",
@@ -157,6 +158,7 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
     },
 }
+"""
 #cloud-storage
 STORJ_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 AWS_S3_ENDPOINT_URL = "https://gateway.storjshare.io"
