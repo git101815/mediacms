@@ -143,12 +143,24 @@ def _provider_metadata_for_session(
     provider_id: str = "",
     raw_payload=None,
 ) -> dict:
+    normalized_provider_id = (provider_id or get_paygate_provider_id() or "").strip().lower()
+    provider_label = (
+        get_paygate_provider_label(normalized_provider_id)
+        if normalized_provider_id
+        else PAYGATE_PAYMENT_METHOD_LABEL
+    )
+    display_label = (
+        f"PayGate · {provider_label}"
+        if normalized_provider_id
+        else PAYGATE_PAYMENT_METHOD_LABEL
+    )
+
     provider = {
         "key": PAYGATE_PROVIDER_KEY,
-        "label": PAYGATE_PAYMENT_METHOD_LABEL,
+        "label": display_label,
         "payment_method_key": PAYGATE_PAYMENT_METHOD_KEY,
         "payment_method_type": PAYGATE_PAYMENT_METHOD_TYPE,
-        "route_key": paygate_route_key(provider_id=provider_id),
+        "route_key": paygate_route_key(provider_id=normalized_provider_id),
         "reference": (ipn_token or "").strip(),
         "address_in": (address_in or "").strip(),
         "polygon_address_in": (polygon_address_in or "").strip(),
@@ -156,8 +168,8 @@ def _provider_metadata_for_session(
         "checkout_url": (checkout_url or "").strip(),
         "status": (status or "").strip().upper(),
         "session_public_id": str(session_public_id),
-        "provider_id": (provider_id or get_paygate_provider_id() or "").strip().lower(),
-        "provider_label": get_paygate_provider_label(provider_id or get_paygate_provider_id()),
+        "provider_id": normalized_provider_id,
+        "provider_label": provider_label,
     }
     if raw_payload is not None:
         provider["raw_payload"] = raw_payload
@@ -238,9 +250,17 @@ def open_paygate_deposit_session(
     if expected_canonical_amount < min_amount:
         raise ValidationError("Selected token pack is below PayGate's minimum payment amount")
 
+    provider_id = (provider_id or get_paygate_provider_id() or "").strip().lower()
+    provider_display_label = (
+        f"PayGate · {get_paygate_provider_label(provider_id)}"
+        if provider_id
+        else PAYGATE_PAYMENT_METHOD_LABEL
+    )
+
     existing_session = _find_reusable_paygate_session(
         wallet=wallet,
         token_pack_code=token_pack_snapshot["code"],
+        provider_id=provider_id,
     )
     if existing_session is not None:
         return existing_session
@@ -249,7 +269,6 @@ def open_paygate_deposit_session(
 
     public_id = uuid.uuid4()
     currency = get_paygate_currency()
-    provider_id = (provider_id or get_paygate_provider_id() or "").strip().lower()
     route_key = paygate_route_key(currency, provider_id)
     synthetic_ref = f"paygate:{public_id.hex}"
     now = timezone.now()
@@ -259,7 +278,7 @@ def open_paygate_deposit_session(
     callback_url = _build_absolute_url(callback_path)
 
     metadata = {
-        "display_label": f"PayGate · {get_paygate_provider_label(provider_id)}" if provider_id else PAYGATE_PAYMENT_METHOD_LABEL,
+        "display_label": provider_display_label,
         "allocation_source": "provider_checkout",
         "chain_family": "provider",
         "token_pack": token_pack_snapshot,
@@ -269,7 +288,10 @@ def open_paygate_deposit_session(
             "label": PAYGATE_PAYMENT_METHOD_LABEL,
             "show_network_step": False,
         },
-        "payment_provider": _provider_metadata_for_session(session_public_id=public_id),
+        "payment_provider": _provider_metadata_for_session(
+            session_public_id=public_id,
+            provider_id=provider_id,
+        ),
         "amount_unit": "canonical_stable",
         "expected_canonical_stable_amount": int(expected_canonical_amount),
         "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
@@ -285,7 +307,7 @@ def open_paygate_deposit_session(
         asset_code=currency,
         token_contract_address="",
         route_key=route_key,
-        display_label=f"PayGate · {get_paygate_provider_label(provider_id)}" if provider_id else PAYGATE_PAYMENT_METHOD_LABEL,
+        display_label=provider_display_label,
         deposit_address=synthetic_ref,
         address_derivation_ref=synthetic_ref,
         derivation_index=None,
