@@ -6,7 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlencode
-
+import socket
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 
@@ -150,6 +150,16 @@ def paygate_enabled() -> bool:
         return False
     return True
 
+def normalize_paygate_address_in(value: str) -> str:
+    normalized = str(value or "").strip()
+
+    for _ in range(5):
+        decoded = unquote(normalized)
+        if decoded == normalized:
+            break
+        normalized = decoded
+
+    return normalized
 
 def paygate_route_key(currency: str | None = None, provider_id: str | None = None) -> str:
     currency_part = (currency or get_paygate_currency()).lower()
@@ -227,7 +237,8 @@ def create_paygate_wallet(*, payout_wallet: str, callback_url: str) -> dict:
         },
     )
 
-    address_in = str(response.get("address_in") or "").strip()
+    address_in = normalize_paygate_address_in(response.get("address_in") or "")
+    response["address_in"] = address_in
     polygon_address_in = str(response.get("polygon_address_in") or "").strip()
     ipn_token = str(response.get("ipn_token") or "").strip()
 
@@ -264,7 +275,7 @@ def build_paygate_checkout_url(
     currency: str,
     provider_id: str = "",
 ) -> str:
-    normalized_address = unquote((address_in or "").strip())
+    normalized_address = normalize_paygate_address_in(address_in)
     if not normalized_address:
         raise ValidationError("PayGate address_in is required")
 
@@ -335,4 +346,5 @@ __all__ = [
     "paygate_amount_to_canonical_stable_units",
     "paygate_enabled",
     "paygate_route_key",
+    "normalize_paygate_address_in",
 ]
