@@ -148,7 +148,7 @@ def _provider_metadata_for_session(
         "label": PAYGATE_PAYMENT_METHOD_LABEL,
         "payment_method_key": PAYGATE_PAYMENT_METHOD_KEY,
         "payment_method_type": PAYGATE_PAYMENT_METHOD_TYPE,
-        "route_key": paygate_route_key(),
+        "route_key": paygate_route_key(provider_id=provider_id),
         "reference": (ipn_token or "").strip(),
         "address_in": (address_in or "").strip(),
         "polygon_address_in": (polygon_address_in or "").strip(),
@@ -386,11 +386,13 @@ def _update_paygate_provider_metadata(
 ) -> None:
     metadata = dict(deposit_session.metadata or {})
     provider = dict(metadata.get("payment_provider") or {})
+    provider_id = str(provider.get("provider_id") or "").strip().lower()
+    provider_label = provider.get("provider_label") or get_paygate_provider_label(provider_id)
 
     provider.update(
         {
             "key": PAYGATE_PROVIDER_KEY,
-            "label": f"PayGate · {get_paygate_provider_label(provider_id)}" if provider_id else PAYGATE_PAYMENT_METHOD_LABEL,
+            "label": f"PayGate · {provider_label}" if provider_id else PAYGATE_PAYMENT_METHOD_LABEL,
             "status": status,
             "last_status": status,
             "last_callback_at": timezone.now().isoformat(),

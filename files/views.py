@@ -133,7 +133,7 @@ from ledger.provider_deposits import (
     open_malum_deposit_session,
 )
 from ledger.paygate_deposits import (
-    get_paygate_deposit_option,
+    get_paygate_deposit_options,
     open_paygate_deposit_session,
 )
 from ledger.internal_api import (
@@ -459,8 +459,7 @@ def _build_wallet_deposit_options() -> list[dict]:
             }
         )
 
-    paygate_option = get_paygate_deposit_option()
-    if paygate_option is not None:
+    for paygate_option in get_paygate_deposit_options():
         options.append(
             {
                 **paygate_option,

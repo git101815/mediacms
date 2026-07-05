@@ -44,15 +44,6 @@ def _setting_bool(name: str, default: bool = False) -> bool:
 def _setting_str(name: str, default: str = "") -> str:
     return str(getattr(settings, name, os.environ.get(name, default)) or "").strip()
 
-
-def _setting_int(name: str, default: int) -> int:
-    value = getattr(settings, name, os.environ.get(name, default))
-    try:
-        return int(value)
-    except (TypeError, ValueError) as exc:
-        raise ImprolyConfigured(f"{name} must be an integer") from exc
-
-
 def get_paygate_currency() -> str:
     value = _setting_str("PAYGATE_CURRENCY", "USD").upper()
     if value not in {"USD", "EUR", "CAD"}:
