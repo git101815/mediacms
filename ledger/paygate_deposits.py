@@ -163,15 +163,21 @@ def _provider_metadata_for_session(
         provider["raw_payload"] = raw_payload
     return provider
 
-
-def _find_reusable_paygate_session(*, wallet: TokenWallet, token_pack_code: str) -> DepositSession | None:
+def _find_reusable_paygate_session(
+    *,
+    wallet: TokenWallet,
+    token_pack_code: str,
+    provider_id: str = "",
+) -> DepositSession | None:
     now = timezone.now()
+    normalized_provider_id = (provider_id or "").strip().lower()
+
     candidates = (
         DepositSession.objects.select_for_update()
         .filter(
             wallet=wallet,
             chain=PAYGATE_CHAIN,
-            route_key=paygate_route_key(),
+            route_key=paygate_route_key(provider_id=normalized_provider_id),
             status__in=PAYGATE_ACTIVE_STATUSES,
             expires_at__gt=now,
         )
@@ -183,15 +189,22 @@ def _find_reusable_paygate_session(*, wallet: TokenWallet, token_pack_code: str)
         metadata = session.metadata or {}
         snapshot = metadata.get("token_pack") or {}
         provider = metadata.get("payment_provider") or {}
+
         if provider.get("key") != PAYGATE_PROVIDER_KEY:
             continue
+
+        session_provider_id = str(provider.get("provider_id") or "").strip().lower()
+        if session_provider_id != normalized_provider_id:
+            continue
+
         if normalized_pack_code and (snapshot.get("code") or "").strip() != normalized_pack_code:
             continue
+
         return session
 
     return None
 
-
+@transaction.atomic
 def open_paygate_deposit_session(
     *,
     actor,
@@ -662,4 +675,5 @@ __all__ = [
     "open_paygate_deposit_session",
     "credit_paygate_deposit_session",
     "process_paygate_callback",
+    "get_paygate_deposit_options",
 ]
