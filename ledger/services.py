@@ -31,7 +31,7 @@ from .models import (
 )
 import json
 import hashlib
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import uuid
 from django.utils import timezone
 from datetime import timedelta
@@ -1300,18 +1300,25 @@ def _amount_metadata(
     }
 
 
-def _build_token_pack_snapshot(*, token_pack: TokenPack) -> dict:
+def _apply_payment_price_bps(canonical_amount: int, payment_price_bps: int) -> int:
+    amount = (
+        Decimal(int(canonical_amount))
+        * Decimal(10000 + int(payment_price_bps or 0))
+        / Decimal(10000)
+    )
+    return int(amount.to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def _build_token_pack_snapshot(*, token_pack: TokenPack, payment_price_bps=0) -> dict:
     token_pack = TokenPack.objects.select_for_update().get(id=token_pack.id)
 
     if not token_pack.is_active:
         raise ValidationError("Selected token pack is inactive")
 
     token_amount = int(token_pack.token_amount)
-    gross_stable_amount = int(token_pack.gross_stable_amount)
     net_stable_amount = _convert_platform_token_units_to_canonical_stable_units(token_amount)
-
-    if gross_stable_amount < net_stable_amount:
-        raise ValidationError("Token pack gross price cannot be lower than its token credit value")
+    normalized_bps = max(0, int(payment_price_bps or 0))
+    gross_stable_amount = _apply_payment_price_bps(net_stable_amount, normalized_bps)
 
     return {
         "code": token_pack.code,
@@ -1322,6 +1329,8 @@ def _build_token_pack_snapshot(*, token_pack: TokenPack) -> dict:
         "gross_stable_amount": gross_stable_amount,
         "net_stable_amount": net_stable_amount,
         "fee_stable_amount": gross_stable_amount - net_stable_amount,
+        "payment_price_bps": normalized_bps,
+        "legacy_gross_stable_amount": int(token_pack.gross_stable_amount),
     }
 
 def _get_max_used_evm_derivation_index() -> int:
@@ -3429,6 +3438,7 @@ def open_user_deposit_session(
     payment_method_type: str = "crypto",
     payment_method_label: str = "",
     show_network_step: bool = True,
+    payment_price_bps=0,
 ) -> DepositSession:
     actor = _require_authenticated_actor(actor)
     require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_DEPOSIT_OPEN)
@@ -3449,7 +3459,10 @@ def open_user_deposit_session(
         token_contract_address=token_contract_address,
     )
 
-    token_pack_snapshot = _build_token_pack_snapshot(token_pack=token_pack)
+    token_pack_snapshot = _build_token_pack_snapshot(
+        token_pack=token_pack,
+        payment_price_bps=payment_price_bps,
+    )
 
     template_min_canonical_amount, template_min_onchain_amount = _deposit_address_min_amounts(template)
 

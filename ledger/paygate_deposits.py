@@ -223,6 +223,7 @@ def open_paygate_deposit_session(
     wallet: TokenWallet,
     token_pack: TokenPack,
     provider_id: str = "",
+    payment_price_bps=0,
 ) -> DepositSession:
     actor = _require_authenticated_actor(actor)
     require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_DEPOSIT_OPEN)
@@ -243,7 +244,10 @@ def open_paygate_deposit_session(
     if not customer_email:
         raise ValidationError("A verified email address is required for PayGate payments")
 
-    token_pack_snapshot = _build_token_pack_snapshot(token_pack=token_pack)
+    token_pack_snapshot = _build_token_pack_snapshot(
+        token_pack=token_pack,
+        payment_price_bps=payment_price_bps,
+    )
     expected_canonical_amount = int(token_pack_snapshot["gross_stable_amount"])
     min_amount = get_paygate_min_canonical_stable_amount()
 

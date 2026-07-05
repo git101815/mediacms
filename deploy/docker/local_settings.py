@@ -77,9 +77,9 @@ PAYGATE_PROVIDER_LABELS = {
     "revolut": "Revolut (EU only)",
 }
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
-    "credit_card_link": 3,
-    "paypal_us": 2,
-    "revolut_eu": 1,
+    "credit_card_link": 1000,
+    "paypal_us": 800,
+    "revolut_eu": 500,
     "crypto": 0,
 }
 PAYGATE_CURRENCY = "USD"

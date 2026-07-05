@@ -391,6 +391,7 @@ def _build_wallet_token_pack_rows() -> list[dict]:
     queryset = TokenPack.objects.filter(is_active=True).order_by("sort_order", "id")[:5]
 
     for pack in queryset:
+        base_stable_amount = int(pack.token_amount) // 100
         rows.append(
             {
                 "code": pack.code,
@@ -399,8 +400,8 @@ def _build_wallet_token_pack_rows() -> list[dict]:
                 "badge_text": pack.badge_text,
                 "token_amount": int(pack.token_amount),
                 "token_amount_display": _format_pack_token_amount(pack.token_amount),
-                "gross_stable_amount": int(pack.gross_stable_amount),
-                "price_display": _format_canonical_stable_amount(pack.gross_stable_amount),
+                "gross_stable_amount": int(base_stable_amount),
+                "price_display": _format_canonical_stable_amount(base_stable_amount),
             }
         )
 
@@ -1120,6 +1121,8 @@ def wallet_deposit_request(request):
         if token_pack is None:
             raise DjangoValidationError("Invalid token pack.")
 
+        payment_price_bps = int(selected_option.get("payment_price_bps") or 0)
+
         if selected_option.get("payment_method_type") == "provider" and selected_option.get("provider_key") == MALUM_PROVIDER_KEY:
             session = open_malum_deposit_session(
                 actor=request.user,
@@ -1139,6 +1142,7 @@ def wallet_deposit_request(request):
                 wallet=wallet_obj,
                 token_pack=token_pack,
                 provider_id=selected_option.get("paygate_provider_id") or "",
+                payment_price_bps=payment_price_bps
             )
             provider = (session.metadata or {}).get("payment_provider") or {}
             checkout_url = (provider.get("checkout_url") or "").strip()
@@ -1173,6 +1177,7 @@ def wallet_deposit_request(request):
             payment_method_type=payment_method_type or selected_option["payment_method_type"],
             payment_method_label=selected_option["payment_method_label"],
             show_network_step=show_network_step,
+            payment_price_bps=payment_price_bps
         )
     except (DjangoValidationError, DjangoPermissionDenied, ImproperlyConfigured) as exc:
         messages.add_message(request, messages.ERROR, _extract_wallet_form_error(exc))
