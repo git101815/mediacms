@@ -85,7 +85,8 @@ def get_malum_private_key() -> str:
 
 
 def malum_private_key_is_sandbox() -> bool:
-    return get_malum_private_key().startswith("sbx_")
+    private_key = get_malum_private_key().lower()
+    return private_key.startswith(("sbx_", "sec_sandbox_"))
 
 
 def get_malum_webhook_key(*, sandbox: bool) -> str:
@@ -113,8 +114,8 @@ def malum_enabled() -> bool:
         return False
     try:
         get_malum_merchant_id()
-        private_key = get_malum_private_key()
-        get_malum_webhook_key(sandbox=private_key.startswith("sbx_"))
+        get_malum_private_key()
+        get_malum_webhook_key(sandbox=malum_private_key_is_sandbox())
         get_malum_public_base_url()
     except ImproperlyConfigured:
         return False
