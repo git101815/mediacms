@@ -1,5 +1,5 @@
 import json
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied, ValidationError as DjangoValidationError
 from django.views.decorators.http import require_POST
@@ -446,6 +446,87 @@ def _format_route_amount(value, *, chain: str, asset_code: str) -> str:
     text = format(scaled.quantize(Decimal("0.01")), "f")
     return text
 
+WALLET_PAYMENT_GROUPS = {
+    "credit_card_link": {
+        "label": "Credit Card (via Link by Stripe)",
+        "icon": "Card",
+        "order": 10,
+    },
+    "paypal_us": {
+        "label": "PayPal (US only)",
+        "icon": "PayPal",
+        "order": 20,
+    },
+    "revolut_eu": {
+        "label": "Revolut (EU only)",
+        "icon": "Revolut",
+        "order": 30,
+    },
+    "crypto": {
+        "label": "Crypto",
+        "icon": "Crypto",
+        "order": 40,
+    },
+}
+
+PAYGATE_PROVIDER_PAYMENT_GROUPS = {
+    "stripe": "credit_card_link",
+    "paypal": "paypal_us",
+    "revolut": "revolut_eu",
+}
+
+
+def _get_wallet_payment_price_bps(group_key: str) -> int:
+    configured = getattr(settings, "WALLET_PAYMENT_METHOD_PRICE_BPS", {}) or {}
+    try:
+        return max(0, int(configured.get(group_key, 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _apply_payment_bps(canonical_amount: int, bps: int) -> int:
+    amount = (
+        Decimal(int(canonical_amount))
+        * Decimal(10000 + int(bps))
+        / Decimal(10000)
+    )
+    return int(amount.to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def _decorate_wallet_deposit_option(option: dict) -> dict:
+    decorated = dict(option)
+    provider_key = str(decorated.get("provider_key") or "").strip()
+    provider_id = str(decorated.get("paygate_provider_id") or "").strip().lower()
+    payment_method_type = str(decorated.get("payment_method_type") or "").strip().lower()
+
+    if provider_key == PAYGATE_PROVIDER_KEY and provider_id in PAYGATE_PROVIDER_PAYMENT_GROUPS:
+        group_key = PAYGATE_PROVIDER_PAYMENT_GROUPS[provider_id]
+    elif payment_method_type == "crypto":
+        group_key = "crypto"
+    else:
+        group_key = decorated.get("payment_method_key") or "payment"
+
+    group = WALLET_PAYMENT_GROUPS.get(group_key, {})
+    group_label = group.get("label") or decorated.get("payment_method_label") or "Payment"
+    group_icon = group.get("icon") or group_label
+    group_order = int(group.get("order") or 100)
+    price_bps = _get_wallet_payment_price_bps(group_key)
+
+    decorated.update(
+        {
+            "payment_group_key": group_key,
+            "payment_group_label": group_label,
+            "payment_group_icon": group_icon,
+            "payment_group_order": group_order,
+            "payment_price_bps": price_bps,
+        }
+    )
+
+    if provider_key == PAYGATE_PROVIDER_KEY:
+        decorated["payment_method_label"] = group_label
+        decorated["route_label"] = group_label
+
+    return decorated
 
 def _build_wallet_deposit_options() -> list[dict]:
     options = []
@@ -488,6 +569,15 @@ def _build_wallet_deposit_options() -> list[dict]:
             }
         )
 
+    options = [_decorate_wallet_deposit_option(option) for option in options]
+    options.sort(
+        key=lambda item: (
+            int(item.get("payment_group_order") or 100),
+            str(item.get("payment_group_label") or ""),
+            str(item.get("network_display") or ""),
+            str(item.get("asset_code") or ""),
+        )
+    )
     return options
 
 def _normalize_wallet_tab(value: str) -> str:

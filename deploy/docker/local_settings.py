@@ -72,9 +72,15 @@ PAYGATE_PUBLIC_BASE_URL = "https://celebfakes.ru"
 PAYGATE_USDC_POLYGON_WALLET = os.getenv("PAYGATE_USDC_POLYGON_WALLET", "").strip()
 PAYGATE_PROVIDER_IDS = ("paypal", "revolut", "stripe")
 PAYGATE_PROVIDER_LABELS = {
-    "paypal": "PayPal",
-    "revolut": "Revolut",
-    "stripe": "Stripe",
+    "stripe": "Credit Card (via Link by Stripe)",
+    "paypal": "PayPal (US only)",
+    "revolut": "Revolut (EU only)",
+}
+WALLET_PAYMENT_METHOD_PRICE_BPS = {
+    "credit_card_link": 3,
+    "paypal_us": 2,
+    "revolut_eu": 1,
+    "crypto": 0,
 }
 PAYGATE_CURRENCY = "USD"
 PAYGATE_PAYMENT_TTL_SECONDS = "3600"

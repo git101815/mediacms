@@ -1534,6 +1534,19 @@ $error-text: #ff9a9a;
   gap: 10px;
   margin-bottom: 16px;
 }
+.wallet-buy-flow__choice-price {
+  margin-left: auto;
+  font-size: 16px;
+  font-weight: 800;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.wallet-buy-modal__package-subtitle,
+.wallet-modal__subtitle,
+.wallet-route-form__note {
+  display: none;
+}
 
 @media (max-width: 860px) {
   .wallet-buy-flow__actions--split,
