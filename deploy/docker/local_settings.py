@@ -65,6 +65,29 @@ MALUM_PAYMENT_TTL_SECONDS = "3600"
 MALUM_BUYER_PAYS_FEES = "false"
 MALUM_MERCHANT_PAYS_GW_FEES = "false"
 
+PAYGATE_ENABLED = "true"
+PAYGATE_API_BASE_URL = "https://api.paygate.to"
+PAYGATE_CHECKOUT_BASE_URL = "https://checkout.paygate.to"
+PAYGATE_PUBLIC_BASE_URL = "https://celebfakes.ru"
+PAYGATE_USDC_POLYGON_WALLET = os.getenv("PAYGATE_USDC_POLYGON_WALLET", "").strip()
+PAYGATE_PROVIDER_IDS = ("paypal", "revolut", "stripe")
+PAYGATE_PROVIDER_LABELS = {
+    "paypal": "PayPal",
+    "revolut": "Revolut",
+    "stripe": "Stripe",
+}
+PAYGATE_CURRENCY = "USD"
+PAYGATE_PAYMENT_TTL_SECONDS = "3600"
+PAYGATE_MIN_CANONICAL_STABLE_AMOUNT = "1000000"
+PAYGATE_DOMAIN = ""
+PAYGATE_LOGO_URL = ""
+PAYGATE_BACKGROUND = ""
+PAYGATE_THEME = ""
+PAYGATE_BUTTON = ""
+PAYGATE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 REDIS_LOCATION = os.getenv("REDIS_LOCATION", "redis://redis:6379/1")

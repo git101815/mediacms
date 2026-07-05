@@ -4,7 +4,7 @@ from django.conf.urls import include
 from django.conf.urls.static import static
 from django.urls import path, re_path
 from cms.views_video_sitemap import video_sitemap
-from . import download_views, management_views, views, malum_webhooks
+from . import download_views, management_views, views, malum_webhooks, paygate_webhooks
 from .feeds import IndexRSSFeed, SearchRSSFeed
 
 urlpatterns = [
@@ -35,6 +35,7 @@ urlpatterns = [
         name="wallet_deposit_session_cancel",
     ),
     path("api/payments/malum/webhook", malum_webhooks.malum_webhook, name="malum_webhook"),
+    path("api/payments/paygate/callback", paygate_webhooks.paygate_callback, name="paygate_callback"),
     re_path(r"^wallet$", views.wallet, name="wallet"),
     re_path(
         r"^api/internal/ledger/deposit-observations$",

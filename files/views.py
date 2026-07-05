@@ -127,9 +127,14 @@ from ledger.services import (
     purchase_ad_free_lifetime,
 )
 from ledger.providers.malum import MALUM_CHAIN, MALUM_PROVIDER_KEY
+from ledger.providers.paygate import PAYGATE_CHAIN, PAYGATE_PROVIDER_KEY
 from ledger.provider_deposits import (
     get_malum_deposit_option,
     open_malum_deposit_session,
+)
+from ledger.paygate_deposits import (
+    get_paygate_deposit_option,
+    open_paygate_deposit_session,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
@@ -199,6 +204,15 @@ WALLET_REQUEST_TYPE_ICON_MAP = {
     WalletRequest.REQUEST_TYPE_DEPOSIT: "south",
     WalletRequest.REQUEST_TYPE_WITHDRAWAL: "north_east",
 }
+
+PROVIDER_CHECKOUT_KEYS = {MALUM_PROVIDER_KEY, PAYGATE_PROVIDER_KEY}
+PROVIDER_CHECKOUT_CHAINS = {MALUM_CHAIN, PAYGATE_CHAIN}
+
+
+def _is_provider_checkout_session(session) -> bool:
+    metadata = session.metadata or {}
+    provider = metadata.get("payment_provider") or {}
+    return provider.get("key") in PROVIDER_CHECKOUT_KEYS or session.chain in PROVIDER_CHECKOUT_CHAINS
 
 DEPOSIT_SESSION_TERMINAL_STATUSES = {
     DepositSession.STATUS_CREDITED,
@@ -442,6 +456,15 @@ def _build_wallet_deposit_options() -> list[dict]:
             {
                 **malum_option,
                 "min_amount_display": _format_canonical_stable_amount(malum_option["min_amount"]),
+            }
+        )
+
+    paygate_option = get_paygate_deposit_option()
+    if paygate_option is not None:
+        options.append(
+            {
+                **paygate_option,
+                "min_amount_display": _format_canonical_stable_amount(paygate_option["min_amount"]),
             }
         )
 
@@ -747,10 +770,10 @@ def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_ST
     for session in sessions:
         metadata = session.metadata or {}
         provider = metadata.get("payment_provider") or {}
-        is_provider_checkout = provider.get("key") == MALUM_PROVIDER_KEY or session.chain == MALUM_CHAIN
+        is_provider_checkout = _is_provider_checkout_session(session)
 
         if is_provider_checkout:
-            display_label = metadata.get("display_label") or provider.get("label") or "Card / PayPal"
+            display_label = metadata.get("display_label") or provider.get("label") or "Provider checkout"
             deposit_reference = provider.get("reference") or session.observed_txid or str(session.public_id)
         else:
             display_label = f"{_get_network_display_label(session.chain)} · {session.asset_code}"
@@ -791,11 +814,11 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
     token_pack = metadata.get("token_pack") or {}
     payment_method = metadata.get("payment_method") or {}
     provider = metadata.get("payment_provider") or {}
-    is_provider_checkout = provider.get("key") == MALUM_PROVIDER_KEY or session.chain == MALUM_CHAIN
+    is_provider_checkout = _is_provider_checkout_session(session)
 
     if is_provider_checkout:
         network_display = provider.get("network_display") or "Hosted checkout"
-        route_label = metadata.get("display_label") or provider.get("label") or "Card / PayPal"
+        route_label = metadata.get("display_label") or provider.get("label")
     else:
         network_display = _get_network_display_label(session.chain)
         route_label = f"{network_display} · {session.asset_code}"
@@ -960,9 +983,7 @@ def _get_public_deposit_status(session) -> str:
         return PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
 
     if raw_status == DepositSession.STATUS_CREDITED:
-        metadata = session.metadata or {}
-        provider = metadata.get("payment_provider") or {}
-        if provider.get("key") == MALUM_PROVIDER_KEY or session.chain == MALUM_CHAIN:
+        if _is_provider_checkout_session(session):
             return PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
 
     if raw_status == DepositSession.STATUS_AWAITING_PAYMENT:
@@ -1015,6 +1036,20 @@ def wallet_deposit_request(request):
                 actor=request.user,
                 wallet=wallet_obj,
                 token_pack=token_pack,
+            )
+            provider = (session.metadata or {}).get("payment_provider") or {}
+            checkout_url = (provider.get("checkout_url") or "").strip()
+            if checkout_url and session.status == DepositSession.STATUS_AWAITING_PAYMENT:
+                return redirect(checkout_url)
+            return redirect("wallet_deposit_session", public_id=session.public_id)
+
+        if selected_option.get("payment_method_type") == "provider" and selected_option.get(
+                "provider_key") == PAYGATE_PROVIDER_KEY:
+            session = open_paygate_deposit_session(
+                actor=request.user,
+                wallet=wallet_obj,
+                token_pack=token_pack,
+                provider_id=selected_option.get("paygate_provider_id") or "",
             )
             provider = (session.metadata or {}).get("payment_provider") or {}
             checkout_url = (provider.get("checkout_url") or "").strip()

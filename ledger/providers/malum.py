@@ -15,7 +15,7 @@ MALUM_CHAIN = "malum"
 MALUM_ROUTE_SLUG = "hosted_checkout"
 MALUM_PAYMENT_METHOD_KEY = "malum:hosted_checkout"
 MALUM_PAYMENT_METHOD_TYPE = "provider"
-MALUM_PAYMENT_METHOD_LABEL = "Card / PayPal"
+MALUM_PAYMENT_METHOD_LABEL = "Malum Payments (Credit card accepted)"
 MALUM_NETWORK_DISPLAY = "Hosted checkout"
 MALUM_ROUTE_KEY_PREFIX = "malum"
 MALUM_DEFAULT_API_BASE_URL = "https://malum.to"
@@ -172,10 +172,12 @@ def call_malum_json(*, method: str, path: str, payload: dict | None = None, time
         data=body if method.upper() in {"POST", "PUT", "PATCH"} else None,
         method=method.upper(),
         headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "Accept-Encoding": "identity",
             "MALUM": malum_auth_header(),
-        },
+        }
     )
 
     try:
