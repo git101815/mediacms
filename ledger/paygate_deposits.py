@@ -283,9 +283,9 @@ def open_paygate_deposit_session(
         "chain_family": "provider",
         "token_pack": token_pack_snapshot,
         "payment_method": {
-            "key": PAYGATE_PAYMENT_METHOD_KEY,
+            "key": f"{PAYGATE_PAYMENT_METHOD_KEY}:{provider_id}",
             "type": PAYGATE_PAYMENT_METHOD_TYPE,
-            "label": PAYGATE_PAYMENT_METHOD_LABEL,
+            "label": provider_display_label,
             "show_network_step": False,
         },
         "payment_provider": _provider_metadata_for_session(
