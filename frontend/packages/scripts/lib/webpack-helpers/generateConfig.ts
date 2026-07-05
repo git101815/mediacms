@@ -187,26 +187,31 @@ function webpackPlugins(env: string, srcDir: string, pages: ConfigPages, cssSrc:
 
 	if ('development' !== env) {
 		ret.push(
-			new CopyPlugin({
-				patterns: [
-					{
-						from: path.resolve(__dirname, '../../../src/static/lib'),
-						to: path.resolve(__dirname, '../../../' + env + '/static/lib'),
-					},
-					{
-						from: path.resolve(__dirname, '../../../src/static/images'),
-						to: path.resolve(__dirname, '../../../' + env + '/static/images'),
-					},
-					{
-						from: path.resolve(__dirname, '../../../src/static/favicons'),
-						to: path.resolve(__dirname, '../../../' + env + '/static/favicons'),
-					},
-					{
-						from: path.resolve(__dirname, '../../../src/static/css/_extra.css'),
-						to: path.resolve(__dirname, '../../../' + env + '/static/css/_extra.css'),
-					},
-				],
-			})
+                new CopyPlugin({
+                  patterns: [
+                    {
+                      from: path.resolve(__dirname, '../../../src/static/lib'),
+                      to: path.resolve(__dirname, '../../../' + env + '/static/lib'),
+                    },
+                    {
+                      from: path.resolve(__dirname, '../../../src/static/images'),
+                      to: path.resolve(__dirname, '../../../' + env + '/static/images'),
+                    },
+                    {
+                      from: path.resolve(__dirname, '../../../src/static/favicons'),
+                      to: path.resolve(__dirname, '../../../' + env + '/static/favicons'),
+                    },
+                    {
+                      from: path.resolve(__dirname, '../../../src/static/js/pages'),
+                      to: path.resolve(__dirname, '../../../' + env + '/static/js/pages'),
+                      noErrorOnMissing: true,
+                    },
+                    {
+                      from: path.resolve(__dirname, '../../../src/static/css/_extra.css'),
+                      to: path.resolve(__dirname, '../../../' + env + '/static/css/_extra.css'),
+                    },
+                  ],
+                })
 		);
 	}
 
