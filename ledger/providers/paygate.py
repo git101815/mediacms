@@ -5,7 +5,7 @@ import os
 from decimal import Decimal, ROUND_HALF_UP
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, ValidationError
@@ -190,7 +190,13 @@ def call_paygate_json(*, path: str, params: dict | None = None, timeout: int = 2
         },
     )
 
+    original_getaddrinfo = socket.getaddrinfo
+
+    def ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        return original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
     try:
+        socket.getaddrinfo = ipv4_only_getaddrinfo
         with urllib_request.urlopen(req, timeout=timeout) as response:
             raw_body = response.read().decode("utf-8")
     except HTTPError as exc:
@@ -198,6 +204,8 @@ def call_paygate_json(*, path: str, params: dict | None = None, timeout: int = 2
         raise ValidationError(f"PayGate API error {exc.code}: {error_body[:500]}") from exc
     except URLError as exc:
         raise ValidationError(f"PayGate API request failed: {exc.reason}") from exc
+    finally:
+        socket.getaddrinfo = original_getaddrinfo
 
     try:
         parsed = json.loads(raw_body or "{}")
@@ -256,7 +264,7 @@ def build_paygate_checkout_url(
     currency: str,
     provider_id: str = "",
 ) -> str:
-    normalized_address = (address_in or "").strip()
+    normalized_address = unquote((address_in or "").strip())
     if not normalized_address:
         raise ValidationError("PayGate address_in is required")
 
