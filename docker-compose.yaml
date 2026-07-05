@@ -1,7 +1,7 @@
 name: mediacms-staging
 
 x-mediacms-app: &mediacms_app
-  image: mediacms-local:dev
+  image: mediacms-local:staging
   pull_policy: never
   build:
     context: .
