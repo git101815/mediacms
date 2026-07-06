@@ -1536,28 +1536,24 @@ $error-text: #ff9a9a;
 }
 
 .wallet-buy-flow__choice-icon {
-  width: 72px;
-  height: 44px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  width: 138px;
+  height: 78px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  overflow: hidden;
+  background: transparent;
+  border-radius: 0;
+  overflow: visible;
 }
 
 .wallet-buy-flow__choice-icon-image {
-  max-width: 52px;
-  max-height: 26px;
+  max-width: 132px;
+  max-height: 66px;
+  width: auto;
+  height: auto;
   object-fit: contain;
   display: block;
-}
-
-.wallet-buy-flow__choice-icon-fallback {
-  font-size: 13px;
-  font-weight: 800;
-  color: #ffffff;
 }
 
 .wallet-buy-modal__package-icon {

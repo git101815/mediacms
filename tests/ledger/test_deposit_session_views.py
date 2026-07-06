@@ -5,7 +5,11 @@ from django.urls import reverse
 from django.utils import timezone
 
 from ledger.models import DepositAddress, DepositSession, TokenPack
-from ledger.services import credit_confirmed_deposit_session, record_onchain_observation
+from ledger.services import (
+    _convert_platform_token_units_to_canonical_stable_units,
+    credit_confirmed_deposit_session,
+    record_onchain_observation,
+)
 
 from .base import BaseLedgerTestCase
 
@@ -295,7 +299,9 @@ class TestDepositSessionViews(BaseLedgerTestCase):
 
         session = DepositSession.objects.get(wallet=self.w1)
 
-        expected_canonical_amount = int(bsc_pack.gross_stable_amount)
+        expected_canonical_amount = _convert_platform_token_units_to_canonical_stable_units(
+            bsc_pack.token_amount
+        )
         expected_onchain_amount = expected_canonical_amount * 10 ** 12
 
         self.assertEqual(session.chain, "bsc")
@@ -318,8 +324,8 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         self.assertEqual(page_response.status_code, 200)
         self.assertContains(page_response, "500_tokens")
         self.assertContains(page_response, "500 tokens")
-        self.assertContains(page_response, "$7")
-        self.assertContains(page_response, "7.00 USDT")
+        self.assertContains(page_response, "$5")
+        self.assertContains(page_response, "5.00 USDT")
         self.assertNotContains(page_response, "0.00 USDT")
 
     @patch("ledger.services._derive_session_deposit_address")
@@ -370,7 +376,9 @@ class TestDepositSessionViews(BaseLedgerTestCase):
 
         session = DepositSession.objects.get(wallet=self.w1)
 
-        expected_canonical_amount = int(bsc_pack.gross_stable_amount)
+        expected_canonical_amount = _convert_platform_token_units_to_canonical_stable_units(
+            bsc_pack.token_amount
+        )
         expected_onchain_amount = expected_canonical_amount * 10 ** 12
 
         self.assertEqual(session.chain, "bsc")
@@ -447,7 +455,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         session = DepositSession.objects.get(wallet=self.w1)
         session.status = DepositSession.STATUS_CONFIRMING
         session.confirmations = 201
-        session.observed_amount = 5_000_000
+        session.observed_amount = 4_000_000
         session.observed_txid = ""
         session.save(
             update_fields=[
@@ -464,8 +472,8 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         )
 
         self.assertEqual(page_response.status_code, 200)
-        self.assertContains(page_response, "7.00 USDT")
-        self.assertContains(page_response, 'data-deposit-observed-amount>5</span>')
+        self.assertContains(page_response, "5.00 USDT")
+        self.assertContains(page_response, 'data-deposit-observed-amount>4</span>')
         self.assertContains(page_response, "<span>USDT</span>")
         self.assertNotContains(page_response, "0.00 USDT")
 
@@ -474,7 +482,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         )
 
         self.assertEqual(status_response.status_code, 200)
-        self.assertEqual(status_response.json()["observed_amount_display"], "5")
+        self.assertEqual(status_response.json()["observed_amount_display"], "4")
 
     @patch("ledger.services._derive_session_deposit_address")
     def test_bsc_partial_payment_is_seen_but_not_credited_until_expected_amount(self, mocked_derive):
@@ -536,7 +544,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
             to_address=session.deposit_address,
             token_contract_address="0x55d398326f99059ff775485246999027b3197955",
             asset_code="USDT",
-            amount=5 * 10**18,
+            amount=4 * 10**18,
             confirmations=session.required_confirmations,
             raw_payload={"source": "bsc-partial-payment-test"},
         )
@@ -544,7 +552,7 @@ class TestDepositSessionViews(BaseLedgerTestCase):
         session.refresh_from_db()
         self.w1.refresh_from_db()
 
-        self.assertEqual(session.observed_amount, 5_000_000)
+        self.assertEqual(session.observed_amount, 4_000_000)
         self.assertNotEqual(session.status, DepositSession.STATUS_CREDITED)
         self.assertEqual(self.w1.balance, 0)
 
