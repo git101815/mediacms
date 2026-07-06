@@ -68,6 +68,62 @@ class TestDepositSessions(BaseLedgerTestCase):
         self.assertEqual((session.metadata or {}).get("token_pack", {}).get("code"), self.default_token_pack.code)
 
     @patch("ledger.services._derive_session_deposit_address")
+    def test_open_user_deposit_session_applies_fixed_and_bps_payment_adjustment(self, mocked_derive):
+        mocked_derive.return_value = (
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa99",
+            "m/44'/60'/0'/0/99",
+        )
+
+        session = open_user_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
+            payment_price_bps=250,
+            payment_price_fixed_canonical=300_000,
+        )
+
+        token_pack = (session.metadata or {}).get("token_pack") or {}
+
+        self.assertEqual(token_pack["net_stable_amount"], 1_000_000)
+        self.assertEqual(token_pack["fixed_fee_stable_amount"], 300_000)
+        self.assertEqual(token_pack["percentage_fee_stable_amount"], 25_000)
+        self.assertEqual(token_pack["fee_stable_amount"], 325_000)
+        self.assertEqual(token_pack["gross_stable_amount"], 1_325_000)
+        self.assertEqual(token_pack["payment_price_bps"], 250)
+        self.assertEqual(token_pack["payment_price_fixed_canonical"], 300_000)
+
+        self.assertEqual(session.min_amount, 1_325_000)
+        self.assertEqual(session.expected_onchain_raw_amount, 1_325_000)
+        self.assertEqual(
+            int((session.metadata or {}).get("expected_canonical_stable_amount")),
+            1_325_000,
+        )
+        self.assertEqual(
+            int((session.metadata or {}).get("expected_route_raw_amount")),
+            1_325_000,
+        )
+
+    def test_open_user_deposit_session_rejects_negative_payment_price_adjustments(self):
+        with self.assertRaisesMessage(ValidationError, "Payment price bps cannot be negative"):
+            open_user_deposit_session(
+                actor=self.u1,
+                wallet=self.w1,
+                option_key=self.default_deposit_option_key(),
+                token_pack=self.default_token_pack,
+                payment_price_bps=-1,
+            )
+
+        with self.assertRaisesMessage(ValidationError, "Payment fixed fee cannot be negative"):
+            open_user_deposit_session(
+                actor=self.u1,
+                wallet=self.w1,
+                option_key=self.default_deposit_option_key(),
+                token_pack=self.default_token_pack,
+                payment_price_fixed_canonical=-1,
+            )
+
+    @patch("ledger.services._derive_session_deposit_address")
     def test_open_user_deposit_session_reuses_existing_active_session(self, mocked_derive):
         mocked_derive.return_value = (
             "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

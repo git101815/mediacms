@@ -1,6 +1,6 @@
 from datetime import timedelta
 from unittest.mock import patch
-
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -17,7 +17,11 @@ from ledger.services import (
     reverse_ledger_transaction,
     set_wallet_risk_status,
 )
-
+from files.views import (
+    _build_wallet_deposit_options,
+    _build_wallet_token_pack_rows,
+)
+from ledger.providers.paygate import PAYGATE_PROVIDER_KEY
 from .base import BaseLedgerTestCase
 
 
@@ -580,3 +584,158 @@ class TestWalletView(BaseLedgerTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, completed_request.reference)
         self.assertNotContains(response, pending_request.reference)
+
+    def test_wallet_token_pack_rows_expose_admin_token_pack_image(self):
+        self.default_token_pack.image = "wallet/token_packs/starter.png"
+        self.default_token_pack.save(update_fields=["image"])
+
+        rows = _build_wallet_token_pack_rows()
+        row = next(item for item in rows if item["code"] == self.default_token_pack.code)
+
+        self.assertIn("wallet/token_packs/starter.png", row["image_url"])
+
+    @override_settings(
+        WALLET_PAYMENT_METHOD_PRICE_BPS={"crypto": 1000},
+        WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL={"crypto": 0.3},
+    )
+    @patch("ledger.services._derive_session_deposit_address")
+    def test_wallet_deposit_request_applies_payment_group_fixed_and_bps_fees(self, mocked_derive):
+        mocked_derive.return_value = (
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa77",
+            "m/44'/60'/0'/0/77",
+        )
+
+        DepositAddress.objects.create(
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+            display_label="Ethereum · USDT",
+            address="0x1111111111111111111111111111111111111111",
+            address_derivation_ref="m/44'/60'/0'/0/10",
+            derivation_index=10,
+            required_confirmations=12,
+            min_amount=100,
+            session_ttl_seconds=3600,
+        )
+
+        self.client.force_login(self.u1)
+
+        response = self.client.post(
+            reverse("wallet_deposit_request"),
+            self.default_deposit_request_payload(
+                return_tab="all",
+                return_status="all",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 302)
+
+        session = DepositSession.objects.get(wallet=self.w1)
+        token_pack = (session.metadata or {}).get("token_pack") or {}
+
+        self.assertEqual(token_pack["net_stable_amount"], 1_000_000)
+        self.assertEqual(token_pack["fixed_fee_stable_amount"], 300_000)
+        self.assertEqual(token_pack["percentage_fee_stable_amount"], 100_000)
+        self.assertEqual(token_pack["fee_stable_amount"], 400_000)
+        self.assertEqual(token_pack["gross_stable_amount"], 1_400_000)
+
+        self.assertEqual(session.min_amount, 1_400_000)
+        self.assertEqual(session.expected_onchain_raw_amount, 1_400_000)
+
+    @override_settings(
+        WALLET_PAYMENT_METHOD_PRICE_BPS={
+            "credit_card_link": 1000,
+            "paypal_us": 800,
+            "revolut_eu": 500,
+            "crypto": 0,
+        },
+        WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL={
+            "credit_card_link": 0.3,
+            "paypal_us": 0.3,
+            "revolut_eu": 0.3,
+            "crypto": 0,
+        },
+    )
+    @patch("files.views.list_available_deposit_options", return_value=[])
+    @patch("files.views.get_malum_deposit_option", return_value=None)
+    @patch("files.views.get_paygate_deposit_options")
+    def test_wallet_deposit_options_group_paygate_providers_with_icons_and_fees(
+        self,
+        mocked_paygate_options,
+        mocked_malum_option,
+        mocked_crypto_options,
+    ):
+        mocked_paygate_options.return_value = [
+            {
+                "key": "paygate:usd:stripe:hosted_checkout",
+                "label": "Stripe",
+                "route_label": "Stripe",
+                "network_label": "PayGate",
+                "network_display": "PayGate",
+                "chain": "paygate",
+                "asset_code": "USD",
+                "token_contract_address": "",
+                "required_confirmations": 1,
+                "min_amount": 1_000_000,
+                "payment_method_key": "paygate:stripe",
+                "payment_method_label": "Stripe",
+                "payment_method_type": "provider",
+                "provider_key": PAYGATE_PROVIDER_KEY,
+                "paygate_provider_id": "stripe",
+            },
+            {
+                "key": "paygate:usd:paypal:hosted_checkout",
+                "label": "PayPal",
+                "route_label": "PayPal",
+                "network_label": "PayGate",
+                "network_display": "PayGate",
+                "chain": "paygate",
+                "asset_code": "USD",
+                "token_contract_address": "",
+                "required_confirmations": 1,
+                "min_amount": 1_000_000,
+                "payment_method_key": "paygate:paypal",
+                "payment_method_label": "PayPal",
+                "payment_method_type": "provider",
+                "provider_key": PAYGATE_PROVIDER_KEY,
+                "paygate_provider_id": "paypal",
+            },
+            {
+                "key": "paygate:usd:revolut:hosted_checkout",
+                "label": "Revolut",
+                "route_label": "Revolut",
+                "network_label": "PayGate",
+                "network_display": "PayGate",
+                "chain": "paygate",
+                "asset_code": "USD",
+                "token_contract_address": "",
+                "required_confirmations": 1,
+                "min_amount": 1_000_000,
+                "payment_method_key": "paygate:revolut",
+                "payment_method_label": "Revolut",
+                "payment_method_type": "provider",
+                "provider_key": PAYGATE_PROVIDER_KEY,
+                "paygate_provider_id": "revolut",
+            },
+        ]
+
+        options = _build_wallet_deposit_options()
+        by_group = {item["payment_group_key"]: item for item in options}
+
+        self.assertEqual(
+            by_group["credit_card_link"]["payment_group_label"],
+            "Credit Card (via Link by Stripe)",
+        )
+        self.assertEqual(by_group["credit_card_link"]["payment_group_icon_path"], "images/wallet/card.svg")
+        self.assertEqual(by_group["credit_card_link"]["payment_price_bps"], 1000)
+        self.assertEqual(by_group["credit_card_link"]["payment_price_fixed_canonical"], 300_000)
+
+        self.assertEqual(by_group["paypal_us"]["payment_group_label"], "PayPal (US only)")
+        self.assertEqual(by_group["paypal_us"]["payment_group_icon_path"], "images/wallet/paypal.svg")
+        self.assertEqual(by_group["paypal_us"]["payment_price_bps"], 800)
+        self.assertEqual(by_group["paypal_us"]["payment_price_fixed_canonical"], 300_000)
+
+        self.assertEqual(by_group["revolut_eu"]["payment_group_label"], "Revolut (EU only)")
+        self.assertEqual(by_group["revolut_eu"]["payment_group_icon_path"], "images/wallet/revolut.svg")
+        self.assertEqual(by_group["revolut_eu"]["payment_price_bps"], 500)
+        self.assertEqual(by_group["revolut_eu"]["payment_price_fixed_canonical"], 300_000)
