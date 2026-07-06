@@ -477,25 +477,25 @@ WALLET_PAYMENT_GROUPS = {
     "credit_card_link": {
         "label": "Credit Card (via Link by Stripe)",
         "icon_label": "Card",
-        "icon_path": "images/wallet/payments/stripe.svg",
+        "icon_path": "images/wallet/card.svg",
         "order": 10,
     },
     "paypal_us": {
         "label": "PayPal (US only)",
         "icon_label": "PayPal",
-        "icon_path": "images/wallet/payments/paypal.svg",
+        "icon_path": "images/wallet/paypal.svg",
         "order": 20,
     },
     "revolut_eu": {
         "label": "Revolut (EU only)",
         "icon_label": "Revolut",
-        "icon_path": "images/wallet/payments/revolut.svg",
+        "icon_path": "images/wallet/revolut.svg",
         "order": 30,
     },
     "crypto": {
         "label": "Crypto",
         "icon_label": "Crypto",
-        "icon_path": "images/wallet/payments/crypto.svg",
+        "icon_path": "images/wallet/crypto.svg",
         "order": 40,
     },
 }
