@@ -64,6 +64,8 @@
         paymentGroupKey: node.getAttribute('data-payment-group-key') || '',
         paymentGroupLabel: node.getAttribute('data-payment-group-label') || '',
         paymentGroupIcon: node.getAttribute('data-payment-group-icon') || '',
+        paymentGroupIconPath: node.getAttribute('data-payment-group-icon-path') || '',
+        paymentPriceFixedCanonical: Number(node.getAttribute('data-payment-price-fixed-canonical') || 0),
         paymentPriceBps: Number(node.getAttribute('data-payment-price-bps') || 0),
         assetCode: node.getAttribute('data-asset-code') || '',
         chain: node.getAttribute('data-chain') || '',
@@ -72,6 +74,14 @@
       };
     });
   }
+
+    function renderChoiceIcon(iconPath, fallbackLabel, className) {
+      if (iconPath) {
+        return '<img class="' + className + '" src="' + escapeHtml(iconPath) + '" alt="">';
+      }
+
+      return '<span class="wallet-buy-flow__choice-icon-fallback">' + escapeHtml(fallbackLabel || '') + '</span>';
+    }
 
   function getPaymentMethods() {
     const map = new Map();
@@ -89,6 +99,8 @@
           icon: option.paymentGroupIcon || option.paymentGroupLabel || option.assetCode,
           type: option.paymentMethodType || 'crypto',
           priceBps: option.paymentPriceBps || 0,
+          iconPath: option.paymentGroupIconPath || '',
+          priceFixedCanonical: option.paymentPriceFixedCanonical || 0,
           routes: [],
         });
       }
@@ -165,12 +177,16 @@
     }
   }
 
-  function getPaymentMethodPriceDisplay(method) {
-    const base = Number(buyState.packGrossCanonical || 0);
-    const bps = Number((method && method.priceBps) || 0);
-    const adjusted = Math.round(base * (10000 + bps) / 10000);
-    return '$' + formatCanonicalStableAmount(adjusted);
-  }
+function getPaymentMethodPriceDisplay(method) {
+  const base = Number(buyState.packGrossCanonical || 0);
+  const bps = Number((method && method.priceBps) || 0);
+  const fixed = Number((method && method.priceFixedCanonical) || 0);
+
+  const percentageFee = Math.round(base * bps / 10000);
+  const adjusted = base + fixed + percentageFee;
+
+  return '$' + formatCanonicalStableAmount(adjusted);
+}
 
   function renderPaymentMethodChoices() {
     const container = document.querySelector('[data-wallet-payment-method-choices]');
@@ -193,12 +209,14 @@
       );
       button.setAttribute('data-wallet-payment-method-choice', method.key);
 
-      button.innerHTML =
-        '<span class="wallet-buy-flow__choice-icon">' + escapeHtml(method.icon) + '</span>' +
-        '<span class="wallet-buy-flow__choice-copy">' +
-          '<span class="wallet-buy-flow__choice-title">' + escapeHtml(method.label) + '</span>' +
-        '</span>' +
-        '<span class="wallet-buy-flow__choice-price">' + escapeHtml(getPaymentMethodPriceDisplay(method)) + '</span>';
+    button.innerHTML =
+      '<span class="wallet-buy-flow__choice-icon">' +
+        renderChoiceIcon(method.iconPath, method.icon, 'wallet-buy-flow__choice-icon-image') +
+      '</span>' +
+      '<span class="wallet-buy-flow__choice-copy">' +
+        '<span class="wallet-buy-flow__choice-title">' + escapeHtml(method.label) + '</span>' +
+      '</span>' +
+      '<span class="wallet-buy-flow__choice-price">' + escapeHtml(getPaymentMethodPriceDisplay(method)) + '</span>';
 
       container.appendChild(button);
     });

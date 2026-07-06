@@ -180,6 +180,7 @@ def _find_reusable_paygate_session(
     wallet: TokenWallet,
     token_pack_code: str,
     provider_id: str = "",
+    expected_canonical_amount: int | None = None,
 ) -> DepositSession | None:
     now = timezone.now()
     normalized_provider_id = (provider_id or "").strip().lower()
@@ -204,7 +205,8 @@ def _find_reusable_paygate_session(
 
         if provider.get("key") != PAYGATE_PROVIDER_KEY:
             continue
-
+        if expected_canonical_amount is not None and int(session.min_amount) != int(expected_canonical_amount):
+            continue
         session_provider_id = str(provider.get("provider_id") or "").strip().lower()
         if session_provider_id != normalized_provider_id:
             continue
@@ -224,6 +226,7 @@ def open_paygate_deposit_session(
     token_pack: TokenPack,
     provider_id: str = "",
     payment_price_bps=0,
+    payment_price_fixed_canonical=0,
 ) -> DepositSession:
     actor = _require_authenticated_actor(actor)
     require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_DEPOSIT_OPEN)
@@ -247,6 +250,7 @@ def open_paygate_deposit_session(
     token_pack_snapshot = _build_token_pack_snapshot(
         token_pack=token_pack,
         payment_price_bps=payment_price_bps,
+        payment_price_fixed_canonical=payment_price_fixed_canonical,
     )
     expected_canonical_amount = int(token_pack_snapshot["gross_stable_amount"])
     min_amount = get_paygate_min_canonical_stable_amount()
@@ -265,6 +269,7 @@ def open_paygate_deposit_session(
         wallet=wallet,
         token_pack_code=token_pack_snapshot["code"],
         provider_id=provider_id,
+        expected_canonical_amount=expected_canonical_amount,
     )
     if existing_session is not None:
         return existing_session

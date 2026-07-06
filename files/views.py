@@ -377,6 +377,24 @@ def _format_canonical_stable_amount(value: int) -> str:
         text = text.rstrip("0").rstrip(".")
     return text or "0"
 
+def _parse_human_canonical_stable_amount(value, *, field_name: str = "Amount") -> int:
+    raw_value = str(value or "0").strip().replace(",", ".")
+    if not raw_value:
+        return 0
+
+    try:
+        parsed = Decimal(raw_value)
+    except Exception:
+        return 0
+
+    if parsed <= 0:
+        return 0
+
+    scaled = parsed * (Decimal(10) ** 6)
+    if scaled != scaled.to_integral_value():
+        raise DjangoValidationError(f"{field_name} supports at most 6 decimal places.")
+
+    return int(scaled)
 
 def _format_pack_token_amount(value: int) -> str:
     scaled = Decimal(int(value)) / (Decimal(10) ** PLATFORM_TOKEN_DECIMALS)
@@ -496,6 +514,17 @@ def _get_wallet_payment_price_bps(group_key: str) -> int:
     except (TypeError, ValueError):
         return 0
 
+def _get_wallet_payment_price_fixed_canonical(group_key: str) -> int:
+    configured = (
+        getattr(settings, "WALLET_PAYMENT_METHOD_PRICE_FIXED", None)
+        or getattr(settings, "WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL", {})
+        or {}
+    )
+
+    return _parse_human_canonical_stable_amount(
+        configured.get(group_key, 0),
+        field_name=f"WALLET_PAYMENT_METHOD_PRICE_FIXED[{group_key}]",
+    )
 
 def _apply_payment_bps(canonical_amount: int, bps: int) -> int:
     amount = (
@@ -521,17 +550,21 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
 
     group = WALLET_PAYMENT_GROUPS.get(group_key, {})
     group_label = group.get("label") or decorated.get("payment_method_label") or "Payment"
-    group_icon = group.get("icon") or group_label
+    group_icon = group.get("icon_label") or group.get("icon") or group_label
+    group_icon_path = group.get("icon_path") or ""
     group_order = int(group.get("order") or 100)
     price_bps = _get_wallet_payment_price_bps(group_key)
+    price_fixed_canonical = _get_wallet_payment_price_fixed_canonical(group_key)
 
     decorated.update(
         {
             "payment_group_key": group_key,
             "payment_group_label": group_label,
             "payment_group_icon": group_icon,
+            "payment_group_icon_path": group_icon_path,
             "payment_group_order": group_order,
             "payment_price_bps": price_bps,
+            "payment_price_fixed_canonical": price_fixed_canonical,
         }
     )
 
@@ -1134,6 +1167,7 @@ def wallet_deposit_request(request):
             raise DjangoValidationError("Invalid token pack.")
 
         payment_price_bps = int(selected_option.get("payment_price_bps") or 0)
+        payment_price_fixed_canonical = int(selected_option.get("payment_price_fixed_canonical") or 0)
 
         if selected_option.get("payment_method_type") == "provider" and selected_option.get("provider_key") == MALUM_PROVIDER_KEY:
             session = open_malum_deposit_session(
@@ -1154,7 +1188,8 @@ def wallet_deposit_request(request):
                 wallet=wallet_obj,
                 token_pack=token_pack,
                 provider_id=selected_option.get("paygate_provider_id") or "",
-                payment_price_bps=payment_price_bps
+                payment_price_bps=payment_price_bps,
+                payment_price_fixed_canonical=payment_price_fixed_canonical,
             )
             provider = (session.metadata or {}).get("payment_provider") or {}
             checkout_url = (provider.get("checkout_url") or "").strip()
@@ -1189,7 +1224,8 @@ def wallet_deposit_request(request):
             payment_method_type=payment_method_type or selected_option["payment_method_type"],
             payment_method_label=selected_option["payment_method_label"],
             show_network_step=show_network_step,
-            payment_price_bps=payment_price_bps
+            payment_price_bps=payment_price_bps,
+            payment_price_fixed_canonical=payment_price_fixed_canonical,
         )
     except (DjangoValidationError, DjangoPermissionDenied, ImproperlyConfigured) as exc:
         messages.add_message(request, messages.ERROR, _extract_wallet_form_error(exc))

@@ -1300,16 +1300,52 @@ def _amount_metadata(
     }
 
 
-def _apply_payment_price_bps(canonical_amount: int, payment_price_bps: int) -> int:
-    amount = (
-        Decimal(int(canonical_amount))
-        * Decimal(10000 + int(payment_price_bps or 0))
-        / Decimal(10000)
+def _normalize_non_negative_int(value, *, field_name: str) -> int:
+    try:
+        normalized = int(value or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{field_name} must be an integer") from exc
+
+    if normalized < 0:
+        raise ValidationError(f"{field_name} cannot be negative")
+
+    return normalized
+
+
+def _apply_payment_price_adjustment(
+    canonical_amount: int,
+    *,
+    payment_price_bps=0,
+    payment_price_fixed_canonical=0,
+) -> tuple[int, int, int]:
+    base_amount = int(canonical_amount)
+    normalized_bps = _normalize_non_negative_int(
+        payment_price_bps,
+        field_name="Payment price bps",
     )
-    return int(amount.to_integral_value(rounding=ROUND_HALF_UP))
+    normalized_fixed = _normalize_non_negative_int(
+        payment_price_fixed_canonical,
+        field_name="Payment fixed fee",
+    )
+
+    percentage_fee = int(
+        (
+            Decimal(base_amount)
+            * Decimal(normalized_bps)
+            / Decimal(10000)
+        ).to_integral_value(rounding=ROUND_HALF_UP)
+    )
+
+    gross_amount = base_amount + normalized_fixed + percentage_fee
+    return gross_amount, normalized_fixed, percentage_fee
 
 
-def _build_token_pack_snapshot(*, token_pack: TokenPack, payment_price_bps=0) -> dict:
+def _build_token_pack_snapshot(
+    *,
+    token_pack: TokenPack,
+    payment_price_bps=0,
+    payment_price_fixed_canonical=0,
+) -> dict:
     token_pack = TokenPack.objects.select_for_update().get(id=token_pack.id)
 
     if not token_pack.is_active:
@@ -1317,8 +1353,17 @@ def _build_token_pack_snapshot(*, token_pack: TokenPack, payment_price_bps=0) ->
 
     token_amount = int(token_pack.token_amount)
     net_stable_amount = _convert_platform_token_units_to_canonical_stable_units(token_amount)
-    normalized_bps = max(0, int(payment_price_bps or 0))
-    gross_stable_amount = _apply_payment_price_bps(net_stable_amount, normalized_bps)
+    normalized_bps = _normalize_non_negative_int(
+        payment_price_bps,
+        field_name="Payment price bps",
+    )
+    gross_stable_amount, fixed_fee_stable_amount, percentage_fee_stable_amount = (
+        _apply_payment_price_adjustment(
+            net_stable_amount,
+            payment_price_bps=normalized_bps,
+            payment_price_fixed_canonical=payment_price_fixed_canonical,
+        )
+    )
 
     return {
         "code": token_pack.code,
@@ -1329,8 +1374,12 @@ def _build_token_pack_snapshot(*, token_pack: TokenPack, payment_price_bps=0) ->
         "gross_stable_amount": gross_stable_amount,
         "net_stable_amount": net_stable_amount,
         "fee_stable_amount": gross_stable_amount - net_stable_amount,
+        "fixed_fee_stable_amount": fixed_fee_stable_amount,
+        "percentage_fee_stable_amount": percentage_fee_stable_amount,
         "payment_price_bps": normalized_bps,
+        "payment_price_fixed_canonical": fixed_fee_stable_amount,
         "legacy_gross_stable_amount": int(token_pack.gross_stable_amount),
+        "image_url": token_pack.image.url if token_pack.image else "",
     }
 
 def _get_max_used_evm_derivation_index() -> int:
@@ -3439,6 +3488,7 @@ def open_user_deposit_session(
     payment_method_label: str = "",
     show_network_step: bool = True,
     payment_price_bps=0,
+    payment_price_fixed_canonical=0,
 ) -> DepositSession:
     actor = _require_authenticated_actor(actor)
     require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_DEPOSIT_OPEN)
@@ -3462,6 +3512,7 @@ def open_user_deposit_session(
     token_pack_snapshot = _build_token_pack_snapshot(
         token_pack=token_pack,
         payment_price_bps=payment_price_bps,
+        payment_price_fixed_canonical=payment_price_fixed_canonical,
     )
 
     template_min_canonical_amount, template_min_onchain_amount = _deposit_address_min_amounts(template)
