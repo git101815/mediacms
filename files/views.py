@@ -125,6 +125,7 @@ from ledger.services import (
     expire_stale_deposit_sessions,
     get_ad_free_lifetime_price_tokens,
     purchase_ad_free_lifetime,
+    _convert_platform_token_units_to_canonical_stable_units,
 )
 from ledger.providers.malum import MALUM_CHAIN, MALUM_PROVIDER_KEY
 from ledger.providers.paygate import PAYGATE_CHAIN, PAYGATE_PROVIDER_KEY
@@ -409,7 +410,7 @@ def _build_wallet_token_pack_rows() -> list[dict]:
     queryset = TokenPack.objects.filter(is_active=True).order_by("sort_order", "id")[:5]
 
     for pack in queryset:
-        base_stable_amount = int(pack.token_amount) // 100
+        base_stable_amount = _convert_platform_token_units_to_canonical_stable_units(pack.token_amount)
         image_url = ""
         if pack.image:
             try:
@@ -1205,15 +1206,6 @@ def wallet_deposit_request(request):
             selected_option["payment_method_type"] == "crypto"
             and len({item["network_display"] for item in matching_payment_routes}) > 1
         )
-
-        existing_session = _find_existing_active_deposit_session(
-            user=request.user,
-            wallet=wallet_obj,
-            option_key=option_key,
-            token_pack_code=token_pack_code,
-        )
-        if existing_session is not None:
-            return redirect("wallet_deposit_session", public_id=existing_session.public_id)
 
         session = open_user_deposit_session(
             actor=request.user,

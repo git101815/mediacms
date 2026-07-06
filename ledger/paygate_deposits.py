@@ -95,7 +95,7 @@ def get_paygate_deposit_options() -> list[dict]:
     options = []
     for provider_id in provider_ids:
         provider_label = get_paygate_provider_label(provider_id) if provider_id else PAYGATE_PAYMENT_METHOD_LABEL
-        label = f"PayGate · {provider_label}" if provider_id else PAYGATE_PAYMENT_METHOD_LABEL
+        label = provider_label if provider_id else PAYGATE_PAYMENT_METHOD_LABEL
 
         options.append(
             {
@@ -149,11 +149,7 @@ def _provider_metadata_for_session(
         if normalized_provider_id
         else PAYGATE_PAYMENT_METHOD_LABEL
     )
-    display_label = (
-        f"PayGate · {provider_label}"
-        if normalized_provider_id
-        else PAYGATE_PAYMENT_METHOD_LABEL
-    )
+    display_label = provider_label if normalized_provider_id else PAYGATE_PAYMENT_METHOD_LABEL
 
     provider = {
         "key": PAYGATE_PROVIDER_KEY,
@@ -260,7 +256,7 @@ def open_paygate_deposit_session(
 
     provider_id = (provider_id or get_paygate_provider_id() or "").strip().lower()
     provider_display_label = (
-        f"PayGate · {get_paygate_provider_label(provider_id)}"
+        get_paygate_provider_label(provider_id)
         if provider_id
         else PAYGATE_PAYMENT_METHOD_LABEL
     )
