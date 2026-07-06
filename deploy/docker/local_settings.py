@@ -82,6 +82,12 @@ WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "revolut_eu": 500,
     "crypto": 0,
 }
+WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
+    "credit_card_link": 0.3,
+    "paypal_us": 0.3,
+    "revolut_eu": 0.3,
+    "crypto": 0,
+}
 PAYGATE_CURRENCY = "USD"
 PAYGATE_PAYMENT_TTL_SECONDS = "3600"
 PAYGATE_MIN_CANONICAL_STABLE_AMOUNT = "1000000"

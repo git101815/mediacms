@@ -392,6 +392,13 @@ def _build_wallet_token_pack_rows() -> list[dict]:
 
     for pack in queryset:
         base_stable_amount = int(pack.token_amount) // 100
+        image_url = ""
+        if pack.image:
+            try:
+                image_url = pack.image.url
+            except ValueError:
+                image_url = ""
+
         rows.append(
             {
                 "code": pack.code,
@@ -402,6 +409,7 @@ def _build_wallet_token_pack_rows() -> list[dict]:
                 "token_amount_display": _format_pack_token_amount(pack.token_amount),
                 "gross_stable_amount": int(base_stable_amount),
                 "price_display": _format_canonical_stable_amount(base_stable_amount),
+                "image_url": image_url,
             }
         )
 
@@ -450,22 +458,26 @@ def _format_route_amount(value, *, chain: str, asset_code: str) -> str:
 WALLET_PAYMENT_GROUPS = {
     "credit_card_link": {
         "label": "Credit Card (via Link by Stripe)",
-        "icon": "Card",
+        "icon_label": "Card",
+        "icon_path": "images/wallet/payments/stripe.svg",
         "order": 10,
     },
     "paypal_us": {
         "label": "PayPal (US only)",
-        "icon": "PayPal",
+        "icon_label": "PayPal",
+        "icon_path": "images/wallet/payments/paypal.svg",
         "order": 20,
     },
     "revolut_eu": {
         "label": "Revolut (EU only)",
-        "icon": "Revolut",
+        "icon_label": "Revolut",
+        "icon_path": "images/wallet/payments/revolut.svg",
         "order": 30,
     },
     "crypto": {
         "label": "Crypto",
-        "icon": "Crypto",
+        "icon_label": "Crypto",
+        "icon_path": "images/wallet/payments/crypto.svg",
         "order": 40,
     },
 }

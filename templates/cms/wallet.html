@@ -455,7 +455,18 @@
               >
               <span class="wallet-buy-modal__package-inner">
                 <span class="wallet-buy-modal__package-copy">
-                  <span class="wallet-buy-modal__package-title">{{ pack.token_amount_display }} tokens</span>
+                  {% if pack.image_url %}
+                    <img
+                      class="wallet-buy-modal__package-icon"
+                      src="{{ pack.image_url }}"
+                      alt=""
+                      loading="lazy"
+                    >
+                  {% endif %}
+
+                  <span class="wallet-buy-modal__package-title">
+                    {{ pack.token_amount_display }} tokens
+                  </span>
                 </span>
                 {% if pack.badge_text %}
                 <span class="wallet-buy-modal__package-tag">{{ pack.badge_text }}</span>
