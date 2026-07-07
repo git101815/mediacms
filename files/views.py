@@ -1195,8 +1195,6 @@ def wallet_deposit_request(request):
 
     option_key = (request.POST.get("deposit_option_key") or "").strip()
     token_pack_code = (request.POST.get("token_pack_key") or "").strip()
-    payment_method_key = (request.POST.get("payment_method_key") or "").strip()
-    payment_method_type = (request.POST.get("payment_method_type") or "").strip()
     return_tab = _normalize_wallet_tab((request.POST.get("return_tab") or WALLET_TAB_ALL).strip())
     return_status = _normalize_wallet_status(
         (request.POST.get("return_status") or WALLET_STATUS_ALL).strip(),
@@ -1263,8 +1261,8 @@ def wallet_deposit_request(request):
             wallet=wallet_obj,
             option_key=option_key,
             token_pack=token_pack,
-            payment_method_key=payment_method_key or selected_option["payment_method_key"],
-            payment_method_type=payment_method_type or selected_option["payment_method_type"],
+            payment_method_key=selected_option["payment_method_key"],
+            payment_method_type=selected_option["payment_method_type"],
             payment_method_label=selected_option["payment_method_label"],
             show_network_step=show_network_step,
             payment_price_bps=payment_price_bps,
