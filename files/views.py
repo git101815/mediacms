@@ -479,7 +479,7 @@ WALLET_PAYMENT_GROUPS = {
         "label": "Credit Card (via Link by Stripe)",
         "icon_label": "Card",
         "icon_path": "images/wallet/card.svg",
-        "order": 10,
+        "order": 40,
     },
     "paypal_us": {
         "label": "PayPal (US only)",
@@ -497,10 +497,21 @@ WALLET_PAYMENT_GROUPS = {
         "label": "Crypto",
         "icon_label": "Crypto",
         "icon_path": "images/wallet/crypto.svg",
-        "order": 40,
+        "order": 10,
     },
 }
-
+WALLET_CRYPTO_ASSET_GROUPS = {
+    "USDC": {
+        "label": "USDC",
+        "icon_path": "images/wallet/usdc.svg",
+        "order": 10,
+    },
+    "USDT": {
+        "label": "USDT",
+        "icon_path": "images/wallet/usdt.svg",
+        "order": 20,
+    },
+}
 PAYGATE_PROVIDER_PAYMENT_GROUPS = {
     "stripe": "credit_card_link",
     "paypal": "paypal_us",
@@ -556,7 +567,11 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
     group_order = int(group.get("order") or 100)
     price_bps = _get_wallet_payment_price_bps(group_key)
     price_fixed_canonical = _get_wallet_payment_price_fixed_canonical(group_key)
-
+    asset_code = str(decorated.get("asset_code") or "").strip().upper()
+    asset_group = WALLET_CRYPTO_ASSET_GROUPS.get(asset_code, {})
+    asset_group_label = asset_group.get("label") or asset_code
+    asset_group_icon_path = asset_group.get("icon_path") or ""
+    asset_group_order = int(asset_group.get("order") or 100)
     decorated.update(
         {
             "payment_group_key": group_key,
@@ -566,6 +581,10 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
             "payment_group_order": group_order,
             "payment_price_bps": price_bps,
             "payment_price_fixed_canonical": price_fixed_canonical,
+            "asset_group_key": asset_code,
+            "asset_group_label": asset_group_label,
+            "asset_group_icon_path": asset_group_icon_path,
+            "asset_group_order": asset_group_order,
         }
     )
 
