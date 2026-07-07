@@ -512,6 +512,28 @@ WALLET_CRYPTO_ASSET_GROUPS = {
         "order": 20,
     },
 }
+WALLET_CRYPTO_NETWORK_GROUPS = {
+    "ethereum": {
+        "label": "Ethereum",
+        "icon_path": "images/wallet/eth.svg",
+        "order": 10,
+    },
+    "arbitrum": {
+        "label": "Arbitrum One",
+        "icon_path": "images/wallet/arb.svg",
+        "order": 20,
+    },
+    "base": {
+        "label": "Base",
+        "icon_path": "images/wallet/base.svg",
+        "order": 30,
+    },
+    "bsc": {
+        "label": "BNB Chain",
+        "icon_path": "images/wallet/bnb.svg",
+        "order": 40,
+    },
+}
 PAYGATE_PROVIDER_PAYMENT_GROUPS = {
     "stripe": "credit_card_link",
     "paypal": "paypal_us",
@@ -572,6 +594,12 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
     asset_group_label = asset_group.get("label") or asset_code
     asset_group_icon_path = asset_group.get("icon_path") or ""
     asset_group_order = int(asset_group.get("order") or 100)
+    chain = str(decorated.get("chain") or "").strip().lower()
+    network_group = WALLET_CRYPTO_NETWORK_GROUPS.get(chain, {})
+    network_group_label = network_group.get("label") or decorated.get("network_display") or decorated.get(
+        "network_label") or chain
+    network_group_icon_path = network_group.get("icon_path") or ""
+    network_group_order = int(network_group.get("order") or 100)
     decorated.update(
         {
             "payment_group_key": group_key,
@@ -585,6 +613,10 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
             "asset_group_label": asset_group_label,
             "asset_group_icon_path": asset_group_icon_path,
             "asset_group_order": asset_group_order,
+            "network_group_key": chain,
+            "network_group_label": network_group_label,
+            "network_group_icon_path": network_group_icon_path,
+            "network_group_order": network_group_order,
         }
     )
 

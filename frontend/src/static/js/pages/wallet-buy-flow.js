@@ -86,6 +86,10 @@
         assetGroupOrder: Number(node.getAttribute('data-asset-group-order') || 100),
         chain: node.getAttribute('data-chain') || '',
         networkLabel: node.getAttribute('data-network-label') || '',
+        networkGroupKey: node.getAttribute('data-network-group-key') || node.getAttribute('data-chain') || '',
+        networkGroupLabel: node.getAttribute('data-network-group-label') || node.getAttribute('data-network-label') || '',
+        networkGroupIconPath: node.getAttribute('data-network-group-icon-path') || '',
+        networkGroupOrder: Number(node.getAttribute('data-network-group-order') || 100),
         minAmount: node.getAttribute('data-min-amount') || '',
       };
     });
@@ -377,10 +381,19 @@
       );
       button.setAttribute('data-wallet-route-choice', item.key);
 
-      button.innerHTML =
-        '<span class="wallet-buy-flow__choice-copy">' +
-          '<span class="wallet-buy-flow__choice-title">' + escapeHtml(item.networkLabel) + '</span>' +
-        '</span>';
+        button.innerHTML =
+          '<span class="wallet-buy-flow__choice-icon">' +
+            renderChoiceIcon(
+              item.networkGroupIconPath || '',
+              item.networkGroupLabel || item.networkLabel,
+              'wallet-buy-flow__choice-icon-image'
+            ) +
+          '</span>' +
+          '<span class="wallet-buy-flow__choice-copy">' +
+            '<span class="wallet-buy-flow__choice-title">' +
+              escapeHtml(item.networkGroupLabel || item.networkLabel) +
+            '</span>' +
+          '</span>';
 
       container.appendChild(button);
     });

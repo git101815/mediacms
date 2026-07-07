@@ -437,6 +437,10 @@
           data-asset-group-order="{{ option.asset_group_order|default:100 }}"
           data-chain="{{ option.chain }}"
           data-network-label="{{ option.network_display|default:option.network_label|default:option.chain }}"
+          data-network-group-key="{{ option.network_group_key|default:option.chain }}"
+          data-network-group-label="{{ option.network_group_label|default:option.network_display|default:option.network_label|default:option.chain }}"
+          data-network-group-icon-path="{% if option.network_group_icon_path %}{% static option.network_group_icon_path %}{% endif %}"
+          data-network-group-order="{{ option.network_group_order|default:100 }}"
           data-min-amount="{{ option.min_amount_display|default:option.min_amount }}"
         >
         {% endfor %}
