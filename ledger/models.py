@@ -1132,6 +1132,7 @@ class TokenPack(models.Model):
     name = models.CharField(max_length=64)
     description = models.CharField(max_length=128, blank=True, default="")
     badge_text = models.CharField(max_length=24, blank=True, default="")
+    image = models.ImageField(upload_to="wallet/token_packs/", blank=True, default="")
     token_amount = models.BigIntegerField()
     gross_stable_amount = models.BigIntegerField()
     is_active = models.BooleanField(default=True, db_index=True)

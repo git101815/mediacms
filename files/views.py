@@ -1,5 +1,5 @@
 import json
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied, ValidationError as DjangoValidationError
 from django.views.decorators.http import require_POST
@@ -125,6 +125,17 @@ from ledger.services import (
     expire_stale_deposit_sessions,
     get_ad_free_lifetime_price_tokens,
     purchase_ad_free_lifetime,
+    _convert_platform_token_units_to_canonical_stable_units,
+)
+from ledger.providers.malum import MALUM_CHAIN, MALUM_PROVIDER_KEY
+from ledger.providers.paygate import PAYGATE_CHAIN, PAYGATE_PROVIDER_KEY
+from ledger.provider_deposits import (
+    get_malum_deposit_option,
+    open_malum_deposit_session,
+)
+from ledger.paygate_deposits import (
+    get_paygate_deposit_options,
+    open_paygate_deposit_session,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
@@ -194,6 +205,15 @@ WALLET_REQUEST_TYPE_ICON_MAP = {
     WalletRequest.REQUEST_TYPE_DEPOSIT: "south",
     WalletRequest.REQUEST_TYPE_WITHDRAWAL: "north_east",
 }
+
+PROVIDER_CHECKOUT_KEYS = {MALUM_PROVIDER_KEY, PAYGATE_PROVIDER_KEY}
+PROVIDER_CHECKOUT_CHAINS = {MALUM_CHAIN, PAYGATE_CHAIN}
+
+
+def _is_provider_checkout_session(session) -> bool:
+    metadata = session.metadata or {}
+    provider = metadata.get("payment_provider") or {}
+    return provider.get("key") in PROVIDER_CHECKOUT_KEYS or session.chain in PROVIDER_CHECKOUT_CHAINS
 
 DEPOSIT_SESSION_TERMINAL_STATUSES = {
     DepositSession.STATUS_CREDITED,
@@ -358,6 +378,24 @@ def _format_canonical_stable_amount(value: int) -> str:
         text = text.rstrip("0").rstrip(".")
     return text or "0"
 
+def _parse_human_canonical_stable_amount(value, *, field_name: str = "Amount") -> int:
+    raw_value = str(value or "0").strip().replace(",", ".")
+    if not raw_value:
+        return 0
+
+    try:
+        parsed = Decimal(raw_value)
+    except Exception:
+        return 0
+
+    if parsed <= 0:
+        return 0
+
+    scaled = parsed * (Decimal(10) ** 6)
+    if scaled != scaled.to_integral_value():
+        raise DjangoValidationError(f"{field_name} supports at most 6 decimal places.")
+
+    return int(scaled)
 
 def _format_pack_token_amount(value: int) -> str:
     scaled = Decimal(int(value)) / (Decimal(10) ** PLATFORM_TOKEN_DECIMALS)
@@ -372,6 +410,14 @@ def _build_wallet_token_pack_rows() -> list[dict]:
     queryset = TokenPack.objects.filter(is_active=True).order_by("sort_order", "id")[:5]
 
     for pack in queryset:
+        base_stable_amount = _convert_platform_token_units_to_canonical_stable_units(pack.token_amount)
+        image_url = ""
+        if pack.image:
+            try:
+                image_url = pack.image.url
+            except ValueError:
+                image_url = ""
+
         rows.append(
             {
                 "code": pack.code,
@@ -380,8 +426,9 @@ def _build_wallet_token_pack_rows() -> list[dict]:
                 "badge_text": pack.badge_text,
                 "token_amount": int(pack.token_amount),
                 "token_amount_display": _format_pack_token_amount(pack.token_amount),
-                "gross_stable_amount": int(pack.gross_stable_amount),
-                "price_display": _format_canonical_stable_amount(pack.gross_stable_amount),
+                "gross_stable_amount": int(base_stable_amount),
+                "price_display": _format_canonical_stable_amount(base_stable_amount),
+                "image_url": image_url,
             }
         )
 
@@ -427,9 +474,177 @@ def _format_route_amount(value, *, chain: str, asset_code: str) -> str:
     text = format(scaled.quantize(Decimal("0.01")), "f")
     return text
 
+WALLET_PAYMENT_GROUPS = {
+    "credit_card_link": {
+        "label": "Credit Card (via Link by Stripe)",
+        "icon_label": "Card",
+        "icon_path": "images/wallet/card.svg",
+        "order": 40,
+    },
+    "paypal_us": {
+        "label": "PayPal (US only)",
+        "icon_label": "PayPal",
+        "icon_path": "images/wallet/paypal.svg",
+        "order": 20,
+    },
+    "revolut_eu": {
+        "label": "Revolut (EU only)",
+        "icon_label": "Revolut",
+        "icon_path": "images/wallet/revolut.svg",
+        "order": 30,
+    },
+    "crypto": {
+        "label": "Crypto",
+        "icon_label": "Crypto",
+        "icon_path": "images/wallet/crypto.svg",
+        "order": 10,
+    },
+}
+WALLET_CRYPTO_ASSET_GROUPS = {
+    "USDC": {
+        "label": "USDC",
+        "icon_path": "images/wallet/usdc.svg",
+        "order": 10,
+    },
+    "USDT": {
+        "label": "USDT",
+        "icon_path": "images/wallet/usdt.svg",
+        "order": 20,
+    },
+}
+WALLET_CRYPTO_NETWORK_GROUPS = {
+    "ethereum": {
+        "label": "Ethereum",
+        "icon_path": "images/wallet/eth.svg",
+        "order": 10,
+    },
+    "arbitrum": {
+        "label": "Arbitrum One",
+        "icon_path": "images/wallet/arb.svg",
+        "order": 20,
+    },
+    "base": {
+        "label": "Base",
+        "icon_path": "images/wallet/base.svg",
+        "order": 30,
+    },
+    "bsc": {
+        "label": "BNB Chain",
+        "icon_path": "images/wallet/bnb.svg",
+        "order": 40,
+    },
+}
+PAYGATE_PROVIDER_PAYMENT_GROUPS = {
+    "stripe": "credit_card_link",
+    "paypal": "paypal_us",
+    "revolut": "revolut_eu",
+}
+
+
+def _get_wallet_payment_price_bps(group_key: str) -> int:
+    configured = getattr(settings, "WALLET_PAYMENT_METHOD_PRICE_BPS", {}) or {}
+    try:
+        return max(0, int(configured.get(group_key, 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+def _get_wallet_payment_price_fixed_canonical(group_key: str) -> int:
+    configured = (
+        getattr(settings, "WALLET_PAYMENT_METHOD_PRICE_FIXED", None)
+        or getattr(settings, "WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL", {})
+        or {}
+    )
+
+    return _parse_human_canonical_stable_amount(
+        configured.get(group_key, 0),
+        field_name=f"WALLET_PAYMENT_METHOD_PRICE_FIXED[{group_key}]",
+    )
+
+def _apply_payment_bps(canonical_amount: int, bps: int) -> int:
+    amount = (
+        Decimal(int(canonical_amount))
+        * Decimal(10000 + int(bps))
+        / Decimal(10000)
+    )
+    return int(amount.to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def _decorate_wallet_deposit_option(option: dict) -> dict:
+    decorated = dict(option)
+    provider_key = str(decorated.get("provider_key") or "").strip()
+    provider_id = str(decorated.get("paygate_provider_id") or "").strip().lower()
+    payment_method_type = str(decorated.get("payment_method_type") or "").strip().lower()
+
+    if provider_key == PAYGATE_PROVIDER_KEY and provider_id in PAYGATE_PROVIDER_PAYMENT_GROUPS:
+        group_key = PAYGATE_PROVIDER_PAYMENT_GROUPS[provider_id]
+    elif payment_method_type == "crypto":
+        group_key = "crypto"
+    else:
+        group_key = decorated.get("payment_method_key") or "payment"
+
+    group = WALLET_PAYMENT_GROUPS.get(group_key, {})
+    group_label = group.get("label") or decorated.get("payment_method_label") or "Payment"
+    group_icon = group.get("icon_label") or group.get("icon") or group_label
+    group_icon_path = group.get("icon_path") or ""
+    group_order = int(group.get("order") or 100)
+    price_bps = _get_wallet_payment_price_bps(group_key)
+    price_fixed_canonical = _get_wallet_payment_price_fixed_canonical(group_key)
+    asset_code = str(decorated.get("asset_code") or "").strip().upper()
+    asset_group = WALLET_CRYPTO_ASSET_GROUPS.get(asset_code, {})
+    asset_group_label = asset_group.get("label") or asset_code
+    asset_group_icon_path = asset_group.get("icon_path") or ""
+    asset_group_order = int(asset_group.get("order") or 100)
+    chain = str(decorated.get("chain") or "").strip().lower()
+    network_group = WALLET_CRYPTO_NETWORK_GROUPS.get(chain, {})
+    network_group_label = network_group.get("label") or decorated.get("network_display") or decorated.get(
+        "network_label") or chain
+    network_group_icon_path = network_group.get("icon_path") or ""
+    network_group_order = int(network_group.get("order") or 100)
+    decorated.update(
+        {
+            "payment_group_key": group_key,
+            "payment_group_label": group_label,
+            "payment_group_icon": group_icon,
+            "payment_group_icon_path": group_icon_path,
+            "payment_group_order": group_order,
+            "payment_price_bps": price_bps,
+            "payment_price_fixed_canonical": price_fixed_canonical,
+            "asset_group_key": asset_code,
+            "asset_group_label": asset_group_label,
+            "asset_group_icon_path": asset_group_icon_path,
+            "asset_group_order": asset_group_order,
+            "network_group_key": chain,
+            "network_group_label": network_group_label,
+            "network_group_icon_path": network_group_icon_path,
+            "network_group_order": network_group_order,
+        }
+    )
+
+    if provider_key == PAYGATE_PROVIDER_KEY:
+        decorated["payment_method_label"] = group_label
+        decorated["route_label"] = group_label
+
+    return decorated
 
 def _build_wallet_deposit_options() -> list[dict]:
     options = []
+
+    malum_option = get_malum_deposit_option()
+    if malum_option is not None:
+        options.append(
+            {
+                **malum_option,
+                "min_amount_display": _format_canonical_stable_amount(malum_option["min_amount"]),
+            }
+        )
+
+    for paygate_option in get_paygate_deposit_options():
+        options.append(
+            {
+                **paygate_option,
+                "min_amount_display": _format_canonical_stable_amount(paygate_option["min_amount"]),
+            }
+        )
 
     for option in list_available_deposit_options():
         chain = option["chain"]
@@ -452,6 +667,15 @@ def _build_wallet_deposit_options() -> list[dict]:
             }
         )
 
+    options = [_decorate_wallet_deposit_option(option) for option in options]
+    options.sort(
+        key=lambda item: (
+            int(item.get("payment_group_order") or 100),
+            str(item.get("payment_group_label") or ""),
+            str(item.get("network_display") or ""),
+            str(item.get("asset_code") or ""),
+        )
+    )
     return options
 
 def _normalize_wallet_tab(value: str) -> str:
@@ -731,7 +955,17 @@ def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_ST
 
     rows = []
     for session in sessions:
-        display_label = f"{_get_network_display_label(session.chain)} · {session.asset_code}"
+        metadata = session.metadata or {}
+        provider = metadata.get("payment_provider") or {}
+        is_provider_checkout = _is_provider_checkout_session(session)
+
+        if is_provider_checkout:
+            display_label = metadata.get("display_label") or provider.get("label") or "Provider checkout"
+            deposit_reference = provider.get("reference") or session.observed_txid or str(session.public_id)
+        else:
+            display_label = f"{_get_network_display_label(session.chain)} · {session.asset_code}"
+            deposit_reference = session.deposit_address
+
         public_status = _get_public_deposit_status(session)
 
         if active_status != WALLET_STATUS_ALL and public_status != active_status:
@@ -741,13 +975,19 @@ def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_ST
             {
                 "public_id": str(session.public_id),
                 "label": display_label,
+                "display_label": display_label,
                 "status": public_status,
                 "raw_status": session.status,
                 "status_label": PUBLIC_DEPOSIT_STATUS_LABELS.get(public_status, public_status),
                 "status_icon": PUBLIC_DEPOSIT_STATUS_ICONS.get(public_status, "schedule"),
-                "deposit_address": session.deposit_address,
+                "deposit_address": deposit_reference,
                 "created_at": session.created_at,
                 "url": reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}),
+                "show_view": public_status != PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE,
+                "show_amount": public_status == PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE and session.observed_amount is not None,
+                "credited_amount_display": _format_platform_token_amount(
+                    ((metadata.get("token_pack") or {}).get("token_amount") or 0)
+                ),
             }
         )
 
@@ -757,13 +997,20 @@ def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_ST
     return rows
 
 def _build_deposit_session_payload(session: DepositSession) -> dict:
-    network_display = _get_network_display_label(session.chain)
-    route_label = f"{network_display} · {session.asset_code}"
-    public_status = _get_public_deposit_status(session)
-
     metadata = session.metadata or {}
     token_pack = metadata.get("token_pack") or {}
     payment_method = metadata.get("payment_method") or {}
+    provider = metadata.get("payment_provider") or {}
+    is_provider_checkout = _is_provider_checkout_session(session)
+
+    if is_provider_checkout:
+        network_display = provider.get("network_display") or "Hosted checkout"
+        route_label = metadata.get("display_label") or provider.get("label")
+    else:
+        network_display = _get_network_display_label(session.chain)
+        route_label = f"{network_display} · {session.asset_code}"
+
+    public_status = _get_public_deposit_status(session)
 
     token_pack_name = (token_pack.get("name") or "").strip()
     token_pack_token_amount = int(token_pack.get("token_amount") or 0)
@@ -771,7 +1018,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
 
     expected_raw_amount = session.expected_onchain_raw_amount
     if expected_raw_amount in (None, ""):
-        expected_raw_amount = (session.metadata or {}).get("expected_route_raw_amount")
+        expected_raw_amount = metadata.get("expected_route_raw_amount")
     if expected_raw_amount in (None, ""):
         expected_raw_amount = session.min_amount
 
@@ -786,6 +1033,15 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         token_pack_label = (
             f"{_format_pack_token_amount(token_pack_token_amount)} tokens · "
             f"${_format_canonical_stable_amount(token_pack_price)}"
+        )
+
+    if is_provider_checkout:
+        min_amount_display = _format_canonical_stable_amount(session.min_amount)
+    else:
+        min_amount_display = _format_route_amount(
+            expected_raw_amount,
+            chain=session.chain,
+            asset_code=session.asset_code,
         )
 
     return {
@@ -803,11 +1059,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "required_confirmations": session.required_confirmations,
         "confirmations": session.confirmations,
         "min_amount": session.min_amount,
-        "min_amount_display": _format_route_amount(
-            expected_raw_amount,
-            chain=session.chain,
-            asset_code=session.asset_code,
-        ),
+        "min_amount_display": min_amount_display,
         "observed_txid": session.observed_txid or "",
         "observed_amount": session.observed_amount,
         "observed_amount_display": (
@@ -826,8 +1078,13 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "wallet_url": reverse("wallet"),
         "token_pack_name": token_pack_name,
         "token_pack_label": token_pack_label,
-        "payment_method_label": (payment_method.get("label") or "").strip(),
-        "show_network_step": bool(payment_method.get("show_network_step", True)),
+        "payment_method_label": (payment_method.get("label") or provider.get("label") or "").strip(),
+        "show_network_step": bool(payment_method.get("show_network_step", True)) and not is_provider_checkout,
+        "is_provider_checkout": is_provider_checkout,
+        "provider_key": provider.get("key") or "",
+        "provider_reference": provider.get("reference") or "",
+        "provider_status": provider.get("status") or provider.get("last_status") or "",
+        "checkout_url": provider.get("checkout_url") or "",
     }
 
 def _parse_required_list(payload, key):
@@ -912,6 +1169,10 @@ def _get_public_deposit_status(session) -> str:
     if raw_status == getattr(DepositSession, "STATUS_SWEPT", "swept"):
         return PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
 
+    if raw_status == DepositSession.STATUS_CREDITED:
+        if _is_provider_checkout_session(session):
+            return PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
+
     if raw_status == DepositSession.STATUS_AWAITING_PAYMENT:
         observed_amount = int(getattr(session, "observed_amount", 0) or 0)
         min_amount = int(getattr(session, "min_amount", 0) or 0)
@@ -934,8 +1195,6 @@ def wallet_deposit_request(request):
 
     option_key = (request.POST.get("deposit_option_key") or "").strip()
     token_pack_code = (request.POST.get("token_pack_key") or "").strip()
-    payment_method_key = (request.POST.get("payment_method_key") or "").strip()
-    payment_method_type = (request.POST.get("payment_method_type") or "").strip()
     return_tab = _normalize_wallet_tab((request.POST.get("return_tab") or WALLET_TAB_ALL).strip())
     return_status = _normalize_wallet_status(
         (request.POST.get("return_status") or WALLET_STATUS_ALL).strip(),
@@ -957,6 +1216,37 @@ def wallet_deposit_request(request):
         if token_pack is None:
             raise DjangoValidationError("Invalid token pack.")
 
+        payment_price_bps = int(selected_option.get("payment_price_bps") or 0)
+        payment_price_fixed_canonical = int(selected_option.get("payment_price_fixed_canonical") or 0)
+
+        if selected_option.get("payment_method_type") == "provider" and selected_option.get("provider_key") == MALUM_PROVIDER_KEY:
+            session = open_malum_deposit_session(
+                actor=request.user,
+                wallet=wallet_obj,
+                token_pack=token_pack,
+            )
+            provider = (session.metadata or {}).get("payment_provider") or {}
+            checkout_url = (provider.get("checkout_url") or "").strip()
+            if checkout_url and session.status == DepositSession.STATUS_AWAITING_PAYMENT:
+                return redirect(checkout_url)
+            return redirect("wallet_deposit_session", public_id=session.public_id)
+
+        if selected_option.get("payment_method_type") == "provider" and selected_option.get(
+                "provider_key") == PAYGATE_PROVIDER_KEY:
+            session = open_paygate_deposit_session(
+                actor=request.user,
+                wallet=wallet_obj,
+                token_pack=token_pack,
+                provider_id=selected_option.get("paygate_provider_id") or "",
+                payment_price_bps=payment_price_bps,
+                payment_price_fixed_canonical=payment_price_fixed_canonical,
+            )
+            provider = (session.metadata or {}).get("payment_provider") or {}
+            checkout_url = (provider.get("checkout_url") or "").strip()
+            if checkout_url and session.status == DepositSession.STATUS_AWAITING_PAYMENT:
+                return redirect(checkout_url)
+            return redirect("wallet_deposit_session", public_id=session.public_id)
+
         matching_payment_routes = [
             item for item in deposit_options
             if item["payment_method_key"] == selected_option["payment_method_key"]
@@ -966,27 +1256,20 @@ def wallet_deposit_request(request):
             and len({item["network_display"] for item in matching_payment_routes}) > 1
         )
 
-        existing_session = _find_existing_active_deposit_session(
-            user=request.user,
-            wallet=wallet_obj,
-            option_key=option_key,
-            token_pack_code=token_pack_code,
-        )
-        if existing_session is not None:
-            return redirect("wallet_deposit_session", public_id=existing_session.public_id)
-
         session = open_user_deposit_session(
             actor=request.user,
             wallet=wallet_obj,
             option_key=option_key,
             token_pack=token_pack,
-            payment_method_key=payment_method_key or selected_option["payment_method_key"],
-            payment_method_type=payment_method_type or selected_option["payment_method_type"],
+            payment_method_key=selected_option["payment_method_key"],
+            payment_method_type=selected_option["payment_method_type"],
             payment_method_label=selected_option["payment_method_label"],
             show_network_step=show_network_step,
+            payment_price_bps=payment_price_bps,
+            payment_price_fixed_canonical=payment_price_fixed_canonical,
         )
-    except DjangoValidationError as exc:
-        messages.add_message(request, messages.ERROR, str(exc))
+    except (DjangoValidationError, DjangoPermissionDenied, ImproperlyConfigured) as exc:
+        messages.add_message(request, messages.ERROR, _extract_wallet_form_error(exc))
         return redirect(
             f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status, open_modal='deposit')}"
         )

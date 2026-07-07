@@ -111,6 +111,11 @@ const PAGES = {
     snippet: templates.htmlBodySnippetEmbedPage({ id: 'page-embed' }),
     global: { mediaId: DEV_SAMPLE_DATA.media.videoId },
   },
+  wallet: {
+      id: 'wallet',
+      title: 'Wallet',
+      renderer: "import './static/js/pages/wallet-buy-flow';\n",
+    },
   media: {
     id: 'media',
     title: 'Media',

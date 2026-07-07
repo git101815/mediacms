@@ -31,7 +31,9 @@
       <div class="wallet-deposit-progress">
         <span class="wallet-deposit-progress__step wallet-deposit-progress__step--done">1. Package</span>
         <span class="wallet-deposit-progress__step wallet-deposit-progress__step--done">2. Payment method</span>
-        {% if deposit_session.show_network_step %}
+        {% if deposit_session.is_provider_checkout %}
+        <span class="wallet-deposit-progress__step wallet-deposit-progress__step--active">3. Secure checkout</span>
+        {% elif deposit_session.show_network_step %}
         <span class="wallet-deposit-progress__step wallet-deposit-progress__step--done">3. Network</span>
         <span class="wallet-deposit-progress__step wallet-deposit-progress__step--active">4. Waiting for payment</span>
         {% else %}
@@ -58,54 +60,92 @@
       {% endif %}
 
       <div class="wallet-deposit-ui__field-label">Payment route</div>
-
       <div class="wallet-deposit-ui__network-box">
         <span>{{ deposit_session.route_label }}</span>
       </div>
 
-      <div class="wallet-deposit-ui__address-box">
-        <div class="wallet-deposit-ui__address" data-deposit-address>{{ deposit_session.deposit_address }}</div>
-        <button type="button" class="wallet-deposit-ui__copy" data-copy-deposit-address aria-label="Copy deposit address">
-          <i class="material-icons" aria-hidden="true">content_copy</i>
-        </button>
-      </div>
+      {% if deposit_session.is_provider_checkout %}
+        {% if deposit_session.checkout_url and not deposit_session.is_terminal %}
+        <div class="wallet-deposit-ui__footer" style="display:block">
+          <a href="{{ deposit_session.checkout_url }}" class="wallet-route-form__submit" rel="noopener noreferrer">
+            Continue to secure checkout
+          </a>
+        </div>
+        {% endif %}
 
-      <div class="wallet-deposit-ui__info-card">
-        <div class="wallet-deposit-ui__row">
-          <span class="wallet-deposit-ui__row-label">Network</span>
-          <span class="wallet-deposit-ui__row-value">{{ deposit_session.network_display }}</span>
+        <div class="wallet-deposit-ui__info-card">
+          <div class="wallet-deposit-ui__row">
+            <span class="wallet-deposit-ui__row-label">Expected amount</span>
+            <span class="wallet-deposit-ui__row-value">{{ deposit_session.min_amount_display }} {{ deposit_session.asset_code }}</span>
+          </div>
+
+          <div class="wallet-deposit-ui__row">
+            <span class="wallet-deposit-ui__row-label">Reference</span>
+            <span class="wallet-deposit-ui__row-value wallet-deposit-ui__row-value--mono" data-deposit-txid>
+              {{ deposit_session.observed_txid|default:deposit_session.provider_reference|default:"—" }}
+            </span>
+          </div>
+
+          <div class="wallet-deposit-ui__row">
+            <span class="wallet-deposit-ui__row-label">Paid</span>
+            <span class="wallet-deposit-ui__row-value">
+              <span data-deposit-observed-amount>{{ deposit_session.observed_amount_display|default:"0" }}</span>
+              <span>{{ deposit_session.asset_code }}</span>
+            </span>
+          </div>
         </div>
 
-        <div class="wallet-deposit-ui__row">
-          <span class="wallet-deposit-ui__row-label">Expected amount</span>
-          <span class="wallet-deposit-ui__row-value">{{ deposit_session.min_amount_display }} {{ deposit_session.asset_code }}</span>
+        <div class="wallet-deposit-ui__warning">
+          <i class="material-icons" aria-hidden="true">info</i>
+          <div>
+            Complete the hosted checkout. Your tokens are credited automatically after Malum confirms the payment.
+          </div>
+        </div>
+      {% else %}
+        <div class="wallet-deposit-ui__address-box">
+          <div class="wallet-deposit-ui__address" data-deposit-address>{{ deposit_session.deposit_address }}</div>
+          <button type="button" class="wallet-deposit-ui__copy" data-copy-deposit-address aria-label="Copy deposit address">
+            <i class="material-icons" aria-hidden="true">content_copy</i>
+          </button>
         </div>
 
-        <div class="wallet-deposit-ui__row">
-          <span class="wallet-deposit-ui__row-label">Confirmations</span>
-          <span class="wallet-deposit-ui__row-value">
-            <span data-deposit-confirmations>{{ deposit_session.confirmations }}</span> / {{ deposit_session.required_confirmations }}
-          </span>
+        <div class="wallet-deposit-ui__info-card">
+          <div class="wallet-deposit-ui__row">
+            <span class="wallet-deposit-ui__row-label">Network</span>
+            <span class="wallet-deposit-ui__row-value">{{ deposit_session.network_display }}</span>
+          </div>
+
+          <div class="wallet-deposit-ui__row">
+            <span class="wallet-deposit-ui__row-label">Expected amount</span>
+            <span class="wallet-deposit-ui__row-value">{{ deposit_session.min_amount_display }} {{ deposit_session.asset_code }}</span>
+          </div>
+
+          <div class="wallet-deposit-ui__row">
+            <span class="wallet-deposit-ui__row-label">Confirmations</span>
+            <span class="wallet-deposit-ui__row-value">
+              <span data-deposit-confirmations>{{ deposit_session.confirmations }}</span> / {{ deposit_session.required_confirmations }}
+            </span>
+          </div>
+
+          <div class="wallet-deposit-ui__row">
+            <span class="wallet-deposit-ui__row-label">Reference</span>
+            <span class="wallet-deposit-ui__row-value wallet-deposit-ui__row-value--mono" data-deposit-txid>
+              {{ deposit_session.observed_txid|default:"—" }}
+            </span>
+          </div>
         </div>
 
-        <div class="wallet-deposit-ui__row">
-          <span class="wallet-deposit-ui__row-label">Reference</span>
-          <span class="wallet-deposit-ui__row-value wallet-deposit-ui__row-value--mono" data-deposit-txid>
-            {{ deposit_session.observed_txid|default:"—" }}
-          </span>
+        <div class="wallet-deposit-ui__warning">
+          <i class="material-icons" aria-hidden="true">warning</i>
+          <div>
+            Send only {{ deposit_session.asset_code }} on {{ deposit_session.network_display }}.
+          </div>
         </div>
-      </div>
-
-      <div class="wallet-deposit-ui__warning">
-        <i class="material-icons" aria-hidden="true">warning</i>
-        <div>
-          Send only {{ deposit_session.asset_code }} on {{ deposit_session.network_display }}.
-        </div>
-      </div>
+      {% endif %}
 
       <div class="wallet-deposit-ui__footer">
         <div class="wallet-deposit-ui__balance">
-          <div class="wallet-deposit-ui__balance-label">Received</div>
+          <div class="wallet-deposit-ui__balance-label">{% if deposit_session.is_provider_checkout %}Paid{% else %}Received{% endif %}</div>
           <div class="wallet-deposit-ui__balance-value">
             <span data-deposit-observed-amount>{{ deposit_session.observed_amount_display|default:"0" }}</span>
             <span>{{ deposit_session.asset_code }}</span>
@@ -124,7 +164,9 @@
           {% endif %}
 
           <a href="{{ wallet_url }}" class="wallet-deposit-ui__return">Return to wallet</a>
+          {% if not deposit_session.is_provider_checkout %}
           <button type="button" class="wallet-deposit-ui__share" data-share-deposit-details>Share details</button>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -148,7 +190,7 @@
   const statusIcon = root.querySelector('[data-deposit-status-icon]');
   const statusLabel = root.querySelector('[data-deposit-status-label]');
   const confirmationsNode = root.querySelector('[data-deposit-confirmations]');
-  const observedAmountNode = root.querySelector('[data-deposit-observed-amount]');
+  const observedAmountNodes = root.querySelectorAll('[data-deposit-observed-amount]');
   const txidNode = root.querySelector('[data-deposit-txid]');
   const refreshButton = root.querySelector('[data-deposit-refresh]');
   const shareButton = root.querySelector('[data-share-deposit-details]');
@@ -213,12 +255,24 @@
 
     const payload = await response.json();
 
-    statusPill.className = 'wallet-deposit-ui__status wallet-deposit-ui__status--' + payload.status;
-    statusIcon.textContent = payload.status_icon;
-    statusLabel.textContent = payload.status_label;
-    confirmationsNode.textContent = payload.confirmations;
-    observedAmountNode.textContent = payload.observed_amount_display || '0';
-    txidNode.textContent = payload.observed_txid || '—';
+    if (statusPill) {
+      statusPill.className = 'wallet-deposit-ui__status wallet-deposit-ui__status--' + payload.status;
+    }
+    if (statusIcon) {
+      statusIcon.textContent = payload.status_icon;
+    }
+    if (statusLabel) {
+      statusLabel.textContent = payload.status_label;
+    }
+    if (confirmationsNode) {
+      confirmationsNode.textContent = payload.confirmations || 0;
+    }
+    observedAmountNodes.forEach(function (node) {
+      node.textContent = payload.observed_amount_display || '0';
+    });
+    if (txidNode) {
+      txidNode.textContent = payload.observed_txid || payload.provider_reference || '—';
+    }
 
     if (!payload.is_terminal) {
       pollTimer = setTimeout(refreshStatus, 5000);

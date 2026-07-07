@@ -53,6 +53,54 @@ LEDGER_DEPOSIT_OPEN_COOLDOWN_THRESHOLD = 3
 LEDGER_DEPOSIT_OPEN_COOLDOWN_WINDOW_SECONDS = 5 * 60
 LEDGER_DEPOSIT_OPEN_COOLDOWN_SECONDS = 15 * 60
 
+MALUM_ENABLED = "false"
+MALUM_MERCHANT_ID = os.getenv("MALUM_MERCHANT_ID", "").strip()
+MALUM_PRIVATE_KEY = os.getenv("MALUM_PRIVATE_KEY", "").strip()
+MALUM_WEBHOOK_KEY = os.getenv("MALUM_WEBHOOK_KEY", "").strip()
+MALUM_SANDBOX_WEBHOOK_KEY = os.getenv("MALUM_SANDBOX_WEBHOOK_KEY", "").strip()
+MALUM_CURRENCY = "USD"
+MALUM_API_BASE_URL = "https://malum.to"
+MALUM_PUBLIC_BASE_URL = "https://celebfakes.ru"
+MALUM_PAYMENT_TTL_SECONDS = "3600"
+MALUM_BUYER_PAYS_FEES = "false"
+MALUM_MERCHANT_PAYS_GW_FEES = "false"
+
+PAYGATE_ENABLED = "true"
+PAYGATE_API_BASE_URL = "https://api.paygate.to"
+PAYGATE_CHECKOUT_BASE_URL = "https://checkout.paygate.to"
+PAYGATE_PUBLIC_BASE_URL = "https://celebfakes.ru"
+PAYGATE_USDC_POLYGON_WALLET = os.getenv("PAYGATE_USDC_POLYGON_WALLET", "").strip()
+PAYGATE_PROVIDER_IDS = ("paypal", "revolut", "stripe")
+PAYGATE_PROVIDER_LABELS = {
+    "stripe": "Credit Card (via Link by Stripe)",
+    "paypal": "PayPal (US only)",
+    "revolut": "Revolut (EU only)",
+}
+WALLET_PAYMENT_METHOD_PRICE_BPS = {
+    "credit_card_link": 1000,
+    "paypal_us": 800,
+    "revolut_eu": 500,
+    "crypto": 0,
+}
+WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
+    "credit_card_link": 0.3,
+    "paypal_us": 0.3,
+    "revolut_eu": 0.3,
+    "crypto": 0,
+}
+PAYGATE_CURRENCY = "USD"
+PAYGATE_PAYMENT_TTL_SECONDS = "3600"
+PAYGATE_MIN_CANONICAL_STABLE_AMOUNT = "1000000"
+PAYGATE_DOMAIN = "celebfakes.ru"
+PAYGATE_LOGO_URL = f"{FRONTEND_HOST}/static/images/logo_light.png"
+PAYGATE_BACKGROUND = "#15151a"
+PAYGATE_THEME = "dark"
+PAYGATE_BUTTON = "#ff3c73"
+PAYGATE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
 SECRET_KEY = os.getenv("SECRET_KEY")
 REDIS_LOCATION = os.getenv("REDIS_LOCATION", "redis://redis:6379/1")
 
@@ -106,6 +154,7 @@ CACHES = {
         },
     }
 }
+"""
 CELERY_BEAT_SCHEDULE = {
     "clear_sessions": {
         "task": "clear_sessions",
@@ -144,6 +193,7 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
     },
 }
+"""
 #cloud-storage
 STORJ_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 AWS_S3_ENDPOINT_URL = "https://gateway.storjshare.io"
