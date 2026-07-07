@@ -398,7 +398,8 @@
     <div class="wallet-buy-flow__steps">
       <span class="wallet-buy-flow__step wallet-buy-flow__step--active" data-wallet-step-indicator="1">1. Package</span>
       <span class="wallet-buy-flow__step" data-wallet-step-indicator="2">2. Payment method</span>
-      <span class="wallet-buy-flow__step" data-wallet-step-indicator="3">3. Network</span>
+      <span class="wallet-buy-flow__step" data-wallet-step-indicator="3">3. Coin</span>
+      <span class="wallet-buy-flow__step" data-wallet-step-indicator="4">4. Network</span>
     </div>
 
     <h2 id="wallet-deposit-modal-title" class="wallet-modal__title">Buy tokens</h2>
@@ -412,6 +413,7 @@
       <input type="hidden" name="payment_method_key" value="" data-wallet-selected-payment-method-key>
       <input type="hidden" name="payment_method_type" value="" data-wallet-selected-payment-method-type>
       <input type="hidden" name="deposit_option_key" value="" data-wallet-selected-route>
+      <input type="hidden" value="" data-wallet-selected-asset>
 
       <div class="wallet-buy-flow__source" hidden aria-hidden="true">
         {% for option in deposit_options %}
@@ -429,6 +431,10 @@
           data-payment-price-bps="{{ option.payment_price_bps }}"
           data-payment-price-fixed-canonical="{{ option.payment_price_fixed_canonical }}"
           data-asset-code="{{ option.asset_code }}"
+          data-asset-group-key="{{ option.asset_group_key|default:option.asset_code }}"
+          data-asset-group-label="{{ option.asset_group_label|default:option.asset_code }}"
+          data-asset-group-icon-path="{% if option.asset_group_icon_path %}{% static option.asset_group_icon_path %}{% endif %}"
+          data-asset-group-order="{{ option.asset_group_order|default:100 }}"
           data-chain="{{ option.chain }}"
           data-network-label="{{ option.network_display|default:option.network_label|default:option.chain }}"
           data-min-amount="{{ option.min_amount_display|default:option.min_amount }}"
@@ -503,14 +509,29 @@
       </div>
 
       <div class="wallet-buy-flow__panel" data-wallet-step-panel="3" hidden>
+        <div class="wallet-buy-modal__section">
+          <div class="wallet-buy-modal__section-title">Choose coin</div>
+          <div class="wallet-buy-flow__choices" data-wallet-asset-choices></div>
+        </div>
 
+        <div class="wallet-buy-flow__actions wallet-buy-flow__actions--split">
+          <button type="button" class="wallet-buy-flow__back" data-wallet-prev-step="2">
+            Back
+          </button>
+          <button type="button" class="wallet-route-form__submit" data-wallet-next-step="4">
+            Continue
+          </button>
+        </div>
+      </div>
+
+      <div class="wallet-buy-flow__panel" data-wallet-step-panel="4" hidden>
         <div class="wallet-buy-modal__section">
           <div class="wallet-buy-modal__section-title">Choose network</div>
           <div class="wallet-buy-flow__choices" data-wallet-network-choices></div>
         </div>
 
         <div class="wallet-buy-flow__actions wallet-buy-flow__actions--split">
-          <button type="button" class="wallet-buy-flow__back" data-wallet-prev-step="2">
+          <button type="button" class="wallet-buy-flow__back" data-wallet-prev-step="3">
             Back
           </button>
           <button type="submit" class="wallet-route-form__submit">

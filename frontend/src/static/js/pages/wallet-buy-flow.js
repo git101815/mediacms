@@ -25,6 +25,7 @@
     paymentMethodKey: '',
     paymentMethodLabel: '',
     paymentMethodType: '',
+    assetKey: '',
     routeKey: '',
   };
 
@@ -49,6 +50,14 @@
     });
   }
 
+  function renderChoiceIcon(iconPath, fallbackLabel, className) {
+    if (iconPath) {
+      return '<img class="' + className + '" src="' + escapeHtml(iconPath) + '" alt="">';
+    }
+
+    return '<span class="wallet-buy-flow__choice-icon-fallback">' + escapeHtml(fallbackLabel || '') + '</span>';
+  }
+
   function getRouteOptions() {
     const form = getBuyForm();
     if (!form) {
@@ -56,6 +65,9 @@
     }
 
     return Array.from(form.querySelectorAll('[data-wallet-route-option]')).map(function (node) {
+      const assetCode = node.getAttribute('data-asset-code') || '';
+      const assetGroupKey = node.getAttribute('data-asset-group-key') || assetCode;
+
       return {
         key: node.getAttribute('data-option-key') || '',
         paymentMethodKey: node.getAttribute('data-payment-method-key') || '',
@@ -67,21 +79,17 @@
         paymentGroupIconPath: node.getAttribute('data-payment-group-icon-path') || '',
         paymentPriceFixedCanonical: Number(node.getAttribute('data-payment-price-fixed-canonical') || 0),
         paymentPriceBps: Number(node.getAttribute('data-payment-price-bps') || 0),
-        assetCode: node.getAttribute('data-asset-code') || '',
+        assetCode: assetCode,
+        assetGroupKey: assetGroupKey,
+        assetGroupLabel: node.getAttribute('data-asset-group-label') || assetGroupKey,
+        assetGroupIconPath: node.getAttribute('data-asset-group-icon-path') || '',
+        assetGroupOrder: Number(node.getAttribute('data-asset-group-order') || 100),
         chain: node.getAttribute('data-chain') || '',
         networkLabel: node.getAttribute('data-network-label') || '',
         minAmount: node.getAttribute('data-min-amount') || '',
       };
     });
   }
-
-    function renderChoiceIcon(iconPath, fallbackLabel, className) {
-      if (iconPath) {
-        return '<img class="' + className + '" src="' + escapeHtml(iconPath) + '" alt="">';
-      }
-
-      return '<span class="wallet-buy-flow__choice-icon-fallback">' + escapeHtml(fallbackLabel || '') + '</span>';
-    }
 
   function getPaymentMethods() {
     const map = new Map();
@@ -97,9 +105,9 @@
           key: groupKey,
           label: option.paymentGroupLabel || option.paymentMethodLabel || option.assetCode,
           icon: option.paymentGroupIcon || option.paymentGroupLabel || option.assetCode,
+          iconPath: option.paymentGroupIconPath || '',
           type: option.paymentMethodType || 'crypto',
           priceBps: option.paymentPriceBps || 0,
-          iconPath: option.paymentGroupIconPath || '',
           priceFixedCanonical: option.paymentPriceFixedCanonical || 0,
           routes: [],
         });
@@ -114,6 +122,50 @@
   function getRoutesForPaymentMethod(paymentMethodKey) {
     return getRouteOptions().filter(function (option) {
       return (option.paymentGroupKey || option.paymentMethodKey) === paymentMethodKey;
+    });
+  }
+
+  function getRouteByKey(routeKey) {
+    return getRouteOptions().find(function (option) {
+      return option.key === routeKey;
+    }) || null;
+  }
+
+  function getAssetsForPaymentMethod(paymentMethodKey) {
+    const map = new Map();
+
+    getRoutesForPaymentMethod(paymentMethodKey)
+      .filter(function (option) {
+        return option.paymentMethodType === 'crypto';
+      })
+      .forEach(function (option) {
+        const key = option.assetGroupKey || option.assetCode;
+        if (!key) {
+          return;
+        }
+
+        if (!map.has(key)) {
+          map.set(key, {
+            key: key,
+            label: option.assetGroupLabel || option.assetCode,
+            iconPath: option.assetGroupIconPath || '',
+            order: option.assetGroupOrder || 100,
+          });
+        }
+      });
+
+    return Array.from(map.values()).sort(function (a, b) {
+      if (a.order !== b.order) {
+        return a.order - b.order;
+      }
+
+      return String(a.label || '').localeCompare(String(b.label || ''));
+    });
+  }
+
+  function getRoutesForSelectedAsset() {
+    return getRoutesForPaymentMethod(buyState.paymentMethodKey).filter(function (option) {
+      return (option.assetGroupKey || option.assetCode) === buyState.assetKey;
     });
   }
 
@@ -156,7 +208,6 @@
 
     const hiddenKey = document.querySelector('[data-wallet-selected-payment-method-key]');
     const hiddenType = document.querySelector('[data-wallet-selected-payment-method-type]');
-    const labelNode = document.querySelector('[data-wallet-selected-payment-method-label]');
 
     if (hiddenKey) {
       hiddenKey.value = buyState.paymentMethodKey;
@@ -164,29 +215,75 @@
     if (hiddenType) {
       hiddenType.value = buyState.paymentMethodType;
     }
-    if (labelNode) {
-      labelNode.textContent = buyState.paymentMethodLabel || '—';
+  }
+
+  function setSelectedAsset(assetKey) {
+    buyState.assetKey = assetKey || '';
+
+    const hidden = document.querySelector('[data-wallet-selected-asset]');
+    if (hidden) {
+      hidden.value = buyState.assetKey;
+    }
+  }
+
+  function syncHiddenPaymentFromRoute(route) {
+    if (!route) {
+      return;
+    }
+
+    const hiddenKey = document.querySelector('[data-wallet-selected-payment-method-key]');
+    const hiddenType = document.querySelector('[data-wallet-selected-payment-method-type]');
+
+    if (hiddenKey) {
+      hiddenKey.value = route.paymentMethodKey || buyState.paymentMethodKey;
+    }
+    if (hiddenType) {
+      hiddenType.value = route.paymentMethodType || buyState.paymentMethodType;
     }
   }
 
   function setSelectedRoute(routeKey) {
     buyState.routeKey = routeKey || '';
+
     const hidden = document.querySelector('[data-wallet-selected-route]');
     if (hidden) {
       hidden.value = buyState.routeKey;
     }
+
+    syncHiddenPaymentFromRoute(getRouteByKey(buyState.routeKey));
   }
 
-function getPaymentMethodPriceDisplay(method) {
-  const base = Number(buyState.packGrossCanonical || 0);
-  const bps = Number((method && method.priceBps) || 0);
-  const fixed = Number((method && method.priceFixedCanonical) || 0);
+  function selectDefaultAssetForPaymentMethod() {
+    const assets = getAssetsForPaymentMethod(buyState.paymentMethodKey);
+    setSelectedAsset(assets[0] ? assets[0].key : '');
+  }
 
-  const percentageFee = Math.round(base * bps / 10000);
-  const adjusted = base + fixed + percentageFee;
+  function selectDefaultRouteForPaymentMethod() {
+    const methodRoutes = getRoutesForPaymentMethod(buyState.paymentMethodKey);
 
-  return '$' + formatCanonicalStableAmount(adjusted);
-}
+    if (buyState.paymentMethodType !== 'crypto') {
+      setSelectedRoute(methodRoutes[0] ? methodRoutes[0].key : '');
+      return;
+    }
+
+    if (!buyState.assetKey) {
+      selectDefaultAssetForPaymentMethod();
+    }
+
+    const assetRoutes = getRoutesForSelectedAsset();
+    setSelectedRoute(assetRoutes[0] ? assetRoutes[0].key : '');
+  }
+
+  function getPaymentMethodPriceDisplay(method) {
+    const base = Number(buyState.packGrossCanonical || 0);
+    const bps = Number((method && method.priceBps) || 0);
+    const fixed = Number((method && method.priceFixedCanonical) || 0);
+
+    const percentageFee = Math.round(base * bps / 10000);
+    const adjusted = base + fixed + percentageFee;
+
+    return '$' + formatCanonicalStableAmount(adjusted);
+  }
 
   function renderPaymentMethodChoices() {
     const container = document.querySelector('[data-wallet-payment-method-choices]');
@@ -197,6 +294,8 @@ function getPaymentMethodPriceDisplay(method) {
     const methods = getPaymentMethods();
     if (!buyState.paymentMethodKey && methods.length) {
       setSelectedPaymentMethod(methods[0]);
+      selectDefaultAssetForPaymentMethod();
+      selectDefaultRouteForPaymentMethod();
     }
 
     container.innerHTML = '';
@@ -209,14 +308,48 @@ function getPaymentMethodPriceDisplay(method) {
       );
       button.setAttribute('data-wallet-payment-method-choice', method.key);
 
-    button.innerHTML =
-      '<span class="wallet-buy-flow__choice-icon">' +
-        renderChoiceIcon(method.iconPath, method.icon, 'wallet-buy-flow__choice-icon-image') +
-      '</span>' +
-      '<span class="wallet-buy-flow__choice-copy">' +
-        '<span class="wallet-buy-flow__choice-title">' + escapeHtml(method.label) + '</span>' +
-      '</span>' +
-      '<span class="wallet-buy-flow__choice-price">' + escapeHtml(getPaymentMethodPriceDisplay(method)) + '</span>';
+      button.innerHTML =
+        '<span class="wallet-buy-flow__choice-icon">' +
+          renderChoiceIcon(method.iconPath, method.icon, 'wallet-buy-flow__choice-icon-image') +
+        '</span>' +
+        '<span class="wallet-buy-flow__choice-copy">' +
+          '<span class="wallet-buy-flow__choice-title">' + escapeHtml(method.label) + '</span>' +
+        '</span>' +
+        '<span class="wallet-buy-flow__choice-price">' + escapeHtml(getPaymentMethodPriceDisplay(method)) + '</span>';
+
+      container.appendChild(button);
+    });
+  }
+
+  function renderAssetChoices() {
+    const container = document.querySelector('[data-wallet-asset-choices]');
+    if (!container) {
+      return;
+    }
+
+    const assets = getAssetsForPaymentMethod(buyState.paymentMethodKey);
+
+    if (!buyState.assetKey || !assets.some(function (item) { return item.key === buyState.assetKey; })) {
+      setSelectedAsset(assets[0] ? assets[0].key : '');
+    }
+
+    container.innerHTML = '';
+
+    assets.forEach(function (asset) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'wallet-buy-flow__choice' + (
+        buyState.assetKey === asset.key ? ' wallet-buy-flow__choice--selected' : ''
+      );
+      button.setAttribute('data-wallet-asset-choice', asset.key);
+
+      button.innerHTML =
+        '<span class="wallet-buy-flow__choice-icon">' +
+          renderChoiceIcon(asset.iconPath, asset.label, 'wallet-buy-flow__choice-icon-image') +
+        '</span>' +
+        '<span class="wallet-buy-flow__choice-copy">' +
+          '<span class="wallet-buy-flow__choice-title">' + escapeHtml(asset.label) + '</span>' +
+        '</span>';
 
       container.appendChild(button);
     });
@@ -228,7 +361,8 @@ function getPaymentMethodPriceDisplay(method) {
       return;
     }
 
-    const routes = getRoutesForPaymentMethod(buyState.paymentMethodKey);
+    const routes = getRoutesForSelectedAsset();
+
     if (!buyState.routeKey || !routes.some(function (item) { return item.key === buyState.routeKey; })) {
       setSelectedRoute(routes[0] ? routes[0].key : '');
     }
@@ -242,8 +376,8 @@ function getPaymentMethodPriceDisplay(method) {
         buyState.routeKey === item.key ? ' wallet-buy-flow__choice--selected' : ''
       );
       button.setAttribute('data-wallet-route-choice', item.key);
+
       button.innerHTML =
-        '<span class="wallet-buy-flow__choice-icon">' + escapeHtml(item.assetCode) + '</span>' +
         '<span class="wallet-buy-flow__choice-copy">' +
           '<span class="wallet-buy-flow__choice-title">' + escapeHtml(item.networkLabel) + '</span>' +
         '</span>';
@@ -262,6 +396,10 @@ function getPaymentMethodPriceDisplay(method) {
     }
 
     if (step >= 3) {
+      renderAssetChoices();
+    }
+
+    if (step >= 4) {
       renderNetworkChoices();
     }
   }
@@ -272,11 +410,11 @@ function getPaymentMethodPriceDisplay(method) {
 
     const methods = getPaymentMethods();
     setSelectedPaymentMethod(methods[0] || null);
-
-    const routes = getRoutesForPaymentMethod(buyState.paymentMethodKey);
-    setSelectedRoute(routes[0] ? routes[0].key : '');
+    selectDefaultAssetForPaymentMethod();
+    selectDefaultRouteForPaymentMethod();
 
     renderPaymentMethodChoices();
+    renderAssetChoices();
     renderNetworkChoices();
     goToStep(1);
   }
@@ -328,9 +466,11 @@ function getPaymentMethodPriceDisplay(method) {
       event.preventDefault();
 
       const step = nextButton.getAttribute('data-wallet-next-step');
+
       if (step === '2') {
         const checkedPack = document.querySelector('input[name="token_pack_choice"]:checked');
         setSelectedPackFromInput(checkedPack);
+        renderPaymentMethodChoices();
         goToStep(2);
         return;
       }
@@ -360,8 +500,17 @@ function getPaymentMethodPriceDisplay(method) {
           return;
         }
 
-        renderNetworkChoices();
+        selectDefaultAssetForPaymentMethod();
+        selectDefaultRouteForPaymentMethod();
+        renderAssetChoices();
         goToStep(3);
+        return;
+      }
+
+      if (step === '4') {
+        renderNetworkChoices();
+        goToStep(4);
+        return;
       }
 
       return;
@@ -377,13 +526,31 @@ function getPaymentMethodPriceDisplay(method) {
     const paymentMethodChoice = event.target.closest('[data-wallet-payment-method-choice]');
     if (paymentMethodChoice) {
       event.preventDefault();
+
       const methodKey = paymentMethodChoice.getAttribute('data-wallet-payment-method-choice');
       const methods = getPaymentMethods();
       const selectedMethod = methods.find(function (item) {
         return item.key === methodKey;
       });
+
       setSelectedPaymentMethod(selectedMethod || null);
+      selectDefaultAssetForPaymentMethod();
+      selectDefaultRouteForPaymentMethod();
+
       renderPaymentMethodChoices();
+      renderAssetChoices();
+      renderNetworkChoices();
+      return;
+    }
+
+    const assetChoice = event.target.closest('[data-wallet-asset-choice]');
+    if (assetChoice) {
+      event.preventDefault();
+
+      setSelectedAsset(assetChoice.getAttribute('data-wallet-asset-choice'));
+      selectDefaultRouteForPaymentMethod();
+
+      renderAssetChoices();
       renderNetworkChoices();
       return;
     }
@@ -391,6 +558,7 @@ function getPaymentMethodPriceDisplay(method) {
     const routeChoice = event.target.closest('[data-wallet-route-choice]');
     if (routeChoice) {
       event.preventDefault();
+
       setSelectedRoute(routeChoice.getAttribute('data-wallet-route-choice'));
       renderNetworkChoices();
     }
