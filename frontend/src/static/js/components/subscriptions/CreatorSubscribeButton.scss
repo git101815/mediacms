@@ -1,17 +1,25 @@
 .creator-subscribe-slot {
   position: relative;
+  display: inline-block;
+  vertical-align: middle;
   white-space: nowrap;
 }
 
-.profile-info-inner > .creator-subscribe-slot--profile,
-.media-author-banner > .creator-subscribe-slot--media {
-  width: 1%;
-  padding-left: 16px;
-  text-align: right;
+.creator-subscribe-slot--profile {
+  margin-left: 16px;
 }
 
-.media-info-content .media-author-banner {
-  width: 100%;
+.creator-subscribe-slot--media {
+  margin-bottom: 5px;
+  margin-left: 12px;
+}
+
+.creator-subscribe-slot--media .creator-subscribe-button {
+  min-width: 88px;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  line-height: 32px;
 }
 
 .creator-subscribe-button {
@@ -223,9 +231,12 @@
 }
 
 @media screen and (max-width: 520px) {
-  .profile-info-inner > .creator-subscribe-slot--profile,
-  .media-author-banner > .creator-subscribe-slot--media {
-    padding-left: 10px;
+  .creator-subscribe-slot--profile {
+    margin-left: 10px;
+  }
+
+  .creator-subscribe-slot--media {
+    margin-left: 8px;
   }
 
   .creator-subscribe-button {

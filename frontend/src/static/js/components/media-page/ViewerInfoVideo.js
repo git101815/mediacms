@@ -49,7 +49,7 @@ export default class ViewerInfoVideo extends ViewerInfo {
               username={author.username}
               creatorName={author.name || author.username}
               placement="media"
-              portalTargetSelector=".viewer-info-inner .media-author-banner"
+              portalTargetSelector=".viewer-info-inner .media-author-banner > div:nth-child(2) > span:first-child"
             />
           ) : null}
         </div>

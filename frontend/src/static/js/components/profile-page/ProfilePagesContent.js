@@ -19,7 +19,7 @@ export default class ProfilePagesContent extends React.PureComponent {
             username={author.username}
             creatorName={author.name || author.username}
             placement="profile"
-            portalTargetSelector=".profile-page-header .profile-info-inner"
+            portalTargetSelector=".profile-page-header .profile-info-inner > div:nth-child(2)"
           />
         ) : null}
         {this.props.children}
