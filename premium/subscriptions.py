@@ -205,6 +205,8 @@ def record_media_release(
 ) -> tuple[PremiumMediaRelease | None, bool]:
     if media.media_type != "video" or not media.listable:
         return None, False
+    if not bool(getattr(media.user, "advancedUser", False)):
+        return None, False
 
     release, created = PremiumMediaRelease.objects.get_or_create(
         media=media,
@@ -425,6 +427,8 @@ def subscribe_to_creator_with_tokens(
         .get(pk=plan.pk)
     )
 
+    if not bool(getattr(plan.creator, "advancedUser", False)):
+        raise ValidationError("Creator subscriptions are not available")
     if not plan.is_active:
         raise ValidationError("Subscription plan is not active")
     if plan.access_policy != CreatorSubscriptionPlan.POLICY_FUTURE_RELEASES:
@@ -529,6 +533,18 @@ def renew_creator_subscription_with_tokens(*, subscription_id: int) -> dict:
         return {
             "renewed": False,
             "reason": "canceled",
+            "subscription": subscription,
+        }
+
+    if not bool(getattr(subscription.creator, "advancedUser", False)):
+        subscription.status = CreatorSubscription.STATUS_EXPIRED
+        subscription.renewal_attempted_at = now
+        subscription.save(
+            update_fields=["status", "renewal_attempted_at"]
+        )
+        return {
+            "renewed": False,
+            "reason": "creator_not_eligible",
             "subscription": subscription,
         }
 
@@ -713,6 +729,12 @@ def serialize_subscription(subscription: CreatorSubscription) -> dict:
 
 
 def build_creator_subscription_offer(*, creator, viewer) -> dict:
+    if not bool(getattr(creator, "advancedUser", False)):
+        return {
+            "plans": [],
+            "subscription": None,
+        }
+
     plans = list(
         CreatorSubscriptionPlan.objects.filter(
             creator=creator,
