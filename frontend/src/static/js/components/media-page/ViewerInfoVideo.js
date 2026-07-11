@@ -1,5 +1,6 @@
 import React from 'react';
 import { MediaPageStore } from '../../utils/stores/';
+import CreatorSubscribeButton from '../subscriptions/CreatorSubscribeButton';
 import ViewerInfoContent from './ViewerInfoContent';
 import ViewerInfoVideoTitleBanner from './ViewerInfoVideoTitleBanner';
 import ViewerInfo from './ViewerInfo';
@@ -23,6 +24,7 @@ export default class ViewerInfoVideo extends ViewerInfo {
       title = MediaPageStore.get('media-data').title;
 
       author = {
+        username: MediaPageStore.get('media-data').user,
         name: MediaPageStore.get('media-data').author_name,
         url: MediaPageStore.get('media-data').author_profile,
         thumb: MediaPageStore.get('media-author-thumbnail-url'),
@@ -42,6 +44,14 @@ export default class ViewerInfoVideo extends ViewerInfo {
             allowDownload={allowDownload}
           />
           <ViewerInfoContent author={author} published={published} description={description} />
+          {author && author.username ? (
+            <CreatorSubscribeButton
+              username={author.username}
+              creatorName={author.name || author.username}
+              placement="media"
+              portalTargetSelector=".viewer-info-inner .media-author-banner"
+            />
+          ) : null}
         </div>
       </div>
     );
