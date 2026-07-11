@@ -475,12 +475,6 @@ def _format_route_amount(value, *, chain: str, asset_code: str) -> str:
     return text
 
 WALLET_PAYMENT_GROUPS = {
-    "credit_card_link": {
-        "label": "Credit Card (via Link by Stripe)",
-        "icon_label": "Card",
-        "icon_path": "images/wallet/card.svg",
-        "order": 40,
-    },
     "paypal_us": {
         "label": "PayPal (US only)",
         "icon_label": "PayPal",
@@ -535,7 +529,6 @@ WALLET_CRYPTO_NETWORK_GROUPS = {
     },
 }
 PAYGATE_PROVIDER_PAYMENT_GROUPS = {
-    "stripe": "credit_card_link",
     "paypal": "paypal_us",
     "revolut": "revolut_eu",
 }

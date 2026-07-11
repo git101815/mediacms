@@ -67,35 +67,28 @@ MALUM_MERCHANT_PAYS_GW_FEES = "false"
 
 PAYGATE_ENABLED = "true"
 PAYGATE_API_BASE_URL = "https://api.paygate.to"
-PAYGATE_CHECKOUT_BASE_URL = "https://checkout.paygate.to"
-PAYGATE_PUBLIC_BASE_URL = "https://celebfakes.ru"
+PAYGATE_CHECKOUT_BASE_URL = "https://checkout.celebfakes.ru"
+PAYGATE_PUBLIC_BASE_URL = "https://checkout.celebfakes.ru"
 PAYGATE_USDC_POLYGON_WALLET = os.getenv("PAYGATE_USDC_POLYGON_WALLET", "").strip()
-PAYGATE_PROVIDER_IDS = ("paypal", "revolut", "stripe")
+PAYGATE_PROVIDER_IDS = ("paypal", "revolut")
 PAYGATE_PROVIDER_LABELS = {
-    "stripe": "Credit Card (via Link by Stripe)",
     "paypal": "PayPal (US only)",
     "revolut": "Revolut (EU only)",
 }
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
-    "credit_card_link": 1000,
     "paypal_us": 800,
-    "revolut_eu": 500,
+    "revolut_eu": 700,
     "crypto": 0,
 }
 WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
-    "credit_card_link": 0.3,
-    "paypal_us": 0.3,
-    "revolut_eu": 0.3,
+    "paypal_us": 1.3,
+    "revolut_eu": 1.8,
     "crypto": 0,
 }
 PAYGATE_CURRENCY = "USD"
 PAYGATE_PAYMENT_TTL_SECONDS = "3600"
 PAYGATE_MIN_CANONICAL_STABLE_AMOUNT = "1000000"
-PAYGATE_DOMAIN = "celebfakes.ru"
-PAYGATE_LOGO_URL = f"{FRONTEND_HOST}/static/images/logo_light.png"
-PAYGATE_BACKGROUND = "#15151a"
-PAYGATE_THEME = "dark"
-PAYGATE_BUTTON = "#ff3c73"
+PAYGATE_DOMAIN = "checkout.celebfakes.ru"
 PAYGATE_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -154,7 +147,7 @@ CACHES = {
         },
     }
 }
-"""
+
 CELERY_BEAT_SCHEDULE = {
     "clear_sessions": {
         "task": "clear_sessions",
@@ -193,7 +186,7 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
     },
 }
-"""
+
 #cloud-storage
 STORJ_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 AWS_S3_ENDPOINT_URL = "https://gateway.storjshare.io"
@@ -202,6 +195,18 @@ AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_S3_SIGNATURE_VERSION = os.getenv("AWS_S3_SIGNATURE_VERSION")
 AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
+
+# premium private S3 storage
+PREMIUM_S3_BUCKET = os.getenv("PREMIUM_S3_BUCKET", "").strip()
+PREMIUM_S3_ENDPOINT_URL = "https://gateway.storjshare.io"
+PREMIUM_S3_REGION_NAME = "auto"
+PREMIUM_S3_ADDRESSING_STYLE = "path"
+PREMIUM_S3_SIGNATURE_VERSION = "s3v4"
+PREMIUM_S3_ACCESS_KEY_ID = os.getenv("PREMIUM_S3_ACCESS_KEY_ID", "").strip()
+PREMIUM_S3_SECRET_ACCESS_KEY = os.getenv("PREMIUM_S3_SECRET_ACCESS_KEY", "").strip()
+PREMIUM_S3_UPLOAD_PREFIX = "premium-media"
+PREMIUM_SIGNED_URL_TTL_SECONDS = 900
+PREMIUM_MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024 * 1024
 
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@celebfakes.ru")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "mail.smtpbackend.ru")
