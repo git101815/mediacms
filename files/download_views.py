@@ -1,22 +1,31 @@
 import base64
 import hashlib
 import hmac
+import logging
 import time
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.conf import settings
 from django.core.cache import cache
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.http import Http404, HttpResponse, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
+from django.template.defaultfilters import filesizeformat
 from django.utils.encoding import iri_to_uri
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET, require_POST
 
+from premium.downloads import (
+    build_premium_download_url,
+    get_premium_download_asset,
+)
+
 from .methods import is_mediacms_editor
 from .models import Encoding, Media
 
+
+logger = logging.getLogger(__name__)
 
 DOWNLOADABLE_EXTENSIONS = {"mp4", "webm"}
 
@@ -144,6 +153,52 @@ def get_download_source(media, download_id):
     return encoding.media_encoding_url
 
 
+def get_request_premium_download_asset(request, media):
+    try:
+        return get_premium_download_asset(
+            user=request.user,
+            media=media,
+        )
+    except ValidationError as exc:
+        raise Http404("Premium download is not available") from exc
+
+
+def get_premium_download_options(asset):
+    size = ""
+
+    if int(asset.size_bytes or 0) > 0:
+        size = filesizeformat(asset.size_bytes)
+
+    return [
+        {
+            "id": "premium",
+            "label": "Download premium video",
+            "size": size,
+        }
+    ]
+
+
+def build_download_back_url(media, premium_mode):
+    url = media.get_absolute_url()
+
+    if not premium_mode:
+        return url
+
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["playback"] = "premium"
+
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urlencode(query),
+            parts.fragment,
+        )
+    )
+
+
 def build_bunny_download_url(source_url):
     base_url = getattr(settings, "BUNNY_DOWNLOAD_BASE_URL", "").rstrip("/")
     token_key = getattr(settings, "BUNNY_DOWNLOAD_TOKEN_KEY", "")
@@ -191,15 +246,24 @@ def media_download_page(request, friendly_token):
         return HttpResponseForbidden("Age verification is required")
 
     media = get_download_media(request, friendly_token)
+    premium_mode = request.GET.get("playback") == "premium"
+
+    if premium_mode:
+        asset = get_request_premium_download_asset(request, media)
+        download_options = get_premium_download_options(asset)
+    else:
+        download_options = get_download_options(media)
 
     return render(
         request,
         "cms/download.html",
         {
             "media": media,
-            "download_options": get_download_options(media),
+            "download_options": download_options,
+            "back_url": build_download_back_url(media, premium_mode),
         },
     )
+
 
 def get_download_cooldown_identity(request):
     user = request.user
@@ -245,6 +309,7 @@ def get_download_cooldown_response(request):
 
     return response
 
+
 @never_cache
 @csrf_protect
 @require_POST
@@ -257,9 +322,28 @@ def media_download_start(request, friendly_token, download_id):
         return cooldown_response
 
     media = get_download_media(request, friendly_token)
-    source_url = get_download_source(media, download_id)
 
-    response = HttpResponseRedirect(build_bunny_download_url(source_url))
+    if download_id == "premium":
+        asset = get_request_premium_download_asset(request, media)
+
+        try:
+            source_url = build_premium_download_url(
+                asset=asset,
+                media=media,
+            )
+        except ValidationError as exc:
+            logger.exception(
+                "Could not build premium download URL media_id=%s",
+                media.id,
+            )
+            raise Http404(
+                "Premium download is not available"
+            ) from exc
+    else:
+        source_url = get_download_source(media, download_id)
+        source_url = build_bunny_download_url(source_url)
+
+    response = HttpResponseRedirect(source_url)
     response["Cache-Control"] = "private, no-store, max-age=0"
     response["Pragma"] = "no-cache"
 

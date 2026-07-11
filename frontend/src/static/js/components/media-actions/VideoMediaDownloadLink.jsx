@@ -1,5 +1,6 @@
 import React from 'react';
 import { MediaPageStore } from '../../utils/stores/';
+import { getVideoDownloadPageUrl } from '../../utils/mediaDownload';
 import { CircleIconButton, MaterialIcon } from '../_shared/';
 import { translateString } from '../../utils/helpers/';
 
@@ -15,7 +16,7 @@ export function VideoMediaDownloadLink() {
       <button
         type="button"
         onClick={() => {
-          window.location.href = '/download/' + encodeURIComponent(mediaId) + '/';
+          window.location.href = getVideoDownloadPageUrl(mediaId);
         }}
       >
         <CircleIconButton type="span">

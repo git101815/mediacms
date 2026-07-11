@@ -5,6 +5,7 @@ import { usePopup, useUser } from '../../utils/hooks/';
 import { SiteContext } from '../../utils/contexts/';
 import { PageActions, MediaPageActions } from '../../utils/actions/';
 import { MediaPageStore } from '../../utils/stores/';
+import { getVideoDownloadPageUrl } from '../../utils/mediaDownload';
 import { CircleIconButton, MaterialIcon, NavigationContentApp, NavigationMenuList, PopupMain } from '../_shared/';
 import { ReportForm } from '../report-form/ReportForm';
 
@@ -152,7 +153,7 @@ export function MediaMoreOptionsIcon(props) {
   const mediaIsVideo = 'video' === mediaData.media_type;
 
   const downloadLink = mediaIsVideo
-    ? '/download/' + encodeURIComponent(mediaId) + '/'
+    ? getVideoDownloadPageUrl(mediaId)
     : formatInnerLink(mediaData.public_media_url, site.url);
 
   const [popupContentRef, PopupContent, PopupTrigger] = usePopup();

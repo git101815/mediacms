@@ -141,7 +141,7 @@ urlpatterns = [
     re_path(r"^tags", views.tags, name="tags"),
     re_path(r"^tos$", views.tos, name="terms_of_service"),
     re_path(r"^download/(?P<friendly_token>[\w\-_]+)/$", download_views.media_download_page, name="media_download_page"),
-    re_path(r"^download/(?P<friendly_token>[\w\-_]+)/(?P<download_id>original|\d+)/$", download_views.media_download_start, name="media_download_start"),
+    re_path(r"^download/(?P<friendly_token>[\w\-_]+)/(?P<download_id>original|premium|\d+)/$", download_views.media_download_start, name="media_download_start"),
     re_path(r"^view", views.view_media, name="get_media"),
     re_path(r"^upload", views.upload_media, name="upload_media"),
     # API VIEWS
