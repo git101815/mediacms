@@ -2,11 +2,13 @@ from django.contrib import admin
 
 from .models import (
     CreatorSubscription,
+    CreatorSubscriptionPeriod,
     CreatorSubscriptionPlan,
     MediaPurchase,
     PremiumCollection,
     PremiumCollectionMedia,
     PremiumMediaAsset,
+    PremiumMediaRelease,
     PremiumMediaUnlock,
 )
 
@@ -54,10 +56,29 @@ class PremiumCollectionAdmin(admin.ModelAdmin):
 
 @admin.register(CreatorSubscriptionPlan)
 class CreatorSubscriptionPlanAdmin(admin.ModelAdmin):
-    list_display = ["id", "creator", "code", "name", "price_tokens", "access_policy", "is_active"]
+    list_display = [
+        "id",
+        "creator",
+        "code",
+        "name",
+        "price_tokens",
+        "billing_period_days",
+        "access_policy",
+        "is_active",
+    ]
     list_filter = ["access_policy", "is_active"]
     search_fields = ["creator__username", "code", "name"]
     filter_horizontal = ["included_collections"]
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return ()
+        return (
+            "creator",
+            "code",
+            "billing_period_days",
+            "access_policy",
+        )
 
 
 @admin.register(CreatorSubscription)
@@ -70,7 +91,78 @@ class CreatorSubscriptionAdmin(admin.ModelAdmin):
         "status",
         "current_period_start",
         "current_period_end",
+        "past_due_since",
+        "renewal_attempted_at",
         "cancel_at_period_end",
     ]
     list_filter = ["status", "cancel_at_period_end"]
     search_fields = ["user__username", "creator__username", "plan__code"]
+    raw_id_fields = ["user", "creator", "plan", "last_txn"]
+
+
+@admin.register(CreatorSubscriptionPeriod)
+class CreatorSubscriptionPeriodAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "subscription",
+        "creator",
+        "plan",
+        "period_start",
+        "period_end",
+        "price_tokens",
+        "txn",
+    ]
+    list_filter = ["plan"]
+    search_fields = [
+        "subscription__user__username",
+        "creator__username",
+        "plan__code",
+    ]
+    raw_id_fields = ["subscription", "creator", "plan", "txn"]
+    readonly_fields = [
+        "subscription",
+        "creator",
+        "plan",
+        "txn",
+        "period_start",
+        "period_end",
+        "price_tokens",
+        "created_at",
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PremiumMediaRelease)
+class PremiumMediaReleaseAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "media",
+        "creator",
+        "released_at",
+        "processed_at",
+    ]
+    list_filter = ["processed_at"]
+    search_fields = [
+        "media__title",
+        "media__friendly_token",
+        "creator__username",
+    ]
+    raw_id_fields = ["media", "creator"]
+    readonly_fields = [
+        "media",
+        "creator",
+        "released_at",
+        "processed_at",
+        "created_at",
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
