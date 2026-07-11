@@ -61,12 +61,12 @@ class CreatorSubscriptionPeriod(models.Model):
 class PremiumMediaRelease(models.Model):
     media = models.OneToOneField(
         "files.Media",
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="premium_release",
     )
     creator = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="premium_media_releases",
     )
     released_at = models.DateTimeField(db_index=True)

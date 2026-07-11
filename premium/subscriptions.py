@@ -36,6 +36,9 @@ from .models import (
 from .services import format_token_amount, get_user_wallet
 
 
+DEFAULT_CREATOR_SUBSCRIPTION_PLAN_CODE = "default"
+DEFAULT_CREATOR_SUBSCRIPTION_PLAN_NAME = "Membership"
+DEFAULT_CREATOR_SUBSCRIPTION_PERIOD_DAYS = 30
 DEFAULT_SUBSCRIPTION_CREATOR_SHARE_BPS = 8000
 DEFAULT_SUBSCRIPTION_RENEWAL_GRACE_DAYS = 3
 DEFAULT_SUBSCRIPTION_RETRY_MINUTES = 60
@@ -213,35 +216,19 @@ def record_media_release(
     return release, created
 
 
-def backfill_missing_media_releases(*, limit: int = 500) -> int:
-    media_rows = list(
-        Media.objects.filter(
-            media_type="video",
-            listable=True,
-            premium_release__isnull=True,
-        )
-        .select_related("user")
-        .order_by("id")[: max(int(limit), 1)]
-    )
-
-    created_count = 0
-    for media in media_rows:
-        _, created = record_media_release(
-            media=media,
-            released_at=media.add_date or timezone.now(),
-        )
-        if created:
-            created_count += 1
-
-    return created_count
-
-
 def _create_subscription_payment(
     *,
     subscription: CreatorSubscription,
     plan: CreatorSubscriptionPlan,
     period_start,
 ) -> CreatorSubscriptionPeriod:
+    if plan.creator_id != subscription.creator_id:
+        raise ValidationError(
+            "Subscription plan creator does not match subscription creator"
+        )
+    if plan.access_policy != CreatorSubscriptionPlan.POLICY_FUTURE_RELEASES:
+        raise ValidationError("This subscription access policy is not supported")
+
     price_tokens = int(plan.price_tokens)
     billing_period_days = int(plan.billing_period_days)
 
@@ -381,7 +368,6 @@ def _create_subscription_payment(
     )
 
     subscription.plan = plan
-    subscription.creator = plan.creator
     subscription.status = CreatorSubscription.STATUS_ACTIVE
     subscription.current_period_start = period_start
     subscription.current_period_end = period_end
@@ -392,7 +378,6 @@ def _create_subscription_payment(
     subscription.save(
         update_fields=[
             "plan",
-            "creator",
             "status",
             "current_period_start",
             "current_period_end",
@@ -487,12 +472,10 @@ def subscribe_to_creator_with_tokens(
         )
     else:
         subscription.plan = plan
-        subscription.creator = plan.creator
         subscription.cancel_at_period_end = False
         subscription.save(
             update_fields=[
                 "plan",
-                "creator",
                 "cancel_at_period_end",
             ]
         )
@@ -546,6 +529,33 @@ def renew_creator_subscription_with_tokens(*, subscription_id: int) -> dict:
         return {
             "renewed": False,
             "reason": "canceled",
+            "subscription": subscription,
+        }
+
+    if subscription.plan.creator_id != subscription.creator_id:
+        subscription.status = CreatorSubscription.STATUS_EXPIRED
+        subscription.renewal_attempted_at = now
+        subscription.save(
+            update_fields=["status", "renewal_attempted_at"]
+        )
+        return {
+            "renewed": False,
+            "reason": "plan_creator_mismatch",
+            "subscription": subscription,
+        }
+
+    if (
+        subscription.plan.access_policy
+        != CreatorSubscriptionPlan.POLICY_FUTURE_RELEASES
+    ):
+        subscription.status = CreatorSubscription.STATUS_EXPIRED
+        subscription.renewal_attempted_at = now
+        subscription.save(
+            update_fields=["status", "renewal_attempted_at"]
+        )
+        return {
+            "renewed": False,
+            "reason": "unsupported_policy",
             "subscription": subscription,
         }
 
@@ -706,6 +716,7 @@ def build_creator_subscription_offer(*, creator, viewer) -> dict:
     plans = list(
         CreatorSubscriptionPlan.objects.filter(
             creator=creator,
+            code=DEFAULT_CREATOR_SUBSCRIPTION_PLAN_CODE,
             is_active=True,
             access_policy=CreatorSubscriptionPlan.POLICY_FUTURE_RELEASES,
         ).order_by("price_tokens", "id")
@@ -784,7 +795,6 @@ def get_due_subscription_ids(*, limit: int = 500) -> list[int]:
                 CreatorSubscription.STATUS_PAST_DUE,
             ],
             current_period_end__lte=now,
-            plan__access_policy=CreatorSubscriptionPlan.POLICY_FUTURE_RELEASES,
         )
         .filter(
             Q(renewal_attempted_at__isnull=True)

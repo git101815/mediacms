@@ -4,7 +4,6 @@ from celery import current_app, shared_task
 from celery.schedules import crontab
 
 from .subscriptions import (
-    backfill_missing_media_releases,
     get_due_subscription_ids,
     grant_release_subscription_unlocks,
     process_pending_releases,
@@ -13,6 +12,7 @@ from .subscriptions import (
 
 
 logger = logging.getLogger(__name__)
+SHORT_TASK_QUEUE = "short_tasks"
 
 
 def install_subscription_beat_schedule() -> None:
@@ -22,13 +22,9 @@ def install_subscription_beat_schedule() -> None:
         {
             "task": "premium.tasks.process_pending_premium_releases",
             "schedule": crontab(minute="*/5"),
-        },
-    )
-    schedule.setdefault(
-        "premium-backfill-missing-releases",
-        {
-            "task": "premium.tasks.backfill_missing_premium_releases",
-            "schedule": crontab(minute="*/10"),
+            "options": {
+                "queue": SHORT_TASK_QUEUE,
+            },
         },
     )
     schedule.setdefault(
@@ -36,31 +32,36 @@ def install_subscription_beat_schedule() -> None:
         {
             "task": "premium.tasks.renew_due_creator_subscriptions",
             "schedule": crontab(minute="*/5"),
+            "options": {
+                "queue": SHORT_TASK_QUEUE,
+            },
         },
     )
     current_app.conf.beat_schedule = schedule
 
 
-@shared_task(name="premium.tasks.grant_premium_release_unlocks")
+@shared_task(
+    name="premium.tasks.grant_premium_release_unlocks",
+    queue=SHORT_TASK_QUEUE,
+)
 def grant_premium_release_unlocks(release_id):
     return grant_release_subscription_unlocks(
         release_id=int(release_id),
     )
 
 
-@shared_task(name="premium.tasks.process_pending_premium_releases")
+@shared_task(
+    name="premium.tasks.process_pending_premium_releases",
+    queue=SHORT_TASK_QUEUE,
+)
 def process_pending_premium_releases(limit=500):
     return process_pending_releases(limit=int(limit))
 
 
-@shared_task(name="premium.tasks.backfill_missing_premium_releases")
-def backfill_missing_premium_releases(limit=500):
-    return {
-        "created": backfill_missing_media_releases(limit=int(limit)),
-    }
-
-
-@shared_task(name="premium.tasks.renew_due_creator_subscriptions")
+@shared_task(
+    name="premium.tasks.renew_due_creator_subscriptions",
+    queue=SHORT_TASK_QUEUE,
+)
 def renew_due_creator_subscriptions(limit=500):
     subscription_ids = get_due_subscription_ids(limit=int(limit))
     summary = {

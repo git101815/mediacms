@@ -70,6 +70,16 @@ class CreatorSubscriptionPlanAdmin(admin.ModelAdmin):
     search_fields = ["creator__username", "code", "name"]
     filter_horizontal = ["included_collections"]
 
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return ()
+        return (
+            "creator",
+            "code",
+            "billing_period_days",
+            "access_policy",
+        )
+
 
 @admin.register(CreatorSubscription)
 class CreatorSubscriptionAdmin(admin.ModelAdmin):
