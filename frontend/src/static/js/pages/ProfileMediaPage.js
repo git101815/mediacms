@@ -6,6 +6,7 @@ import { ProfilePageActions } from '../utils/actions';
 import { MediaListWrapper } from '../components/MediaListWrapper';
 import ProfilePagesHeader from '../components/profile-page/ProfilePagesHeader';
 import ProfilePagesContent from '../components/profile-page/ProfilePagesContent';
+import CreatorSubscriptionPanel from '../components/profile-page/CreatorSubscriptionPanel';
 import { LazyLoadItemListAsync } from '../components/item-list/LazyLoadItemListAsync';
 
 import { Page } from './_Page';
@@ -156,6 +157,7 @@ export class ProfileMediaPage extends Page {
       ) : null,
       this.state.author ? (
         <ProfilePagesContent key="ProfilePagesContent">
+          <CreatorSubscriptionPanel username={this.state.author.username} />
           <MediaListWrapper
             title={!isMediaAuthor || 0 < this.state.channelMediaCount ? this.state.title : null}
             className="items-list-ver"

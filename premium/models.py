@@ -226,6 +226,7 @@ class CreatorSubscriptionPlan(models.Model):
     code = models.SlugField(max_length=64)
     name = models.CharField(max_length=100)
     price_tokens = models.BigIntegerField()
+    billing_period_days = models.PositiveIntegerField(default=30)
 
     access_policy = models.CharField(
         max_length=32,
@@ -252,7 +253,15 @@ class CreatorSubscriptionPlan(models.Model):
             models.UniqueConstraint(
                 fields=["creator", "code"],
                 name="unique_creator_subscription_plan_code",
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(price_tokens__gt=0),
+                name="prem_sub_plan_price_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(billing_period_days__gt=0),
+                name="prem_sub_plan_days_gt_0",
+            ),
         ]
 
     def __str__(self):
@@ -284,6 +293,8 @@ class CreatorSubscription(models.Model):
     status = models.CharField(max_length=16, default=STATUS_ACTIVE, db_index=True)
     current_period_start = models.DateTimeField(db_index=True)
     current_period_end = models.DateTimeField(db_index=True)
+    past_due_since = models.DateTimeField(null=True, blank=True, db_index=True)
+    renewal_attempted_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     cancel_at_period_end = models.BooleanField(default=False)
 
@@ -297,9 +308,21 @@ class CreatorSubscription(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "creator"],
+                name="uniq_subscriber_creator",
+            ),
+        ]
         indexes = [
             models.Index(fields=["user", "creator", "status", "current_period_end"]),
         ]
 
     def __str__(self):
         return f"{self.user_id} -> {self.creator_id}"
+
+
+from .subscription_models import (  # noqa: E402,F401
+    CreatorSubscriptionPeriod,
+    PremiumMediaRelease,
+)

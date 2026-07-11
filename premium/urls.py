@@ -1,9 +1,34 @@
 from django.urls import re_path
 
-from . import views
+from . import subscription_views, views
 
 
 urlpatterns = [
+    re_path(
+        r"^api/v1/creators/(?P<username>[\w.@+-]+)/subscription-plans$",
+        subscription_views.creator_subscription_plans,
+        name="premium_creator_subscription_plans",
+    ),
+    re_path(
+        r"^api/v1/subscription-plans/(?P<plan_id>\d+)/subscribe$",
+        subscription_views.subscribe_creator_plan,
+        name="premium_subscription_subscribe",
+    ),
+    re_path(
+        r"^api/v1/me/subscriptions$",
+        subscription_views.my_creator_subscriptions,
+        name="premium_my_subscriptions",
+    ),
+    re_path(
+        r"^api/v1/subscriptions/(?P<subscription_id>\d+)/cancel$",
+        subscription_views.cancel_subscription,
+        name="premium_subscription_cancel",
+    ),
+    re_path(
+        r"^api/v1/subscriptions/(?P<subscription_id>\d+)/resume$",
+        subscription_views.resume_subscription,
+        name="premium_subscription_resume",
+    ),
     re_path(
         (
             r"^premium/media/"
