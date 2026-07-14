@@ -487,12 +487,6 @@ WALLET_PAYMENT_GROUPS = {
         "icon_path": "images/wallet/revolut.svg",
         "order": 30,
     },
-    "guardarian_card": {
-        "label": "Credit Card (Guardarian)",
-        "icon_label": "Guardarian",
-        "icon_path": "images/wallet/card.svg",
-        "order": 40,
-    },
     "crypto": {
         "label": "Crypto",
         "icon_label": "Crypto",
@@ -537,7 +531,6 @@ WALLET_CRYPTO_NETWORK_GROUPS = {
 PAYGATE_PROVIDER_PAYMENT_GROUPS = {
     "paypal": "paypal_us",
     "revolut": "revolut_eu",
-    "guardarian": "guardarian_card",
 }
 
 

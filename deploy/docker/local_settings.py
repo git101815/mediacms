@@ -70,30 +70,24 @@ PAYGATE_API_BASE_URL = "https://api.paygate.to"
 PAYGATE_CHECKOUT_BASE_URL = "https://checkout.celebfakes.ru"
 PAYGATE_PUBLIC_BASE_URL = "https://checkout.celebfakes.ru"
 PAYGATE_USDC_POLYGON_WALLET = os.getenv("PAYGATE_USDC_POLYGON_WALLET", "").strip()
-PAYGATE_PROVIDER_IDS = ("paypal", "revolut", "guardarian")
+PAYGATE_PROVIDER_IDS = ("paypal", "revolut")
 PAYGATE_PROVIDER_LABELS = {
     "paypal": "PayPal (US only)",
     "revolut": "Revolut (EU only)",
-    "guardarian": "Credit Card (min 20 USD)",
 }
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "paypal_us": 800,
     "revolut_eu": 700,
-    "guardarian_card": 600,
     "crypto": 0,
 }
 WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
     "paypal_us": 1.3,
     "revolut_eu": 1.8,
-    "guardarian_card": 2,
     "crypto": 0,
 }
 PAYGATE_CURRENCY = "USD"
 PAYGATE_PAYMENT_TTL_SECONDS = "3600"
 PAYGATE_MIN_CANONICAL_STABLE_AMOUNT = "1000000"
-PAYGATE_PROVIDER_MIN_CANONICAL_STABLE_AMOUNTS = {
-    "guardarian": 20_000_000,
-}
 PAYGATE_DOMAIN = "checkout.celebfakes.ru"
 PAYGATE_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
