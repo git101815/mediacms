@@ -131,6 +131,29 @@ def get_paygate_min_canonical_stable_amount() -> int:
     return max(1, parsed)
 
 
+def get_paygate_provider_min_canonical_stable_amount(provider_id: str) -> int:
+    normalized_provider_id = str(provider_id or "").strip().lower()
+    default_minimum = get_paygate_min_canonical_stable_amount()
+    if not normalized_provider_id:
+        return default_minimum
+
+    configured = getattr(settings, "PAYGATE_PROVIDER_MIN_CANONICAL_STABLE_AMOUNTS", {}) or {}
+    if not isinstance(configured, dict):
+        raise ImproperlyConfigured(
+            "PAYGATE_PROVIDER_MIN_CANONICAL_STABLE_AMOUNTS must be a mapping"
+        )
+
+    value = configured.get(normalized_provider_id, default_minimum)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ImproperlyConfigured(
+            f"Invalid PayGate minimum for provider '{normalized_provider_id}'"
+        ) from exc
+
+    return max(1, parsed)
+
+
 def get_paygate_user_agent() -> str:
     return _setting_str(
         "PAYGATE_USER_AGENT",
