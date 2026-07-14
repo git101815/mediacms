@@ -68,7 +68,7 @@ MALUM_MERCHANT_PAYS_GW_FEES = "false"
 PAYGATE_ENABLED = "true"
 PAYGATE_API_BASE_URL = "https://api.paygate.to"
 PAYGATE_CHECKOUT_BASE_URL = "https://checkout.celebfakes.ru"
-PAYGATE_PUBLIC_BASE_URL = "https://celebfakes.ru"
+PAYGATE_PUBLIC_BASE_URL = "https://checkout.celebfakes.ru"
 PAYGATE_USDC_POLYGON_WALLET = os.getenv("PAYGATE_USDC_POLYGON_WALLET", "").strip()
 PAYGATE_PROVIDER_IDS = ("paypal", "revolut", "guardarian")
 PAYGATE_PROVIDER_LABELS = {
@@ -83,9 +83,9 @@ WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "crypto": 0,
 }
 WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
-    "paypal_us": 0.8,
+    "paypal_us": 1.3,
     "revolut_eu": 1.8,
-    "guardarian_card": 0.6,
+    "guardarian_card": 2,
     "crypto": 0,
 }
 PAYGATE_CURRENCY = "USD"
