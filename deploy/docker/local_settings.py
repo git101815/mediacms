@@ -74,7 +74,7 @@ PAYGATE_PROVIDER_IDS = ("paypal", "revolut", "guardarian")
 PAYGATE_PROVIDER_LABELS = {
     "paypal": "PayPal (US only)",
     "revolut": "Revolut (EU only)",
-    "guardarian": "Credit Card (via Guardarian)",
+    "guardarian": "Credit Card (min 20 USD)",
 }
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "paypal_us": 800,
