@@ -27,6 +27,7 @@ from ledger.providers.paygate import (
     get_paygate_currency,
     get_paygate_min_canonical_stable_amount,
     get_paygate_payment_ttl_seconds,
+    get_paygate_provider_min_canonical_stable_amount,
     get_paygate_provider_id,
     get_paygate_provider_ids,
     get_paygate_provider_label,
@@ -87,13 +88,18 @@ def get_paygate_deposit_options() -> list[dict]:
 
     currency = get_paygate_currency()
     provider_ids = get_paygate_provider_ids()
-    min_amount = get_paygate_min_canonical_stable_amount()
+    default_min_amount = get_paygate_min_canonical_stable_amount()
 
     if not provider_ids:
         provider_ids = [""]
 
     options = []
     for provider_id in provider_ids:
+        min_amount = (
+            get_paygate_provider_min_canonical_stable_amount(provider_id)
+            if provider_id
+            else default_min_amount
+        )
         provider_label = get_paygate_provider_label(provider_id) if provider_id else PAYGATE_PAYMENT_METHOD_LABEL
         label = provider_label if provider_id else PAYGATE_PAYMENT_METHOD_LABEL
 
