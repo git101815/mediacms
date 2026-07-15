@@ -42,12 +42,12 @@ def _shared_secret() -> str:
 
 def _gateway_header() -> tuple[str, str]:
     secret = (
-        _setting_str("LEDGER_INTERNAL_GATEWAY_SECRET")
-        or _setting_str("MEDIACMS_INTERNAL_GATEWAY_SECRET")
+        _setting_str("MEDIACMS_INTERNAL_GATEWAY_SECRET")
+        or _setting_str("LEDGER_INTERNAL_GATEWAY_SECRET")
     )
     name = (
-        _setting_str("LEDGER_INTERNAL_GATEWAY_HEADER")
-        or _setting_str("MEDIACMS_INTERNAL_GATEWAY_HEADER")
+        _setting_str("MEDIACMS_INTERNAL_GATEWAY_HEADER")
+        or _setting_str("LEDGER_INTERNAL_GATEWAY_HEADER")
         or "X-Ledger-Internal-Gateway"
     )
     return name, secret
