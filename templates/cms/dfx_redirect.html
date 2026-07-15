@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block headtitle %}Opening DFX - {{ PORTAL_NAME }}{% endblock headtitle %}
+
+{% block innercontent %}
+<div class="wallet-ui wallet-ui--tokens">
+  <div class="wallet-ui__shell">
+    <div class="wallet-ui__body">
+      <section class="wallet-ui__section">
+        <div class="wallet-ui__empty">
+          <div class="wallet-ui__empty-title">Opening DFX</div>
+          <div class="wallet-ui__empty-text" data-dfx-status>
+            Preparing the secure bank-transfer checkout…
+          </div>
+          <a href="{{ dfx_launch.session_url }}" class="wallet-ui__ghost-link" data-dfx-fallback hidden>
+            Return to the deposit
+          </a>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+{{ dfx_launch.auth_payload|json_script:"dfx-auth-payload" }}
+{{ dfx_launch.checkout_params|json_script:"dfx-checkout-params" }}
+<script>
+(function () {
+  const statusNode = document.querySelector('[data-dfx-status]');
+  const fallbackNode = document.querySelector('[data-dfx-fallback]');
+  const authPayload = JSON.parse(
+    document.getElementById('dfx-auth-payload').textContent
+  );
+  const checkoutParams = JSON.parse(
+    document.getElementById('dfx-checkout-params').textContent
+  );
+
+  fetch('{{ dfx_launch.auth_url|escapejs }}', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(authPayload)
+  })
+    .then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (!response.ok) {
+          const detail = payload.message || payload.error || ('HTTP ' + response.status);
+          throw new Error(String(detail));
+        }
+        return payload;
+      });
+    })
+    .then(function (payload) {
+      if (!payload.accessToken) {
+        throw new Error('DFX did not return an access token');
+      }
+      const params = new URLSearchParams(checkoutParams);
+      params.set('session', payload.accessToken);
+      window.location.replace('{{ dfx_launch.checkout_url|escapejs }}?' + params.toString());
+    })
+    .catch(function (error) {
+      statusNode.textContent = 'DFX could not be opened: ' + error.message;
+      fallbackNode.hidden = false;
+    });
+})();
+</script>
+{% endblock %}

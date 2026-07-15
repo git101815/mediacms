@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, ValidationError
@@ -106,11 +106,33 @@ def canonical_stable_to_fiat_amount(
     return format(amount, f".{int(decimal_places)}f")
 
 
+def fiat_amount_to_canonical_stable_units(
+    value,
+    *,
+    currency: str,
+    rounding=ROUND_CEILING,
+) -> int:
+    try:
+        fiat_amount = Decimal(str(value))
+    except Exception as exc:
+        raise ValidationError("Fiat amount must be a decimal number") from exc
+    if not fiat_amount.is_finite() or fiat_amount < 0:
+        raise ValidationError("Fiat amount must be finite and non-negative")
+
+    canonical = (
+        fiat_amount
+        * get_fiat_usd_rate(currency)
+        * (Decimal(10) ** CANONICAL_STABLE_DECIMALS)
+    )
+    return int(canonical.to_integral_value(rounding=rounding))
+
+
 __all__ = [
     "CANONICAL_STABLE_CURRENCY",
     "CANONICAL_STABLE_DECIMALS",
     "canonical_stable_to_fiat_amount",
     "canonical_stable_to_fiat_decimal",
+    "fiat_amount_to_canonical_stable_units",
     "get_fiat_currency_symbol",
     "get_fiat_usd_rate",
     "normalize_fiat_currency",

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from .client import MediaCMSInternalClient
 from .config import load_config
 from .derivation import EvmDeriver
+from .dfx_signer import start_dfx_signer_server
 from .evm import (
     address_from_private_key,
     build_erc20_transfer_transaction,
@@ -1388,6 +1389,11 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
 
 def main() -> None:
     config = load_config()
+    try:
+        start_dfx_signer_server(config)
+    except Exception:
+        logging.exception("dfx_signer action=start_failed")
+
     client = MediaCMSInternalClient(
         base_url=config.mediacms_base_url,
         service_name=config.service_name,

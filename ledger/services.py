@@ -3476,6 +3476,45 @@ def list_available_deposit_options() -> list[dict]:
 
     return options
 
+def _find_reusable_active_session_by_payment(
+    *,
+    wallet: TokenWallet,
+    chain: str,
+    asset_code: str,
+    token_contract_address: str,
+    token_pack_code: str,
+    expected_min_amount: int,
+    payment_method_key: str,
+) -> DepositSession | None:
+    normalized_payment_key = str(payment_method_key or "").strip()
+    candidates = (
+        DepositSession.objects.select_for_update()
+        .filter(
+            wallet=wallet,
+            chain=chain,
+            asset_code=asset_code,
+            token_contract_address=token_contract_address,
+            status__in=ACTIVE_DEPOSIT_SESSION_STATUSES,
+            expires_at__gt=timezone.now(),
+        )
+        .order_by("-created_at")
+    )
+
+    for session in candidates:
+        metadata = session.metadata or {}
+        snapshot = metadata.get("token_pack") or {}
+        payment_method = metadata.get("payment_method") or {}
+        if str(snapshot.get("code") or "").strip() != str(token_pack_code or "").strip():
+            continue
+        if int(session.min_amount) != int(expected_min_amount):
+            continue
+        if str(payment_method.get("key") or "").strip() != normalized_payment_key:
+            continue
+        return session
+
+    return None
+
+
 @transaction.atomic
 def open_user_deposit_session(
     *,
@@ -3489,6 +3528,7 @@ def open_user_deposit_session(
     show_network_step: bool = True,
     payment_price_bps=0,
     payment_price_fixed_canonical=0,
+    session_ttl_seconds: int | None = None,
 ) -> DepositSession:
     actor = _require_authenticated_actor(actor)
     require_ledger_operation_enabled(LEDGER_OPERATION_FLAG_DEPOSIT_OPEN)
@@ -3527,13 +3567,14 @@ def open_user_deposit_session(
     if expected_canonical_amount < int(template_min_canonical_amount):
         raise ValidationError("Selected token pack is below the minimum deposit for this payment route")
 
-    existing_session = _find_reusable_active_session(
+    existing_session = _find_reusable_active_session_by_payment(
         wallet=wallet,
         chain=chain,
         asset_code=asset_code,
         token_contract_address=token_contract_address,
         token_pack_code=token_pack_snapshot["code"],
         expected_min_amount=expected_canonical_amount,
+        payment_method_key=payment_method_key,
     )
 
     if existing_session is not None:
@@ -3547,7 +3588,14 @@ def open_user_deposit_session(
         token_contract_address=token_contract_address,
     )
 
-    expires_at = timezone.now() + timedelta(seconds=int(template.session_ttl_seconds))
+    ttl_seconds = int(
+        session_ttl_seconds
+        if session_ttl_seconds is not None
+        else template.session_ttl_seconds
+    )
+    if ttl_seconds <= 0:
+        raise ValidationError("Deposit session TTL must be positive")
+    expires_at = timezone.now() + timedelta(seconds=ttl_seconds)
 
     route_key = _build_deposit_route_key(
         chain=chain,

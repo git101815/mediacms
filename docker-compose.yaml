@@ -168,6 +168,8 @@ services:
     restart: unless-stopped
 
   sweeper_service:
+    expose:
+      - "8080"
     build:
       context: .
       dockerfile: ./sweeper_service/Dockerfile
@@ -184,6 +186,9 @@ services:
       SWEEPER_SERVICE_CONFIG_PATH: /app/config/sweeper-service.json
       SWEEPER_SERVICE_POLL_INTERVAL_SECONDS: 30
       SWEEPER_SERVICE_CLAIM_BATCH_SIZE: 20
+      DFX_SIGNER_HOST: 0.0.0.0
+      DFX_SIGNER_PORT: 8080
+      DFX_SIGNER_EXPECTED_SERVICE: mediacms-web
       ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
       ARBITRUM_RPC_URL: ${ARBITRUM_RPC_URL}
       BASE_RPC_URL: ${BASE_RPC_URL}

@@ -84,14 +84,31 @@ WALLET_FIAT_USD_RATES = {
     # EUR/USD: one EUR is worth 1.12 USD.
     "EUR": "1.12",
 }
+
+DFX_ENABLED = "true"
+DFX_API_BASE_URL = "https://api.dfx.swiss"
+DFX_APP_BASE_URL = "https://app.dfx.swiss"
+DFX_PUBLIC_BASE_URL = "https://celebfakes.ru"
+DFX_FIAT_CURRENCY = "EUR"
+DFX_PAYMENT_METHOD = "Bank"
+DFX_LANGUAGE = "en"
+DFX_WALLET_NAME = ""
+DFX_PAYMENT_TTL_SECONDS = 7 * 24 * 60 * 60
+DFX_API_TIMEOUT_SECONDS = 20
+DFX_CACHE_SECONDS = 300
+DFX_SWEEPER_SIGNER_BASE_URL = "http://sweeper_service:8080"
+DFX_SWEEPER_SIGNER_SERVICE_NAME = "mediacms-web"
+DFX_SWEEPER_SIGNER_TIMEOUT_SECONDS = 10
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "paypal_us": 800,
     "revolut_eu": 700,
+    "dfx_bank": 0,
     "crypto": 0,
 }
 WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
     "paypal_us": 1.3,
     "revolut_eu": 1.8,
+    "dfx_bank": 0,
     "crypto": 0,
 }
 PAYGATE_CURRENCY = "USD"
