@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 
@@ -89,11 +90,15 @@ def _preflight_dfx_purchase(
     if asset is None:
         raise ValidationError("Selected MediaCMS route is not buyable through DFX")
 
-    token_pack_snapshot = _build_token_pack_snapshot(
-        token_pack=token_pack,
-        payment_price_bps=payment_price_bps,
-        payment_price_fixed_canonical=payment_price_fixed_canonical,
-    )
+    # _build_token_pack_snapshot() locks the TokenPack row with
+    # select_for_update(). Keep that lock in a short local transaction instead
+    # of holding a database transaction open during the DFX network request.
+    with transaction.atomic():
+        token_pack_snapshot = _build_token_pack_snapshot(
+            token_pack=token_pack,
+            payment_price_bps=payment_price_bps,
+            payment_price_fixed_canonical=payment_price_fixed_canonical,
+        )
     expected_canonical_amount = int(token_pack_snapshot["gross_stable_amount"])
     quote = get_dfx_buy_quote(
         asset_id=int(asset["id"]),

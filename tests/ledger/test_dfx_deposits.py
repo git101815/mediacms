@@ -3,12 +3,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TransactionTestCase
 
 from ledger.dfx_deposits import (
     _preflight_dfx_purchase,
     open_dfx_deposit_session,
 )
+from ledger.models import TokenPack
 
 
 class TestDfxDepositPreflight(SimpleTestCase):
@@ -107,3 +108,70 @@ class TestDfxDepositPreflight(SimpleTestCase):
                 )
 
         mocked_open.assert_not_called()
+
+
+class TestDfxDepositPreflightTransactions(TransactionTestCase):
+    def test_real_pack_snapshot_runs_without_an_outer_transaction(self):
+        token_pack = TokenPack.objects.create(
+            code="dfx-preflight-transaction",
+            name="DFX preflight transaction",
+            description="",
+            badge_text="",
+            token_amount=1_000_000_000,
+            gross_stable_amount=10_000_000,
+            is_active=True,
+            sort_order=0,
+        )
+        route = {
+            "key": (
+                "arbitrum:USDC:"
+                "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
+            ),
+            "chain": "arbitrum",
+            "asset_code": "USDC",
+            "token_contract_address": (
+                "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
+            ),
+        }
+
+        with (
+            patch(
+                "ledger.dfx_deposits.list_available_deposit_options",
+                return_value=[route],
+            ),
+            patch(
+                "ledger.dfx_deposits.find_dfx_asset_for_route",
+                return_value={"id": 123},
+            ),
+            patch(
+                "ledger.dfx_deposits.get_dfx_buy_quote",
+                return_value={
+                    "sourceAmount": "12.34",
+                    "requestedTargetAmount": "10",
+                    "estimatedTargetAmount": "10",
+                },
+            ) as mocked_quote,
+            patch(
+                "ledger.dfx_deposits.get_dfx_fiat_currency",
+                return_value="EUR",
+            ),
+            patch(
+                "ledger.dfx_deposits.get_dfx_fiat",
+                return_value={"name": "EUR"},
+            ),
+            patch(
+                "ledger.dfx_deposits.get_dfx_bank_limits",
+                return_value=(Decimal("10"), Decimal("100")),
+            ),
+        ):
+            result = _preflight_dfx_purchase(
+                option_key=route["key"],
+                token_pack=token_pack,
+            )
+
+        self.assertEqual(result["source_amount"], "12.34")
+        mocked_quote.assert_called_once_with(
+            asset_id=123,
+            target_canonical_amount=10_000_000,
+            fiat_currency="EUR",
+        )
