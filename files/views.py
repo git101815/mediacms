@@ -127,6 +127,10 @@ from ledger.services import (
     purchase_ad_free_lifetime,
     _convert_platform_token_units_to_canonical_stable_units,
 )
+from ledger.fiat import (
+    get_fiat_currency_symbol,
+    get_fiat_usd_rate,
+)
 from ledger.providers.malum import MALUM_CHAIN, MALUM_PROVIDER_KEY
 from ledger.providers.paygate import PAYGATE_CHAIN, PAYGATE_PROVIDER_KEY
 from ledger.provider_deposits import (
@@ -582,6 +586,12 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
     group_order = int(group.get("order") or 100)
     price_bps = _get_wallet_payment_price_bps(group_key)
     price_fixed_canonical = _get_wallet_payment_price_fixed_canonical(group_key)
+    payment_currency = str(decorated.get("payment_currency") or "USD").strip().upper()
+    payment_currency_usd_rate = str(
+        decorated.get("payment_currency_usd_rate")
+        or format(get_fiat_usd_rate(payment_currency), "f")
+    )
+    payment_currency_symbol = get_fiat_currency_symbol(payment_currency)
     asset_code = str(decorated.get("asset_code") or "").strip().upper()
     asset_group = WALLET_CRYPTO_ASSET_GROUPS.get(asset_code, {})
     asset_group_label = asset_group.get("label") or asset_code
@@ -602,6 +612,9 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
             "payment_group_order": group_order,
             "payment_price_bps": price_bps,
             "payment_price_fixed_canonical": price_fixed_canonical,
+            "payment_currency": payment_currency,
+            "payment_currency_symbol": payment_currency_symbol,
+            "payment_currency_usd_rate": payment_currency_usd_rate,
             "asset_group_key": asset_code,
             "asset_group_label": asset_group_label,
             "asset_group_icon_path": asset_group_icon_path,
@@ -1009,6 +1022,19 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
     token_pack_token_amount = int(token_pack.get("token_amount") or 0)
     token_pack_price = int(token_pack.get("gross_stable_amount") or 0)
 
+    token_pack_price_label = f"${_format_canonical_stable_amount(token_pack_price)}"
+    if is_provider_checkout:
+        checkout_currency = str(
+            provider.get("checkout_currency")
+            or metadata.get("checkout_currency")
+            or "USD"
+        ).strip().upper()
+        checkout_amount = str(
+            provider.get("checkout_amount") or metadata.get("checkout_amount") or ""
+        ).strip()
+        if checkout_amount:
+            token_pack_price_label = f"{get_fiat_currency_symbol(checkout_currency)}{checkout_amount}"
+
     expected_raw_amount = session.expected_onchain_raw_amount
     if expected_raw_amount in (None, ""):
         expected_raw_amount = metadata.get("expected_route_raw_amount")
@@ -1020,12 +1046,12 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         token_pack_label = (
             f"{token_pack_name} · "
             f"{_format_pack_token_amount(token_pack_token_amount)} tokens · "
-            f"${_format_canonical_stable_amount(token_pack_price)}"
+            f"{token_pack_price_label}"
         )
     elif token_pack_token_amount > 0:
         token_pack_label = (
             f"{_format_pack_token_amount(token_pack_token_amount)} tokens · "
-            f"${_format_canonical_stable_amount(token_pack_price)}"
+            f"{token_pack_price_label}"
         )
 
     if is_provider_checkout:

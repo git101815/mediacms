@@ -79,6 +79,9 @@
         paymentGroupIconPath: node.getAttribute('data-payment-group-icon-path') || '',
         paymentPriceFixedCanonical: Number(node.getAttribute('data-payment-price-fixed-canonical') || 0),
         paymentPriceBps: Number(node.getAttribute('data-payment-price-bps') || 0),
+        paymentCurrency: node.getAttribute('data-payment-currency') || 'USD',
+        paymentCurrencySymbol: node.getAttribute('data-payment-currency-symbol') || '$',
+        paymentCurrencyUsdRate: Number(node.getAttribute('data-payment-currency-usd-rate') || 1),
         assetCode: assetCode,
         assetGroupKey: assetGroupKey,
         assetGroupLabel: node.getAttribute('data-asset-group-label') || assetGroupKey,
@@ -113,6 +116,9 @@
           type: option.paymentMethodType || 'crypto',
           priceBps: option.paymentPriceBps || 0,
           priceFixedCanonical: option.paymentPriceFixedCanonical || 0,
+          currency: option.paymentCurrency || 'USD',
+          currencySymbol: option.paymentCurrencySymbol || '$',
+          currencyUsdRate: option.paymentCurrencyUsdRate || 1,
           routes: [],
         });
       }
@@ -282,11 +288,22 @@
     const base = Number(buyState.packGrossCanonical || 0);
     const bps = Number((method && method.priceBps) || 0);
     const fixed = Number((method && method.priceFixedCanonical) || 0);
+    const currency = String((method && method.currency) || 'USD').toUpperCase();
+    const currencySymbol = String((method && method.currencySymbol) || currency + ' ');
+    const currencyUsdRate = Number((method && method.currencyUsdRate) || 1);
 
     const percentageFee = Math.round(base * bps / 10000);
     const adjusted = base + fixed + percentageFee;
+    const normalizedRate = Number.isFinite(currencyUsdRate) && currencyUsdRate > 0
+      ? currencyUsdRate
+      : 1;
+    const fiatAmount = (adjusted / 1000000) / normalizedRate;
+    const roundedFiatAmount = Math.round(fiatAmount * 100) / 100;
 
-    return '$' + formatCanonicalStableAmount(adjusted);
+    return currencySymbol + roundedFiatAmount.toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    });
   }
 
   function renderPaymentMethodChoices() {

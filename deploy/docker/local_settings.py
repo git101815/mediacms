@@ -75,6 +75,15 @@ PAYGATE_PROVIDER_LABELS = {
     "paypal": "PayPal (US only)",
     "revolut": "Revolut (EU only)",
 }
+PAYGATE_PROVIDER_CURRENCIES = {
+    "paypal": "USD",
+    "revolut": "EUR",
+}
+WALLET_FIAT_USD_RATES = {
+    "USD": "1",
+    # EUR/USD: one EUR is worth 1.12 USD.
+    "EUR": "1.12",
+}
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "paypal_us": 800,
     "revolut_eu": 700,

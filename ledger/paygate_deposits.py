@@ -10,6 +10,7 @@ from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 
+from ledger.fiat import get_fiat_usd_rate
 from ledger.internal_api import _get_internal_deposit_service_actor
 from ledger.models import DepositSession, LEDGER_METADATA_VERSION, TokenPack, TokenWallet
 from ledger.providers.paygate import (
@@ -24,10 +25,10 @@ from ledger.providers.paygate import (
     canonical_stable_to_paygate_amount,
     check_paygate_payment,
     create_paygate_wallet,
-    get_paygate_currency,
     get_paygate_min_canonical_stable_amount,
     get_paygate_payment_ttl_seconds,
     get_paygate_provider_id,
+    get_paygate_provider_currency,
     get_paygate_provider_ids,
     get_paygate_provider_label,
     get_paygate_public_base_url,
@@ -85,7 +86,6 @@ def get_paygate_deposit_options() -> list[dict]:
     if not paygate_enabled():
         return []
 
-    currency = get_paygate_currency()
     provider_ids = get_paygate_provider_ids()
     min_amount = get_paygate_min_canonical_stable_amount()
 
@@ -94,6 +94,7 @@ def get_paygate_deposit_options() -> list[dict]:
 
     options = []
     for provider_id in provider_ids:
+        currency = get_paygate_provider_currency(provider_id)
         provider_label = get_paygate_provider_label(provider_id) if provider_id else PAYGATE_PAYMENT_METHOD_LABEL
         label = provider_label if provider_id else PAYGATE_PAYMENT_METHOD_LABEL
 
@@ -119,6 +120,8 @@ def get_paygate_deposit_options() -> list[dict]:
                 "payment_method_label": label,
                 "payment_method_type": PAYGATE_PAYMENT_METHOD_TYPE,
                 "provider_key": PAYGATE_PROVIDER_KEY,
+                "payment_currency": currency,
+                "payment_currency_usd_rate": format(get_fiat_usd_rate(currency), "f"),
                 "paygate_provider_id": provider_id,
                 "paygate_provider_label": provider_label,
             }
@@ -141,6 +144,9 @@ def _provider_metadata_for_session(
     checkout_url: str = "",
     status: str = "",
     provider_id: str = "",
+    checkout_currency: str = "",
+    checkout_amount: str = "",
+    checkout_currency_usd_rate: str = "",
     raw_payload=None,
 ) -> dict:
     normalized_provider_id = (provider_id or get_paygate_provider_id() or "").strip().lower()
@@ -150,13 +156,19 @@ def _provider_metadata_for_session(
         else PAYGATE_PAYMENT_METHOD_LABEL
     )
     display_label = provider_label if normalized_provider_id else PAYGATE_PAYMENT_METHOD_LABEL
+    normalized_checkout_currency = (
+        checkout_currency or get_paygate_provider_currency(normalized_provider_id)
+    ).strip().upper()
 
     provider = {
         "key": PAYGATE_PROVIDER_KEY,
         "label": display_label,
         "payment_method_key": PAYGATE_PAYMENT_METHOD_KEY,
         "payment_method_type": PAYGATE_PAYMENT_METHOD_TYPE,
-        "route_key": paygate_route_key(provider_id=normalized_provider_id),
+        "route_key": paygate_route_key(
+            currency=normalized_checkout_currency,
+            provider_id=normalized_provider_id,
+        ),
         "reference": (ipn_token or "").strip(),
         "address_in": (address_in or "").strip(),
         "polygon_address_in": (polygon_address_in or "").strip(),
@@ -166,6 +178,9 @@ def _provider_metadata_for_session(
         "session_public_id": str(session_public_id),
         "provider_id": normalized_provider_id,
         "provider_label": provider_label,
+        "checkout_currency": normalized_checkout_currency,
+        "checkout_amount": str(checkout_amount or "").strip(),
+        "checkout_currency_usd_rate": str(checkout_currency_usd_rate or "").strip(),
     }
     if raw_payload is not None:
         provider["raw_payload"] = raw_payload
@@ -177,16 +192,21 @@ def _find_reusable_paygate_session(
     token_pack_code: str,
     provider_id: str = "",
     expected_canonical_amount: int | None = None,
+    checkout_currency: str = "",
 ) -> DepositSession | None:
     now = timezone.now()
     normalized_provider_id = (provider_id or "").strip().lower()
+    normalized_checkout_currency = get_paygate_provider_currency(normalized_provider_id)
 
     candidates = (
         DepositSession.objects.select_for_update()
         .filter(
             wallet=wallet,
             chain=PAYGATE_CHAIN,
-            route_key=paygate_route_key(provider_id=normalized_provider_id),
+            route_key=paygate_route_key(
+                currency=checkout_currency or normalized_checkout_currency,
+                provider_id=normalized_provider_id,
+            ),
             status__in=PAYGATE_ACTIVE_STATUSES,
             expires_at__gt=now,
         )
@@ -255,6 +275,12 @@ def open_paygate_deposit_session(
         raise ValidationError("Selected token pack is below PayGate's minimum payment amount")
 
     provider_id = (provider_id or get_paygate_provider_id() or "").strip().lower()
+    currency = get_paygate_provider_currency(provider_id)
+    currency_usd_rate = format(get_fiat_usd_rate(currency), "f")
+    checkout_amount = canonical_stable_to_paygate_amount(
+        expected_canonical_amount,
+        currency=currency,
+    )
     provider_display_label = (
         get_paygate_provider_label(provider_id)
         if provider_id
@@ -266,6 +292,7 @@ def open_paygate_deposit_session(
         token_pack_code=token_pack_snapshot["code"],
         provider_id=provider_id,
         expected_canonical_amount=expected_canonical_amount,
+        checkout_currency=currency,
     )
     if existing_session is not None:
         return existing_session
@@ -273,7 +300,6 @@ def open_paygate_deposit_session(
     _enforce_deposit_open_cooldown(user=wallet.user)
 
     public_id = uuid.uuid4()
-    currency = get_paygate_currency()
     route_key = paygate_route_key(currency, provider_id)
     synthetic_ref = f"paygate:{public_id.hex}"
     now = timezone.now()
@@ -296,9 +322,16 @@ def open_paygate_deposit_session(
         "payment_provider": _provider_metadata_for_session(
             session_public_id=public_id,
             provider_id=provider_id,
+            checkout_currency=currency,
+            checkout_amount=checkout_amount,
+            checkout_currency_usd_rate=currency_usd_rate,
         ),
         "amount_unit": "canonical_stable",
         "expected_canonical_stable_amount": int(expected_canonical_amount),
+        "canonical_currency": "USD",
+        "checkout_currency": currency,
+        "checkout_amount": checkout_amount,
+        "checkout_currency_usd_rate": currency_usd_rate,
         "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
         "platform_token_decimals": PLATFORM_TOKEN_DECIMALS,
         "platform_tokens_per_stablecoin": PLATFORM_TOKENS_PER_STABLECOIN,
@@ -339,7 +372,7 @@ def open_paygate_deposit_session(
 
         checkout_url = build_paygate_checkout_url(
             address_in=address_in,
-            amount=canonical_stable_to_paygate_amount(expected_canonical_amount),
+            amount=checkout_amount,
             customer_email=customer_email,
             currency=currency,
             provider_id=provider_id,
@@ -369,6 +402,9 @@ def open_paygate_deposit_session(
         checkout_url=checkout_url,
         status="CREATED",
         provider_id=provider_id,
+        checkout_currency=currency,
+        checkout_amount=checkout_amount,
+        checkout_currency_usd_rate=currency_usd_rate,
         raw_payload=wallet_response,
     )
     metadata["paygate_callback_url"] = callback_url
@@ -548,7 +584,11 @@ def credit_paygate_deposit_session(
                 "deposit_session_public_id": str(deposit_session.public_id),
                 "provider": PAYGATE_PROVIDER_KEY,
                 "provider_reference": provider_reference,
-                "requested_currency": get_paygate_currency(),
+                "requested_currency": (
+                    provider.get("checkout_currency")
+                    or metadata.get("checkout_currency")
+                    or deposit_session.asset_code
+                ),
                 "observed_canonical_stable_amount": int(paid_canonical_stable_amount),
                 "expected_gross_canonical_stable_amount": int(expected_gross_canonical_stable_amount),
                 "expected_net_canonical_stable_amount": int(expected_net_canonical_stable_amount),

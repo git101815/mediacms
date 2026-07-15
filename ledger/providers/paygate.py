@@ -10,6 +10,12 @@ import socket
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 
+from ledger.fiat import (
+    canonical_stable_to_fiat_amount,
+    get_fiat_usd_rate,
+    normalize_fiat_currency,
+)
+
 PAYGATE_PROVIDER_KEY = "paygate"
 PAYGATE_CHAIN = "paygate"
 PAYGATE_ROUTE_SLUG = "hosted_checkout"
@@ -23,6 +29,7 @@ PAYGATE_DEFAULT_API_BASE_URL = "https://api.paygate.to"
 PAYGATE_DEFAULT_CHECKOUT_BASE_URL = "https://checkout.paygate.to"
 PAYGATE_DEFAULT_PAYMENT_TTL_SECONDS = 60 * 60
 PAYGATE_DEFAULT_MIN_CANONICAL_STABLE_AMOUNT = 1_000_000  # $1.00, canonical stable units with 6 decimals.
+PAYGATE_SUPPORTED_CURRENCIES = {"USD", "EUR", "CAD"}
 
 PAYGATE_WALLET_PATH = "/control/wallet.php"
 PAYGATE_PROVIDER_STATUS_PATH = "/control/provider-status"
@@ -44,11 +51,39 @@ def _setting_bool(name: str, default: bool = False) -> bool:
 def _setting_str(name: str, default: str = "") -> str:
     return str(getattr(settings, name, os.environ.get(name, default)) or "").strip()
 
+def _validate_paygate_currency(value) -> str:
+    currency = normalize_fiat_currency(value)
+    if currency not in PAYGATE_SUPPORTED_CURRENCIES:
+        raise ImproperlyConfigured("PayGate currency must be USD, EUR, or CAD")
+    return currency
+
+
 def get_paygate_currency() -> str:
-    value = _setting_str("PAYGATE_CURRENCY", "USD").upper()
-    if value not in {"USD", "EUR", "CAD"}:
-        raise ImproperlyConfigured("PAYGATE_CURRENCY must be USD, EUR, or CAD")
-    return value
+    return _validate_paygate_currency(_setting_str("PAYGATE_CURRENCY", "USD"))
+
+
+def get_paygate_provider_currencies() -> dict[str, str]:
+    configured = getattr(settings, "PAYGATE_PROVIDER_CURRENCIES", {}) or {}
+    currencies = {}
+
+    for provider_id, raw_currency in configured.items():
+        normalized_provider_id = str(provider_id or "").strip().lower()
+        if not normalized_provider_id:
+            continue
+        currencies[normalized_provider_id] = _validate_paygate_currency(raw_currency)
+
+    return currencies
+
+
+def get_paygate_provider_currency(provider_id: str = "") -> str:
+    normalized_provider_id = str(provider_id or "").strip().lower()
+    currency = get_paygate_provider_currencies().get(normalized_provider_id)
+    if not currency:
+        currency = get_paygate_currency()
+
+    # Fail closed if a non-USD provider currency has no configured rate.
+    get_fiat_usd_rate(currency)
+    return currency
 
 
 def get_paygate_api_base_url() -> str:
@@ -145,7 +180,9 @@ def paygate_enabled() -> bool:
     try:
         get_paygate_usdc_polygon_wallet()
         get_paygate_public_base_url()
-        get_paygate_currency()
+        provider_ids = get_paygate_provider_ids() or [""]
+        for provider_id in provider_ids:
+            get_paygate_provider_currency(provider_id)
     except ImproperlyConfigured:
         return False
     return True
@@ -167,9 +204,9 @@ def paygate_route_key(currency: str | None = None, provider_id: str | None = Non
     return f"{PAYGATE_ROUTE_KEY_PREFIX}:{currency_part}:{provider_part}:{PAYGATE_ROUTE_SLUG}"
 
 
-def canonical_stable_to_paygate_amount(value: int) -> str:
-    amount = Decimal(int(value)) / Decimal(1_000_000)
-    return format(amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
+def canonical_stable_to_paygate_amount(value: int, *, currency: str | None = None) -> str:
+    requested_currency = currency or get_paygate_currency()
+    return canonical_stable_to_fiat_amount(value, currency=requested_currency)
 
 
 def paygate_amount_to_canonical_stable_units(value) -> int:
@@ -338,6 +375,8 @@ __all__ = [
     "get_paygate_payment_ttl_seconds",
     "get_paygate_provider_id",
     "get_paygate_provider_ids",
+    "get_paygate_provider_currencies",
+    "get_paygate_provider_currency",
     "get_paygate_provider_label",
     "get_paygate_provider_labels",
     "get_paygate_provider_status",
