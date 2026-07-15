@@ -76,7 +76,10 @@
         <div class="wallet-deposit-ui__info-card">
           <div class="wallet-deposit-ui__row">
             <span class="wallet-deposit-ui__row-label">Expected amount</span>
-            <span class="wallet-deposit-ui__row-value">{{ deposit_session.min_amount_display }} {{ deposit_session.asset_code }}</span>
+            <span class="wallet-deposit-ui__row-value">
+              {{ deposit_session.expected_payment_amount_display }}
+              {{ deposit_session.expected_payment_currency }}
+            </span>
           </div>
 
           <div class="wallet-deposit-ui__row">
@@ -90,7 +93,7 @@
             <span class="wallet-deposit-ui__row-label">Paid</span>
             <span class="wallet-deposit-ui__row-value">
               <span data-deposit-observed-amount>{{ deposit_session.observed_amount_display|default:"0" }}</span>
-              <span>{{ deposit_session.asset_code }}</span>
+              <span>{{ deposit_session.observed_asset_code }}</span>
             </span>
           </div>
         </div>
@@ -98,7 +101,7 @@
         <div class="wallet-deposit-ui__warning">
           <i class="material-icons" aria-hidden="true">info</i>
           <div>
-            Complete the hosted checkout. Your tokens are credited automatically after Malum confirms the payment.
+            Complete the hosted checkout. Your tokens are credited automatically after the payment is confirmed.
           </div>
         </div>
       {% else %}
@@ -148,7 +151,7 @@
           <div class="wallet-deposit-ui__balance-label">{% if deposit_session.is_provider_checkout %}Paid{% else %}Received{% endif %}</div>
           <div class="wallet-deposit-ui__balance-value">
             <span data-deposit-observed-amount>{{ deposit_session.observed_amount_display|default:"0" }}</span>
-            <span>{{ deposit_session.asset_code }}</span>
+            <span>{{ deposit_session.observed_asset_code }}</span>
             <button type="button" class="wallet-deposit-ui__refresh" data-deposit-refresh aria-label="Refresh deposit status">
               <i class="material-icons" aria-hidden="true">refresh</i>
             </button>

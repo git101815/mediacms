@@ -1022,6 +1022,9 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
     token_pack_token_amount = int(token_pack.get("token_amount") or 0)
     token_pack_price = int(token_pack.get("gross_stable_amount") or 0)
 
+    checkout_currency = session.asset_code
+    checkout_amount = ""
+    observed_asset_code = session.asset_code
     token_pack_price_label = f"${_format_canonical_stable_amount(token_pack_price)}"
     if is_provider_checkout:
         checkout_currency = str(
@@ -1034,6 +1037,8 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         ).strip()
         if checkout_amount:
             token_pack_price_label = f"{get_fiat_currency_symbol(checkout_currency)}{checkout_amount}"
+        if provider.get("key") == PAYGATE_PROVIDER_KEY:
+            observed_asset_code = "USDC"
 
     expected_raw_amount = session.expected_onchain_raw_amount
     if expected_raw_amount in (None, ""):
@@ -1063,6 +1068,12 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
             asset_code=session.asset_code,
         )
 
+    expected_payment_amount_display = min_amount_display
+    expected_payment_currency = session.asset_code
+    if is_provider_checkout and checkout_amount:
+        expected_payment_amount_display = checkout_amount
+        expected_payment_currency = checkout_currency
+
     return {
         "public_id": str(session.public_id),
         "status": public_status,
@@ -1079,6 +1090,9 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "confirmations": session.confirmations,
         "min_amount": session.min_amount,
         "min_amount_display": min_amount_display,
+        "expected_payment_amount_display": expected_payment_amount_display,
+        "expected_payment_currency": expected_payment_currency,
+        "observed_asset_code": observed_asset_code,
         "observed_txid": session.observed_txid or "",
         "observed_amount": session.observed_amount,
         "observed_amount_display": (
