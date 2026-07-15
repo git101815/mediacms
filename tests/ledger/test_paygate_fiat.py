@@ -35,6 +35,15 @@ class TestPayGateFiat(SimpleTestCase):
             "11.61",
         )
 
+    def test_revolut_checkout_amount_is_never_rounded_below_canonical_value(self):
+        self.assertEqual(
+            canonical_stable_to_paygate_amount(
+                12_500_000,
+                currency=get_paygate_provider_currency("revolut"),
+            ),
+            "11.17",
+        )
+
     def test_revolut_checkout_uses_eur_amount_and_currency(self):
         checkout_url = build_paygate_checkout_url(
             address_in="wallet-reference",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlencode
@@ -206,7 +206,11 @@ def paygate_route_key(currency: str | None = None, provider_id: str | None = Non
 
 def canonical_stable_to_paygate_amount(value: int, *, currency: str | None = None) -> str:
     requested_currency = currency or get_paygate_currency()
-    return canonical_stable_to_fiat_amount(value, currency=requested_currency)
+    return canonical_stable_to_fiat_amount(
+        value,
+        currency=requested_currency,
+        rounding=ROUND_CEILING,
+    )
 
 
 def paygate_amount_to_canonical_stable_units(value) -> int:

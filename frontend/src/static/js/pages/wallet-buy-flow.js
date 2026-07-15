@@ -298,7 +298,7 @@
       ? currencyUsdRate
       : 1;
     const fiatAmount = (adjusted / 1000000) / normalizedRate;
-    const roundedFiatAmount = Math.round(fiatAmount * 100) / 100;
+    const roundedFiatAmount = Math.ceil((fiatAmount * 100) - 1e-9) / 100;
 
     return currencySymbol + roundedFiatAmount.toLocaleString(undefined, {
       minimumFractionDigits: 0,

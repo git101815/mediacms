@@ -64,6 +64,7 @@ def canonical_stable_to_fiat_decimal(
     *,
     currency: str,
     decimal_places: int = 2,
+    rounding=ROUND_HALF_UP,
 ) -> Decimal:
     try:
         canonical_value = int(value)
@@ -86,7 +87,7 @@ def canonical_stable_to_fiat_decimal(
     )
     fiat_amount = usd_amount / get_fiat_usd_rate(currency)
     quantum = Decimal(1).scaleb(-places)
-    return fiat_amount.quantize(quantum, rounding=ROUND_HALF_UP)
+    return fiat_amount.quantize(quantum, rounding=rounding)
 
 
 def canonical_stable_to_fiat_amount(
@@ -94,11 +95,13 @@ def canonical_stable_to_fiat_amount(
     *,
     currency: str,
     decimal_places: int = 2,
+    rounding=ROUND_HALF_UP,
 ) -> str:
     amount = canonical_stable_to_fiat_decimal(
         value,
         currency=currency,
         decimal_places=decimal_places,
+        rounding=rounding,
     )
     return format(amount, f".{int(decimal_places)}f")
 
