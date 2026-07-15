@@ -27,9 +27,9 @@ class TestDfxSigner(SimpleTestCase):
             passphrase="",
             account_index=0,
         )
-        _, address = deriver.derive(
+        address = deriver.derive_address(
             chain="arbitrum",
-            derivation_index=7,
+            address_index=7,
         )
 
         result = sign_dfx_message(

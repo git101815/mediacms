@@ -1389,10 +1389,7 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
 
 def main() -> None:
     config = load_config()
-    try:
-        start_dfx_signer_server(config)
-    except Exception:
-        logging.exception("dfx_signer action=start_failed")
+    start_dfx_signer_server(config)
 
     client = MediaCMSInternalClient(
         base_url=config.mediacms_base_url,

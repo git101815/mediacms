@@ -1,7 +1,9 @@
 import json
+import secrets
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied, ValidationError as DjangoValidationError
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 from allauth.socialaccount.models import SocialApp
 from django.conf import settings
@@ -15,7 +17,7 @@ from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonRespons
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from django.core.paginator import Paginator
 from django.views.decorators.csrf import csrf_exempt
 from drf_yasg import openapi as openapi
@@ -1362,6 +1364,21 @@ def wallet_deposit_request(request):
     return redirect("wallet_deposit_session", public_id=session.public_id)
 
 
+def _dfx_auth_origin(auth_url: str) -> str:
+    parsed = urlparse(str(auth_url or "").strip())
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise ImproperlyConfigured("DFX auth URL must use a valid HTTPS origin")
+
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"https://{parsed.hostname}{port}"
+
+
+@never_cache
 @login_required
 def wallet_dfx_launch(request, public_id):
     session = get_object_or_404(
@@ -1372,15 +1389,56 @@ def wallet_dfx_launch(request, public_id):
     provider = (session.metadata or {}).get("payment_provider") or {}
     if provider.get("key") != DFX_PROVIDER_KEY:
         raise Http404
+
     try:
         launch = prepare_dfx_browser_launch(
             session=session,
             actor=request.user,
         )
+        auth_origin = _dfx_auth_origin(launch.get("auth_url"))
     except (DjangoValidationError, ImproperlyConfigured) as exc:
         messages.error(request, _extract_wallet_form_error(exc))
         return redirect("wallet_deposit_session", public_id=session.public_id)
-    return render(request, "cms/dfx_redirect.html", {"dfx_launch": launch})
+
+    csp_nonce = secrets.token_urlsafe(24)
+    context = {
+        "dfx_launch": launch,
+        "dfx_csp_nonce": csp_nonce,
+        "dfx_auth_payload_json": json.dumps(
+            launch["auth_payload"],
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ),
+        "dfx_checkout_params_json": json.dumps(
+            launch["checkout_params"],
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ),
+    }
+    response = render(request, "cms/dfx_redirect.html", context)
+    response["Cache-Control"] = "no-store, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    response["Referrer-Policy"] = "no-referrer"
+    response["X-Content-Type-Options"] = "nosniff"
+    response["X-Frame-Options"] = "DENY"
+    response["Cross-Origin-Opener-Policy"] = "same-origin"
+    response["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=()"
+    )
+    response["Content-Security-Policy"] = (
+        "default-src 'none'; "
+        f"script-src 'nonce-{csp_nonce}'; "
+        "style-src 'unsafe-inline'; "
+        f"connect-src {auth_origin}; "
+        "img-src 'none'; "
+        "font-src 'none'; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'none'; "
+        "frame-ancestors 'none'"
+    )
+    return response
 
 
 @login_required

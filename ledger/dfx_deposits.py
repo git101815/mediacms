@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import ROUND_CEILING
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
 from django.core.exceptions import ValidationError
 from django.urls import reverse
@@ -29,7 +29,11 @@ from ledger.providers.dfx import (
     get_dfx_public_base_url,
     round_dfx_source_amount,
 )
-from ledger.services import list_available_deposit_options, open_user_deposit_session
+from ledger.services import (
+    _build_token_pack_snapshot,
+    list_available_deposit_options,
+    open_user_deposit_session,
+)
 from ledger.sweeper_signer import sign_dfx_auth_message
 
 
@@ -57,6 +61,71 @@ def _dfx_launch_url(session_public_id) -> str:
         "wallet_dfx_launch",
         kwargs={"public_id": session_public_id},
     )
+
+
+def _preflight_dfx_purchase(
+    *,
+    option_key: str,
+    token_pack: TokenPack,
+    payment_price_bps=0,
+    payment_price_fixed_canonical=0,
+) -> dict:
+    route = next(
+        (
+            item
+            for item in list_available_deposit_options()
+            if str(item.get("key") or "") == str(option_key or "")
+        ),
+        None,
+    )
+    if route is None:
+        raise ValidationError("Invalid DFX deposit route")
+
+    asset = find_dfx_asset_for_route(
+        chain=route.get("chain") or "",
+        asset_code=route.get("asset_code") or "",
+        token_contract_address=route.get("token_contract_address") or "",
+    )
+    if asset is None:
+        raise ValidationError("Selected MediaCMS route is not buyable through DFX")
+
+    token_pack_snapshot = _build_token_pack_snapshot(
+        token_pack=token_pack,
+        payment_price_bps=payment_price_bps,
+        payment_price_fixed_canonical=payment_price_fixed_canonical,
+    )
+    expected_canonical_amount = int(token_pack_snapshot["gross_stable_amount"])
+    quote = get_dfx_buy_quote(
+        asset_id=int(asset["id"]),
+        target_canonical_amount=expected_canonical_amount,
+        fiat_currency=get_dfx_fiat_currency(),
+    )
+
+    try:
+        source_amount = Decimal(str(quote["sourceAmount"]))
+    except (InvalidOperation, KeyError, TypeError, ValueError) as exc:
+        raise ValidationError("DFX quote is missing a valid fiat amount") from exc
+
+    fiat = get_dfx_fiat(get_dfx_fiat_currency())
+    minimum_fiat, maximum_fiat = get_dfx_bank_limits(fiat)
+    if maximum_fiat <= 0:
+        raise ValidationError("DFX bank transfers are currently unavailable")
+    if source_amount < minimum_fiat:
+        raise ValidationError(
+            "Selected token pack is below DFX's minimum bank transfer amount"
+        )
+    if source_amount > maximum_fiat:
+        raise ValidationError(
+            "Selected token pack is above DFX's maximum bank transfer amount"
+        )
+
+    return {
+        "asset": asset,
+        "quote": quote,
+        "source_amount": format(source_amount, "f"),
+        "minimum_fiat": format(minimum_fiat, "f"),
+        "maximum_fiat": format(maximum_fiat, "f"),
+    }
 
 
 def get_dfx_deposit_options() -> list[dict]:
@@ -167,6 +236,15 @@ def open_dfx_deposit_session(
 ) -> DepositSession:
     if not dfx_enabled():
         raise ValidationError("DFX bank transfers are temporarily unavailable")
+
+    # Validate the live DFX quote and bank limits before allocating an address.
+    # The launch page obtains a fresh quote because the user may open it later.
+    _preflight_dfx_purchase(
+        option_key=option_key,
+        token_pack=token_pack,
+        payment_price_bps=payment_price_bps,
+        payment_price_fixed_canonical=payment_price_fixed_canonical,
+    )
 
     session = open_user_deposit_session(
         actor=actor,

@@ -66,9 +66,13 @@ def sign_dfx_message(*, config, chain: str, derivation_index: int, address: str)
         passphrase=config.mnemonic_passphrase,
         account_index=config.account_index,
     )
-    private_key, derived_address = deriver.derive(
+    derived_address = deriver.derive_address(
         chain=normalized_chain,
-        derivation_index=normalized_index,
+        address_index=normalized_index,
+    )
+    private_key = deriver.derive_private_key(
+        chain=normalized_chain,
+        address_index=normalized_index,
     )
     if derived_address.lower() != normalized_address:
         raise ValueError("Requested address does not match the derived address")
