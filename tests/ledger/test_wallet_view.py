@@ -644,13 +644,11 @@ class TestWalletView(BaseLedgerTestCase):
 
     @override_settings(
         WALLET_PAYMENT_METHOD_PRICE_BPS={
-            "credit_card_link": 1000,
             "paypal_us": 800,
             "revolut_eu": 500,
             "crypto": 0,
         },
         WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL={
-            "credit_card_link": 0.3,
             "paypal_us": 0.3,
             "revolut_eu": 0.3,
             "crypto": 0,
@@ -666,23 +664,6 @@ class TestWalletView(BaseLedgerTestCase):
         mocked_crypto_options,
     ):
         mocked_paygate_options.return_value = [
-            {
-                "key": "paygate:usd:stripe:hosted_checkout",
-                "label": "Stripe",
-                "route_label": "Stripe",
-                "network_label": "PayGate",
-                "network_display": "PayGate",
-                "chain": "paygate",
-                "asset_code": "USD",
-                "token_contract_address": "",
-                "required_confirmations": 1,
-                "min_amount": 1_000_000,
-                "payment_method_key": "paygate:stripe",
-                "payment_method_label": "Stripe",
-                "payment_method_type": "provider",
-                "provider_key": PAYGATE_PROVIDER_KEY,
-                "paygate_provider_id": "stripe",
-            },
             {
                 "key": "paygate:usd:paypal:hosted_checkout",
                 "label": "PayPal",
@@ -721,14 +702,6 @@ class TestWalletView(BaseLedgerTestCase):
 
         options = _build_wallet_deposit_options()
         by_group = {item["payment_group_key"]: item for item in options}
-
-        self.assertEqual(
-            by_group["credit_card_link"]["payment_group_label"],
-            "Credit Card (via Link by Stripe)",
-        )
-        self.assertEqual(by_group["credit_card_link"]["payment_group_icon_path"], "images/wallet/card.svg")
-        self.assertEqual(by_group["credit_card_link"]["payment_price_bps"], 1000)
-        self.assertEqual(by_group["credit_card_link"]["payment_price_fixed_canonical"], 300_000)
 
         self.assertEqual(by_group["paypal_us"]["payment_group_label"], "PayPal (US only)")
         self.assertEqual(by_group["paypal_us"]["payment_group_icon_path"], "images/wallet/paypal.svg")

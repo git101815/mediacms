@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
-from django.test import SimpleTestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase
 
 from ledger.dfx_deposits import (
     _preflight_dfx_purchase,
@@ -12,7 +12,7 @@ from ledger.dfx_deposits import (
 from ledger.models import TokenPack
 
 
-class TestDfxDepositPreflight(SimpleTestCase):
+class TestDfxDepositPreflight(TestCase):
     def _route(self):
         return {
             "key": (
