@@ -106,3 +106,87 @@ class TestDfxProvider(SimpleTestCase):
             query["external-transaction-id"],
             ["session-id"],
         )
+
+
+class _DfxTestCache:
+    def __init__(self):
+        self.values = {}
+
+    def get(self, key):
+        return self.values.get(key)
+
+    def set(self, key, value, timeout=None):
+        self.values[key] = value
+
+
+@override_settings(
+    DFX_API_BASE_URL="https://api.example",
+    DFX_FIAT_CURRENCY="EUR",
+    DFX_PAYMENT_METHOD="Bank",
+    DFX_QUOTE_CACHE_SECONDS=60,
+    DFX_WALLET_NAME="",
+    WALLET_FIAT_USD_RATES={"EUR": "1.12", "CHF": "1.10"},
+)
+class TestDfxQuoteCache(SimpleTestCase):
+    def _response(self):
+        return {
+            "isValid": True,
+            "amount": 12.34,
+            "estimatedAmount": 10,
+        }
+
+    def test_identical_quotes_reuse_the_short_cache(self):
+        fake_cache = _DfxTestCache()
+        with (
+            patch("ledger.providers.dfx.cache", fake_cache),
+            patch(
+                "ledger.providers.dfx.call_dfx_json",
+                return_value=self._response(),
+            ) as mocked_call,
+        ):
+            first = get_dfx_buy_quote(
+                asset_id=123,
+                target_canonical_amount=10_000_000,
+                fiat_currency="EUR",
+            )
+            second = get_dfx_buy_quote(
+                asset_id=123,
+                target_canonical_amount=10_000_000,
+                fiat_currency="EUR",
+            )
+
+        self.assertEqual(first, second)
+        mocked_call.assert_called_once()
+
+    def test_quote_cache_isolated_by_asset_amount_and_currency(self):
+        fake_cache = _DfxTestCache()
+        with (
+            patch("ledger.providers.dfx.cache", fake_cache),
+            patch(
+                "ledger.providers.dfx.call_dfx_json",
+                return_value=self._response(),
+            ) as mocked_call,
+        ):
+            get_dfx_buy_quote(
+                asset_id=123,
+                target_canonical_amount=10_000_000,
+                fiat_currency="EUR",
+            )
+            get_dfx_buy_quote(
+                asset_id=124,
+                target_canonical_amount=10_000_000,
+                fiat_currency="EUR",
+            )
+            get_dfx_buy_quote(
+                asset_id=124,
+                target_canonical_amount=11_000_000,
+                fiat_currency="EUR",
+            )
+            get_dfx_buy_quote(
+                asset_id=124,
+                target_canonical_amount=11_000_000,
+                fiat_currency="CHF",
+            )
+
+        self.assertEqual(mocked_call.call_count, 4)
+

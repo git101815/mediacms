@@ -74,6 +74,7 @@ services:
       LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME: sweeper-service
       LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET: ${LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET}
       DEPOSIT_EVM_ACCOUNT_XPUB: ${DEPOSIT_EVM_ACCOUNT_XPUB}
+      DFX_SWEEPER_SIGNER_BASE_URL: http://dfx_signer_service:8080
       PAYGATE_USDC_POLYGON_WALLET: ${PAYGATE_USDC_POLYGON_WALLET}
       SECRET_KEY: ${SECRET_KEY}
       LEDGER_INTERNAL_GATEWAY_SECRET: ${LEDGER_INTERNAL_GATEWAY_SECRET}
@@ -104,6 +105,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      dfx_signer_service:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -113,6 +116,46 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 20s
+
+  dfx_signer_service:
+    build:
+      context: .
+      dockerfile: ./sweeper_service/Dockerfile
+    command:
+      - python
+      - -m
+      - app.dfx_signer_main
+    expose:
+      - "8080"
+    mem_limit: 384m
+    mem_reservation: 128m
+    environment:
+      MEDIACMS_INTERNAL_SHARED_SECRET: ${LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET}
+      MEDIACMS_INTERNAL_GATEWAY_SECRET: ${MEDIACMS_INTERNAL_GATEWAY_SECRET}
+      MEDIACMS_INTERNAL_GATEWAY_HEADER: ${MEDIACMS_INTERNAL_GATEWAY_HEADER}
+      DFX_SIGNER_EXPECTED_SERVICE: mediacms-web
+      DFX_SIGNER_HOST: 0.0.0.0
+      DFX_SIGNER_PORT: 8080
+      DFX_SIGNER_ACCOUNT_INDEX: ${DFX_SIGNER_ACCOUNT_INDEX:-0}
+      DFX_SIGNER_MNEMONIC_FILE: /run/secrets/sweeper_evm_mnemonic
+      DFX_SIGNER_MNEMONIC_PASSPHRASE_FILE: /run/secrets/sweeper_evm_mnemonic_passphrase
+    secrets:
+      - source: sweeper_evm_mnemonic
+        target: sweeper_evm_mnemonic
+      - source: sweeper_evm_mnemonic_passphrase
+        target: sweeper_evm_mnemonic_passphrase
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
 
   deposit_service:
     build:
