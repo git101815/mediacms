@@ -1,7 +1,9 @@
 import json
+import secrets
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied, ValidationError as DjangoValidationError
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 from allauth.socialaccount.models import SocialApp
 from django.conf import settings
@@ -15,7 +17,7 @@ from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonRespons
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from django.core.paginator import Paginator
 from django.views.decorators.csrf import csrf_exempt
 from drf_yasg import openapi as openapi
@@ -133,6 +135,7 @@ from ledger.fiat import (
 )
 from ledger.providers.malum import MALUM_CHAIN, MALUM_PROVIDER_KEY
 from ledger.providers.paygate import PAYGATE_CHAIN, PAYGATE_PROVIDER_KEY
+from ledger.providers.dfx import DFX_PROVIDER_KEY
 from ledger.provider_deposits import (
     get_malum_deposit_option,
     open_malum_deposit_session,
@@ -140,6 +143,11 @@ from ledger.provider_deposits import (
 from ledger.paygate_deposits import (
     get_paygate_deposit_options,
     open_paygate_deposit_session,
+)
+from ledger.dfx_deposits import (
+    get_dfx_deposit_options,
+    open_dfx_deposit_session,
+    prepare_dfx_browser_launch,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
@@ -210,7 +218,11 @@ WALLET_REQUEST_TYPE_ICON_MAP = {
     WalletRequest.REQUEST_TYPE_WITHDRAWAL: "north_east",
 }
 
-PROVIDER_CHECKOUT_KEYS = {MALUM_PROVIDER_KEY, PAYGATE_PROVIDER_KEY}
+PROVIDER_CHECKOUT_KEYS = {
+    MALUM_PROVIDER_KEY,
+    PAYGATE_PROVIDER_KEY,
+    DFX_PROVIDER_KEY,
+}
 PROVIDER_CHECKOUT_CHAINS = {MALUM_CHAIN, PAYGATE_CHAIN}
 
 
@@ -491,6 +503,12 @@ WALLET_PAYMENT_GROUPS = {
         "icon_path": "images/wallet/revolut.svg",
         "order": 30,
     },
+    "dfx_bank": {
+        "label": "Bank transfer (DFX)",
+        "icon_label": "DFX",
+        "icon_path": "",
+        "order": 40,
+    },
     "crypto": {
         "label": "Crypto",
         "icon_label": "Crypto",
@@ -572,7 +590,9 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
     provider_id = str(decorated.get("paygate_provider_id") or "").strip().lower()
     payment_method_type = str(decorated.get("payment_method_type") or "").strip().lower()
 
-    if provider_key == PAYGATE_PROVIDER_KEY and provider_id in PAYGATE_PROVIDER_PAYMENT_GROUPS:
+    if provider_key == DFX_PROVIDER_KEY:
+        group_key = "dfx_bank"
+    elif provider_key == PAYGATE_PROVIDER_KEY and provider_id in PAYGATE_PROVIDER_PAYMENT_GROUPS:
         group_key = PAYGATE_PROVIDER_PAYMENT_GROUPS[provider_id]
     elif payment_method_type == "crypto":
         group_key = "crypto"
@@ -592,6 +612,13 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
         or format(get_fiat_usd_rate(payment_currency), "f")
     )
     payment_currency_symbol = get_fiat_currency_symbol(payment_currency)
+    payment_requires_route_selection = (
+        payment_method_type == "crypto"
+        or bool(decorated.get("payment_requires_route_selection", False))
+    )
+    payment_price_mode = str(
+        decorated.get("payment_price_mode") or "fixed"
+    ).strip().lower()
     asset_code = str(decorated.get("asset_code") or "").strip().upper()
     asset_group = WALLET_CRYPTO_ASSET_GROUPS.get(asset_code, {})
     asset_group_label = asset_group.get("label") or asset_code
@@ -615,6 +642,8 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
             "payment_currency": payment_currency,
             "payment_currency_symbol": payment_currency_symbol,
             "payment_currency_usd_rate": payment_currency_usd_rate,
+            "payment_requires_route_selection": payment_requires_route_selection,
+            "payment_price_mode": payment_price_mode,
             "asset_group_key": asset_code,
             "asset_group_label": asset_group_label,
             "asset_group_icon_path": asset_group_icon_path,
@@ -629,6 +658,8 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
     if provider_key == PAYGATE_PROVIDER_KEY:
         decorated["payment_method_label"] = group_label
         decorated["route_label"] = group_label
+    elif provider_key == DFX_PROVIDER_KEY:
+        decorated["payment_method_label"] = group_label
 
     return decorated
 
@@ -652,6 +683,14 @@ def _build_wallet_deposit_options() -> list[dict]:
             }
         )
 
+    for dfx_option in get_dfx_deposit_options():
+        options.append(
+            {
+                **dfx_option,
+                "min_amount_display": _format_canonical_stable_amount(dfx_option["min_amount"]),
+            }
+        )
+
     for option in list_available_deposit_options():
         chain = option["chain"]
         asset_code = option["asset_code"]
@@ -669,6 +708,7 @@ def _build_wallet_deposit_options() -> list[dict]:
                 "payment_method_key": payment_method_key,
                 "payment_method_label": payment_method_label,
                 "payment_method_type": payment_method_type,
+                "payment_requires_route_selection": True,
                 "min_amount_display": _format_canonical_stable_amount(option["min_amount"]),
             }
         )
@@ -1280,6 +1320,22 @@ def wallet_deposit_request(request):
                 return redirect(checkout_url)
             return redirect("wallet_deposit_session", public_id=session.public_id)
 
+        if selected_option.get("payment_method_type") == "provider" and selected_option.get(
+                "provider_key") == DFX_PROVIDER_KEY:
+            session = open_dfx_deposit_session(
+                actor=request.user,
+                wallet=wallet_obj,
+                option_key=selected_option.get("deposit_route_key") or "",
+                token_pack=token_pack,
+                payment_price_bps=payment_price_bps,
+                payment_price_fixed_canonical=payment_price_fixed_canonical,
+            )
+            provider = (session.metadata or {}).get("payment_provider") or {}
+            checkout_url = (provider.get("checkout_url") or "").strip()
+            if checkout_url and session.status == DepositSession.STATUS_AWAITING_PAYMENT:
+                return redirect(checkout_url)
+            return redirect("wallet_deposit_session", public_id=session.public_id)
+
         matching_payment_routes = [
             item for item in deposit_options
             if item["payment_method_key"] == selected_option["payment_method_key"]
@@ -1307,6 +1363,120 @@ def wallet_deposit_request(request):
             f"{reverse('wallet')}?{_build_wallet_querystring(tab=return_tab, status=return_status, open_modal='deposit')}"
         )
 
+    return redirect("wallet_deposit_session", public_id=session.public_id)
+
+
+def _dfx_auth_origin(auth_url: str) -> str:
+    parsed = urlparse(str(auth_url or "").strip())
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise ImproperlyConfigured("DFX auth URL must use a valid HTTPS origin")
+
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"https://{parsed.hostname}{port}"
+
+
+@never_cache
+@login_required
+def wallet_dfx_launch(request, public_id):
+    session = get_object_or_404(
+        DepositSession,
+        public_id=public_id,
+        user=request.user,
+    )
+    provider = (session.metadata or {}).get("payment_provider") or {}
+    if provider.get("key") != DFX_PROVIDER_KEY:
+        raise Http404
+
+    try:
+        launch = prepare_dfx_browser_launch(
+            session=session,
+            actor=request.user,
+        )
+        auth_origin = _dfx_auth_origin(launch.get("auth_url"))
+        app_origin = _dfx_auth_origin(launch.get("checkout_url"))
+    except (DjangoValidationError, ImproperlyConfigured) as exc:
+        messages.error(request, _extract_wallet_form_error(exc))
+        return redirect("wallet_deposit_session", public_id=session.public_id)
+
+    token_pack = (session.metadata or {}).get("token_pack") or {}
+    try:
+        token_amount = int(token_pack.get("token_amount") or 0)
+    except (TypeError, ValueError):
+        token_amount = 0
+
+    csp_nonce = secrets.token_urlsafe(24)
+    context = {
+        "dfx_launch": launch,
+        "dfx_csp_nonce": csp_nonce,
+        "dfx_token_pack_name": str(
+            token_pack.get("name") or "Token package"
+        ),
+        "dfx_token_amount_display": (
+            _format_pack_token_amount(token_amount)
+            if token_amount > 0
+            else ""
+        ),
+        "dfx_checkout_amount": str(
+            launch["checkout_params"].get("amount-in") or ""
+        ),
+        "dfx_checkout_currency": str(
+            launch["checkout_params"].get("asset-in") or ""
+        ),
+        "dfx_auth_payload_json": json.dumps(
+            launch["auth_payload"],
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ),
+        "dfx_checkout_params_json": json.dumps(
+            launch["checkout_params"],
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ),
+    }
+    response = render(request, "cms/dfx_redirect.html", context)
+    response["Cache-Control"] = "no-store, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    response["Referrer-Policy"] = "no-referrer"
+    response["X-Content-Type-Options"] = "nosniff"
+    response["X-Frame-Options"] = "DENY"
+    response["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+    response["Permissions-Policy"] = (
+        "camera=(self), microphone=(self), geolocation=(), payment=()"
+    )
+    response["Content-Security-Policy"] = (
+        "default-src 'none'; "
+        f"script-src 'nonce-{csp_nonce}' {app_origin}; "
+        f"style-src 'unsafe-inline' {app_origin}; "
+        f"connect-src {auth_origin} {app_origin}; "
+        f"img-src 'self' {auth_origin} {app_origin} data: blob:; "
+        f"font-src {app_origin} data:; "
+        f"frame-src {app_origin}; "
+        "media-src blob:; "
+        "worker-src blob:; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        f"form-action {auth_origin} {app_origin}; "
+        "frame-ancestors 'none'"
+    )
+    return response
+
+
+@login_required
+def wallet_dfx_return(request, public_id):
+    session = get_object_or_404(
+        DepositSession,
+        public_id=public_id,
+        user=request.user,
+    )
+    provider = (session.metadata or {}).get("payment_provider") or {}
+    if provider.get("key") != DFX_PROVIDER_KEY:
+        raise Http404
     return redirect("wallet_deposit_session", public_id=session.public_id)
 
 

@@ -25,6 +25,8 @@
     paymentMethodKey: '',
     paymentMethodLabel: '',
     paymentMethodType: '',
+    paymentRequiresRouteSelection: false,
+    paymentPriceMode: 'fixed',
     assetKey: '',
     routeKey: '',
   };
@@ -82,6 +84,9 @@
         paymentCurrency: node.getAttribute('data-payment-currency') || 'USD',
         paymentCurrencySymbol: node.getAttribute('data-payment-currency-symbol') || '$',
         paymentCurrencyUsdRate: Number(node.getAttribute('data-payment-currency-usd-rate') || 1),
+        paymentRequiresRouteSelection:
+          node.getAttribute('data-payment-requires-route-selection') === 'true',
+        paymentPriceMode: node.getAttribute('data-payment-price-mode') || 'fixed',
         assetCode: assetCode,
         assetGroupKey: assetGroupKey,
         assetGroupLabel: node.getAttribute('data-asset-group-label') || assetGroupKey,
@@ -119,6 +124,11 @@
           currency: option.paymentCurrency || 'USD',
           currencySymbol: option.paymentCurrencySymbol || '$',
           currencyUsdRate: option.paymentCurrencyUsdRate || 1,
+          requiresRouteSelection: Boolean(
+            option.paymentRequiresRouteSelection ||
+            option.paymentMethodType === 'crypto'
+          ),
+          priceMode: option.paymentPriceMode || 'fixed',
           routes: [],
         });
       }
@@ -146,7 +156,8 @@
 
     getRoutesForPaymentMethod(paymentMethodKey)
       .filter(function (option) {
-        return option.paymentMethodType === 'crypto';
+        return option.paymentMethodType === 'crypto' ||
+          option.paymentRequiresRouteSelection;
       })
       .forEach(function (option) {
         const key = option.assetGroupKey || option.assetCode;
@@ -215,6 +226,10 @@
     buyState.paymentMethodKey = method ? method.key : '';
     buyState.paymentMethodLabel = method ? method.label : '';
     buyState.paymentMethodType = method ? method.type : '';
+    buyState.paymentRequiresRouteSelection = Boolean(
+      method && method.requiresRouteSelection
+    );
+    buyState.paymentPriceMode = method ? method.priceMode || 'fixed' : 'fixed';
 
     const hiddenKey = document.querySelector('[data-wallet-selected-payment-method-key]');
     const hiddenType = document.querySelector('[data-wallet-selected-payment-method-type]');
@@ -271,7 +286,7 @@
   function selectDefaultRouteForPaymentMethod() {
     const methodRoutes = getRoutesForPaymentMethod(buyState.paymentMethodKey);
 
-    if (buyState.paymentMethodType !== 'crypto') {
+    if (!buyState.paymentRequiresRouteSelection) {
       setSelectedRoute(methodRoutes[0] ? methodRoutes[0].key : '');
       return;
     }
@@ -521,7 +536,7 @@
           return;
         }
 
-        if (selectedMethod.type !== 'crypto') {
+        if (!selectedMethod.requiresRouteSelection) {
           setSelectedRoute(routes[0].key);
           const form = getBuyForm();
           if (form) {

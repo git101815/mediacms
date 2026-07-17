@@ -34,6 +34,21 @@ urlpatterns = [
         views.wallet_deposit_session_cancel,
         name="wallet_deposit_session_cancel",
     ),
+    path(
+        "wallet/deposits/<uuid:public_id>/dfx-launch",
+        views.wallet_dfx_launch,
+        name="wallet_dfx_launch",
+    ),
+    path(
+        "wallet/deposits/<uuid:public_id>/dfx-return",
+        views.wallet_dfx_return,
+        name="wallet_dfx_return",
+    ),
+    path(
+        "wallet/deposits/<uuid:public_id>/dfx-return/buy",
+        views.wallet_dfx_return,
+        name="wallet_dfx_return_buy",
+    ),
     path("api/payments/malum/webhook", malum_webhooks.malum_webhook, name="malum_webhook"),
     path("api/payments/paygate/callback", paygate_webhooks.paygate_callback, name="paygate_callback"),
     re_path(r"^wallet$", views.wallet, name="wallet"),
