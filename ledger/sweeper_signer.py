@@ -61,7 +61,7 @@ def sign_dfx_auth_message(
 ) -> dict:
     base_url = _setting_str(
         "DFX_SWEEPER_SIGNER_BASE_URL",
-        "http://sweeper_service:8080",
+        "http://dfx_signer_service:8080",
     ).rstrip("/")
     if not base_url:
         raise ImproperlyConfigured("DFX_SWEEPER_SIGNER_BASE_URL is not configured")
