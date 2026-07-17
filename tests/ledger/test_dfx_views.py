@@ -165,6 +165,26 @@ class TestDfxSessionViews(BaseLedgerTestCase):
             "widget.setAttribute('borderless', 'true')",
             body,
         )
+        self.assertIn(
+            "DFX_ACCESS_TOKEN_CACHE_VERSION",
+            body,
+        )
+        self.assertIn(
+            "window.sessionStorage.getItem",
+            body,
+        )
+        self.assertIn(
+            "window.sessionStorage.setItem",
+            body,
+        )
+        self.assertIn(
+            "readCachedAccessToken",
+            body,
+        )
+        self.assertIn(
+            "authenticateWithDfx",
+            body,
+        )
         self.assertTrue(body.lstrip().lower().startswith("<!doctype html>"))
 
     def test_launch_page_is_owner_only(self):

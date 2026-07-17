@@ -371,9 +371,141 @@
     const checkoutUrl = '{{ dfx_launch.checkout_url|escapejs }}';
     const sessionUrl = '{{ dfx_launch.session_url|escapejs }}';
     const authBody = JSON.stringify(authPayload);
+    const DFX_ACCESS_TOKEN_CACHE_VERSION = 'v1';
+    const MAX_CACHED_TOKEN_AGE_MS = 30 * 60 * 1000;
+    const TOKEN_EXPIRY_SKEW_MS = 30 * 1000;
     let standaloneUrl = '';
 
     authPayload.signature = '';
+
+    function getAccessTokenStorageKey() {
+      const transactionId = String(
+        checkoutParams['external-transaction-id'] || ''
+      ).trim();
+      const blockchain = String(
+        authPayload.blockchain || ''
+      ).trim().toLowerCase();
+      const address = String(
+        authPayload.address || ''
+      ).trim().toLowerCase();
+
+      if (!transactionId || !blockchain || !address) {
+        return '';
+      }
+
+      return [
+        'dfx-access-token',
+        DFX_ACCESS_TOKEN_CACHE_VERSION,
+        transactionId,
+        blockchain,
+        address
+      ].join(':');
+    }
+
+    const accessTokenStorageKey = getAccessTokenStorageKey();
+
+    function removeCachedAccessToken() {
+      if (!accessTokenStorageKey) {
+        return;
+      }
+
+      try {
+        window.sessionStorage.removeItem(accessTokenStorageKey);
+      } catch (error) {
+        // Storage may be disabled. Checkout can still continue without reuse.
+      }
+    }
+
+    function decodeJwtExpiryMs(accessToken) {
+      try {
+        const parts = String(accessToken || '').split('.');
+        if (parts.length < 2) {
+          return null;
+        }
+
+        let encodedPayload = parts[1]
+          .replace(/-/g, '+')
+          .replace(/_/g, '/');
+
+        while (encodedPayload.length % 4) {
+          encodedPayload += '=';
+        }
+
+        const payload = JSON.parse(window.atob(encodedPayload));
+        const expirySeconds = Number(payload.exp);
+
+        if (!Number.isFinite(expirySeconds) || expirySeconds <= 0) {
+          return null;
+        }
+
+        return expirySeconds * 1000;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function readCachedAccessToken() {
+      if (!accessTokenStorageKey) {
+        return '';
+      }
+
+      try {
+        const rawEntry = window.sessionStorage.getItem(
+          accessTokenStorageKey
+        );
+
+        if (!rawEntry) {
+          return '';
+        }
+
+        const entry = JSON.parse(rawEntry);
+        const accessToken = String(entry.accessToken || '').trim();
+        const storedAt = Number(entry.storedAt);
+        const now = Date.now();
+        const tokenExpiryMs = decodeJwtExpiryMs(accessToken);
+        const invalidStoredAt = (
+          !Number.isFinite(storedAt) ||
+          storedAt <= 0 ||
+          storedAt > now + (5 * 60 * 1000)
+        );
+        const tooOld = (
+          !invalidStoredAt &&
+          now - storedAt > MAX_CACHED_TOKEN_AGE_MS
+        );
+        const expired = (
+          tokenExpiryMs !== null &&
+          tokenExpiryMs <= now + TOKEN_EXPIRY_SKEW_MS
+        );
+
+        if (!accessToken || invalidStoredAt || tooOld || expired) {
+          removeCachedAccessToken();
+          return '';
+        }
+
+        return accessToken;
+      } catch (error) {
+        removeCachedAccessToken();
+        return '';
+      }
+    }
+
+    function cacheAccessToken(accessToken) {
+      if (!accessTokenStorageKey) {
+        return;
+      }
+
+      try {
+        window.sessionStorage.setItem(
+          accessTokenStorageKey,
+          JSON.stringify({
+            accessToken: String(accessToken),
+            storedAt: Date.now()
+          })
+        );
+      } catch (error) {
+        // Storage may be disabled or full. The current checkout still works.
+      }
+    }
 
     function showError(error) {
       const message = error && error.message
@@ -388,6 +520,18 @@
       if (standaloneUrl) {
         standaloneNode.href = standaloneUrl;
         standaloneNode.hidden = false;
+      }
+    }
+
+    function updateStatus(title, detail) {
+      const titleNode = statusNode.querySelector('strong');
+      const detailNode = statusNode.querySelector('p');
+
+      if (titleNode && title) {
+        titleNode.textContent = title;
+      }
+      if (detailNode && detail) {
+        detailNode.textContent = detail;
       }
     }
 
@@ -443,6 +587,88 @@
       widgetHost.hidden = false;
     }
 
+    function waitForWidgetDefinition() {
+      return Promise.race([
+        customElements.whenDefined('dfx-services'),
+        new Promise(function (_, reject) {
+          window.setTimeout(function () {
+            reject(
+              new Error(
+                'The embedded DFX checkout did not initialize.'
+              )
+            );
+          }, 15000);
+        })
+      ]);
+    }
+
+    function authenticateWithDfx() {
+      return fetch(authUrl, {
+        method: 'POST',
+        mode: 'cors',
+        credentials: 'omit',
+        cache: 'no-store',
+        referrerPolicy: 'no-referrer',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: authBody
+      })
+        .then(function (response) {
+          return response.json().catch(function () {
+            return {};
+          }).then(function (payload) {
+            if (!response.ok) {
+              const detail = (
+                payload.message ||
+                payload.error ||
+                ('HTTP ' + response.status)
+              );
+              throw new Error(String(detail));
+            }
+            return payload;
+          });
+        })
+        .then(function (payload) {
+          const accessToken = String(
+            payload.accessToken || ''
+          ).trim();
+
+          if (!accessToken) {
+            throw new Error('DFX did not return an access token.');
+          }
+
+          cacheAccessToken(accessToken);
+          return accessToken;
+        });
+    }
+
+    function openCheckout(accessToken) {
+      standaloneUrl = buildStandaloneUrl(accessToken);
+
+      return waitForWidgetDefinition().then(function () {
+        mountWidget(accessToken);
+      });
+    }
+
+    function startCheckout() {
+      const cachedAccessToken = readCachedAccessToken();
+
+      if (cachedAccessToken) {
+        updateStatus(
+          'Resuming your secure checkout',
+          'Restoring the current DFX bank-transfer session…'
+        );
+        openCheckout(cachedAccessToken).catch(showError);
+        return;
+      }
+
+      authenticateWithDfx()
+        .then(openCheckout)
+        .catch(showError);
+    }
+
     window.handleDfxClose = function () {
       window.location.assign(sessionUrl);
     };
@@ -455,56 +681,7 @@
       });
     }
 
-    fetch(authUrl, {
-      method: 'POST',
-      mode: 'cors',
-      credentials: 'omit',
-      cache: 'no-store',
-      referrerPolicy: 'no-referrer',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: authBody
-    })
-      .then(function (response) {
-        return response.json().catch(function () {
-          return {};
-        }).then(function (payload) {
-          if (!response.ok) {
-            const detail = (
-              payload.message ||
-              payload.error ||
-              ('HTTP ' + response.status)
-            );
-            throw new Error(String(detail));
-          }
-          return payload;
-        });
-      })
-      .then(function (payload) {
-        if (!payload.accessToken) {
-          throw new Error('DFX did not return an access token.');
-        }
-
-        standaloneUrl = buildStandaloneUrl(payload.accessToken);
-
-        return Promise.race([
-          customElements.whenDefined('dfx-services'),
-          new Promise(function (_, reject) {
-            window.setTimeout(function () {
-              reject(
-                new Error(
-                  'The embedded DFX checkout did not initialize.'
-                )
-              );
-            }, 15000);
-          })
-        ]).then(function () {
-          mountWidget(payload.accessToken);
-        });
-      })
-      .catch(showError);
+    startCheckout();
   })();
   </script>
 </body>
