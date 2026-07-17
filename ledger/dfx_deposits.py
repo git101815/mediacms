@@ -28,6 +28,7 @@ from ledger.providers.dfx import (
     get_dfx_fiat_currency,
     get_dfx_payment_ttl_seconds,
     get_dfx_public_base_url,
+    get_dfx_settlement_route_preferences,
     round_dfx_source_amount,
 )
 from ledger.services import (
@@ -47,6 +48,35 @@ def _network_label(chain: str) -> str:
     }
     normalized = str(chain or "").strip().lower()
     return labels.get(normalized, normalized)
+
+
+def _ordered_dfx_settlement_routes() -> list[dict]:
+    routes = list_available_deposit_options()
+    preferences = get_dfx_settlement_route_preferences()
+    ordered = []
+    seen_route_keys = set()
+
+    for preference in preferences:
+        normalized_preference = str(preference).strip().lower()
+        for route in routes:
+            route_key = str(route.get("key") or "").strip()
+            if not route_key or route_key in seen_route_keys:
+                continue
+
+            chain_asset_key = (
+                f"{str(route.get('chain') or '').strip().lower()}:"
+                f"{str(route.get('asset_code') or '').strip().lower()}"
+            )
+            if normalized_preference not in {
+                route_key.lower(),
+                chain_asset_key,
+            }:
+                continue
+
+            ordered.append(route)
+            seen_route_keys.add(route_key)
+
+    return ordered
 
 
 def _absolute_dfx_return_url(session_public_id) -> str:
@@ -141,10 +171,11 @@ def get_dfx_deposit_options() -> list[dict]:
         currency = get_dfx_fiat_currency()
         fiat = get_dfx_fiat(currency)
         minimum_fiat, maximum_fiat = get_dfx_bank_limits(fiat)
+        settlement_routes = _ordered_dfx_settlement_routes()
     except Exception:
         return []
 
-    if maximum_fiat <= 0:
+    if maximum_fiat <= 0 or not settlement_routes:
         return []
 
     dfx_min_canonical = (
@@ -158,9 +189,10 @@ def get_dfx_deposit_options() -> list[dict]:
     )
     currency_rate = format(get_fiat_usd_rate(currency), "f")
     assets_by_blockchain: dict[str, list[dict]] = {}
-    options = []
 
-    for route in list_available_deposit_options():
+    # DFX is one user-facing bank-transfer provider. Pick the first healthy
+    # settlement route from the explicit server-side preference list.
+    for route in settlement_routes:
         chain = str(route.get("chain") or "").strip().lower()
         try:
             blockchain = get_dfx_chain_name(chain)
@@ -184,13 +216,14 @@ def get_dfx_deposit_options() -> list[dict]:
         network_display = _network_label(chain)
         asset_code = str(route["asset_code"]).upper()
         min_amount = max(int(route["min_amount"]), int(dfx_min_canonical))
-        options.append(
+
+        return [
             {
                 **route,
                 "key": f"dfx:{route_key}",
                 "deposit_route_key": route_key,
-                "label": f"{DFX_PAYMENT_METHOD_LABEL} · {network_display} · {asset_code}",
-                "route_label": f"{network_display} · {asset_code}",
+                "label": DFX_PAYMENT_METHOD_LABEL,
+                "route_label": DFX_PAYMENT_METHOD_LABEL,
                 "network_display": network_display,
                 "payment_method_key": DFX_PAYMENT_METHOD_KEY,
                 "payment_method_label": DFX_PAYMENT_METHOD_LABEL,
@@ -198,18 +231,20 @@ def get_dfx_deposit_options() -> list[dict]:
                 "provider_key": DFX_PROVIDER_KEY,
                 "payment_currency": currency,
                 "payment_currency_usd_rate": currency_rate,
-                "payment_requires_route_selection": True,
-                "payment_price_mode": "provider_quote",
+                "payment_requires_route_selection": False,
+                "payment_price_mode": "fixed",
                 "min_amount": min_amount,
                 "dfx_asset_id": int(asset["id"]),
                 "dfx_asset_unique_name": str(asset.get("uniqueName") or ""),
                 "dfx_blockchain": blockchain,
                 "dfx_bank_min_fiat": format(minimum_fiat, "f"),
                 "dfx_bank_max_fiat": format(maximum_fiat, "f"),
+                "dfx_settlement_asset_code": asset_code,
+                "dfx_settlement_network": network_display,
             }
-        )
+        ]
 
-    return options
+    return []
 
 
 def _update_provider_metadata(
@@ -270,10 +305,7 @@ def open_dfx_deposit_session(
     if session.derivation_index is None:
         raise ValidationError("DFX session is missing its derivation index")
 
-    display_label = (
-        f"{DFX_PAYMENT_METHOD_LABEL} · "
-        f"{_network_label(session.chain)} · {session.asset_code}"
-    )
+    display_label = DFX_PAYMENT_METHOD_LABEL
     provider = {
         "key": DFX_PROVIDER_KEY,
         "label": DFX_PAYMENT_METHOD_LABEL,
@@ -315,10 +347,7 @@ def prepare_dfx_browser_launch(
     if current_provider.get("key") != DFX_PROVIDER_KEY:
         raise ValidationError("Deposit session is not a DFX session")
 
-    display_label = (
-        f"{DFX_PAYMENT_METHOD_LABEL} · "
-        f"{_network_label(session.chain)} · {session.asset_code}"
-    )
+    display_label = DFX_PAYMENT_METHOD_LABEL
 
     try:
         asset = find_dfx_asset_for_route(

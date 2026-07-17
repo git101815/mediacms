@@ -23,6 +23,15 @@ DFX_DEFAULT_APP_BASE_URL = "https://app.dfx.swiss"
 DFX_DEFAULT_PAYMENT_TTL_SECONDS = 7 * 24 * 60 * 60
 DFX_DEFAULT_CACHE_SECONDS = 300
 DFX_DEFAULT_API_TIMEOUT_SECONDS = 20
+DFX_DEFAULT_SETTLEMENT_ROUTE_PREFERENCES = (
+    "arbitrum:USDC",
+    "arbitrum:USDT",
+    "base:USDC",
+    "bsc:USDC",
+    "bsc:USDT",
+    "ethereum:USDC",
+    "ethereum:USDT",
+)
 
 DFX_CHAIN_BY_MEDIACMS_CHAIN = {
     "ethereum": "Ethereum",
@@ -85,6 +94,64 @@ def get_dfx_payment_method() -> str:
     return value
 
 
+def get_dfx_settlement_route_preferences() -> tuple[str, ...]:
+    configured = getattr(
+        settings,
+        "DFX_SETTLEMENT_ROUTE_PREFERENCES",
+        DFX_DEFAULT_SETTLEMENT_ROUTE_PREFERENCES,
+    )
+
+    if isinstance(configured, str):
+        raw_values = configured.split(",")
+    else:
+        try:
+            raw_values = list(configured)
+        except TypeError as exc:
+            raise ImproperlyConfigured(
+                "DFX_SETTLEMENT_ROUTE_PREFERENCES must be a sequence or "
+                "a comma-separated string"
+            ) from exc
+
+    preferences = []
+    for raw_value in raw_values:
+        value = str(raw_value or "").strip()
+        if not value:
+            continue
+
+        parts = value.split(":")
+        if len(parts) not in {2, 3}:
+            raise ImproperlyConfigured(
+                "Each DFX settlement route preference must be "
+                "'chain:ASSET' or an exact MediaCMS route key"
+            )
+
+        chain = parts[0].strip().lower()
+        asset_code = parts[1].strip().upper()
+        if chain not in DFX_CHAIN_BY_MEDIACMS_CHAIN or not asset_code:
+            raise ImproperlyConfigured(
+                f"Invalid DFX settlement route preference: {value}"
+            )
+
+        normalized = f"{chain}:{asset_code}"
+        if len(parts) == 3:
+            contract = parts[2].strip().lower()
+            if not contract:
+                raise ImproperlyConfigured(
+                    f"Invalid DFX settlement route preference: {value}"
+                )
+            normalized = f"{normalized}:{contract}"
+
+        if normalized not in preferences:
+            preferences.append(normalized)
+
+    if not preferences:
+        raise ImproperlyConfigured(
+            "DFX_SETTLEMENT_ROUTE_PREFERENCES must contain at least one route"
+        )
+
+    return tuple(preferences)
+
+
 def get_dfx_payment_ttl_seconds() -> int:
     return _setting_int(
         "DFX_PAYMENT_TTL_SECONDS",
@@ -136,6 +203,7 @@ def dfx_enabled() -> bool:
             raise ImproperlyConfigured("DFX_PUBLIC_BASE_URL or FRONTEND_HOST must be configured")
         get_dfx_fiat_currency()
         get_dfx_payment_method()
+        get_dfx_settlement_route_preferences()
         get_dfx_payment_ttl_seconds()
         if not _setting_str("DFX_SWEEPER_SIGNER_BASE_URL"):
             raise ImproperlyConfigured("DFX_SWEEPER_SIGNER_BASE_URL is not configured")
@@ -503,6 +571,7 @@ __all__ = [
     "get_dfx_fiat",
     "get_dfx_fiat_currency",
     "get_dfx_payment_ttl_seconds",
+    "get_dfx_settlement_route_preferences",
     "get_dfx_public_base_url",
     "round_dfx_source_amount",
 ]

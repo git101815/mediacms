@@ -91,6 +91,17 @@ DFX_APP_BASE_URL = "https://app.dfx.swiss"
 DFX_PUBLIC_BASE_URL = FRONTEND_HOST
 DFX_FIAT_CURRENCY = "EUR"
 DFX_PAYMENT_METHOD = "Bank"
+# DFX is exposed as one bank-transfer provider. The crypto settlement route is
+# selected internally in this order and is never shown to the buyer.
+DFX_SETTLEMENT_ROUTE_PREFERENCES = (
+    "arbitrum:USDC",
+    "arbitrum:USDT",
+    "base:USDC",
+    "bsc:USDC",
+    "bsc:USDT",
+    "ethereum:USDC",
+    "ethereum:USDT",
+)
 DFX_LANGUAGE = "en"
 DFX_WALLET_NAME = ""
 DFX_PAYMENT_TTL_SECONDS = 7 * 24 * 60 * 60

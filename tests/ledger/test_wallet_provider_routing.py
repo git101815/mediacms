@@ -58,8 +58,8 @@ class TestWalletProviderRouting(SimpleTestCase):
                 "provider_key": DFX_PROVIDER_KEY,
                 "payment_currency": "EUR",
                 "payment_currency_usd_rate": "1.12",
-                "payment_requires_route_selection": True,
-                "payment_price_mode": "provider_quote",
+                "payment_requires_route_selection": False,
+                "payment_price_mode": "fixed",
             },
         ]
         direct_crypto_options = [
@@ -140,7 +140,8 @@ class TestWalletProviderRouting(SimpleTestCase):
         )
         self.assertEqual(dfx_rows[0]["payment_method_type"], "provider")
         self.assertEqual(dfx_rows[0]["provider_key"], DFX_PROVIDER_KEY)
-        self.assertTrue(dfx_rows[0]["payment_requires_route_selection"])
+        self.assertFalse(dfx_rows[0]["payment_requires_route_selection"])
+        self.assertEqual(dfx_rows[0]["payment_price_mode"], "fixed")
         self.assertEqual(
             dfx_rows[0]["payment_group_label"],
             "Bank transfer (DFX)",

@@ -300,10 +300,6 @@
   }
 
   function getPaymentMethodPriceDisplay(method) {
-    if (method && method.priceMode === 'provider_quote') {
-      return 'Calculated by DFX';
-    }
-
     const base = Number(buyState.packGrossCanonical || 0);
     const bps = Number((method && method.priceBps) || 0);
     const fixed = Number((method && method.priceFixedCanonical) || 0);
