@@ -1388,7 +1388,6 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
 
 def main() -> None:
     config = load_config()
-
     client = MediaCMSInternalClient(
         base_url=config.mediacms_base_url,
         service_name=config.service_name,

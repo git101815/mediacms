@@ -6,6 +6,8 @@
   <meta name="robots" content="noindex,nofollow,noarchive">
   <link rel="icon" href="data:,">
   <title>Complete your bank transfer</title>
+  <link rel="preconnect" href="{{ dfx_launch.checkout_url }}" crossorigin>
+  <link rel="preconnect" href="{{ dfx_launch.auth_url }}" crossorigin>
   <style>
     :root {
       color-scheme: light;
@@ -599,6 +601,7 @@
     defer
     src="{{ dfx_launch.widget_script_url }}"
     data-dfx-widget-script
+    fetchpriority="high"
   ></script>
 
   <script nonce="{{ dfx_csp_nonce }}">

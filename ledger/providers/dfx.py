@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
@@ -22,6 +23,8 @@ DFX_DEFAULT_API_BASE_URL = "https://api.dfx.swiss"
 DFX_DEFAULT_APP_BASE_URL = "https://app.dfx.swiss"
 DFX_DEFAULT_PAYMENT_TTL_SECONDS = 7 * 24 * 60 * 60
 DFX_DEFAULT_CACHE_SECONDS = 300
+DFX_DEFAULT_QUOTE_CACHE_SECONDS = 60
+DFX_DEFAULT_LAUNCH_QUOTE_MAX_AGE_SECONDS = 30 * 60
 DFX_DEFAULT_API_TIMEOUT_SECONDS = 20
 DFX_DEFAULT_SETTLEMENT_ROUTE_PREFERENCES = (
     "arbitrum:USDC",
@@ -162,6 +165,23 @@ def get_dfx_payment_ttl_seconds() -> int:
 
 def get_dfx_cache_seconds() -> int:
     return _setting_int("DFX_CACHE_SECONDS", DFX_DEFAULT_CACHE_SECONDS, minimum=1)
+
+
+
+def get_dfx_quote_cache_seconds() -> int:
+    return _setting_int(
+        "DFX_QUOTE_CACHE_SECONDS",
+        DFX_DEFAULT_QUOTE_CACHE_SECONDS,
+        minimum=1,
+    )
+
+
+def get_dfx_launch_quote_max_age_seconds() -> int:
+    return _setting_int(
+        "DFX_LAUNCH_QUOTE_MAX_AGE_SECONDS",
+        DFX_DEFAULT_LAUNCH_QUOTE_MAX_AGE_SECONDS,
+        minimum=1,
+    )
 
 
 def get_dfx_api_timeout_seconds() -> int:
@@ -416,15 +436,40 @@ def get_dfx_buy_quote(
     target_canonical_amount: int,
     fiat_currency: str | None = None,
 ) -> dict:
-    currency = normalize_fiat_currency(fiat_currency or get_dfx_fiat_currency())
-    target_amount = canonical_stable_to_dfx_target_amount(target_canonical_amount)
+    currency = normalize_fiat_currency(
+        fiat_currency or get_dfx_fiat_currency()
+    )
+    target_amount = canonical_stable_to_dfx_target_amount(
+        target_canonical_amount
+    )
+    payment_method = get_dfx_payment_method()
+    wallet_name = get_dfx_wallet_name()
+
+    cache_material = {
+        "asset_id": int(asset_id),
+        "currency": currency,
+        "target_amount": format(target_amount, "f"),
+        "payment_method": payment_method,
+        "wallet": wallet_name,
+    }
+    cache_suffix = hashlib.sha256(
+        json.dumps(
+            cache_material,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    cache_key = _cache_key("buy_quote", cache_suffix)
+    cached = cache.get(cache_key)
+    if isinstance(cached, dict):
+        return dict(cached)
+
     payload = {
         "currency": {"name": currency},
         "asset": {"id": int(asset_id)},
         "targetAmount": float(target_amount),
-        "paymentMethod": get_dfx_payment_method(),
+        "paymentMethod": payment_method,
     }
-    wallet_name = get_dfx_wallet_name()
     if wallet_name:
         payload["wallet"] = wallet_name
 
@@ -436,14 +481,20 @@ def get_dfx_buy_quote(
     if not isinstance(response, dict):
         raise ValidationError("DFX quote response must be an object")
     if response.get("isValid") is not True:
-        errors = response.get("errors") or response.get("error") or "Quote unavailable"
+        errors = (
+            response.get("errors")
+            or response.get("error")
+            or "Quote unavailable"
+        )
         raise ValidationError(f"DFX quote is invalid: {errors}")
 
     try:
         source_amount = Decimal(str(response.get("amount")))
         estimated_amount = Decimal(str(response.get("estimatedAmount")))
     except (InvalidOperation, TypeError, ValueError) as exc:
-        raise ValidationError("DFX quote is missing valid amounts") from exc
+        raise ValidationError(
+            "DFX quote is missing valid amounts"
+        ) from exc
 
     if source_amount <= 0 or estimated_amount <= 0:
         raise ValidationError("DFX quote returned non-positive amounts")
@@ -451,9 +502,16 @@ def get_dfx_buy_quote(
     normalized = dict(response)
     normalized["requestedTargetAmount"] = format(target_amount, "f")
     normalized["sourceAmount"] = format(source_amount, "f")
-    normalized["estimatedTargetAmount"] = format(estimated_amount, "f")
-    return normalized
-
+    normalized["estimatedTargetAmount"] = format(
+        estimated_amount,
+        "f",
+    )
+    cache.set(
+        cache_key,
+        normalized,
+        get_dfx_quote_cache_seconds(),
+    )
+    return dict(normalized)
 
 def round_dfx_source_amount(value) -> str:
     try:
