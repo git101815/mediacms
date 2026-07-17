@@ -12,7 +12,7 @@ from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 
 from ledger.fiat import get_fiat_usd_rate, normalize_fiat_currency
-
+from ledger.providers.paygate import get_paygate_user_agent
 
 DFX_PROVIDER_KEY = "dfx"
 DFX_PAYMENT_METHOD_KEY = "dfx:bank"
@@ -178,7 +178,7 @@ def call_dfx_json(
         url = f"{url}?{query}"
 
     body = None
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "User-Agent": get_paygate_user_agent(),}
     if extra_headers:
         headers.update(
             {

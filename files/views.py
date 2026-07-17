@@ -612,8 +612,9 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
         or format(get_fiat_usd_rate(payment_currency), "f")
     )
     payment_currency_symbol = get_fiat_currency_symbol(payment_currency)
-    payment_requires_route_selection = bool(
-        decorated.get("payment_requires_route_selection", False)
+    payment_requires_route_selection = (
+        payment_method_type == "crypto"
+        or bool(decorated.get("payment_requires_route_selection", False))
     )
     payment_price_mode = str(
         decorated.get("payment_price_mode") or "fixed"
@@ -707,6 +708,7 @@ def _build_wallet_deposit_options() -> list[dict]:
                 "payment_method_key": payment_method_key,
                 "payment_method_label": payment_method_label,
                 "payment_method_type": payment_method_type,
+                "payment_requires_route_selection": True,
                 "min_amount_display": _format_canonical_stable_amount(option["min_amount"]),
             }
         )

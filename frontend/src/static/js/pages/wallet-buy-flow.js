@@ -124,7 +124,10 @@
           currency: option.paymentCurrency || 'USD',
           currencySymbol: option.paymentCurrencySymbol || '$',
           currencyUsdRate: option.paymentCurrencyUsdRate || 1,
-          requiresRouteSelection: Boolean(option.paymentRequiresRouteSelection),
+          requiresRouteSelection: Boolean(
+            option.paymentRequiresRouteSelection ||
+            option.paymentMethodType === 'crypto'
+          ),
           priceMode: option.paymentPriceMode || 'fixed',
           routes: [],
         });

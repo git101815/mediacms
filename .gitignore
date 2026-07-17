@@ -40,6 +40,8 @@ static/drf-yasg/
 static/jazzmin/
 static/css/
 static/js/
+static/lib/file-uploader/
+static/lib/video-js/
 static/favicons/browserconfig.xml
 static/favicons/site.webmanifest
 static/lib/gfonts/LICENSE.txt
