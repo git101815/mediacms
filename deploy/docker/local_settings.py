@@ -94,11 +94,11 @@ DFX_PAYMENT_METHOD = "Bank"
 # DFX is exposed as one bank-transfer provider. The crypto settlement route is
 # selected internally in this order and is never shown to the buyer.
 DFX_SETTLEMENT_ROUTE_PREFERENCES = (
-    "arbitrum:USDC",
-    "arbitrum:USDT",
     "base:USDC",
     "bsc:USDC",
     "bsc:USDT",
+    "arbitrum:USDC",
+    "arbitrum:USDT",
     "ethereum:USDC",
     "ethereum:USDT",
 )
@@ -116,13 +116,13 @@ DFX_SWEEPER_SIGNER_TIMEOUT_SECONDS = 10
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "paypal_us": 800,
     "revolut_eu": 700,
-    "dfx_bank": 0,
+    "dfx_bank": 400,
     "crypto": 0,
 }
 WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
     "paypal_us": 1.3,
     "revolut_eu": 1.8,
-    "dfx_bank": 0,
+    "dfx_bank": 2,
     "crypto": 0,
 }
 PAYGATE_CURRENCY = "USD"
