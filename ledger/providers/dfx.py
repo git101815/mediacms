@@ -509,12 +509,16 @@ def build_dfx_checkout_params(
     params = {
         "lang": get_dfx_language(),
         "asset-out": str(asset_reference),
+        "assets": str(asset_reference),
         "blockchain": get_dfx_chain_name(chain),
+        "blockchains": get_dfx_chain_name(chain),
         "asset-in": normalize_fiat_currency(fiat_currency),
         "amount-in": round_dfx_source_amount(source_amount),
         "payment-method": "bank",
         "external-transaction-id": str(external_transaction_id),
         "redirect-uri": str(redirect_uri),
+        "headless": "true",
+        "borderless": "true",
     }
     email = str(customer_email or "").strip()
     if email:

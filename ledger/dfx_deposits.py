@@ -442,6 +442,7 @@ def prepare_dfx_browser_launch(
         "auth_url": get_dfx_auth_url(),
         "auth_payload": auth_payload,
         "checkout_url": f"{get_dfx_app_base_url()}/buy",
+        "widget_script_url": f"{get_dfx_app_base_url()}/widget/v1.0",
         "checkout_params": checkout_params,
         "wallet_url": reverse("wallet"),
         "session_url": reverse(

@@ -4,69 +4,456 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
-  <title>Opening DFX</title>
+  <title>Complete your bank transfer</title>
   <style>
     :root {
       color-scheme: dark;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #101114;
+      background: #0d0e12;
       color: #f5f6f8;
     }
-    * { box-sizing: border-box; }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       min-height: 100vh;
       margin: 0;
-      display: grid;
-      place-items: center;
-      padding: 24px;
+      padding: 28px 18px 48px;
+      background:
+        radial-gradient(circle at top, rgba(73, 91, 255, 0.14), transparent 34rem),
+        #0d0e12;
     }
+
     main {
-      width: min(520px, 100%);
-      padding: 32px;
-      border: 1px solid #30333a;
-      border-radius: 16px;
-      background: #191b20;
+      width: min(760px, 100%);
+      margin: 0 auto;
+    }
+
+    .checkout-header {
       text-align: center;
     }
-    h1 {
-      margin: 0 0 12px;
-      font-size: 1.45rem;
+
+    .checkout-kicker {
+      min-height: 30px;
+      padding: 0 12px;
+      border: 1px solid rgba(133, 145, 255, 0.22);
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      color: #cfd5ff;
+      background: rgba(91, 107, 255, 0.13);
+      font-size: 0.82rem;
+      font-weight: 700;
     }
-    p {
-      margin: 0;
-      color: #c7cad1;
+
+    h1 {
+      margin: 16px 0 10px;
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      line-height: 1.08;
+    }
+
+    .checkout-subtitle {
+      max-width: 580px;
+      margin: 0 auto;
+      color: #aeb3c0;
+      font-size: 1rem;
+      line-height: 1.55;
+    }
+
+    .checkout-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    .summary-item {
+      min-width: 0;
+      padding: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.045);
+    }
+
+    .summary-label {
+      color: #8f95a4;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .summary-value {
+      margin-top: 7px;
+      color: #f7f8fb;
+      font-size: 1.04rem;
+      font-weight: 750;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+
+    .checkout-note {
+      display: flex;
+      gap: 12px;
+      margin-top: 14px;
+      padding: 14px 16px;
+      border: 1px solid rgba(86, 182, 255, 0.17);
+      border-radius: 14px;
+      color: #c7d9e8;
+      background: rgba(55, 144, 217, 0.08);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .checkout-note__icon {
+      flex: 0 0 auto;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #0d0e12;
+      background: #86cfff;
+      font-size: 0.8rem;
+      font-weight: 900;
+    }
+
+    .widget-card {
+      margin-top: 18px;
+      padding: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 20px;
+      overflow: hidden;
+      background: #f7f8fb;
+      box-shadow: 0 22px 70px rgba(0, 0, 0, 0.35);
+    }
+
+    .widget-status {
+      min-height: 360px;
+      padding: 28px;
+      display: grid;
+      place-items: center;
+      color: #2e3340;
+      text-align: center;
+    }
+
+    .widget-status[hidden],
+    .widget-host[hidden],
+    .widget-error[hidden] {
+      display: none !important;
+    }
+
+    .spinner {
+      width: 38px;
+      height: 38px;
+      margin: 0 auto 16px;
+      border: 3px solid rgba(46, 51, 64, 0.14);
+      border-top-color: #5268e8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .widget-status strong {
+      display: block;
+      font-size: 1.04rem;
+    }
+
+    .widget-status p,
+    .widget-error p {
+      margin: 8px 0 0;
+      color: #697080;
       line-height: 1.5;
       overflow-wrap: anywhere;
     }
-    a {
-      display: inline-block;
+
+    .widget-host,
+    dfx-services {
+      display: block;
+      width: 100%;
+      min-height: 620px;
+      color: #111318;
+    }
+
+    .widget-error {
+      min-height: 320px;
+      padding: 34px 24px;
+      display: grid;
+      place-items: center;
+      color: #252a35;
+      text-align: center;
+    }
+
+    .widget-error h2 {
+      margin: 0;
+      font-size: 1.25rem;
+    }
+
+    .widget-error__actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
       margin-top: 20px;
-      color: #f5f6f8;
+    }
+
+    .button {
+      min-height: 44px;
+      padding: 0 18px;
+      border: 0;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      background: #5268e8;
+      font: inherit;
+      font-weight: 750;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .button--secondary {
+      color: #343946;
+      background: #e6e8ee;
+    }
+
+    .checkout-footer {
+      margin-top: 16px;
+      color: #868c9a;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 18px 10px 32px;
+      }
+
+      .checkout-summary {
+        grid-template-columns: 1fr;
+      }
+
+      .widget-card {
+        padding: 6px;
+        border-radius: 14px;
+      }
+
+      .widget-host,
+      dfx-services {
+        min-height: 690px;
+      }
     }
   </style>
 </head>
 <body>
   <main>
-    <h1>Opening DFX</h1>
-    <p data-dfx-status>Preparing the secure bank-transfer checkout...</p>
-    <a href="{{ dfx_launch.session_url }}" data-dfx-fallback hidden>
-      Return to the deposit
-    </a>
+    <header class="checkout-header">
+      <span class="checkout-kicker">Secure bank transfer</span>
+      <h1>Complete your bank transfer</h1>
+      <p class="checkout-subtitle">
+        Follow the secure instructions below to pay for your token package.
+        DFX.swiss processes the bank transfer and technical settlement.
+      </p>
+    </header>
+
+    <section class="checkout-summary" aria-label="Payment summary">
+      <div class="summary-item">
+        <div class="summary-label">Purchase</div>
+        <div class="summary-value">
+          {% if dfx_token_amount_display %}
+            {{ dfx_token_amount_display }} tokens
+          {% else %}
+            {{ dfx_token_pack_name }}
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="summary-item">
+        <div class="summary-label">Amount</div>
+        <div class="summary-value">
+          {{ dfx_checkout_amount }} {{ dfx_checkout_currency }}
+        </div>
+      </div>
+
+      <div class="summary-item">
+        <div class="summary-label">Payment method</div>
+        <div class="summary-value">SEPA bank transfer</div>
+      </div>
+    </section>
+
+    <div class="checkout-note">
+      <span class="checkout-note__icon" aria-hidden="true">i</span>
+      <div>
+        The conversion and blockchain settlement are handled automatically.
+        Complete only the payment and verification steps requested by DFX.swiss.
+        No crypto-wallet action is required.
+      </div>
+    </div>
+
+    <section class="widget-card" aria-label="DFX bank-transfer checkout">
+      <div class="widget-status" data-dfx-status>
+        <div>
+          <div class="spinner" aria-hidden="true"></div>
+          <strong>Connecting to DFX.swiss</strong>
+          <p>Preparing your secure bank-transfer checkout…</p>
+        </div>
+      </div>
+
+      <div class="widget-host" data-dfx-widget-host hidden></div>
+
+      <div class="widget-error" data-dfx-error hidden>
+        <div>
+          <h2>Unable to load the embedded checkout</h2>
+          <p data-dfx-error-message>
+            The secure checkout could not be loaded in this page.
+          </p>
+          <div class="widget-error__actions">
+            <a class="button" href="#" data-dfx-open-standalone hidden>
+              Open secure checkout
+            </a>
+            <a
+              class="button button--secondary"
+              href="{{ dfx_launch.session_url }}"
+            >
+              Return to payment status
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="checkout-footer">
+      Payment processing, onboarding and compliance checks are provided by
+      DFX.swiss. The amount and settlement route are preconfigured for this
+      order.
+    </footer>
   </main>
+
+  <script
+    nonce="{{ dfx_csp_nonce }}"
+    defer
+    src="{{ dfx_launch.widget_script_url }}"
+    data-dfx-widget-script
+  ></script>
 
   <script nonce="{{ dfx_csp_nonce }}">
   (function () {
     'use strict';
 
     const statusNode = document.querySelector('[data-dfx-status]');
-    const fallbackNode = document.querySelector('[data-dfx-fallback]');
-    const authPayload = JSON.parse('{{ dfx_auth_payload_json|escapejs }}');
-    const checkoutParams = JSON.parse('{{ dfx_checkout_params_json|escapejs }}');
+    const widgetHost = document.querySelector('[data-dfx-widget-host]');
+    const errorNode = document.querySelector('[data-dfx-error]');
+    const errorMessageNode = document.querySelector(
+      '[data-dfx-error-message]'
+    );
+    const standaloneNode = document.querySelector(
+      '[data-dfx-open-standalone]'
+    );
+    const widgetScriptNode = document.querySelector(
+      '[data-dfx-widget-script]'
+    );
+    const authPayload = JSON.parse(
+      '{{ dfx_auth_payload_json|escapejs }}'
+    );
+    const checkoutParams = JSON.parse(
+      '{{ dfx_checkout_params_json|escapejs }}'
+    );
     const authUrl = '{{ dfx_launch.auth_url|escapejs }}';
     const checkoutUrl = '{{ dfx_launch.checkout_url|escapejs }}';
+    const sessionUrl = '{{ dfx_launch.session_url|escapejs }}';
     const authBody = JSON.stringify(authPayload);
+    let standaloneUrl = '';
 
     authPayload.signature = '';
+
+    function showError(error) {
+      const message = error && error.message
+        ? String(error.message)
+        : 'The secure checkout could not be loaded.';
+
+      statusNode.hidden = true;
+      widgetHost.hidden = true;
+      errorNode.hidden = false;
+      errorMessageNode.textContent = message;
+
+      if (standaloneUrl) {
+        standaloneNode.href = standaloneUrl;
+        standaloneNode.hidden = false;
+      }
+    }
+
+    function buildStandaloneUrl(accessToken) {
+      const params = new URLSearchParams(checkoutParams);
+      params.set('session', accessToken);
+      return checkoutUrl + '?' + params.toString();
+    }
+
+    function setAttributeIfPresent(node, name, value) {
+      if (
+        value === undefined ||
+        value === null ||
+        String(value) === ''
+      ) {
+        return;
+      }
+      node.setAttribute(name, String(value));
+    }
+
+    function mountWidget(accessToken) {
+      const widget = document.createElement('dfx-services');
+      const forwardedAttributes = [
+        'lang',
+        'asset-in',
+        'asset-out',
+        'assets',
+        'blockchain',
+        'blockchains',
+        'amount-in',
+        'payment-method',
+        'mail',
+        'wallet',
+        'refcode',
+        'special-code',
+        'external-transaction-id'
+      ];
+
+      widget.setAttribute('service', 'buy');
+      widget.setAttribute('session', accessToken);
+      widget.setAttribute('headless', 'true');
+      widget.setAttribute('borderless', 'true');
+      widget.setAttribute('on-close', 'handleDfxClose');
+
+      forwardedAttributes.forEach(function (name) {
+        setAttributeIfPresent(widget, name, checkoutParams[name]);
+      });
+
+      widget.textContent = 'Loading secure bank-transfer checkout…';
+      widgetHost.replaceChildren(widget);
+      statusNode.hidden = true;
+      errorNode.hidden = true;
+      widgetHost.hidden = false;
+    }
+
+    window.handleDfxClose = function () {
+      window.location.assign(sessionUrl);
+    };
+
+    if (widgetScriptNode) {
+      widgetScriptNode.addEventListener('error', function () {
+        showError(
+          new Error('DFX checkout resources could not be loaded.')
+        );
+      });
+    }
 
     fetch(authUrl, {
       method: 'POST',
@@ -85,7 +472,11 @@
           return {};
         }).then(function (payload) {
           if (!response.ok) {
-            const detail = payload.message || payload.error || ('HTTP ' + response.status);
+            const detail = (
+              payload.message ||
+              payload.error ||
+              ('HTTP ' + response.status)
+            );
             throw new Error(String(detail));
           }
           return payload;
@@ -93,17 +484,27 @@
       })
       .then(function (payload) {
         if (!payload.accessToken) {
-          throw new Error('DFX did not return an access token');
+          throw new Error('DFX did not return an access token.');
         }
 
-        const params = new URLSearchParams(checkoutParams);
-        params.set('session', payload.accessToken);
-        window.location.replace(checkoutUrl + '?' + params.toString());
+        standaloneUrl = buildStandaloneUrl(payload.accessToken);
+
+        return Promise.race([
+          customElements.whenDefined('dfx-services'),
+          new Promise(function (_, reject) {
+            window.setTimeout(function () {
+              reject(
+                new Error(
+                  'The embedded DFX checkout did not initialize.'
+                )
+              );
+            }, 15000);
+          })
+        ]).then(function () {
+          mountWidget(payload.accessToken);
+        });
       })
-      .catch(function (error) {
-        statusNode.textContent = 'DFX could not be opened: ' + error.message;
-        fallbackNode.hidden = false;
-      });
+      .catch(showError);
   })();
   </script>
 </body>

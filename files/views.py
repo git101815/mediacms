@@ -1398,14 +1398,35 @@ def wallet_dfx_launch(request, public_id):
             actor=request.user,
         )
         auth_origin = _dfx_auth_origin(launch.get("auth_url"))
+        app_origin = _dfx_auth_origin(launch.get("checkout_url"))
     except (DjangoValidationError, ImproperlyConfigured) as exc:
         messages.error(request, _extract_wallet_form_error(exc))
         return redirect("wallet_deposit_session", public_id=session.public_id)
+
+    token_pack = (session.metadata or {}).get("token_pack") or {}
+    try:
+        token_amount = int(token_pack.get("token_amount") or 0)
+    except (TypeError, ValueError):
+        token_amount = 0
 
     csp_nonce = secrets.token_urlsafe(24)
     context = {
         "dfx_launch": launch,
         "dfx_csp_nonce": csp_nonce,
+        "dfx_token_pack_name": str(
+            token_pack.get("name") or "Token package"
+        ),
+        "dfx_token_amount_display": (
+            _format_pack_token_amount(token_amount)
+            if token_amount > 0
+            else ""
+        ),
+        "dfx_checkout_amount": str(
+            launch["checkout_params"].get("amount-in") or ""
+        ),
+        "dfx_checkout_currency": str(
+            launch["checkout_params"].get("asset-in") or ""
+        ),
         "dfx_auth_payload_json": json.dumps(
             launch["auth_payload"],
             separators=(",", ":"),
@@ -1424,20 +1445,23 @@ def wallet_dfx_launch(request, public_id):
     response["Referrer-Policy"] = "no-referrer"
     response["X-Content-Type-Options"] = "nosniff"
     response["X-Frame-Options"] = "DENY"
-    response["Cross-Origin-Opener-Policy"] = "same-origin"
+    response["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
     response["Permissions-Policy"] = (
-        "camera=(), microphone=(), geolocation=(), payment=()"
+        "camera=(self), microphone=(self), geolocation=(), payment=()"
     )
     response["Content-Security-Policy"] = (
         "default-src 'none'; "
-        f"script-src 'nonce-{csp_nonce}'; "
-        "style-src 'unsafe-inline'; "
-        f"connect-src {auth_origin}; "
-        "img-src 'none'; "
-        "font-src 'none'; "
+        f"script-src 'nonce-{csp_nonce}' {app_origin}; "
+        f"style-src 'unsafe-inline' {app_origin}; "
+        f"connect-src {auth_origin} {app_origin}; "
+        f"img-src {auth_origin} {app_origin} data: blob:; "
+        f"font-src {app_origin} data:; "
+        f"frame-src {app_origin}; "
+        "media-src blob:; "
+        "worker-src blob:; "
         "object-src 'none'; "
         "base-uri 'none'; "
-        "form-action 'none'; "
+        f"form-action {auth_origin} {app_origin}; "
         "frame-ancestors 'none'"
     )
     return response

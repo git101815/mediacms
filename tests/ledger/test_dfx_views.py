@@ -112,6 +112,7 @@ class TestDfxSessionViews(BaseLedgerTestCase):
                 "blockchain": "Ethereum",
             },
             "checkout_url": "https://app.dfx.swiss/buy",
+            "widget_script_url": "https://app.dfx.swiss/widget/v1.0",
             "checkout_params": {
                 "asset-in": "EUR",
                 "amount-in": "12.34",
@@ -146,7 +147,24 @@ class TestDfxSessionViews(BaseLedgerTestCase):
         body = response.content.decode("utf-8")
         self.assertIn(signature, body)
         self.assertNotIn("hydranalitics.ru", body)
-        self.assertNotIn("<script src=", body)
+        self.assertIn(
+            'src="https://app.dfx.swiss/widget/v1.0"',
+            body,
+        )
+        self.assertIn("Complete your bank transfer", body)
+        self.assertIn("SEPA bank transfer", body)
+        self.assertIn(
+            "document.createElement('dfx-services')",
+            body,
+        )
+        self.assertIn(
+            "widget.setAttribute('headless', 'true')",
+            body,
+        )
+        self.assertIn(
+            "widget.setAttribute('borderless', 'true')",
+            body,
+        )
         self.assertTrue(body.lstrip().lower().startswith("<!doctype html>"))
 
     def test_launch_page_is_owner_only(self):
