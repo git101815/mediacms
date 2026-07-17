@@ -142,6 +142,7 @@ class TestDfxSessionViews(BaseLedgerTestCase):
         csp = response["Content-Security-Policy"]
         self.assertIn("connect-src https://api.dfx.swiss", csp)
         self.assertIn("frame-ancestors 'none'", csp)
+        self.assertIn("img-src 'self'", csp)
         self.assertIn("script-src 'nonce-", csp)
 
         body = response.content.decode("utf-8")
@@ -165,6 +166,8 @@ class TestDfxSessionViews(BaseLedgerTestCase):
             "widget.setAttribute('borderless', 'true')",
             body,
         )
+        self.assertIn("delete checkoutParams.mail;", body)
+        self.assertNotIn("MutationObserver", body)
         self.assertIn(
             "DFX_ACCESS_TOKEN_CACHE_VERSION",
             body,

@@ -520,9 +520,8 @@ def build_dfx_checkout_params(
         "headless": "true",
         "borderless": "true",
     }
-    email = str(customer_email or "").strip()
-    if email:
-        params["mail"] = email
+    # Do not inherit the MediaCMS account email. The buyer must choose
+    # the address used for DFX onboarding inside the DFX checkout.
     wallet_name = get_dfx_wallet_name()
     if wallet_name:
         params["wallet"] = wallet_name

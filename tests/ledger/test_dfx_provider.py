@@ -101,6 +101,7 @@ class TestDfxProvider(SimpleTestCase):
         self.assertEqual(query["asset-in"], ["EUR"])
         self.assertEqual(query["amount-in"], ["12.35"])
         self.assertEqual(query["payment-method"], ["bank"])
+        self.assertNotIn("mail", query)
         self.assertEqual(
             query["external-transaction-id"],
             ["session-id"],

@@ -384,7 +384,8 @@ def prepare_dfx_browser_launch(
             source_amount=checkout_amount,
             external_transaction_id=str(session.public_id),
             redirect_uri=_absolute_dfx_return_url(session.public_id),
-            customer_email=getattr(actor, "email", "") or "",
+            # The buyer may use a different email for DFX onboarding.
+            customer_email="",
         )
     except Exception as exc:
         current_provider.update(

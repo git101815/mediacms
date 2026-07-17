@@ -1454,7 +1454,7 @@ def wallet_dfx_launch(request, public_id):
         f"script-src 'nonce-{csp_nonce}' {app_origin}; "
         f"style-src 'unsafe-inline' {app_origin}; "
         f"connect-src {auth_origin} {app_origin}; "
-        f"img-src {auth_origin} {app_origin} data: blob:; "
+        f"img-src 'self' {auth_origin} {app_origin} data: blob:; "
         f"font-src {app_origin} data:; "
         f"frame-src {app_origin}; "
         "media-src blob:; "
