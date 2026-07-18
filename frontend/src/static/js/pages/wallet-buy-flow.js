@@ -98,15 +98,44 @@
         networkGroupLabel: node.getAttribute('data-network-group-label') || node.getAttribute('data-network-label') || '',
         networkGroupIconPath: node.getAttribute('data-network-group-icon-path') || '',
         networkGroupOrder: Number(node.getAttribute('data-network-group-order') || 100),
-        minAmount: node.getAttribute('data-min-amount') || '',
+        minAmountCanonical: Number(
+          node.getAttribute('data-min-amount-canonical') || 0
+        ),
       };
     });
+  }
+
+  function getAdjustedCanonicalAmountForOption(option) {
+    const base = Number(buyState.packGrossCanonical || 0);
+    const bps = Number((option && option.paymentPriceBps) || 0);
+    const fixed = Number(
+      (option && option.paymentPriceFixedCanonical) || 0
+    );
+
+    return base + fixed + Math.round(base * bps / 10000);
+  }
+
+  function routeSupportsSelectedPack(option) {
+    if ((option.paymentGroupKey || '') !== 'dfx_bank') {
+      return true;
+    }
+
+    const minimum = Number(option.minAmountCanonical || 0);
+    if (!Number.isFinite(minimum) || minimum <= 0) {
+      return true;
+    }
+
+    return getAdjustedCanonicalAmountForOption(option) >= minimum;
+  }
+
+  function getAvailableRouteOptions() {
+    return getRouteOptions().filter(routeSupportsSelectedPack);
   }
 
   function getPaymentMethods() {
     const map = new Map();
 
-    getRouteOptions().forEach(function (option) {
+    getAvailableRouteOptions().forEach(function (option) {
       const groupKey = option.paymentGroupKey || option.paymentMethodKey;
       if (!groupKey) {
         return;
@@ -140,13 +169,13 @@
   }
 
   function getRoutesForPaymentMethod(paymentMethodKey) {
-    return getRouteOptions().filter(function (option) {
+    return getAvailableRouteOptions().filter(function (option) {
       return (option.paymentGroupKey || option.paymentMethodKey) === paymentMethodKey;
     });
   }
 
   function getRouteByKey(routeKey) {
-    return getRouteOptions().find(function (option) {
+    return getAvailableRouteOptions().find(function (option) {
       return option.key === routeKey;
     }) || null;
   }
@@ -328,8 +357,12 @@
     }
 
     const methods = getPaymentMethods();
-    if (!buyState.paymentMethodKey && methods.length) {
-      setSelectedPaymentMethod(methods[0]);
+    const selectedMethod = methods.find(function (method) {
+      return method.key === buyState.paymentMethodKey;
+    });
+
+    if (!selectedMethod) {
+      setSelectedPaymentMethod(methods[0] || null);
       selectDefaultAssetForPaymentMethod();
       selectDefaultRouteForPaymentMethod();
     }

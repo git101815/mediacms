@@ -505,8 +505,8 @@ WALLET_PAYMENT_GROUPS = {
     },
     "dfx_bank": {
         "label": "Bank transfer (DFX)",
-        "icon_label": "DFX",
-        "icon_path": "",
+        "icon_label": "SEPA",
+        "icon_path": "images/wallet/sepa.svg",
         "order": 40,
     },
     "crypto": {

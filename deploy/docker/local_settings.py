@@ -116,13 +116,13 @@ DFX_SWEEPER_SIGNER_TIMEOUT_SECONDS = 10
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "paypal_us": 800,
     "revolut_eu": 700,
-    "dfx_bank": 400,
+    "dfx_bank": 500,
     "crypto": 0,
 }
 WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
     "paypal_us": 1.3,
     "revolut_eu": 1.8,
-    "dfx_bank": 2,
+    "dfx_bank": 1.2,
     "crypto": 0,
 }
 PAYGATE_CURRENCY = "USD"
