@@ -18,6 +18,10 @@ SMTP_MSGID_DOMAIN = "domain.tld"
 # valid options include 'all', 'email_verified', 'advancedUser'
 CAN_ADD_MEDIA = "all"
 
+# Maximum number of logical video uploads per user and calendar day.
+# A value of 0 disables the quota.
+MAX_VIDEO_UPLOADS_PER_DAY = 0
+
 # who can comment
 # valid options include 'all', 'email_verified', 'advancedUser'
 CAN_COMMENT = "all"

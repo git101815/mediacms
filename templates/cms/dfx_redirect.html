@@ -229,6 +229,30 @@
       overflow: hidden;
     }
 
+    .widget-resume {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border: 1px solid #dbe6f7;
+      border-radius: 14px;
+      background: #fbfdff;
+      text-align: center;
+    }
+
+    .widget-resume[hidden] {
+      display: none !important;
+    }
+
+    .widget-resume .button {
+      width: 100%;
+    }
+
+    .widget-resume p {
+      margin: 9px 0 0;
+      color: #66758d;
+      font-size: 0.86rem;
+      line-height: 1.45;
+    }
+
     .widget-frame {
       border: 1px solid #edf0f5;
       border-radius: 14px;
@@ -335,6 +359,12 @@
     .button:hover {
       opacity: 0.94;
       transform: translateY(-1px);
+    }
+
+    .button:disabled {
+      cursor: wait;
+      opacity: 0.55;
+      transform: none;
     }
 
     .button--secondary {
@@ -517,6 +547,21 @@
             </div>
           </div>
 
+          <div class="widget-resume" data-dfx-resume hidden>
+            <button
+              type="button"
+              class="button"
+              data-dfx-resume-buy
+            >
+              Recommendation accepted — continue payment
+            </button>
+            <p>
+              Use this after DFX has accepted the recommendation code. The
+              checkout will restart on the purchase screen without completing
+              the following identification step.
+            </p>
+          </div>
+
           <div class="checkout-footer">
             Payment processing, onboarding and compliance checks are provided by
             DFX.swiss. The amount and settlement route are preconfigured for this
@@ -620,6 +665,10 @@
     const widgetScriptNode = document.querySelector(
       '[data-dfx-widget-script]'
     );
+    const resumeNode = document.querySelector('[data-dfx-resume]');
+    const resumeButtonNode = document.querySelector(
+      '[data-dfx-resume-buy]'
+    );
     const authPayload = JSON.parse(
       '{{ dfx_auth_payload_json|escapejs }}'
     );
@@ -636,6 +685,8 @@
     const MAX_CACHED_TOKEN_AGE_MS = 30 * 60 * 1000;
     const TOKEN_EXPIRY_SKEW_MS = 30 * 1000;
     let standaloneUrl = '';
+    let currentAccessToken = '';
+    let resumeInProgress = false;
     authPayload.signature = '';
 
     function getAccessTokenStorageKey() {
@@ -842,6 +893,9 @@
       statusNode.hidden = true;
       errorNode.hidden = true;
       widgetHost.hidden = false;
+      if (resumeNode) {
+        resumeNode.hidden = false;
+      }
     }
 
     function waitForWidgetDefinition() {
@@ -902,11 +956,51 @@
     }
 
     function openCheckout(accessToken) {
+      currentAccessToken = accessToken;
       standaloneUrl = buildStandaloneUrl(accessToken);
 
       return waitForWidgetDefinition().then(function () {
         mountWidget(accessToken);
       });
+    }
+
+    function resumeBuyCheckout() {
+      if (
+        !resumeButtonNode ||
+        !currentAccessToken ||
+        resumeInProgress
+      ) {
+        return;
+      }
+
+      resumeInProgress = true;
+      resumeButtonNode.disabled = true;
+
+      updateStatus(
+        'Checking your recommendation',
+        'Restarting the DFX purchase flow…'
+      );
+      widgetHost.hidden = true;
+      statusNode.hidden = false;
+      errorNode.hidden = true;
+
+      /*
+       * Removing the custom element destroys its internal memory router.
+       * A new service="buy" element starts again on /buy with the same
+       * authenticated DFX session.
+       */
+      widgetHost.replaceChildren();
+
+      window.setTimeout(function () {
+        try {
+          mountWidget(currentAccessToken);
+        } catch (error) {
+          showError(error);
+        } finally {
+          resumeInProgress = false;
+          resumeButtonNode.disabled = false;
+        }
+      }, 100);
     }
 
     function startCheckout() {
@@ -936,6 +1030,10 @@
           new Error('DFX checkout resources could not be loaded.')
         );
       });
+    }
+
+    if (resumeButtonNode) {
+      resumeButtonNode.addEventListener('click', resumeBuyCheckout);
     }
 
     startCheckout();

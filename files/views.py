@@ -166,6 +166,12 @@ from .serializers import (
     TagSerializer,
 )
 from .stop_words import STOP_WORDS
+from .upload_limits import (
+    DailyVideoUploadLimitReached,
+    release_daily_video_upload,
+    reserve_daily_video_upload,
+    uploaded_file_is_video,
+)
 from .tasks import save_user_action, video_trim_task
 
 VALID_USER_ACTIONS = [action for action, name in USER_MEDIA_ACTIONS]
@@ -2262,7 +2268,28 @@ class MediaList(APIView):
         serializer = MediaSerializer(data=request.data, context={"request": request})
         if serializer.is_valid():
             media_file = request.data["media_file"]
-            serializer.save(user=request.user, media_file=media_file)
+            reservation = None
+
+            if uploaded_file_is_video(media_file):
+                try:
+                    reservation = reserve_daily_video_upload(
+                        request.user
+                    )
+                except DailyVideoUploadLimitReached as exc:
+                    return Response(
+                        exc.as_payload(),
+                        status=status.HTTP_429_TOO_MANY_REQUESTS,
+                    )
+
+            try:
+                serializer.save(
+                    user=request.user,
+                    media_file=media_file,
+                )
+            except Exception:
+                release_daily_video_upload(reservation)
+                raise
+
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

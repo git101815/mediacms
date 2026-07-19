@@ -128,6 +128,27 @@ def celebrity_thumb_path(instance, filename):
     file_name = f"{instance.uid}.{helpers.get_file_name(filename)}"
     return settings.MEDIA_UPLOAD_DIR + f"celebrities/{file_name}"
 
+
+class DailyVideoUploadQuota(models.Model):
+    """Persistent daily video-upload counter for one user."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="daily_video_upload_quotas",
+    )
+    day = models.DateField(db_index=True)
+    used = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("user", "day"),
+                name="unique_daily_video_upload_quota",
+            )
+        ]
+
+
 class Media(models.Model):
     """The most important model for MediaCMS"""
 

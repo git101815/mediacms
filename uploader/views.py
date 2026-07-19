@@ -11,6 +11,12 @@ from django.views import generic
 from cms.permissions import user_allowed_to_upload
 from files.helpers import rm_file
 from files.models import Media
+from files.upload_limits import (
+    DailyVideoUploadLimitReached,
+    media_path_is_video,
+    release_daily_video_upload,
+    reserve_daily_video_upload,
+)
 
 from .fineuploader import ChunkedFineUploader
 from .forms import FineUploaderUploadForm, FineUploaderUploadSuccessForm
@@ -63,9 +69,46 @@ class FineUploaderView(generic.FormView):
             return self.make_response({"success": True})
         # create media!
         media_file = os.path.join(settings.MEDIA_ROOT, self.upload.real_path)
-        with open(media_file, "rb") as f:
-            myfile = File(f)
-            new = Media.objects.create(media_file=myfile, user=self.request.user)
+        reservation = None
+
+        if media_path_is_video(media_file):
+            try:
+                reservation = reserve_daily_video_upload(
+                    self.request.user
+                )
+            except DailyVideoUploadLimitReached as exc:
+                rm_file(media_file)
+                shutil.rmtree(
+                    os.path.join(
+                        settings.MEDIA_ROOT,
+                        self.upload.file_path,
+                    ),
+                    ignore_errors=True,
+                )
+                return self.make_response(
+                    exc.as_payload(),
+                    status=429,
+                )
+
+        new = None
+        try:
+            with open(media_file, "rb") as f:
+                myfile = File(f)
+                new = Media(
+                    media_file=myfile,
+                    user=self.request.user,
+                )
+                new.save()
+        except Exception:
+            if new is None or new.pk is None:
+                release_daily_video_upload(reservation)
+            rm_file(media_file)
+            shutil.rmtree(
+                os.path.join(settings.MEDIA_ROOT, self.upload.file_path),
+                ignore_errors=True,
+            )
+            raise
+
         rm_file(media_file)
         shutil.rmtree(os.path.join(settings.MEDIA_ROOT, self.upload.file_path))
         return self.make_response({"success": True, "media_url": new.get_absolute_url()})

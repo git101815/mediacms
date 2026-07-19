@@ -2,6 +2,7 @@ import os
 from celery.schedules import crontab
 from datetime import timedelta
 FRONTEND_HOST = "https://celebfakes.ru"
+TIME_ZONE = "Europe/Moscow"
 ALLOWED_HOSTS = [
     "www.celebfakes.ru",
     "celebfakes.ru",
@@ -23,6 +24,9 @@ TABUNDER_COOLDOWN_SECONDS = 0
 PREROLLS_COOLDOWN_SECONDS = 0
 
 CAN_ADD_MEDIA = "advancedUser"
+MAX_VIDEO_UPLOADS_PER_DAY = int(
+    os.getenv("MAX_VIDEO_UPLOADS_PER_DAY", "10")
+)
 CAN_COMMENT = "email_verified"
 PORTAL_WORKFLOW = "public"
 DEFAULT_VISIBILITY = "public"
