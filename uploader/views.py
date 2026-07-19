@@ -3,6 +3,7 @@ import os
 import shutil
 
 from django.conf import settings
+from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.core.files import File
 from django.http import JsonResponse
@@ -13,6 +14,7 @@ from files.helpers import rm_file
 from files.models import Media
 from files.upload_limits import (
     DailyVideoUploadLimitReached,
+    get_daily_video_upload_status,
     media_path_is_video,
     release_daily_video_upload,
     reserve_daily_video_upload,
@@ -20,6 +22,15 @@ from files.upload_limits import (
 
 from .fineuploader import ChunkedFineUploader
 from .forms import FineUploaderUploadForm, FineUploaderUploadSuccessForm
+
+
+class DailyVideoUploadQuotaView(LoginRequiredMixin, generic.View):
+    http_method_names = ("get",)
+
+    def get(self, request, *args, **kwargs):
+        return JsonResponse(
+            get_daily_video_upload_status(request.user)
+        )
 
 
 class FineUploaderView(generic.FormView):
@@ -85,8 +96,14 @@ class FineUploaderView(generic.FormView):
                     ),
                     ignore_errors=True,
                 )
+                payload = exc.as_payload()
+                payload["video_upload_quota"] = (
+                    get_daily_video_upload_status(
+                        self.request.user
+                    )
+                )
                 return self.make_response(
-                    exc.as_payload(),
+                    payload,
                     status=429,
                 )
 
@@ -111,7 +128,17 @@ class FineUploaderView(generic.FormView):
 
         rm_file(media_file)
         shutil.rmtree(os.path.join(settings.MEDIA_ROOT, self.upload.file_path))
-        return self.make_response({"success": True, "media_url": new.get_absolute_url()})
+        return self.make_response(
+            {
+                "success": True,
+                "media_url": new.get_absolute_url(),
+                "video_upload_quota": (
+                    get_daily_video_upload_status(
+                        self.request.user
+                    )
+                ),
+            }
+        )
 
     def form_invalid(self, form):
         data = {"success": False, "error": "%s" % repr(form.errors)}

@@ -16,6 +16,75 @@
 {% block topimports %}
 <link href="{% static "css/add-media.css" %}" rel="preload" as="style">
 <link href="{% static "css/add-media.css" %}" rel="stylesheet">
+<style>
+	.video-upload-quota {
+		box-sizing: border-box;
+		margin: 0 0 1rem;
+		padding: 1rem;
+		border: 1px solid rgba(127, 127, 127, 0.28);
+		border-radius: 4px;
+		background: var(--sidebar-bg-color, #f5f5f5);
+	}
+
+	.video-upload-quota[hidden],
+	.video-upload-quota-error[hidden] {
+		display: none;
+	}
+
+	.video-upload-quota-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-bottom: 0.4rem;
+	}
+
+	.video-upload-quota-count {
+		white-space: nowrap;
+		font-size: 1rem;
+		font-weight: 600;
+	}
+
+	.video-upload-quota-message {
+		margin: 0 0 0.7rem;
+		font-size: 0.875rem;
+		line-height: 1.4;
+	}
+
+	.video-upload-quota-progress {
+		height: 7px;
+		overflow: hidden;
+		border-radius: 999px;
+		background: rgba(127, 127, 127, 0.25);
+	}
+
+	.video-upload-quota-progress > span {
+		display: block;
+		width: 0;
+		height: 100%;
+		border-radius: inherit;
+		background: #3f8cff;
+		transition: width 180ms ease;
+	}
+
+	.video-upload-quota.is-exhausted {
+		border-color: rgba(190, 45, 45, 0.55);
+	}
+
+	.video-upload-quota.is-exhausted
+	.video-upload-quota-progress > span {
+		background: #be2d2d;
+	}
+
+	.video-upload-quota-error {
+		margin: 0 0 1rem;
+		padding: 0.8rem 1rem;
+		border: 1px solid rgba(190, 45, 45, 0.55);
+		border-radius: 4px;
+		color: #be2d2d;
+		font-size: 0.875rem;
+	}
+</style>
 {%endblock topimports %}
 
 {% block innercontent %}
@@ -30,6 +99,33 @@
 				</div>
 				<div class="media-uploader-top-right-wrap"> </div>
 			</div>
+			<div
+				class="video-upload-quota"
+				data-video-upload-quota
+				hidden
+			>
+				<div class="video-upload-quota-header">
+					<strong>Daily video upload quota</strong>
+					<span class="video-upload-quota-count">
+						<span data-video-upload-used>0</span>
+						/
+						<span data-video-upload-limit>0</span>
+					</span>
+				</div>
+				<p
+					class="video-upload-quota-message"
+					data-video-upload-message
+				></p>
+				<div class="video-upload-quota-progress">
+					<span data-video-upload-progress></span>
+				</div>
+			</div>
+			<div
+				class="video-upload-quota-error"
+				data-video-upload-quota-error
+				role="alert"
+				hidden
+			></div>
 			<script type="text/template" id="qq-template">
 				<div class="media-uploader-bottom-wrap qq-uploader-selector">
 					<div class="media-uploader-bottom-left-wrap">
@@ -148,6 +244,160 @@
 			}
 			return cookieVal;
 		}
+
+		var quotaNode = document.querySelector(
+			'[data-video-upload-quota]'
+		);
+		var quotaErrorNode = document.querySelector(
+			'[data-video-upload-quota-error]'
+		);
+
+		function getQuotaPayload(payload) {
+			if (!payload) {
+				return null;
+			}
+			return payload.video_upload_quota || payload;
+		}
+
+		function updateVideoUploadQuota(payload) {
+			var quota = getQuotaPayload(payload);
+
+			if (!quotaNode || !quota || !quota.enabled) {
+				if (quotaNode) {
+					quotaNode.hidden = true;
+				}
+				return;
+			}
+
+			var limit = Number(quota.limit) || 0;
+			var used = Number(quota.used) || 0;
+			var remaining = Number(quota.remaining);
+
+			if (!Number.isFinite(remaining)) {
+				remaining = Math.max(0, limit - used);
+			}
+
+			var usedNode = quotaNode.querySelector(
+				'[data-video-upload-used]'
+			);
+			var limitNode = quotaNode.querySelector(
+				'[data-video-upload-limit]'
+			);
+			var messageNode = quotaNode.querySelector(
+				'[data-video-upload-message]'
+			);
+			var progressNode = quotaNode.querySelector(
+				'[data-video-upload-progress]'
+			);
+
+			if (usedNode) {
+				usedNode.textContent = String(used);
+			}
+			if (limitNode) {
+				limitNode.textContent = String(limit);
+			}
+			if (messageNode) {
+				if (remaining <= 0) {
+					messageNode.textContent = (
+						'Daily quota reached. New video uploads ' +
+						'will be available after 00:00 Moscow time.'
+					);
+				} else {
+					messageNode.textContent = (
+						remaining + ' video upload' +
+						(remaining === 1 ? '' : 's') +
+						' remaining today. Resets at 00:00 ' +
+						'Moscow time.'
+					);
+				}
+			}
+			if (progressNode) {
+				var percentage = limit > 0
+					? Math.min(
+						100,
+						Math.max(0, (used / limit) * 100)
+					)
+					: 0;
+				progressNode.style.width = percentage + '%';
+			}
+
+			quotaNode.classList.toggle(
+				'is-exhausted',
+				remaining <= 0
+			);
+			quotaNode.hidden = false;
+		}
+
+		function parseUploadResponse(xhrOrXdr) {
+			if (!xhrOrXdr) {
+				return null;
+			}
+
+			var raw = (
+				xhrOrXdr.responseText ||
+				xhrOrXdr.response ||
+				null
+			);
+
+			if (raw && typeof raw === 'object') {
+				return raw;
+			}
+
+			if (typeof raw !== 'string' || !raw) {
+				return null;
+			}
+
+			try {
+				return JSON.parse(raw);
+			} catch (error) {
+				return null;
+			}
+		}
+
+		function showUploadError(id, message) {
+			if (quotaErrorNode) {
+				quotaErrorNode.textContent = message;
+				quotaErrorNode.hidden = false;
+			}
+
+			var listEl = document.querySelector(
+				'.qq-file-id-' + id
+			);
+			var statusEl = listEl
+				? listEl.querySelector(
+					'.qq-upload-status-text-selector'
+				)
+				: null;
+
+			if (statusEl) {
+				statusEl.textContent = message;
+			}
+		}
+
+		function clearUploadError() {
+			if (quotaErrorNode) {
+				quotaErrorNode.textContent = '';
+				quotaErrorNode.hidden = true;
+			}
+		}
+
+		fetch('{% url "uploader:video_upload_quota" %}', {
+			credentials: 'same-origin',
+			headers: {
+				'Accept': 'application/json',
+			},
+		})
+			.then(function(response) {
+				if (!response.ok) {
+					throw new Error('Unable to load upload quota.');
+				}
+				return response.json();
+			})
+			.then(updateVideoUploadQuota)
+			.catch(function(error) {
+				console.warn(error);
+			});
+
 		var default_concurrent_chunked_uploader = new qq.FineUploader({
 			debug: false,
 			element: document.querySelector('.media-uploader'),
@@ -176,11 +426,28 @@
 			},
 			callbacks: {
 				onError: function(id, name, errorReason, xhrOrXdr) {
+					var payload = parseUploadResponse(xhrOrXdr);
+
+					if (
+						payload &&
+						payload.code ===
+							'daily_video_upload_limit_reached'
+					) {
+						updateVideoUploadQuota(payload);
+						showUploadError(
+							id,
+							payload.error || errorReason
+						);
+						return;
+					}
+
 					console.warn(qq.format("Error on file number {} - {}.  Reason: {}", id, name, errorReason));
 				},
 				onComplete: function( id, name, response, request ) {
+					updateVideoUploadQuota(response);
 
 					if( response.success ){
+						clearUploadError();
 
 						if( response.media_url ) {
 							if( 1 === this._currentItemLimit ) {
@@ -207,6 +474,16 @@
 							viewFileEl.setAttribute( 'href', response.media_url );
 							viewFileEl.setAttribute( 'class', 'view-uploaded-media-link' );
 						}
+					}
+					else if (
+						response &&
+						response.code ===
+							'daily_video_upload_limit_reached'
+					) {
+						showUploadError(
+							id,
+							response.error || 'Daily upload quota reached.'
+						);
 					}
 				},
 			},

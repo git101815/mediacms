@@ -8,6 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from files.models import DailyVideoUploadQuota, Media
 from files.upload_limits import (
     DailyVideoUploadLimitReached,
+    get_daily_video_upload_status,
     release_daily_video_upload,
     reserve_daily_video_upload,
 )
@@ -106,6 +107,66 @@ def test_zero_disables_daily_video_upload_quota(
     assert not DailyVideoUploadQuota.objects.filter(
         user=user
     ).exists()
+
+
+@pytest.mark.django_db
+def test_daily_video_upload_status_reports_used_and_remaining(
+    django_user_model,
+    settings,
+):
+    settings.MAX_VIDEO_UPLOADS_PER_DAY = 3
+    user = django_user_model.objects.create_user(
+        username="daily_upload_status",
+    )
+    DailyVideoUploadQuota.objects.create(
+        user=user,
+        day=QUOTA_DAY,
+        used=2,
+    )
+
+    with patch(
+        "files.upload_limits.timezone.localdate",
+        return_value=QUOTA_DAY,
+    ):
+        quota = get_daily_video_upload_status(user)
+
+    assert quota == {
+        "enabled": True,
+        "day": "2026-07-19",
+        "timezone": settings.TIME_ZONE,
+        "limit": 3,
+        "used": 2,
+        "remaining": 1,
+    }
+
+
+@pytest.mark.django_db
+def test_daily_video_upload_quota_endpoint(
+    django_user_model,
+    client,
+    settings,
+):
+    settings.MAX_VIDEO_UPLOADS_PER_DAY = 3
+    user = django_user_model.objects.create_user(
+        username="daily_upload_status_endpoint",
+    )
+    DailyVideoUploadQuota.objects.create(
+        user=user,
+        day=QUOTA_DAY,
+        used=2,
+    )
+    client.force_login(user)
+
+    with patch(
+        "files.upload_limits.timezone.localdate",
+        return_value=QUOTA_DAY,
+    ):
+        response = client.get("/fu/quota/")
+
+    assert response.status_code == 200
+    assert response.json()["limit"] == 3
+    assert response.json()["used"] == 2
+    assert response.json()["remaining"] == 1
 
 
 def _mock_media_side_effects():
@@ -215,8 +276,19 @@ def test_fine_uploader_returns_429_after_daily_video_limit(
         second = upload("second.mp4")
 
     assert first.status_code == 200
+    assert first.json()["video_upload_quota"]["used"] == 1
+    assert (
+        first.json()["video_upload_quota"]["remaining"]
+        == 0
+    )
     assert second.status_code == 429
     assert second.json()["code"] == (
         "daily_video_upload_limit_reached"
+    )
+    assert second.json()["preventRetry"] is True
+    assert second.json()["video_upload_quota"]["used"] == 1
+    assert (
+        second.json()["video_upload_quota"]["remaining"]
+        == 0
     )
     assert Media.objects.filter(user=user).count() == 1

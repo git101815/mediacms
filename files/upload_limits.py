@@ -26,10 +26,12 @@ class DailyVideoUploadLimitReached(Exception):
     def as_payload(self):
         return {
             "success": False,
+            "preventRetry": True,
             "code": DAILY_VIDEO_UPLOAD_LIMIT_CODE,
             "error": str(self),
             "limit": self.limit,
             "used": self.used,
+            "remaining": max(0, self.limit - self.used),
         }
 
 
@@ -51,6 +53,43 @@ def get_daily_video_upload_limit():
         return 0
 
     return max(0, value)
+
+
+def get_daily_video_upload_status(user):
+    """Return the current user's quota state for the upload page."""
+    limit = get_daily_video_upload_limit()
+    authenticated = bool(
+        getattr(user, "is_authenticated", False)
+    )
+    enabled = bool(
+        limit > 0
+        and authenticated
+        and getattr(user, "pk", None)
+        and not getattr(user, "is_superuser", False)
+    )
+    day = timezone.localdate()
+    used = 0
+
+    if enabled:
+        used = int(
+            DailyVideoUploadQuota.objects.filter(
+                user_id=user.pk,
+                day=day,
+            ).values_list(
+                "used",
+                flat=True,
+            ).first()
+            or 0
+        )
+
+    return {
+        "enabled": enabled,
+        "day": day.isoformat(),
+        "timezone": settings.TIME_ZONE,
+        "limit": limit,
+        "used": used,
+        "remaining": max(0, limit - used) if enabled else None,
+    }
 
 
 def media_path_is_video(media_file_path):
