@@ -189,7 +189,7 @@ CACHES = {
         },
     }
 }
-
+"""
 CELERY_BEAT_SCHEDULE = {
     "clear_sessions": {
         "task": "clear_sessions",
@@ -228,7 +228,7 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
     },
 }
-
+"""
 #cloud-storage
 STORJ_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 AWS_S3_ENDPOINT_URL = "https://gateway.storjshare.io"
