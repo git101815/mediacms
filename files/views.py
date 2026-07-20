@@ -509,6 +509,12 @@ WALLET_PAYMENT_GROUPS = {
         "icon_path": "images/wallet/revolut.svg",
         "order": 30,
     },
+    "transak_card": {
+        "label": "Card / Apple Pay / Google Pay",
+        "icon_label": "Transak",
+        "icon_path": "images/wallet/crypto.svg",
+        "order": 35,
+    },
     "dfx_bank": {
         "label": "Bank transfer (DFX)",
         "icon_label": "SEPA",
@@ -559,6 +565,7 @@ WALLET_CRYPTO_NETWORK_GROUPS = {
 PAYGATE_PROVIDER_PAYMENT_GROUPS = {
     "paypal": "paypal_us",
     "revolut": "revolut_eu",
+    "transak": "transak_card",
 }
 
 

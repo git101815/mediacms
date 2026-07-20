@@ -132,10 +132,6 @@
   }
 
   function routeSupportsSelectedPack(option) {
-    if ((option.paymentGroupKey || '') !== 'dfx_bank') {
-      return true;
-    }
-
     const minimum = Number(option.minAmountCanonical || 0);
     if (!Number.isFinite(minimum) || minimum <= 0) {
       return true;

@@ -166,6 +166,51 @@ def get_paygate_min_canonical_stable_amount() -> int:
     return max(1, parsed)
 
 
+def get_paygate_provider_min_canonical_stable_amounts() -> dict[str, int]:
+    configured = getattr(
+        settings,
+        "PAYGATE_PROVIDER_MIN_CANONICAL_STABLE_AMOUNTS",
+        {},
+    ) or {}
+    if not isinstance(configured, dict):
+        raise ImproperlyConfigured(
+            "PAYGATE_PROVIDER_MIN_CANONICAL_STABLE_AMOUNTS must be a mapping"
+        )
+
+    minimums = {}
+    for provider_id, raw_value in configured.items():
+        normalized_provider_id = str(provider_id or "").strip().lower()
+        if not normalized_provider_id:
+            continue
+
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ImproperlyConfigured(
+                "PAYGATE_PROVIDER_MIN_CANONICAL_STABLE_AMOUNTS"
+                f"[{normalized_provider_id}] must be an integer"
+            ) from exc
+
+        if parsed < 1:
+            raise ImproperlyConfigured(
+                "PAYGATE_PROVIDER_MIN_CANONICAL_STABLE_AMOUNTS"
+                f"[{normalized_provider_id}] must be positive"
+            )
+        minimums[normalized_provider_id] = parsed
+
+    return minimums
+
+
+def get_paygate_provider_min_canonical_stable_amount(
+    provider_id: str = "",
+) -> int:
+    normalized_provider_id = str(provider_id or "").strip().lower()
+    return get_paygate_provider_min_canonical_stable_amounts().get(
+        normalized_provider_id,
+        get_paygate_min_canonical_stable_amount(),
+    )
+
+
 def get_paygate_user_agent() -> str:
     return _setting_str(
         "PAYGATE_USER_AGENT",
@@ -183,6 +228,7 @@ def paygate_enabled() -> bool:
         provider_ids = get_paygate_provider_ids() or [""]
         for provider_id in provider_ids:
             get_paygate_provider_currency(provider_id)
+            get_paygate_provider_min_canonical_stable_amount(provider_id)
     except ImproperlyConfigured:
         return False
     return True
@@ -381,6 +427,8 @@ __all__ = [
     "get_paygate_provider_ids",
     "get_paygate_provider_currencies",
     "get_paygate_provider_currency",
+    "get_paygate_provider_min_canonical_stable_amount",
+    "get_paygate_provider_min_canonical_stable_amounts",
     "get_paygate_provider_label",
     "get_paygate_provider_labels",
     "get_paygate_provider_status",

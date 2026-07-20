@@ -35,6 +35,17 @@ class TestWalletProviderRouting(SimpleTestCase):
                 "provider_key": PAYGATE_PROVIDER_KEY,
                 "paygate_provider_id": "revolut",
             },
+            {
+                "key": "paygate:usd:transak:hosted_checkout",
+                "chain": "paygate",
+                "asset_code": "USD",
+                "min_amount": 15_000_000,
+                "payment_method_key": "paygate:transak",
+                "payment_method_label": "Transak",
+                "payment_method_type": "provider",
+                "provider_key": PAYGATE_PROVIDER_KEY,
+                "paygate_provider_id": "transak",
+            },
         ]
         dfx_options = [
             {
@@ -119,7 +130,7 @@ class TestWalletProviderRouting(SimpleTestCase):
 
         self.assertEqual(
             group_order,
-            ["crypto", "paypal_us", "revolut_eu", "dfx_bank"],
+            ["crypto", "paypal_us", "revolut_eu", "transak_card", "dfx_bank"],
         )
 
         direct_crypto_rows = groups["crypto"]
@@ -150,6 +161,14 @@ class TestWalletProviderRouting(SimpleTestCase):
         self.assertEqual(
             groups["paypal_us"][0]["payment_method_type"],
             "provider",
+        )
+        self.assertEqual(
+            groups["transak_card"][0]["payment_method_type"],
+            "provider",
+        )
+        self.assertEqual(
+            groups["transak_card"][0]["payment_group_label"],
+            "Card / Apple Pay / Google Pay",
         )
         self.assertEqual(
             groups["revolut_eu"][0]["payment_method_type"],
