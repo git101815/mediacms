@@ -85,8 +85,8 @@ WALLET_FIAT_USD_RATES = {
     "USD": "1",
     # EUR/USD: one EUR is worth 1.12 USD.
     "EUR": "1.12",
-    # Required by the CHF-only DFX checkout. Keep this value current in .env.
-    "CHF": os.getenv("WALLET_CHF_USD_RATE", "").strip(),
+    # CHF/USD: one CHF is worth
+    "CHF": "1.2"
 }
 
 DFX_ENABLED = "true"
