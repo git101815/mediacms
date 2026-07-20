@@ -50,11 +50,11 @@ class TestDfxDepositPreflight(TestCase):
             ),
             patch(
                 "ledger.dfx_deposits.get_dfx_fiat_currency",
-                return_value="EUR",
+                return_value="CHF",
             ),
             patch(
                 "ledger.dfx_deposits.get_dfx_fiat",
-                return_value={"name": "EUR"},
+                return_value={"name": "CHF"},
             ),
             patch(
                 "ledger.dfx_deposits.get_dfx_bank_limits",
@@ -153,11 +153,11 @@ class TestDfxDepositPreflightTransactions(TransactionTestCase):
             ) as mocked_quote,
             patch(
                 "ledger.dfx_deposits.get_dfx_fiat_currency",
-                return_value="EUR",
+                return_value="CHF",
             ),
             patch(
                 "ledger.dfx_deposits.get_dfx_fiat",
-                return_value={"name": "EUR"},
+                return_value={"name": "CHF"},
             ),
             patch(
                 "ledger.dfx_deposits.get_dfx_bank_limits",
@@ -173,7 +173,7 @@ class TestDfxDepositPreflightTransactions(TransactionTestCase):
         mocked_quote.assert_called_once_with(
             asset_id=123,
             target_canonical_amount=10_000_000,
-            fiat_currency="EUR",
+            fiat_currency="CHF",
         )
 
 
@@ -192,11 +192,11 @@ from .base import BaseLedgerTestCase as _BaseLedgerTestCase
     DFX_API_BASE_URL="https://api.example",
     DFX_APP_BASE_URL="https://app.example",
     DFX_PUBLIC_BASE_URL="https://site.example",
-    DFX_FIAT_CURRENCY="EUR",
+    DFX_FIAT_CURRENCY="CHF",
     DFX_LANGUAGE="en",
     DFX_WALLET_POOL_JSON='[{"id":67,"name":"Edge"}]',
     DFX_LAUNCH_QUOTE_MAX_AGE_SECONDS=1800,
-    WALLET_FIAT_USD_RATES={"EUR": "1.12"},
+    WALLET_FIAT_USD_RATES={"CHF": "1.12"},
 )
 class TestDfxLaunchSnapshotReuse(_BaseLedgerTestCase):
     route_key = (
@@ -254,7 +254,7 @@ class TestDfxLaunchSnapshotReuse(_BaseLedgerTestCase):
                     "route_key": snapshot_route_key,
                     "chain": "arbitrum",
                     "target_canonical_amount": 10_000_000,
-                    "currency": "EUR",
+                    "currency": "CHF",
                     "checkout_amount": "12.34",
                     "asset": self._asset(),
                     "quote": self._quote(),
@@ -323,7 +323,7 @@ class TestDfxLaunchSnapshotReuse(_BaseLedgerTestCase):
         mocked_quote.assert_called_once_with(
             asset_id=456,
             target_canonical_amount=10_000_000,
-            fiat_currency="EUR",
+            fiat_currency="CHF",
         )
         self.assertEqual(launch["checkout_params"]["amount-in"], "13.01")
 

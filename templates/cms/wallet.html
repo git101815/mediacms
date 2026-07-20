@@ -434,6 +434,7 @@
           data-payment-currency-symbol="{{ option.payment_currency_symbol }}"
           data-payment-currency-usd-rate="{{ option.payment_currency_usd_rate }}"
           data-payment-requires-route-selection="{% if option.payment_requires_route_selection %}true{% else %}false{% endif %}"
+          data-payment-open-new-tab="{% if option.payment_open_new_tab %}true{% else %}false{% endif %}"
           data-payment-price-mode="{{ option.payment_price_mode|default:'fixed' }}"
           data-asset-code="{{ option.asset_code }}"
           data-asset-group-key="{{ option.asset_group_key|default:option.asset_code }}"

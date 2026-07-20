@@ -26,6 +26,7 @@
     paymentMethodLabel: '',
     paymentMethodType: '',
     paymentRequiresRouteSelection: false,
+    paymentOpenNewTab: false,
     paymentPriceMode: 'fixed',
     assetKey: '',
     routeKey: '',
@@ -33,6 +34,19 @@
 
   function getBuyForm() {
     return document.querySelector('[data-wallet-buy-form]');
+  }
+
+  function syncBuyFormTarget() {
+    const form = getBuyForm();
+    if (!form) {
+      return;
+    }
+
+    if (buyState.paymentOpenNewTab) {
+      form.setAttribute('target', '_blank');
+    } else {
+      form.removeAttribute('target');
+    }
   }
 
   function escapeHtml(value) {
@@ -86,6 +100,8 @@
         paymentCurrencyUsdRate: Number(node.getAttribute('data-payment-currency-usd-rate') || 1),
         paymentRequiresRouteSelection:
           node.getAttribute('data-payment-requires-route-selection') === 'true',
+        paymentOpenNewTab:
+          node.getAttribute('data-payment-open-new-tab') === 'true',
         paymentPriceMode: node.getAttribute('data-payment-price-mode') || 'fixed',
         assetCode: assetCode,
         assetGroupKey: assetGroupKey,
@@ -157,12 +173,18 @@
             option.paymentRequiresRouteSelection ||
             option.paymentMethodType === 'crypto'
           ),
+          openNewTab: Boolean(option.paymentOpenNewTab),
           priceMode: option.paymentPriceMode || 'fixed',
           routes: [],
         });
       }
 
-      map.get(groupKey).routes.push(option);
+      const method = map.get(groupKey);
+      method.routes.push(option);
+      method.openNewTab = (
+        method.openNewTab ||
+        Boolean(option.paymentOpenNewTab)
+      );
     });
 
     return Array.from(map.values());
@@ -258,7 +280,11 @@
     buyState.paymentRequiresRouteSelection = Boolean(
       method && method.requiresRouteSelection
     );
+    buyState.paymentOpenNewTab = Boolean(
+      method && method.openNewTab
+    );
     buyState.paymentPriceMode = method ? method.priceMode || 'fixed' : 'fixed';
+    syncBuyFormTarget();
 
     const hiddenKey = document.querySelector('[data-wallet-selected-payment-method-key]');
     const hiddenType = document.querySelector('[data-wallet-selected-payment-method-type]');
@@ -573,7 +599,11 @@
           setSelectedRoute(routes[0].key);
           const form = getBuyForm();
           if (form) {
+            syncBuyFormTarget();
             form.submit();
+            if (buyState.paymentOpenNewTab) {
+              closeModal('deposit');
+            }
           }
           return;
         }
@@ -641,6 +671,18 @@
       renderNetworkChoices();
     }
   });
+
+  const buyForm = getBuyForm();
+  if (buyForm) {
+    buyForm.addEventListener('submit', function () {
+      syncBuyFormTarget();
+      if (buyState.paymentOpenNewTab) {
+        window.setTimeout(function () {
+          closeModal('deposit');
+        }, 0);
+      }
+    });
+  }
 
   document.addEventListener('change', function (event) {
     if (!event.target.matches('input[name="token_pack_choice"]')) {

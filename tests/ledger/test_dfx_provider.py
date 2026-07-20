@@ -19,10 +19,10 @@ from ledger.providers.dfx import (
     DFX_API_BASE_URL="https://api.example",
     DFX_APP_BASE_URL="https://app.example",
     DFX_PUBLIC_BASE_URL="https://site.example",
-    DFX_FIAT_CURRENCY="EUR",
+    DFX_FIAT_CURRENCY="CHF",
     DFX_PAYMENT_METHOD="Bank",
     DFX_LANGUAGE="en",
-    WALLET_FIAT_USD_RATES={"EUR": "1.12"},
+    WALLET_FIAT_USD_RATES={"EUR": "1.12", "CHF": "1.10"},
 )
 class TestDfxProvider(SimpleTestCase):
     def test_route_matches_blockchain_asset_and_contract(self):
@@ -117,7 +117,7 @@ class TestDfxProvider(SimpleTestCase):
             access_token="jwt-token",
             asset={"id": 123},
             chain="arbitrum",
-            fiat_currency="EUR",
+            fiat_currency="CHF",
             source_amount="12.35",
             external_transaction_id="session-id",
             redirect_uri="https://site.example/return",
@@ -128,8 +128,11 @@ class TestDfxProvider(SimpleTestCase):
         self.assertEqual(parsed.path, "/buy")
         self.assertEqual(query["session"], ["jwt-token"])
         self.assertEqual(query["asset-out"], ["123"])
+        self.assertEqual(query["assets"], ["123"])
         self.assertEqual(query["blockchain"], ["Arbitrum"])
-        self.assertEqual(query["asset-in"], ["EUR"])
+        self.assertEqual(query["blockchains"], ["Arbitrum"])
+        self.assertEqual(query["hide-target-selection"], ["true"])
+        self.assertEqual(query["asset-in"], ["CHF"])
         self.assertEqual(query["amount-in"], ["12.35"])
         self.assertEqual(query["payment-method"], ["bank"])
         self.assertNotIn("mail", query)
@@ -155,7 +158,7 @@ class _DfxTestCache:
 
 @override_settings(
     DFX_API_BASE_URL="https://api.example",
-    DFX_FIAT_CURRENCY="EUR",
+    DFX_FIAT_CURRENCY="CHF",
     DFX_PAYMENT_METHOD="Bank",
     DFX_QUOTE_CACHE_SECONDS=60,
     DFX_WALLET_NAME="",

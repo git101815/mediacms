@@ -20,6 +20,8 @@ DFX_PROVIDER_KEY = "dfx"
 DFX_PAYMENT_METHOD_KEY = "dfx:bank"
 DFX_PAYMENT_METHOD_TYPE = "provider"
 DFX_PAYMENT_METHOD_LABEL = "Bank transfer (DFX)"
+DFX_REQUIRED_FIAT_CURRENCY = "CHF"
+DFX_REQUIRED_SETTLEMENT_ASSET_CODE = "USDC"
 DFX_DEFAULT_API_BASE_URL = "https://api.dfx.swiss"
 DFX_DEFAULT_APP_BASE_URL = "https://app.dfx.swiss"
 DFX_DEFAULT_PAYMENT_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -29,12 +31,9 @@ DFX_DEFAULT_LAUNCH_QUOTE_MAX_AGE_SECONDS = 30 * 60
 DFX_DEFAULT_API_TIMEOUT_SECONDS = 20
 DFX_DEFAULT_SETTLEMENT_ROUTE_PREFERENCES = (
     "arbitrum:USDC",
-    "arbitrum:USDT",
     "base:USDC",
     "bsc:USDC",
-    "bsc:USDT",
     "ethereum:USDC",
-    "ethereum:USDT",
 )
 
 DFX_CHAIN_BY_MEDIACMS_CHAIN = {
@@ -84,9 +83,16 @@ def get_dfx_public_base_url() -> str:
 
 
 def get_dfx_fiat_currency() -> str:
-    currency = normalize_fiat_currency(_setting_str("DFX_FIAT_CURRENCY", "EUR"))
-    if currency not in {"EUR", "CHF"}:
-        raise ImproperlyConfigured("DFX_FIAT_CURRENCY must be EUR or CHF")
+    currency = normalize_fiat_currency(
+        _setting_str(
+            "DFX_FIAT_CURRENCY",
+            DFX_REQUIRED_FIAT_CURRENCY,
+        )
+    )
+    if currency != DFX_REQUIRED_FIAT_CURRENCY:
+        raise ImproperlyConfigured(
+            "DFX_FIAT_CURRENCY must be CHF"
+        )
     get_fiat_usd_rate(currency)
     return currency
 
@@ -135,6 +141,9 @@ def get_dfx_settlement_route_preferences() -> tuple[str, ...]:
             raise ImproperlyConfigured(
                 f"Invalid DFX settlement route preference: {value}"
             )
+
+        if asset_code != DFX_REQUIRED_SETTLEMENT_ASSET_CODE:
+            continue
 
         normalized = f"{chain}:{asset_code}"
         if len(parts) == 3:
@@ -671,11 +680,23 @@ def build_dfx_checkout_params(
     if asset_reference in (None, ""):
         raise ValidationError("DFX asset reference is missing")
 
+    currency = normalize_fiat_currency(fiat_currency)
+    if currency != DFX_REQUIRED_FIAT_CURRENCY:
+        raise ValidationError(
+            "DFX checkout currency must be CHF"
+        )
+
+    blockchain = get_dfx_chain_name(chain)
+    asset_reference = str(asset_reference)
+
     params = {
         "lang": get_dfx_language(),
-        "asset-out": str(asset_reference),
-        "blockchain": get_dfx_chain_name(chain),
-        "asset-in": normalize_fiat_currency(fiat_currency),
+        "asset-out": asset_reference,
+        "assets": asset_reference,
+        "blockchain": blockchain,
+        "blockchains": blockchain,
+        "hide-target-selection": "true",
+        "asset-in": currency,
         "amount-in": round_dfx_source_amount(source_amount),
         "payment-method": "bank",
         "external-transaction-id": str(external_transaction_id),
@@ -715,6 +736,8 @@ __all__ = [
     "DFX_PAYMENT_METHOD_LABEL",
     "DFX_PAYMENT_METHOD_TYPE",
     "DFX_PROVIDER_KEY",
+    "DFX_REQUIRED_FIAT_CURRENCY",
+    "DFX_REQUIRED_SETTLEMENT_ASSET_CODE",
     "build_dfx_auth_payload",
     "build_dfx_checkout_params",
     "build_dfx_checkout_url",

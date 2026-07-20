@@ -33,7 +33,7 @@ def route(key, chain):
         "base:USDC",
         "arbitrum:USDC",
     ),
-    WALLET_FIAT_USD_RATES={"EUR": "1.12"},
+    WALLET_FIAT_USD_RATES={"CHF": "1.12"},
 )
 class TestDfxProductModel(SimpleTestCase):
     def _common_patches(self):
@@ -41,11 +41,11 @@ class TestDfxProductModel(SimpleTestCase):
             patch("ledger.dfx_deposits.dfx_enabled", return_value=True),
             patch(
                 "ledger.dfx_deposits.get_dfx_fiat_currency",
-                return_value="EUR",
+                return_value="CHF",
             ),
             patch(
                 "ledger.dfx_deposits.get_dfx_fiat",
-                return_value={"name": "EUR"},
+                return_value={"name": "CHF"},
             ),
             patch(
                 "ledger.dfx_deposits.get_dfx_bank_limits",
@@ -67,7 +67,7 @@ class TestDfxProductModel(SimpleTestCase):
     def test_route_preferences_accept_comma_separated_configuration(self):
         with override_settings(
             DFX_SETTLEMENT_ROUTE_PREFERENCES=(
-                "base:USDC, arbitrum:USDC"
+                "base:USDC, bsc:USDT, arbitrum:USDC"
             )
         ):
             self.assertEqual(
@@ -103,8 +103,9 @@ class TestDfxProductModel(SimpleTestCase):
         self.assertEqual(option["payment_method_type"], "provider")
         self.assertEqual(option["provider_key"], "dfx")
         self.assertFalse(option["payment_requires_route_selection"])
+        self.assertTrue(option["payment_open_new_tab"])
         self.assertEqual(option["payment_price_mode"], "fixed")
-        self.assertEqual(option["payment_currency"], "EUR")
+        self.assertEqual(option["payment_currency"], "CHF")
         self.assertEqual(option["label"], "Bank transfer (DFX)")
         self.assertNotIn("USDC", option["label"])
         self.assertNotIn("Base", option["label"])

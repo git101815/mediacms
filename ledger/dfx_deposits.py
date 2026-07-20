@@ -15,6 +15,8 @@ from ledger.providers.dfx import (
     DFX_PAYMENT_METHOD_LABEL,
     DFX_PAYMENT_METHOD_TYPE,
     DFX_PROVIDER_KEY,
+    DFX_REQUIRED_FIAT_CURRENCY,
+    DFX_REQUIRED_SETTLEMENT_ASSET_CODE,
     build_dfx_auth_payload,
     build_dfx_checkout_params,
     choose_dfx_wallet,
@@ -146,6 +148,10 @@ def _load_dfx_launch_snapshot(
         session.chain or ""
     ).strip().lower():
         return None
+    if str(snapshot.get("currency") or "").strip().upper() != (
+        DFX_REQUIRED_FIAT_CURRENCY
+    ):
+        return None
 
     try:
         target_amount = int(snapshot.get("target_canonical_amount"))
@@ -207,6 +213,12 @@ def _preflight_dfx_purchase(
     )
     if route is None:
         raise ValidationError("Invalid DFX deposit route")
+    if str(route.get("asset_code") or "").strip().upper() != (
+        DFX_REQUIRED_SETTLEMENT_ASSET_CODE
+    ):
+        raise ValidationError(
+            "DFX settlement asset must be USDC"
+        )
 
     asset = find_dfx_asset_for_route(
         chain=route.get("chain") or "",
@@ -346,6 +358,7 @@ def get_dfx_deposit_options() -> list[dict]:
                 "payment_currency": currency,
                 "payment_currency_usd_rate": currency_rate,
                 "payment_requires_route_selection": False,
+                "payment_open_new_tab": True,
                 "payment_price_mode": "fixed",
                 "min_amount": min_amount,
                 "dfx_asset_id": int(asset["id"]),
@@ -503,6 +516,12 @@ def prepare_dfx_browser_launch(
     current_provider = dict(metadata.get("payment_provider") or {})
     if current_provider.get("key") != DFX_PROVIDER_KEY:
         raise ValidationError("Deposit session is not a DFX session")
+    if str(session.asset_code or "").strip().upper() != (
+        DFX_REQUIRED_SETTLEMENT_ASSET_CODE
+    ):
+        raise ValidationError(
+            "DFX settlement asset must be USDC"
+        )
 
     display_label = DFX_PAYMENT_METHOD_LABEL
 

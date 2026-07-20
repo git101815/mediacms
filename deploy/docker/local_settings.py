@@ -85,24 +85,23 @@ WALLET_FIAT_USD_RATES = {
     "USD": "1",
     # EUR/USD: one EUR is worth 1.12 USD.
     "EUR": "1.12",
+    # Required by the CHF-only DFX checkout. Keep this value current in .env.
+    "CHF": os.getenv("WALLET_CHF_USD_RATE", "").strip(),
 }
 
 DFX_ENABLED = "true"
 DFX_API_BASE_URL = "https://api.dfx.swiss"
 DFX_APP_BASE_URL = "https://app.dfx.swiss"
 DFX_PUBLIC_BASE_URL = FRONTEND_HOST
-DFX_FIAT_CURRENCY = "EUR"
+DFX_FIAT_CURRENCY = "CHF"
 DFX_PAYMENT_METHOD = "Bank"
-# DFX is exposed as one bank-transfer provider. The crypto settlement route is
-# selected internally in this order and is never shown to the buyer.
+# DFX is exposed as one bank-transfer provider. Settlement is locked to USDC;
+# the first healthy network in this existing preference order is selected.
 DFX_SETTLEMENT_ROUTE_PREFERENCES = (
     "base:USDC",
     "bsc:USDC",
-    "bsc:USDT",
     "arbitrum:USDC",
-    "arbitrum:USDT",
     "ethereum:USDC",
-    "ethereum:USDT",
 )
 DFX_LANGUAGE = "en"
 DFX_WALLET_POOL_JSON = os.getenv(
