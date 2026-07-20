@@ -7,8 +7,10 @@ from django.test import SimpleTestCase, override_settings
 from ledger.providers.dfx import (
     build_dfx_auth_payload,
     build_dfx_checkout_url,
+    choose_dfx_wallet,
     find_dfx_asset_for_route,
     get_dfx_buy_quote,
+    get_dfx_wallet_pool,
     round_dfx_source_amount,
 )
 
@@ -70,10 +72,39 @@ class TestDfxProvider(SimpleTestCase):
             address="0x1111111111111111111111111111111111111111",
             signature="0x" + "11" * 65,
             chain="arbitrum",
+            wallet_id=67,
         )
         self.assertEqual(payload["blockchain"], "Arbitrum")
         self.assertEqual(payload["language"], "EN")
+        self.assertEqual(payload["walletId"], 67)
         self.assertNotIn("wallet", payload)
+
+
+    @override_settings(
+        DFX_WALLET_POOL_JSON=(
+            '[{"id":67,"name":"Edge"},'
+            '{"id":68,"name":"Second"}]'
+        )
+    )
+    def test_wallet_pool_selects_and_reuses_ids(self):
+        self.assertEqual(
+            len(get_dfx_wallet_pool()),
+            2,
+        )
+
+        with patch(
+            "ledger.providers.dfx.secrets.choice",
+            side_effect=lambda pool: pool[1],
+        ):
+            self.assertEqual(
+                choose_dfx_wallet()["id"],
+                68,
+            )
+
+        self.assertEqual(
+            choose_dfx_wallet(67)["id"],
+            67,
+        )
 
     def test_source_amount_rounds_up(self):
         self.assertEqual(
@@ -102,6 +133,9 @@ class TestDfxProvider(SimpleTestCase):
         self.assertEqual(query["amount-in"], ["12.35"])
         self.assertEqual(query["payment-method"], ["bank"])
         self.assertNotIn("mail", query)
+        self.assertNotIn("headless", query)
+        self.assertNotIn("borderless", query)
+        self.assertNotIn("wallet", query)
         self.assertEqual(
             query["external-transaction-id"],
             ["session-id"],

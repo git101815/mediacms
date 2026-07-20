@@ -17,6 +17,7 @@ from ledger.providers.dfx import (
     DFX_PROVIDER_KEY,
     build_dfx_auth_payload,
     build_dfx_checkout_params,
+    choose_dfx_wallet,
     dfx_enabled,
     find_dfx_asset_for_route,
     get_dfx_app_base_url,
@@ -506,6 +507,9 @@ def prepare_dfx_browser_launch(
     display_label = DFX_PAYMENT_METHOD_LABEL
 
     try:
+        selected_wallet = choose_dfx_wallet(
+            current_provider.get("dfx_wallet_id")
+        )
         launch_snapshot = _load_dfx_launch_snapshot(session)
         if launch_snapshot is not None:
             asset = dict(launch_snapshot["asset"])
@@ -561,6 +565,7 @@ def prepare_dfx_browser_launch(
             address=signer_result["address"],
             signature=signer_result["signature"],
             chain=session.chain,
+            wallet_id=selected_wallet["id"],
         )
         checkout_params = build_dfx_checkout_params(
             asset=asset,
@@ -592,6 +597,8 @@ def prepare_dfx_browser_launch(
     current_provider.update(
         {
             "status": "LAUNCH_READY",
+            "dfx_wallet_id": selected_wallet["id"],
+            "dfx_wallet_name": selected_wallet.get("name", ""),
             "checkout_url": _dfx_launch_url(session.public_id),
             "checkout_currency": currency,
             "checkout_amount": checkout_amount,
@@ -639,9 +646,6 @@ def prepare_dfx_browser_launch(
         "auth_url": get_dfx_auth_url(),
         "auth_payload": auth_payload,
         "checkout_url": f"{get_dfx_app_base_url()}/buy",
-        "widget_script_url": (
-            f"{get_dfx_app_base_url()}/widget/v1.0"
-        ),
         "checkout_params": checkout_params,
         "wallet_url": reverse("wallet"),
         "session_url": reverse(

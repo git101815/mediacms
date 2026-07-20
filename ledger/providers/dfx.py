@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
@@ -192,8 +193,93 @@ def get_dfx_api_timeout_seconds() -> int:
     )
 
 
-def get_dfx_wallet_name() -> str:
-    return _setting_str("DFX_WALLET_NAME")
+def get_dfx_wallet_pool() -> tuple[dict, ...]:
+    raw = getattr(
+        settings,
+        "DFX_WALLET_POOL_JSON",
+        os.environ.get("DFX_WALLET_POOL_JSON", ""),
+    )
+
+    if isinstance(raw, str):
+        raw = raw.strip()
+
+        if not raw:
+            return ()
+
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ImproperlyConfigured(
+                "DFX_WALLET_POOL_JSON must be valid JSON"
+            ) from exc
+
+    if not isinstance(raw, (list, tuple)):
+        raise ImproperlyConfigured(
+            "DFX_WALLET_POOL_JSON must contain a JSON array"
+        )
+
+    wallets = []
+    seen_ids = set()
+
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ImproperlyConfigured(
+                f"DFX_WALLET_POOL_JSON item {index} "
+                "must be an object"
+            )
+
+        try:
+            wallet_id = int(item.get("id"))
+        except (TypeError, ValueError) as exc:
+            raise ImproperlyConfigured(
+                f"DFX_WALLET_POOL_JSON item {index} "
+                "has an invalid id"
+            ) from exc
+
+        if wallet_id <= 0 or wallet_id in seen_ids:
+            raise ImproperlyConfigured(
+                f"DFX_WALLET_POOL_JSON item {index} "
+                "has an invalid or duplicate id"
+            )
+
+        wallets.append(
+            {
+                "id": wallet_id,
+                "name": str(
+                    item.get("name") or ""
+                ).strip(),
+            }
+        )
+
+        seen_ids.add(wallet_id)
+
+    return tuple(wallets)
+
+
+def choose_dfx_wallet(
+    preferred_wallet_id=None,
+) -> dict:
+    pool = get_dfx_wallet_pool()
+
+    if not pool:
+        raise ImproperlyConfigured(
+            "DFX_WALLET_POOL_JSON must contain "
+            "at least one authorized wallet"
+        )
+
+    if preferred_wallet_id not in (None, ""):
+        try:
+            preferred_wallet_id = int(
+                preferred_wallet_id
+            )
+        except (TypeError, ValueError):
+            preferred_wallet_id = None
+
+        for wallet in pool:
+            if wallet["id"] == preferred_wallet_id:
+                return dict(wallet)
+
+    return dict(secrets.choice(pool))
 
 
 def get_dfx_language() -> str:
@@ -224,6 +310,10 @@ def dfx_enabled() -> bool:
         get_dfx_fiat_currency()
         get_dfx_payment_method()
         get_dfx_settlement_route_preferences()
+        if not get_dfx_wallet_pool():
+            raise ImproperlyConfigured(
+                "DFX_WALLET_POOL_JSON must contain at least one wallet"
+            )
         get_dfx_payment_ttl_seconds()
         if not _setting_str("DFX_SWEEPER_SIGNER_BASE_URL"):
             raise ImproperlyConfigured("DFX_SWEEPER_SIGNER_BASE_URL is not configured")
@@ -443,14 +533,12 @@ def get_dfx_buy_quote(
         target_canonical_amount
     )
     payment_method = get_dfx_payment_method()
-    wallet_name = get_dfx_wallet_name()
 
     cache_material = {
         "asset_id": int(asset_id),
         "currency": currency,
         "target_amount": format(target_amount, "f"),
         "payment_method": payment_method,
-        "wallet": wallet_name,
     }
     cache_suffix = hashlib.sha256(
         json.dumps(
@@ -470,8 +558,6 @@ def get_dfx_buy_quote(
         "targetAmount": float(target_amount),
         "paymentMethod": payment_method,
     }
-    if wallet_name:
-        payload["wallet"] = wallet_name
 
     response = call_dfx_json(
         method="PUT",
@@ -528,22 +614,43 @@ def build_dfx_auth_payload(
     address: str,
     signature: str,
     chain: str,
+    wallet_id: int,
 ) -> dict:
-    normalized_address = str(address or "").strip()
-    normalized_signature = str(signature or "").strip()
-    if not normalized_address or not normalized_signature:
-        raise ValidationError("DFX address and signature are required")
+    normalized_address = str(
+        address or ""
+    ).strip()
 
-    payload = {
+    normalized_signature = str(
+        signature or ""
+    ).strip()
+
+    if (
+        not normalized_address
+        or not normalized_signature
+    ):
+        raise ValidationError(
+            "DFX address and signature are required"
+        )
+
+    try:
+        normalized_wallet_id = int(wallet_id)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(
+            "DFX wallet id is invalid"
+        ) from exc
+
+    if normalized_wallet_id <= 0:
+        raise ValidationError(
+            "DFX wallet id is invalid"
+        )
+
+    return {
         "address": normalized_address,
         "signature": normalized_signature,
         "blockchain": get_dfx_chain_name(chain),
         "language": get_dfx_language().upper(),
+        "walletId": normalized_wallet_id,
     }
-    wallet_name = get_dfx_wallet_name()
-    if wallet_name:
-        payload["wallet"] = wallet_name
-    return payload
 
 
 def get_dfx_auth_url() -> str:
@@ -567,22 +674,13 @@ def build_dfx_checkout_params(
     params = {
         "lang": get_dfx_language(),
         "asset-out": str(asset_reference),
-        "assets": str(asset_reference),
         "blockchain": get_dfx_chain_name(chain),
-        "blockchains": get_dfx_chain_name(chain),
         "asset-in": normalize_fiat_currency(fiat_currency),
         "amount-in": round_dfx_source_amount(source_amount),
         "payment-method": "bank",
         "external-transaction-id": str(external_transaction_id),
         "redirect-uri": str(redirect_uri),
-        "headless": "true",
-        "borderless": "true",
     }
-    # Do not inherit the MediaCMS account email. The buyer must choose
-    # the address used for DFX onboarding inside the DFX checkout.
-    wallet_name = get_dfx_wallet_name()
-    if wallet_name:
-        params["wallet"] = wallet_name
     return params
 
 def build_dfx_checkout_url(
@@ -620,6 +718,7 @@ __all__ = [
     "build_dfx_auth_payload",
     "build_dfx_checkout_params",
     "build_dfx_checkout_url",
+    "choose_dfx_wallet",
     "canonical_stable_to_dfx_target_amount",
     "dfx_enabled",
     "find_dfx_asset_for_route",
@@ -632,6 +731,7 @@ __all__ = [
     "get_dfx_fiat",
     "get_dfx_fiat_currency",
     "get_dfx_payment_ttl_seconds",
+    "get_dfx_wallet_pool",
     "get_dfx_settlement_route_preferences",
     "get_dfx_public_base_url",
     "round_dfx_source_amount",

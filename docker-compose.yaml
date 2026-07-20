@@ -39,6 +39,7 @@ services:
       BUNNY_DOWNLOAD_TOKEN_KEY: ${BUNNY_DOWNLOAD_TOKEN_KEY}
       REMOTE_ENCODING_CALLBACK_SECRET: ${REMOTE_ENCODING_CALLBACK_SECRET}
       RUNPOD_API_KEY: ${RUNPOD_API_KEY}
+      DFX_WALLET_POOL_JSON: ${DFX_WALLET_POOL_JSON}
     command: "./deploy/docker/prestart.sh"
     restart: on-failure
     depends_on:
@@ -94,6 +95,7 @@ services:
       BUNNY_DOWNLOAD_TOKEN_KEY: ${BUNNY_DOWNLOAD_TOKEN_KEY}
       REMOTE_ENCODING_CALLBACK_SECRET: ${REMOTE_ENCODING_CALLBACK_SECRET}
       RUNPOD_API_KEY: ${RUNPOD_API_KEY}
+      DFX_WALLET_POOL_JSON: ${DFX_WALLET_POOL_JSON}
 
     depends_on:
       migrations:
@@ -288,6 +290,7 @@ services:
 
       REMOTE_ENCODING_CALLBACK_SECRET: ${REMOTE_ENCODING_CALLBACK_SECRET}
       RUNPOD_API_KEY: ${RUNPOD_API_KEY}
+      DFX_WALLET_POOL_JSON: ${DFX_WALLET_POOL_JSON}
     depends_on:
       redis:
         condition: service_healthy
@@ -329,6 +332,7 @@ services:
 
       REMOTE_ENCODING_CALLBACK_SECRET: ${REMOTE_ENCODING_CALLBACK_SECRET}
       RUNPOD_API_KEY: ${RUNPOD_API_KEY}
+      DFX_WALLET_POOL_JSON: ${DFX_WALLET_POOL_JSON}
 
     depends_on:
       redis:

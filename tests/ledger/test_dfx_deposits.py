@@ -194,6 +194,7 @@ from .base import BaseLedgerTestCase as _BaseLedgerTestCase
     DFX_PUBLIC_BASE_URL="https://site.example",
     DFX_FIAT_CURRENCY="EUR",
     DFX_LANGUAGE="en",
+    DFX_WALLET_POOL_JSON='[{"id":67,"name":"Edge"}]',
     DFX_LAUNCH_QUOTE_MAX_AGE_SECONDS=1800,
     WALLET_FIAT_USD_RATES={"EUR": "1.12"},
 )
@@ -292,6 +293,9 @@ class TestDfxLaunchSnapshotReuse(_BaseLedgerTestCase):
         mocked_quote.assert_not_called()
         self.assertEqual(launch["checkout_params"]["amount-in"], "12.34")
         self.assertEqual(launch["checkout_params"]["asset-out"], "123")
+        self.assertEqual(launch["auth_payload"]["walletId"], 67)
+        session.refresh_from_db()
+        self.assertEqual(session.metadata["payment_provider"]["dfx_wallet_id"], 67)
 
     def _assert_snapshot_refreshes(self, session):
         new_asset = self._asset(asset_id=456)

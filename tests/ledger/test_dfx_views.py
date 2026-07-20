@@ -110,9 +110,9 @@ class TestDfxSessionViews(BaseLedgerTestCase):
                 "address": session.deposit_address,
                 "signature": signature,
                 "blockchain": "Ethereum",
+                "walletId": 67,
             },
             "checkout_url": "https://app.dfx.swiss/buy",
-            "widget_script_url": "https://app.dfx.swiss/widget/v1.0",
             "checkout_params": {
                 "asset-in": "EUR",
                 "amount-in": "12.34",
@@ -142,53 +142,38 @@ class TestDfxSessionViews(BaseLedgerTestCase):
         csp = response["Content-Security-Policy"]
         self.assertIn("connect-src https://api.dfx.swiss", csp)
         self.assertIn("frame-ancestors 'none'", csp)
-        self.assertIn("img-src 'self'", csp)
+        self.assertIn("img-src 'none'", csp)
+        self.assertIn("frame-src 'none'", csp)
         self.assertIn("script-src 'nonce-", csp)
 
         body = response.content.decode("utf-8")
         self.assertIn(signature, body)
-        self.assertNotIn("hydranalitics.ru", body)
+        self.assertIn('"walletId":67', body)
         self.assertIn(
-            'src="https://app.dfx.swiss/widget/v1.0"',
-            body,
-        )
-        self.assertIn("Complete your bank transfer", body)
-        self.assertIn("SEPA bank transfer", body)
-        self.assertIn(
-            "document.createElement('dfx-services')",
+            "window.location.replace",
             body,
         )
         self.assertIn(
-            "widget.setAttribute('headless', 'true')",
+            "Opening DFX.swiss",
             body,
         )
-        self.assertIn(
-            "widget.setAttribute('borderless', 'true')",
+        self.assertNotIn(
+            "widget/v1.0",
             body,
         )
-        self.assertIn("delete checkoutParams.mail;", body)
-        self.assertNotIn("MutationObserver", body)
-        self.assertIn(
-            "DFX_ACCESS_TOKEN_CACHE_VERSION",
+        self.assertNotIn(
+            "dfx-services",
             body,
         )
-        self.assertIn(
-            "window.sessionStorage.getItem",
+        self.assertNotIn(
+            "Complete your bank transfer",
             body,
         )
-        self.assertIn(
-            "window.sessionStorage.setItem",
-            body,
+        self.assertTrue(
+            body.lstrip()
+            .lower()
+            .startswith("<!doctype html>")
         )
-        self.assertIn(
-            "readCachedAccessToken",
-            body,
-        )
-        self.assertIn(
-            "authenticateWithDfx",
-            body,
-        )
-        self.assertTrue(body.lstrip().lower().startswith("<!doctype html>"))
 
     def test_launch_page_is_owner_only(self):
         session = self._create_dfx_session()
