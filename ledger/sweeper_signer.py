@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
@@ -151,4 +152,131 @@ def sign_dfx_auth_message(
     }
 
 
-__all__ = ["sign_dfx_auth_message"]
+def sign_mtpelerin_address_validation(
+    *,
+    chain: str,
+    derivation_index: int,
+    address: str,
+    code: str,
+) -> dict:
+    base_url = _setting_str(
+        "DFX_SWEEPER_SIGNER_BASE_URL",
+        "http://dfx_signer_service:8080",
+    ).rstrip("/")
+    if not base_url:
+        raise ImproperlyConfigured("DFX_SWEEPER_SIGNER_BASE_URL is not configured")
+
+    service_name = _setting_str(
+        "DFX_SWEEPER_SIGNER_SERVICE_NAME",
+        "mediacms-web",
+    )
+    if not service_name:
+        raise ImproperlyConfigured("DFX_SWEEPER_SIGNER_SERVICE_NAME is not configured")
+
+    normalized_code = str(code or "").strip()
+    if (
+        len(normalized_code) != 4
+        or not normalized_code.isdigit()
+        or not (1000 <= int(normalized_code) <= 9999)
+    ):
+        raise ValidationError("Mt Pelerin validation code is invalid")
+
+    payload = {
+        "chain": str(chain or "").strip().lower(),
+        "derivation_index": int(derivation_index),
+        "address": str(address or "").strip().lower(),
+        "code": normalized_code,
+    }
+    if payload["derivation_index"] < 0:
+        raise ValidationError("Mt Pelerin derivation index cannot be negative")
+    if not payload["address"]:
+        raise ValidationError("Mt Pelerin deposit address is required")
+
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    timestamp = str(int(time.time()))
+    nonce = uuid.uuid4().hex
+    signature = build_internal_request_signature(
+        service_name=service_name,
+        timestamp=timestamp,
+        nonce=nonce,
+        body_bytes=body,
+        shared_secret=_shared_secret(),
+    )
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-Ledger-Service": service_name,
+        "X-Ledger-Timestamp": timestamp,
+        "X-Ledger-Nonce": nonce,
+        "X-Ledger-Signature": signature,
+    }
+    gateway_name, gateway_secret = _gateway_header()
+    if gateway_secret:
+        headers[gateway_name] = gateway_secret
+
+    request = urllib_request.Request(
+        f"{base_url}/v1/sign/mtpelerin",
+        data=body,
+        method="POST",
+        headers=headers,
+    )
+    try:
+        with urllib_request.urlopen(
+            request,
+            timeout=_setting_float("DFX_SWEEPER_SIGNER_TIMEOUT_SECONDS", 10),
+        ) as response:
+            raw = response.read().decode("utf-8")
+    except HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        raise ValidationError(
+            f"Mt Pelerin sweeper signer error {exc.code}: {error_body[:500]}"
+        ) from exc
+    except URLError as exc:
+        raise ValidationError(
+            f"Mt Pelerin sweeper signer request failed: {exc.reason}"
+        ) from exc
+
+    try:
+        result = json.loads(raw or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValidationError(
+            "Mt Pelerin sweeper signer returned invalid JSON"
+        ) from exc
+    if not isinstance(result, dict):
+        raise ValidationError(
+            "Mt Pelerin sweeper signer response must be an object"
+        )
+
+    returned_address = str(result.get("address") or "").strip().lower()
+    returned_signature = str(result.get("signature") or "").strip()
+    returned_message = str(result.get("message") or "")
+    if returned_address != payload["address"]:
+        raise ValidationError(
+            "Mt Pelerin sweeper signer returned a different address"
+        )
+    if returned_message != f"MtPelerin-{normalized_code}":
+        raise ValidationError(
+            "Mt Pelerin sweeper signer returned an invalid message"
+        )
+    try:
+        signature_bytes = base64.b64decode(returned_signature, validate=True)
+    except Exception as exc:
+        raise ValidationError(
+            "Mt Pelerin sweeper signer returned invalid base64"
+        ) from exc
+    if len(signature_bytes) != 65:
+        raise ValidationError(
+            "Mt Pelerin sweeper signer returned an invalid EVM signature"
+        )
+
+    return {
+        "address": returned_address,
+        "signature": returned_signature,
+        "message": returned_message,
+    }
+
+
+__all__ = [
+    "sign_dfx_auth_message",
+    "sign_mtpelerin_address_validation",
+]

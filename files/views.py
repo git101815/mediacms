@@ -136,6 +136,7 @@ from ledger.fiat import (
 from ledger.providers.malum import MALUM_CHAIN, MALUM_PROVIDER_KEY
 from ledger.providers.paygate import PAYGATE_CHAIN, PAYGATE_PROVIDER_KEY
 from ledger.providers.dfx import DFX_PROVIDER_KEY
+from ledger.providers.mtpelerin import MTPERELIN_PROVIDER_KEY
 from ledger.provider_deposits import (
     get_malum_deposit_option,
     open_malum_deposit_session,
@@ -148,6 +149,11 @@ from ledger.dfx_deposits import (
     get_dfx_deposit_options,
     open_dfx_deposit_session,
     prepare_dfx_browser_launch,
+)
+from ledger.mtpelerin_deposits import (
+    get_mtpelerin_deposit_options,
+    open_mtpelerin_deposit_session,
+    prepare_mtpelerin_browser_launch,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
@@ -228,6 +234,7 @@ PROVIDER_CHECKOUT_KEYS = {
     MALUM_PROVIDER_KEY,
     PAYGATE_PROVIDER_KEY,
     DFX_PROVIDER_KEY,
+    MTPERELIN_PROVIDER_KEY,
 }
 PROVIDER_CHECKOUT_CHAINS = {MALUM_CHAIN, PAYGATE_CHAIN}
 
@@ -515,6 +522,18 @@ WALLET_PAYMENT_GROUPS = {
         "icon_path": "images/wallet/sepa.svg",
         "order": 40,
     },
+    "mtpelerin_eur": {
+        "label": "Bank transfer (Mt Pelerin · EUR)",
+        "icon_label": "SEPA",
+        "icon_path": "images/wallet/sepa.svg",
+        "order": 50,
+    },
+    "mtpelerin_usd": {
+        "label": "Bank transfer (Mt Pelerin · USD)",
+        "icon_label": "SWIFT",
+        "icon_path": "images/wallet/sepa.svg",
+        "order": 51,
+    },
     "crypto": {
         "label": "Crypto",
         "icon_label": "Crypto",
@@ -598,6 +617,9 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
 
     if provider_key == DFX_PROVIDER_KEY:
         group_key = "dfx_bank"
+    elif provider_key == MTPERELIN_PROVIDER_KEY:
+        mtp_currency = str(decorated.get("payment_currency") or "").strip().lower()
+        group_key = f"mtpelerin_{mtp_currency}"
     elif provider_key == PAYGATE_PROVIDER_KEY and provider_id in PAYGATE_PROVIDER_PAYMENT_GROUPS:
         group_key = PAYGATE_PROVIDER_PAYMENT_GROUPS[provider_id]
     elif payment_method_type == "crypto":
@@ -664,7 +686,7 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
     if provider_key == PAYGATE_PROVIDER_KEY:
         decorated["payment_method_label"] = group_label
         decorated["route_label"] = group_label
-    elif provider_key == DFX_PROVIDER_KEY:
+    elif provider_key in {DFX_PROVIDER_KEY, MTPERELIN_PROVIDER_KEY}:
         decorated["payment_method_label"] = group_label
 
     return decorated
@@ -694,6 +716,16 @@ def _build_wallet_deposit_options() -> list[dict]:
             {
                 **dfx_option,
                 "min_amount_display": _format_canonical_stable_amount(dfx_option["min_amount"]),
+            }
+        )
+
+    for mtpelerin_option in get_mtpelerin_deposit_options():
+        options.append(
+            {
+                **mtpelerin_option,
+                "min_amount_display": _format_canonical_stable_amount(
+                    mtpelerin_option["min_amount"]
+                ),
             }
         )
 
@@ -1342,6 +1374,23 @@ def wallet_deposit_request(request):
                 return redirect(checkout_url)
             return redirect("wallet_deposit_session", public_id=session.public_id)
 
+        if selected_option.get("payment_method_type") == "provider" and selected_option.get(
+                "provider_key") == MTPERELIN_PROVIDER_KEY:
+            session = open_mtpelerin_deposit_session(
+                actor=request.user,
+                wallet=wallet_obj,
+                option_key=selected_option.get("deposit_route_key") or "",
+                fiat_currency=selected_option.get("payment_currency") or "",
+                token_pack=token_pack,
+                payment_price_bps=payment_price_bps,
+                payment_price_fixed_canonical=payment_price_fixed_canonical,
+            )
+            provider = (session.metadata or {}).get("payment_provider") or {}
+            checkout_url = (provider.get("checkout_url") or "").strip()
+            if checkout_url and session.status == DepositSession.STATUS_AWAITING_PAYMENT:
+                return redirect(checkout_url)
+            return redirect("wallet_deposit_session", public_id=session.public_id)
+
         matching_payment_routes = [
             item for item in deposit_options
             if item["payment_method_key"] == selected_option["payment_method_key"]
@@ -1488,6 +1537,39 @@ def wallet_dfx_return(request, public_id):
     if provider.get("key") != DFX_PROVIDER_KEY:
         raise Http404
     return redirect("wallet_deposit_session", public_id=session.public_id)
+
+
+@never_cache
+@login_required
+def wallet_mtpelerin_launch(request, public_id):
+    session = get_object_or_404(
+        DepositSession,
+        public_id=public_id,
+        user=request.user,
+    )
+    provider = (session.metadata or {}).get("payment_provider") or {}
+    if provider.get("key") != MTPERELIN_PROVIDER_KEY:
+        raise Http404
+
+    try:
+        launch = prepare_mtpelerin_browser_launch(
+            session=session,
+            actor=request.user,
+        )
+    except (DjangoValidationError, ImproperlyConfigured) as exc:
+        messages.error(request, _extract_wallet_form_error(exc))
+        return redirect(
+            "wallet_deposit_session",
+            public_id=session.public_id,
+        )
+
+    response = redirect(launch["checkout_url"])
+    response["Cache-Control"] = "no-store, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    response["Referrer-Policy"] = "no-referrer"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @login_required

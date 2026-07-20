@@ -67,7 +67,7 @@
       {% if deposit_session.is_provider_checkout %}
         {% if deposit_session.checkout_url and not deposit_session.is_terminal %}
         <div class="wallet-deposit-ui__footer" style="display:block">
-          <a href="{{ deposit_session.checkout_url }}" class="wallet-route-form__submit" rel="noopener noreferrer">
+          <a href="{{ deposit_session.checkout_url }}" class="wallet-route-form__submit" target="_blank" rel="noopener noreferrer">
             Continue to secure checkout
           </a>
         </div>
