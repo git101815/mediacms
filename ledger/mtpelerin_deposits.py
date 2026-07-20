@@ -409,6 +409,7 @@ def prepare_mtpelerin_browser_launch(
         fiat_currency=preflight["fiat_currency"],
         chain=session.chain,
         asset_code=session.asset_code,
+        source_amount=preflight["source_amount"],
         target_canonical_amount=int(session.min_amount),
         address=signer_result["address"],
         validation_code=validation_code,

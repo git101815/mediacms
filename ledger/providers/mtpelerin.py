@@ -354,6 +354,7 @@ def build_mtpelerin_checkout_url(
     fiat_currency: str,
     chain: str,
     asset_code: str,
+    source_amount,
     target_canonical_amount: int,
     address: str,
     validation_code: str,
@@ -364,6 +365,14 @@ def build_mtpelerin_checkout_url(
     normalized_address = str(address or "").strip()
     code = str(validation_code or "").strip()
     signature = str(validation_signature_b64 or "").strip()
+    try:
+        normalized_source_amount = Decimal(str(source_amount))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValidationError("Mt Pelerin source amount must be numeric") from exc
+    if normalized_source_amount <= 0:
+        raise ValidationError("Mt Pelerin source amount must be positive")
+    source_amount_text = format(normalized_source_amount, "f")
+
     if not normalized_address:
         raise ValidationError("Mt Pelerin destination address is required")
     if len(code) != 4 or not code.isdigit() or not (1000 <= int(code) <= 9999):
@@ -381,6 +390,7 @@ def build_mtpelerin_checkout_url(
         "lang": get_mtpelerin_language(),
         "bsc": fiat,
         "bdc": asset,
+        "bsa": source_amount_text,
         "bda": target_amount,
         "curs": fiat,
         "crys": asset,

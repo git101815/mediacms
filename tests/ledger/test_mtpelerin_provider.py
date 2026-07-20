@@ -6,7 +6,7 @@ import pytest
 from ledger.providers import mtpelerin
 
 
-def test_public_direct_link_locks_currency_asset_network_and_address(settings):
+def test_public_direct_link_prefills_amount_without_personal_data(settings):
     settings.MTPERELIN_DIRECT_LINK_CTKN = "public-direct-link-key"
     settings.MTPERELIN_WIDGET_BASE_URL = "https://widget.mtpelerin.com"
     settings.MTPERELIN_LANGUAGE = "en"
@@ -15,6 +15,7 @@ def test_public_direct_link_locks_currency_asset_network_and_address(settings):
         fiat_currency="EUR",
         chain="base",
         asset_code="USDC",
+        source_amount="22.10",
         target_canonical_amount=25_000_000,
         address="0x1111111111111111111111111111111111111111",
         validation_code="1234",
@@ -31,6 +32,7 @@ def test_public_direct_link_locks_currency_asset_network_and_address(settings):
     assert query["tab"] == ["buy"]
     assert query["bsc"] == ["EUR"]
     assert query["bdc"] == ["USDC"]
+    assert query["bsa"] == ["22.10"]
     assert query["bda"] == ["25"]
     assert query["curs"] == ["EUR"]
     assert query["crys"] == ["USDC"]
@@ -40,6 +42,11 @@ def test_public_direct_link_locks_currency_asset_network_and_address(settings):
     assert query["addr"] == ["0x1111111111111111111111111111111111111111"]
     assert query["code"] == ["1234"]
     assert query["hash"] == ["abc+/="]
+    for personal_field in (
+        "email", "phone", "firstname", "lastname",
+        "firstName", "lastName", "username", "user_id",
+    ):
+        assert personal_field not in query
 
 
 def test_quote_uses_destination_amount_and_bank_transfer(monkeypatch, settings):
