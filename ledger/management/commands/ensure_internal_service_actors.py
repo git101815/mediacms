@@ -35,6 +35,12 @@ class Command(BaseCommand):
                 [
                     ("ledger", "can_manage_deposit_addresses"),
                     ("ledger", "can_view_deposit_sessions"),
+                    ("ledger", "can_apply_raw_ledger_transaction"),
+                    ("ledger", "can_reverse_ledger_transaction"),
+                    ("ledger", "can_manage_wallet_holds"),
+                    ("ledger", "can_credit_confirmed_deposits"),
+                    ("ledger", "can_manage_deposit_sweep_jobs"),
+                    ("ledger", "can_manage_deposit_sessions"),
                 ],
             )
             self._grant_permissions(
