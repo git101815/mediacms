@@ -918,6 +918,7 @@ def _expire_mtpelerin_pending_credit(
     reversal = reverse_ledger_transaction(
         actor=actor,
         original_txn=pending_txn,
+        reversal_kind="mtpelerin_pending_reversal",
         external_id=(
             "mtpelerin-pending-expiry:"
             f"{deposit_session.public_id}"
@@ -2263,7 +2264,16 @@ def apply_ledger_transaction(*, actor, kind: str, entries: list, created_by=None
     return txn
 
 @transaction.atomic
-def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, created_by=None, external_id=None, memo="", metadata=None):
+def reverse_ledger_transaction(
+    *,
+    actor,
+    original_txn: LedgerTransaction,
+    created_by=None,
+    external_id=None,
+    memo="",
+    metadata=None,
+    reversal_kind=None,
+):
     _require_perm(actor, "ledger.can_reverse_ledger_transaction")
     created_by = _resolve_created_by(actor=actor, created_by=created_by)
 
@@ -2272,6 +2282,15 @@ def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, create
 
     if original_txn.status != LedgerTransaction.STATUS_POSTED:
         raise ValidationError("Only posted transactions can be reversed")
+
+    resolved_reversal_kind = str(
+        reversal_kind or f"{original_txn.kind}_reversal"
+    ).strip()
+    kind_max_length = LedgerTransaction._meta.get_field("kind").max_length
+    if not resolved_reversal_kind:
+        raise ValidationError("Reversal transaction kind is required")
+    if kind_max_length and len(resolved_reversal_kind) > int(kind_max_length):
+        raise ValidationError("Reversal transaction kind is too long")
 
     if hasattr(original_txn, "reversal_txn"):
         return original_txn.reversal_txn
@@ -2289,7 +2308,7 @@ def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, create
     request_hash = None
     if external_id:
         payload = {
-            "kind": f"{original_txn.kind}_reversal",
+            "kind": resolved_reversal_kind,
             "memo": memo,
             "entries": [[entry.wallet_id, -entry.delta] for entry in original_entries],
             "metadata": payload_metadata,
@@ -2303,7 +2322,7 @@ def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, create
         try:
             with transaction.atomic():
                 txn = LedgerTransaction.objects.create(
-                    kind=f"{original_txn.kind}_reversal",
+                    kind=resolved_reversal_kind,
                     status=LedgerTransaction.STATUS_REVERSED,
                     reversal_of=original_txn,
                     external_id=external_id,
@@ -2320,7 +2339,7 @@ def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, create
             return existing
     else:
         txn = LedgerTransaction.objects.create(
-            kind=f"{original_txn.kind}_reversal",
+            kind=resolved_reversal_kind,
             status=LedgerTransaction.STATUS_REVERSED,
             reversal_of=original_txn,
             external_id=None,

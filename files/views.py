@@ -1635,6 +1635,11 @@ def wallet_mtpelerin_launch(request, public_id):
             f"{parsed_widget_url.scheme}://"
             f"{parsed_widget_url.netloc}"
         )
+        embed_params = dict(launch.get("widget_options") or {})
+        embed_params["type"] = "web"
+        launch["embed_url"] = (
+            f"{widget_origin}/?{urlencode(embed_params)}"
+        )
     except (DjangoValidationError, ImproperlyConfigured) as exc:
         messages.error(request, _extract_wallet_form_error(exc))
         return redirect(
@@ -1648,33 +1653,24 @@ def wallet_mtpelerin_launch(request, public_id):
         "cms/mtpelerin_launch.html",
         {
             "mtpelerin_launch": launch,
-            "mtpelerin_widget_options_json": json.dumps(
-                launch["widget_options"],
-                separators=(",", ":"),
-                ensure_ascii=False,
-            ),
             "mtpelerin_widget_origin": widget_origin,
-            "mtpelerin_widget_script_url": (
-                f"{widget_origin}/mtp-widget.js"
-            ),
             "mtpelerin_csp_nonce": nonce,
         },
     )
     response["Cache-Control"] = "no-store, private, max-age=0"
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
-    response["Referrer-Policy"] = "no-referrer"
+    response["Referrer-Policy"] = "origin"
     response["X-Content-Type-Options"] = "nosniff"
     response["X-Frame-Options"] = "DENY"
     response["Content-Security-Policy"] = (
         "default-src 'none'; "
-        f"script-src 'nonce-{nonce}' {widget_origin}; "
-        f"style-src 'unsafe-inline' {widget_origin}; "
-        f"img-src {widget_origin} data: blob:; "
-        f"font-src {widget_origin} data:; "
+        f"script-src 'nonce-{nonce}'; "
+        f"style-src 'nonce-{nonce}'; "
+        "img-src 'none'; "
+        "font-src 'none'; "
         f"frame-src {widget_origin}; "
-        f"connect-src 'self' {widget_origin} "
-        "https://api.mtpelerin.com; "
+        "connect-src 'self'; "
         "object-src 'none'; "
         "base-uri 'none'; "
         "form-action 'self'; "

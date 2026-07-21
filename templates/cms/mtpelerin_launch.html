@@ -5,65 +5,102 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Mt Pelerin checkout</title>
   <style nonce="{{ mtpelerin_csp_nonce }}">
-    :root { color-scheme: dark; }
+    :root {
+      color-scheme: dark;
+    }
+
+    html,
     body {
+      width: 100%;
+      height: 100%;
       margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
       background: #101114;
       color: #f3f4f6;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    main {
-      width: min(560px, calc(100% - 32px));
-      padding: 32px;
-      box-sizing: border-box;
-      border: 1px solid #2a2d33;
-      border-radius: 16px;
-      background: #17191e;
-      text-align: center;
+
+    body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
-    h1 { margin: 0 0 12px; font-size: 24px; }
-    p { margin: 8px 0; color: #c7cad1; line-height: 1.5; }
-    a { color: #fff; }
-    .status { margin-top: 18px; font-weight: 600; color: #fff; }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 16px;
+      box-sizing: border-box;
+      background: #17191e;
+      border-bottom: 1px solid #2a2d33;
+    }
+
+    #mtp-status {
+      margin: 0;
+      color: #f3f4f6;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    nav {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    a {
+      color: #fff;
+    }
+
+    iframe {
+      display: block;
+      flex: 1 1 auto;
+      width: 100%;
+      min-height: 0;
+      border: 0;
+      background: #fff;
+    }
+
+    @media (max-width: 700px) {
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
   </style>
 </head>
 <body>
-  <main>
-    <h1>Mt Pelerin bank transfer</h1>
-    <p>
-      Complete the Mt Pelerin flow in this tab. No MediaCMS profile
-      information is pre-filled.
-    </p>
-    <p class="status" id="mtp-status">Opening secure checkout…</p>
-    <p>
+  <header>
+    <p id="mtp-status">Opening secure checkout…</p>
+    <nav>
       <a href="{{ mtpelerin_launch.session_url }}">View top-up status</a>
       ·
       <a href="{{ mtpelerin_launch.wallet_url }}">Return to wallet</a>
-    </p>
-  </main>
+    </nav>
+  </header>
+
+  <iframe
+    id="mtp-frame"
+    allow="usb; ethereum; clipboard-write; payment; microphone; camera"
+    loading="eager"
+    referrerpolicy="origin"
+    title="Mt Pelerin exchange widget"
+  ></iframe>
 
   <form hidden>
     {% csrf_token %}
   </form>
-  <script
-    nonce="{{ mtpelerin_csp_nonce }}"
-    src="{{ mtpelerin_widget_script_url }}"
-  ></script>
   <script nonce="{{ mtpelerin_csp_nonce }}">
   (function () {
     "use strict";
 
     const widgetOrigin = "{{ mtpelerin_widget_origin|escapejs }}";
+    const iframeUrl = "{{ mtpelerin_launch.embed_url|escapejs }}";
     const eventUrl = "{{ mtpelerin_launch.event_url|escapejs }}";
     const sessionUrl = "{{ mtpelerin_launch.session_url|escapejs }}";
     const statusNode = document.getElementById("mtp-status");
+    const frame = document.getElementById("mtp-frame");
     const csrfNode = document.querySelector("[name=csrfmiddlewaretoken]");
-    const widgetOptionsJson = (
-      "{{ mtpelerin_widget_options_json|escapejs }}"
-    );
     const sentKeys = new Set();
 
     function parseMessage(value) {
@@ -129,7 +166,11 @@
     }
 
     window.addEventListener("message", function (event) {
-      if (event.origin !== widgetOrigin) {
+      if (
+        event.origin !== widgetOrigin
+        || !frame
+        || event.source !== frame.contentWindow
+      ) {
         return;
       }
       const message = parseMessage(event.data);
@@ -141,15 +182,15 @@
       });
     });
 
-    try {
-      const options = JSON.parse(widgetOptionsJson);
-      if (typeof window.showMtpModal !== "function") {
-        throw new Error("Mt Pelerin widget failed to load");
-      }
-      window.showMtpModal(options);
-    } catch (error) {
-      statusNode.textContent = error.message;
+    if (!frame || !iframeUrl) {
+      statusNode.textContent = "Mt Pelerin widget configuration is missing.";
+      return;
     }
+
+    frame.addEventListener("load", function () {
+      statusNode.textContent = "Complete the Mt Pelerin bank-transfer flow below.";
+    });
+    frame.src = iframeUrl;
   })();
   </script>
 </body>
