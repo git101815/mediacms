@@ -5,7 +5,13 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import override_settings
 from django.utils import timezone
 
-from ledger.models import DepositAddress, DepositSession, DepositSweepJob, ObservedOnchainTransfer
+from ledger.models import (
+    DepositAddress,
+    DepositSession,
+    DepositSweepJob,
+    ObservedOnchainTransfer,
+    TokenWallet,
+)
 from ledger.services import (
     cancel_user_deposit_session,
     create_deposit_session,
@@ -14,6 +20,8 @@ from ledger.services import (
     list_active_deposit_watch_targets,
     expire_stale_deposit_sessions,
     get_external_asset_clearing_wallet,
+    get_system_wallet,
+    ingest_deposit_observation_event,
     open_user_deposit_session,
     record_onchain_observation,
 )
@@ -103,6 +111,83 @@ class TestDepositSessions(BaseLedgerTestCase):
             int((session.metadata or {}).get("expected_route_raw_amount")),
             1_325_000,
         )
+
+    @patch("ledger.services._derive_session_deposit_address")
+    def test_all_routes_credit_at_net_and_book_surplus_as_fee(self, mocked_derive):
+        self.grant_perm(self.operator, "can_view_deposit_sessions")
+        mocked_derive.return_value = (
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa98",
+            "m/44'/60'/0'/0/98",
+        )
+
+        session = open_user_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
+            payment_price_bps=500,
+            payment_price_fixed_canonical=200_000,
+        )
+        token_pack = (session.metadata or {})["token_pack"]
+        net_amount = int(token_pack["net_stable_amount"])
+        gross_amount = int(token_pack["gross_stable_amount"])
+        received_amount = net_amount + 100_000
+
+        self.assertEqual(net_amount, 1_000_000)
+        self.assertEqual(gross_amount, 1_250_000)
+        self.assertLess(received_amount, gross_amount)
+
+        watch = list_active_deposit_watch_targets(
+            actor=self.operator,
+            option_rows=[
+                {
+                    "chain": session.chain,
+                    "asset_code": session.asset_code,
+                    "token_contract_address": session.token_contract_address,
+                }
+            ],
+        )
+        target = watch[0]["targets"][0]
+        self.assertEqual(target["min_amount"], net_amount)
+        self.assertEqual(target["onchain_min_amount"], str(net_amount))
+
+        result = ingest_deposit_observation_event(
+            actor=self.operator,
+            session_public_id=session.public_id,
+            chain=session.chain,
+            txid="0xglobalnetthreshold",
+            log_index=0,
+            block_number=123,
+            detected_block_number=123,
+            from_address="0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            to_address=session.deposit_address,
+            token_contract_address=session.token_contract_address,
+            asset_code=session.asset_code,
+            amount=received_amount,
+            confirmations=session.required_confirmations,
+            detection_method="event",
+            raw_payload={
+                "amount_unit": "canonical_stable",
+                "canonical_stable_amount": received_amount,
+                "onchain_raw_amount": str(received_amount),
+            },
+        )
+
+        self.assertIsNotNone(result["ledger_txn"])
+        session.refresh_from_db()
+        self.w1.refresh_from_db()
+        platform_fees = get_system_wallet(
+            TokenWallet.SYSTEM_PLATFORM_FEES,
+            allow_negative=False,
+        )
+        platform_fees.refresh_from_db()
+
+        self.assertEqual(session.status, DepositSession.STATUS_CREDITED)
+        self.assertEqual(
+            self.w1.balance,
+            self.default_token_pack.token_amount,
+        )
+        self.assertEqual(platform_fees.balance, 10_000_000)
 
     def test_open_user_deposit_session_rejects_negative_payment_price_adjustments(self):
         with self.assertRaisesMessage(ValidationError, "Payment price bps cannot be negative"):

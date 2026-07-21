@@ -3124,15 +3124,15 @@ def record_onchain_observation(
     return observed
 
 
-def _mtpelerin_pending_credit_required_canonical_amount(
-    deposit_session: DepositSession,
+def _token_pack_credit_required_canonical_amount(
+    token_pack_snapshot,
 ) -> int | None:
-    if not _mtpelerin_pending_credit_is_held(deposit_session):
+    if not isinstance(token_pack_snapshot, dict) or not token_pack_snapshot:
         return None
 
-    token_pack_snapshot = (
-        deposit_session.metadata or {}
-    ).get("token_pack") or {}
+    user_credit_amount = int(
+        token_pack_snapshot.get("token_amount") or 0
+    )
     expected_net_amount = int(
         token_pack_snapshot.get("net_stable_amount") or 0
     )
@@ -3140,12 +3140,22 @@ def _mtpelerin_pending_credit_required_canonical_amount(
         token_pack_snapshot.get("gross_stable_amount") or 0
     )
 
+    # Active legacy sessions may predate the explicit net field. Derive it
+    # from the immutable token amount instead of falling back to gross.
+    if expected_net_amount <= 0 and user_credit_amount > 0:
+        expected_net_amount = (
+            _convert_platform_token_units_to_canonical_stable_units(
+                user_credit_amount
+            )
+        )
+
     if (
-        expected_net_amount <= 0
+        user_credit_amount <= 0
+        or expected_net_amount <= 0
         or expected_gross_amount < expected_net_amount
     ):
         raise ValidationError(
-            "Mt Pelerin session is missing valid net and gross amounts"
+            "Deposit session is missing valid token pack net and gross amounts"
         )
 
     return expected_net_amount
@@ -3170,8 +3180,8 @@ def _settle_mtpelerin_pending_credit(
         token_pack_snapshot.get("token_amount") or 0
     )
     expected_net_amount = (
-        _mtpelerin_pending_credit_required_canonical_amount(
-            deposit_session
+        _token_pack_credit_required_canonical_amount(
+            token_pack_snapshot
         )
     )
     pending_amount = int(pending.get("amount") or 0)
@@ -3456,14 +3466,17 @@ def credit_confirmed_deposit_session(
 
     observed_canonical_stable_amount, observed_route_raw_amount = _observed_transfer_amounts(observed_transfer)
     session_min_canonical_amount, session_min_route_raw_amount = _deposit_session_min_amounts(deposit_session)
-    mtpelerin_net_amount = (
-        _mtpelerin_pending_credit_required_canonical_amount(
-            deposit_session
+    token_pack_snapshot = (
+        deposit_session.metadata or {}
+    ).get("token_pack") or {}
+    token_pack_net_amount = (
+        _token_pack_credit_required_canonical_amount(
+            token_pack_snapshot
         )
     )
     credit_minimum_canonical_amount = (
-        mtpelerin_net_amount
-        if mtpelerin_net_amount is not None
+        token_pack_net_amount
+        if token_pack_net_amount is not None
         else int(session_min_canonical_amount)
     )
 
@@ -3493,17 +3506,21 @@ def credit_confirmed_deposit_session(
     clearing_wallet = get_external_asset_clearing_wallet()
     external_id = f"deposit-credit:{observed_transfer.event_key}"
 
-    token_pack_snapshot = (deposit_session.metadata or {}).get("token_pack") or {}
     if token_pack_snapshot:
         user_credit_amount = int(token_pack_snapshot.get("token_amount") or 0)
         expected_gross_canonical_stable_amount = int(token_pack_snapshot.get("gross_stable_amount") or 0)
-        expected_net_canonical_stable_amount = int(token_pack_snapshot.get("net_stable_amount") or 0)
+        expected_net_canonical_stable_amount = int(token_pack_net_amount or 0)
 
-        if user_credit_amount <= 0 or expected_gross_canonical_stable_amount <= 0:
+        if (
+            user_credit_amount <= 0
+            or expected_net_canonical_stable_amount <= 0
+            or expected_gross_canonical_stable_amount
+            < expected_net_canonical_stable_amount
+        ):
             raise ValidationError("Deposit session is missing a valid token pack snapshot")
 
-        if observed_canonical_stable_amount < expected_gross_canonical_stable_amount:
-            raise ValidationError("Observed amount is below the expected token pack price")
+        if observed_canonical_stable_amount < expected_net_canonical_stable_amount:
+            raise ValidationError("Observed amount is below the token pack net amount")
 
         gross_token_equivalent_amount = _convert_canonical_stable_to_platform_tokens(
             observed_canonical_stable_amount
@@ -4143,14 +4160,14 @@ def ingest_deposit_observation_event(
     ledger_txn = None
     observed_canonical_amount, _observed_raw_amount = _observed_transfer_amounts(observed_transfer)
     session_min_canonical_amount, _session_min_raw_amount = _deposit_session_min_amounts(deposit_session)
-    mtpelerin_net_amount = (
-        _mtpelerin_pending_credit_required_canonical_amount(
-            deposit_session
+    token_pack_net_amount = (
+        _token_pack_credit_required_canonical_amount(
+            (deposit_session.metadata or {}).get("token_pack") or {}
         )
     )
     credit_minimum_canonical_amount = (
-        mtpelerin_net_amount
-        if mtpelerin_net_amount is not None
+        token_pack_net_amount
+        if token_pack_net_amount is not None
         else int(session_min_canonical_amount)
     )
     should_credit = (
@@ -4290,15 +4307,30 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
         targets = []
         for session in sessions:
             is_residual_watch = session["status"] in RESIDUAL_DEPOSIT_WATCH_STATUSES
+            session_metadata = session.get("metadata") or {}
             canonical_min_amount, onchain_min_amount = _canonical_and_raw_amounts_from_stored_route_value(
                 chain=chain,
                 asset_code=asset_code,
                 stored_amount=session["min_amount"],
                 raw_amount=session.get("expected_onchain_raw_amount"),
-                metadata=session.get("metadata") or {},
+                metadata=session_metadata,
                 canonical_metadata_keys=("expected_canonical_stable_amount", "canonical_min_amount"),
                 raw_metadata_keys=("expected_route_raw_amount", "expected_onchain_raw_amount", "onchain_min_amount"),
             )
+            token_pack_net_amount = (
+                _token_pack_credit_required_canonical_amount(
+                    session_metadata.get("token_pack") or {}
+                )
+            )
+            if token_pack_net_amount is not None:
+                canonical_min_amount = int(token_pack_net_amount)
+                onchain_min_amount = (
+                    _convert_canonical_stable_to_route_raw_amount(
+                        chain=chain,
+                        asset_code=asset_code,
+                        canonical_amount=canonical_min_amount,
+                    )
+                )
             targets.append(
                 {
                     "session_public_id": str(session["public_id"]),

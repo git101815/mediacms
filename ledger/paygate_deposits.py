@@ -45,6 +45,7 @@ from ledger.services import (
     STABLECOIN_CANONICAL_DECIMALS,
     _build_token_pack_snapshot,
     _convert_canonical_stable_to_platform_tokens,
+    _token_pack_credit_required_canonical_amount,
     _enforce_deposit_open_cooldown,
     _require_authenticated_actor,
     _require_perm,
@@ -547,13 +548,17 @@ def credit_paygate_deposit_session(
     if token_pack_snapshot:
         user_credit_amount = int(token_pack_snapshot.get("token_amount") or 0)
         expected_gross_canonical_stable_amount = int(token_pack_snapshot.get("gross_stable_amount") or 0)
-        expected_net_canonical_stable_amount = int(token_pack_snapshot.get("net_stable_amount") or 0)
+        expected_net_canonical_stable_amount = (
+            _token_pack_credit_required_canonical_amount(
+                token_pack_snapshot
+            )
+        )
 
-        if user_credit_amount <= 0 or expected_gross_canonical_stable_amount <= 0:
+        if user_credit_amount <= 0 or expected_net_canonical_stable_amount is None:
             raise ValidationError("Provider deposit session is missing a valid token pack snapshot")
 
-        if paid_canonical_stable_amount < expected_gross_canonical_stable_amount:
-            raise ValidationError("Provider paid amount is below the expected token pack price")
+        if paid_canonical_stable_amount < expected_net_canonical_stable_amount:
+            raise ValidationError("Provider paid amount is below the token pack net amount")
 
         gross_token_equivalent_amount = _convert_canonical_stable_to_platform_tokens(
             paid_canonical_stable_amount
