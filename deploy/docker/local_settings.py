@@ -122,11 +122,34 @@ DFX_SWEEPER_SIGNER_BASE_URL = os.getenv(
 ).strip()
 DFX_SWEEPER_SIGNER_SERVICE_NAME = "mediacms-web"
 DFX_SWEEPER_SIGNER_TIMEOUT_SECONDS = 10
+
+
+MTPERELIN_ENABLED = "true"
+MTPERELIN_API_BASE_URL = "https://api.mtpelerin.com"
+MTPERELIN_WIDGET_BASE_URL = "https://widget.mtpelerin.com"
+# Public direct-link key published in Mt Pelerin's web-integration docs.
+MTPERELIN_DIRECT_LINK_CTKN = "954139b2-ef3e-4914-82ea-33192d3f43d3"
+MTPERELIN_FIAT_CURRENCIES = ("EUR", "USD")
+MTPERELIN_SETTLEMENT_ROUTE_PREFERENCES = (
+    "base:USDC",
+    "bsc:USDC",
+    "arbitrum:USDC",
+    "ethereum:USDC",
+)
+MTPERELIN_LANGUAGE = "en"
+MTPERELIN_PAYMENT_TTL_SECONDS = 21 * 24 * 60 * 60
+MTPERELIN_API_TIMEOUT_SECONDS = 15
+MTPERELIN_CACHE_SECONDS = 300
+MTPERELIN_QUOTE_CACHE_SECONDS = 60
+MTPERELIN_QUOTE_MAX_AGE_SECONDS = 30 * 60
+
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "paypal_us": 600,
     "revolut_eu": 500,
     "transak_card": 600,
     "dfx_bank": 500,
+    "mtpelerin_eur": 0,
+    "mtpelerin_usd": 0,
     "crypto": 0,
 }
 WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
@@ -134,6 +157,8 @@ WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
     "revolut_eu": 1.6,
     "transak_card": 1.3,
     "dfx_bank": 1.8,
+    "mtpelerin_eur": 0,
+    "mtpelerin_usd": 0,
     "crypto": 0,
 }
 PAYGATE_CURRENCY = "USD"

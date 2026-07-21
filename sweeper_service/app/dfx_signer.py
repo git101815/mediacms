@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hmac
 import json
 import logging
@@ -95,6 +96,67 @@ def sign_dfx_message(*, config, chain: str, derivation_index: int, address: str)
     }
 
 
+MTPERELIN_MESSAGE_PREFIX = "MtPelerin-"
+
+
+def build_mtpelerin_message(code: str) -> str:
+    normalized = str(code or "").strip()
+    if (
+        len(normalized) != 4
+        or not normalized.isdigit()
+        or not (1000 <= int(normalized) <= 9999)
+    ):
+        raise ValueError("Mt Pelerin code must be between 1000 and 9999")
+    return f"{MTPERELIN_MESSAGE_PREFIX}{normalized}"
+
+
+def sign_mtpelerin_message(
+    *,
+    config,
+    chain: str,
+    derivation_index: int,
+    address: str,
+    code: str,
+) -> dict:
+    normalized_chain = str(chain or "").strip().lower()
+    normalized_address = str(address or "").strip().lower()
+    normalized_index = int(derivation_index)
+    if normalized_index < 0:
+        raise ValueError("derivation_index must be >= 0")
+
+    deriver = EvmDeriver(
+        mnemonic=config.mnemonic,
+        passphrase=config.mnemonic_passphrase,
+        account_index=config.account_index,
+    )
+    derived_address = deriver.derive_address(
+        chain=normalized_chain,
+        address_index=normalized_index,
+    )
+    private_key = deriver.derive_private_key(
+        chain=normalized_chain,
+        address_index=normalized_index,
+    )
+    if derived_address.lower() != normalized_address:
+        raise ValueError("Requested address does not match the derived address")
+
+    message = build_mtpelerin_message(code)
+    signable = encode_defunct(text=message)
+    signed = Account.sign_message(signable, private_key=private_key)
+    signature_bytes = bytes(signed.signature)
+    signature = base64.b64encode(signature_bytes).decode("ascii")
+
+    recovered = Account.recover_message(signable, signature=signed.signature)
+    if recovered.lower() != normalized_address:
+        raise ValueError("Generated Mt Pelerin signature failed local verification")
+
+    return {
+        "address": normalized_address,
+        "message": message,
+        "signature": signature,
+    }
+
+
 class _SignerServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -125,7 +187,10 @@ class _Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not_found"})
 
     def do_POST(self):
-        if self.path != "/v1/sign/dfx":
+        if self.path not in {
+            "/v1/sign/dfx",
+            "/v1/sign/mtpelerin",
+        }:
             self._json(404, {"error": "not_found"})
             return
 
@@ -204,12 +269,21 @@ class _Handler(BaseHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError("JSON body must be an object")
-            result = sign_dfx_message(
-                config=self.server.config,
-                chain=payload.get("chain"),
-                derivation_index=payload.get("derivation_index"),
-                address=payload.get("address"),
-            )
+            if self.path == "/v1/sign/dfx":
+                result = sign_dfx_message(
+                    config=self.server.config,
+                    chain=payload.get("chain"),
+                    derivation_index=payload.get("derivation_index"),
+                    address=payload.get("address"),
+                )
+            else:
+                result = sign_mtpelerin_message(
+                    config=self.server.config,
+                    chain=payload.get("chain"),
+                    derivation_index=payload.get("derivation_index"),
+                    address=payload.get("address"),
+                    code=payload.get("code"),
+                )
         except Exception as exc:
             self._json(400, {"error": str(exc)[:500]})
             return
@@ -236,7 +310,10 @@ def start_dfx_signer_server(config):
 
 __all__ = [
     "DFX_MESSAGE_PREFIX",
+    "MTPERELIN_MESSAGE_PREFIX",
     "build_dfx_message",
+    "build_mtpelerin_message",
     "sign_dfx_message",
+    "sign_mtpelerin_message",
     "start_dfx_signer_server",
 ]

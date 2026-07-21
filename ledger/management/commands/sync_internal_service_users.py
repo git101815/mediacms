@@ -11,6 +11,8 @@ SERVICE_USER_SPECS = [
         "permissions": [
             "ledger.can_record_onchain_observations",
             "ledger.can_apply_raw_ledger_transaction",
+            "ledger.can_reverse_ledger_transaction",
+            "ledger.can_manage_wallet_holds",
             "ledger.can_credit_confirmed_deposits",
             "ledger.can_manage_deposit_sweep_jobs",
             "ledger.can_view_deposit_sessions",

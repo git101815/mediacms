@@ -843,6 +843,123 @@ def sweep_broadcast_missing_deadline_has_passed(
 
 DEPOSIT_SESSION_STATUS_CANCELED = getattr(DepositSession, "STATUS_CANCELED", "canceled")
 
+MTPERELIN_PROVIDER_KEY = "mtpelerin"
+MTPERELIN_PENDING_CREDIT_KEY = "mtpelerin_pending_credit"
+MTPERELIN_PENDING_CREDIT_STATUS_HELD = "held"
+MTPERELIN_PENDING_CREDIT_STATUS_SETTLED = "settled"
+MTPERELIN_PENDING_CREDIT_STATUS_EXPIRED = "expired"
+
+
+def _is_mtpelerin_deposit_session(
+    deposit_session: DepositSession,
+) -> bool:
+    metadata = deposit_session.metadata or {}
+    provider = metadata.get("payment_provider") or {}
+    return provider.get("key") == MTPERELIN_PROVIDER_KEY
+
+
+def _mtpelerin_pending_credit(
+    deposit_session: DepositSession,
+) -> dict:
+    metadata = deposit_session.metadata or {}
+    pending = metadata.get(MTPERELIN_PENDING_CREDIT_KEY) or {}
+    return dict(pending) if isinstance(pending, dict) else {}
+
+
+def _mtpelerin_pending_credit_is_held(
+    deposit_session: DepositSession,
+) -> bool:
+    pending = _mtpelerin_pending_credit(deposit_session)
+    return (
+        str(pending.get("status") or "").strip().lower()
+        == MTPERELIN_PENDING_CREDIT_STATUS_HELD
+    )
+
+
+def _expire_mtpelerin_pending_credit(
+    *,
+    actor,
+    deposit_session: DepositSession,
+) -> LedgerTransaction | None:
+    pending = _mtpelerin_pending_credit(deposit_session)
+    if (
+        str(pending.get("status") or "").strip().lower()
+        != MTPERELIN_PENDING_CREDIT_STATUS_HELD
+    ):
+        return None
+
+    hold_id = int(pending.get("hold_id") or 0)
+    ledger_txn_id = int(pending.get("ledger_txn_id") or 0)
+    expected_amount = int(pending.get("amount") or 0)
+    if hold_id <= 0 or ledger_txn_id <= 0 or expected_amount <= 0:
+        raise ValidationError(
+            "Mt Pelerin pending credit metadata is incomplete"
+        )
+
+    hold = LedgerHold.objects.select_for_update().get(
+        id=hold_id,
+        wallet_id=deposit_session.wallet_id,
+    )
+    if int(hold.amount) != expected_amount:
+        raise ValidationError(
+            "Mt Pelerin pending hold amount does not match"
+        )
+
+    hold = release_wallet_hold(
+        actor=actor,
+        hold=hold,
+        reason="Mt Pelerin payment session expired",
+    )
+
+    pending_txn = (
+        LedgerTransaction.objects.select_for_update()
+        .get(id=ledger_txn_id)
+    )
+    reversal = reverse_ledger_transaction(
+        actor=actor,
+        original_txn=pending_txn,
+        reversal_kind="mtpelerin_pending_reversal",
+        external_id=(
+            "mtpelerin-pending-expiry:"
+            f"{deposit_session.public_id}"
+        ),
+        memo="Expired Mt Pelerin pending top-up",
+        metadata={
+            "source": "mtpelerin_pending_expiry",
+            "deposit_session_id": deposit_session.id,
+            "deposit_session_public_id": str(
+                deposit_session.public_id
+            ),
+            "pending_ledger_txn_id": pending_txn.id,
+            "hold_id": hold.id,
+            "expires_at": deposit_session.expires_at.isoformat(),
+        },
+    )
+
+    metadata = dict(deposit_session.metadata or {})
+    provider = dict(metadata.get("payment_provider") or {})
+    pending.update(
+        {
+            "status": MTPERELIN_PENDING_CREDIT_STATUS_EXPIRED,
+            "expired_at": timezone.now().isoformat(),
+            "hold_released_at": (
+                hold.released_at.isoformat()
+                if hold.released_at
+                else timezone.now().isoformat()
+            ),
+            "reversal_ledger_txn_id": reversal.id,
+        }
+    )
+    provider["status"] = "EXPIRED"
+    metadata[MTPERELIN_PENDING_CREDIT_KEY] = pending
+    metadata["payment_provider"] = provider
+    deposit_session.metadata = metadata
+    deposit_session.save(
+        update_fields=["metadata", "updated_at"]
+    )
+    return reversal
+
+
 NETWORK_DISPLAY_LABELS = {
     "ethereum": "Ethereum",
     "arbitrum": "Arbitrum One",
@@ -2147,7 +2264,16 @@ def apply_ledger_transaction(*, actor, kind: str, entries: list, created_by=None
     return txn
 
 @transaction.atomic
-def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, created_by=None, external_id=None, memo="", metadata=None):
+def reverse_ledger_transaction(
+    *,
+    actor,
+    original_txn: LedgerTransaction,
+    created_by=None,
+    external_id=None,
+    memo="",
+    metadata=None,
+    reversal_kind=None,
+):
     _require_perm(actor, "ledger.can_reverse_ledger_transaction")
     created_by = _resolve_created_by(actor=actor, created_by=created_by)
 
@@ -2156,6 +2282,15 @@ def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, create
 
     if original_txn.status != LedgerTransaction.STATUS_POSTED:
         raise ValidationError("Only posted transactions can be reversed")
+
+    resolved_reversal_kind = str(
+        reversal_kind or f"{original_txn.kind}_reversal"
+    ).strip()
+    kind_max_length = LedgerTransaction._meta.get_field("kind").max_length
+    if not resolved_reversal_kind:
+        raise ValidationError("Reversal transaction kind is required")
+    if kind_max_length and len(resolved_reversal_kind) > int(kind_max_length):
+        raise ValidationError("Reversal transaction kind is too long")
 
     if hasattr(original_txn, "reversal_txn"):
         return original_txn.reversal_txn
@@ -2173,7 +2308,7 @@ def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, create
     request_hash = None
     if external_id:
         payload = {
-            "kind": f"{original_txn.kind}_reversal",
+            "kind": resolved_reversal_kind,
             "memo": memo,
             "entries": [[entry.wallet_id, -entry.delta] for entry in original_entries],
             "metadata": payload_metadata,
@@ -2187,7 +2322,7 @@ def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, create
         try:
             with transaction.atomic():
                 txn = LedgerTransaction.objects.create(
-                    kind=f"{original_txn.kind}_reversal",
+                    kind=resolved_reversal_kind,
                     status=LedgerTransaction.STATUS_REVERSED,
                     reversal_of=original_txn,
                     external_id=external_id,
@@ -2204,7 +2339,7 @@ def reverse_ledger_transaction(*, actor, original_txn: LedgerTransaction, create
             return existing
     else:
         txn = LedgerTransaction.objects.create(
-            kind=f"{original_txn.kind}_reversal",
+            kind=resolved_reversal_kind,
             status=LedgerTransaction.STATUS_REVERSED,
             reversal_of=original_txn,
             external_id=None,
@@ -2716,6 +2851,14 @@ def record_onchain_observation(
         .get(id=deposit_session.id)
     )
 
+    if (
+        _is_mtpelerin_deposit_session(deposit_session)
+        and deposit_session.expires_at <= timezone.now()
+    ):
+        raise ValidationError(
+            "Mt Pelerin deposit session has expired"
+        )
+
     chain = _normalize_chain(chain)
     txid = (txid or "").strip().lower()
     detection_method = (detection_method or "event").strip().lower()
@@ -2980,6 +3123,264 @@ def record_onchain_observation(
 
     return observed
 
+
+def _mtpelerin_pending_credit_required_canonical_amount(
+    deposit_session: DepositSession,
+) -> int | None:
+    if not _mtpelerin_pending_credit_is_held(deposit_session):
+        return None
+
+    token_pack_snapshot = (
+        deposit_session.metadata or {}
+    ).get("token_pack") or {}
+    expected_net_amount = int(
+        token_pack_snapshot.get("net_stable_amount") or 0
+    )
+    expected_gross_amount = int(
+        token_pack_snapshot.get("gross_stable_amount") or 0
+    )
+
+    if (
+        expected_net_amount <= 0
+        or expected_gross_amount < expected_net_amount
+    ):
+        raise ValidationError(
+            "Mt Pelerin session is missing valid net and gross amounts"
+        )
+
+    return expected_net_amount
+
+
+@transaction.atomic
+def _settle_mtpelerin_pending_credit(
+    *,
+    actor,
+    deposit_session: DepositSession,
+    observed_transfer: ObservedOnchainTransfer,
+    observed_canonical_stable_amount: int,
+    observed_route_raw_amount: int,
+    session_min_route_raw_amount: int,
+) -> LedgerTransaction:
+    pending = _mtpelerin_pending_credit(deposit_session)
+    token_pack_snapshot = (
+        deposit_session.metadata or {}
+    ).get("token_pack") or {}
+
+    user_credit_amount = int(
+        token_pack_snapshot.get("token_amount") or 0
+    )
+    expected_net_amount = (
+        _mtpelerin_pending_credit_required_canonical_amount(
+            deposit_session
+        )
+    )
+    pending_amount = int(pending.get("amount") or 0)
+    hold_id = int(pending.get("hold_id") or 0)
+    ledger_txn_id = int(pending.get("ledger_txn_id") or 0)
+
+    if (
+        user_credit_amount <= 0
+        or expected_net_amount is None
+        or pending_amount != user_credit_amount
+        or hold_id <= 0
+        or ledger_txn_id <= 0
+    ):
+        raise ValidationError(
+            "Mt Pelerin pending credit metadata is invalid"
+        )
+
+    if observed_canonical_stable_amount < expected_net_amount:
+        raise ValidationError(
+            "Observed amount is below the token pack net amount"
+        )
+
+    pending_txn = (
+        LedgerTransaction.objects.select_for_update()
+        .get(id=ledger_txn_id)
+    )
+    if pending_txn.status != LedgerTransaction.STATUS_POSTED:
+        raise ValidationError(
+            "Mt Pelerin pending credit transaction is not posted"
+        )
+    expected_external_id = (
+        "mtpelerin-pending-credit:"
+        f"{deposit_session.public_id}"
+    )
+    if pending_txn.external_id != expected_external_id:
+        raise ValidationError(
+            "Mt Pelerin pending credit transaction does not match session"
+        )
+
+    hold = LedgerHold.objects.select_for_update().get(
+        id=hold_id,
+        wallet_id=deposit_session.wallet_id,
+    )
+    if int(hold.amount) != user_credit_amount:
+        raise ValidationError(
+            "Mt Pelerin pending hold amount does not match"
+        )
+    if hold.released:
+        raise ValidationError(
+            "Mt Pelerin pending hold was already released"
+        )
+
+    hold = release_wallet_hold(
+        actor=actor,
+        hold=hold,
+        reason="Mt Pelerin payment confirmed on-chain",
+    )
+
+    gross_token_equivalent_amount = (
+        _convert_canonical_stable_to_platform_tokens(
+            observed_canonical_stable_amount
+        )
+    )
+    platform_fee_credit_amount = (
+        gross_token_equivalent_amount - user_credit_amount
+    )
+    if platform_fee_credit_amount < 0:
+        raise ValidationError(
+            "Observed amount is lower than the token pack token value"
+        )
+
+    fee_txn = None
+    if platform_fee_credit_amount > 0:
+        clearing_wallet = get_external_asset_clearing_wallet()
+        platform_fees_wallet = get_system_wallet(
+            TokenWallet.SYSTEM_PLATFORM_FEES,
+            allow_negative=False,
+        )
+        fee_txn = apply_ledger_transaction(
+            actor=actor,
+            kind="mtpelerin_deposit_fee",
+            entries=[
+                (
+                    clearing_wallet,
+                    -platform_fee_credit_amount,
+                ),
+                (
+                    platform_fees_wallet,
+                    platform_fee_credit_amount,
+                ),
+            ],
+            external_id=(
+                "mtpelerin-deposit-fee:"
+                f"{observed_transfer.event_key}"
+            ),
+            memo=(
+                "Mt Pelerin confirmed top-up fee "
+                f"{observed_transfer.txid}"
+            ),
+            metadata={
+                "source": "mtpelerin_onchain_settlement",
+                "deposit_session_id": deposit_session.id,
+                "deposit_session_public_id": str(
+                    deposit_session.public_id
+                ),
+                "observed_transfer_id": observed_transfer.id,
+                "event_key": observed_transfer.event_key,
+                "platform_fee_credit_amount": (
+                    platform_fee_credit_amount
+                ),
+            },
+        )
+
+    now = timezone.now()
+    metadata = dict(deposit_session.metadata or {})
+    provider = dict(metadata.get("payment_provider") or {})
+    pending.update(
+        {
+            "status": MTPERELIN_PENDING_CREDIT_STATUS_SETTLED,
+            "settled_at": now.isoformat(),
+            "hold_released_at": (
+                hold.released_at.isoformat()
+                if hold.released_at
+                else now.isoformat()
+            ),
+            "observed_transfer_id": observed_transfer.id,
+            "observed_event_key": observed_transfer.event_key,
+            "observed_txid": observed_transfer.txid,
+            "fee_ledger_txn_id": fee_txn.id if fee_txn else None,
+        }
+    )
+    provider.update(
+        {
+            "status": "SETTLED",
+            "settled_at": now.isoformat(),
+            "settlement_txid": observed_transfer.txid,
+        }
+    )
+    metadata[MTPERELIN_PENDING_CREDIT_KEY] = pending
+    metadata["payment_provider"] = provider
+
+    deposit_session.metadata = metadata
+    deposit_session.observed_txid = observed_transfer.txid
+    deposit_session.observed_amount = (
+        observed_canonical_stable_amount
+    )
+    if (
+        getattr(
+            deposit_session,
+            "expected_onchain_raw_amount",
+            None,
+        )
+        is None
+    ):
+        deposit_session.expected_onchain_raw_amount = (
+            session_min_route_raw_amount
+        )
+    deposit_session.confirmations = (
+        observed_transfer.confirmations
+    )
+    deposit_session.status = DepositSession.STATUS_CREDITED
+    deposit_session.credited_ledger_txn = pending_txn
+    deposit_session.save(
+        update_fields=[
+            "metadata",
+            "observed_txid",
+            "observed_amount",
+            "expected_onchain_raw_amount",
+            "confirmations",
+            "status",
+            "credited_ledger_txn",
+            "updated_at",
+        ]
+    )
+
+    observed_transfer.status = (
+        ObservedOnchainTransfer.STATUS_CREDITED
+    )
+    observed_transfer.credited_ledger_txn = pending_txn
+    if (
+        getattr(
+            observed_transfer,
+            "onchain_raw_amount",
+            None,
+        )
+        is None
+    ):
+        observed_transfer.onchain_raw_amount = (
+            observed_route_raw_amount
+        )
+    if observed_transfer.confirmed_at is None:
+        observed_transfer.confirmed_at = now
+    observed_transfer.save(
+        update_fields=[
+            "status",
+            "credited_ledger_txn",
+            "onchain_raw_amount",
+            "confirmed_at",
+        ]
+    )
+
+    enqueue_deposit_sweep_job(
+        actor=actor,
+        deposit_session=deposit_session,
+        observed_transfer=observed_transfer,
+    )
+    return pending_txn
+
+
 @transaction.atomic
 def credit_confirmed_deposit_session(
     *,
@@ -3020,9 +3421,19 @@ def credit_confirmed_deposit_session(
     if deposit_session.status == DEPOSIT_SESSION_STATUS_CANCELED:
         raise ValidationError("Canceled deposit sessions cannot be credited")
 
-    first_seen_at = getattr(observed_transfer, "first_seen_at", None) or getattr(observed_transfer, "created_at", None)
+    first_seen_at = (
+        getattr(observed_transfer, "first_seen_at", None)
+        or getattr(observed_transfer, "created_at", None)
+    )
     if deposit_session.expires_at <= timezone.now():
-        if first_seen_at is None or first_seen_at > deposit_session.expires_at:
+        if _is_mtpelerin_deposit_session(deposit_session):
+            raise ValidationError(
+                "Mt Pelerin deposit session has expired"
+            )
+        if (
+            first_seen_at is None
+            or first_seen_at > deposit_session.expires_at
+        ):
             raise ValidationError("Deposit session has expired")
 
     if observed_transfer.status not in {
@@ -3045,12 +3456,39 @@ def credit_confirmed_deposit_session(
 
     observed_canonical_stable_amount, observed_route_raw_amount = _observed_transfer_amounts(observed_transfer)
     session_min_canonical_amount, session_min_route_raw_amount = _deposit_session_min_amounts(deposit_session)
+    mtpelerin_net_amount = (
+        _mtpelerin_pending_credit_required_canonical_amount(
+            deposit_session
+        )
+    )
+    credit_minimum_canonical_amount = (
+        mtpelerin_net_amount
+        if mtpelerin_net_amount is not None
+        else int(session_min_canonical_amount)
+    )
 
-    if observed_canonical_stable_amount < int(session_min_canonical_amount):
+    if (
+        observed_canonical_stable_amount
+        < credit_minimum_canonical_amount
+    ):
         raise ValidationError("Observed amount is below deposit minimum")
 
     if int(observed_transfer.confirmations) < int(deposit_session.required_confirmations):
         raise ValidationError("Observed transfer does not have enough confirmations")
+
+    if _mtpelerin_pending_credit_is_held(deposit_session):
+        return _settle_mtpelerin_pending_credit(
+            actor=actor,
+            deposit_session=deposit_session,
+            observed_transfer=observed_transfer,
+            observed_canonical_stable_amount=(
+                observed_canonical_stable_amount
+            ),
+            observed_route_raw_amount=observed_route_raw_amount,
+            session_min_route_raw_amount=(
+                session_min_route_raw_amount
+            ),
+        )
 
     clearing_wallet = get_external_asset_clearing_wallet()
     external_id = f"deposit-credit:{observed_transfer.event_key}"
@@ -3705,11 +4143,21 @@ def ingest_deposit_observation_event(
     ledger_txn = None
     observed_canonical_amount, _observed_raw_amount = _observed_transfer_amounts(observed_transfer)
     session_min_canonical_amount, _session_min_raw_amount = _deposit_session_min_amounts(deposit_session)
+    mtpelerin_net_amount = (
+        _mtpelerin_pending_credit_required_canonical_amount(
+            deposit_session
+        )
+    )
+    credit_minimum_canonical_amount = (
+        mtpelerin_net_amount
+        if mtpelerin_net_amount is not None
+        else int(session_min_canonical_amount)
+    )
     should_credit = (
         observed_transfer.status != ObservedOnchainTransfer.STATUS_CREDITED
         and not _is_residual_observed_transfer(observed_transfer)
         and int(observed_transfer.confirmations) >= int(deposit_session.required_confirmations)
-        and int(observed_canonical_amount) >= int(session_min_canonical_amount)
+        and int(observed_canonical_amount) >= credit_minimum_canonical_amount
     )
 
     if should_credit:
@@ -4801,6 +5249,11 @@ def cancel_user_deposit_session(*, actor, deposit_session: DepositSession) -> De
     if deposit_session.status == DepositSession.STATUS_CREDITED:
         raise ValidationError("Cannot cancel a credited deposit session")
 
+    if _mtpelerin_pending_credit_is_held(deposit_session):
+        raise ValidationError(
+            "Cannot cancel a Mt Pelerin session after payment submission"
+        )
+
     if deposit_session.status in terminal_statuses:
         return deposit_session
 
@@ -4841,7 +5294,18 @@ def expire_stale_deposit_sessions(*, actor, limit: int = 500) -> int:
         if session.status == DepositSession.STATUS_CREDITED:
             continue
 
-        if expected_amount > 0 and observed_amount >= expected_amount:
+        has_mtpelerin_pending_credit = (
+            _mtpelerin_pending_credit_is_held(session)
+        )
+        if has_mtpelerin_pending_credit:
+            _expire_mtpelerin_pending_credit(
+                actor=actor,
+                deposit_session=session,
+            )
+        elif (
+            expected_amount > 0
+            and observed_amount >= expected_amount
+        ):
             continue
 
         session.status = DepositSession.STATUS_EXPIRED
@@ -4875,6 +5339,11 @@ def delete_user_deposit_session(*, actor, deposit_session: DepositSession) -> No
     }
     if deposit_session.status not in allowed_statuses:
         raise ValidationError("Only pending or canceled deposit sessions can be deleted")
+
+    if _mtpelerin_pending_credit_is_held(deposit_session):
+        raise ValidationError(
+            "Cannot delete a Mt Pelerin session with held funds"
+        )
 
     if deposit_session.observed_txid or int(deposit_session.observed_amount or 0) > 0:
         raise ValidationError("Cannot delete a deposit session that already observed funds")

@@ -14,6 +14,8 @@
         <div class="wallet-deposit-ui__eyebrow">Top up</div>
         {% if deposit_session.status == "awaiting_payment" %}
         <h1 class="wallet-deposit-ui__title">Waiting for payment</h1>
+        {% elif deposit_session.status == "settlement_pending" %}
+        <h1 class="wallet-deposit-ui__title">Waiting for settlement</h1>
         {% elif deposit_session.status == "payment_detected" %}
         <h1 class="wallet-deposit-ui__title">Payment detected</h1>
         {% else %}
@@ -67,7 +69,7 @@
       {% if deposit_session.is_provider_checkout %}
         {% if deposit_session.checkout_url and not deposit_session.is_terminal %}
         <div class="wallet-deposit-ui__footer" style="display:block">
-          <a href="{{ deposit_session.checkout_url }}" class="wallet-route-form__submit" rel="noopener noreferrer">
+          <a href="{{ deposit_session.checkout_url }}" class="wallet-route-form__submit" target="_blank" rel="noopener noreferrer">
             Continue to secure checkout
           </a>
         </div>
@@ -101,7 +103,14 @@
         <div class="wallet-deposit-ui__warning">
           <i class="material-icons" aria-hidden="true">info</i>
           <div>
-            Complete the hosted checkout. Your tokens are credited automatically after the payment is confirmed.
+            {% if deposit_session.status == "settlement_pending" %}
+              {{ deposit_session.pending_token_amount_display }} tokens are
+              visible in your total balance and locked until the USDC payment
+              is confirmed. This can take several days.
+            {% else %}
+              Complete the hosted checkout. Your tokens are credited
+              automatically after the payment is confirmed.
+            {% endif %}
           </div>
         </div>
       {% else %}
