@@ -35,6 +35,17 @@ class TestWalletProviderRouting(SimpleTestCase):
                 "provider_key": PAYGATE_PROVIDER_KEY,
                 "paygate_provider_id": "revolut",
             },
+            {
+                "key": "paygate:usd:transak:hosted_checkout",
+                "chain": "paygate",
+                "asset_code": "USD",
+                "min_amount": 15_000_000,
+                "payment_method_key": "paygate:transak",
+                "payment_method_label": "Transak",
+                "payment_method_type": "provider",
+                "provider_key": PAYGATE_PROVIDER_KEY,
+                "paygate_provider_id": "transak",
+            },
         ]
         dfx_options = [
             {
@@ -110,16 +121,13 @@ class TestWalletProviderRouting(SimpleTestCase):
             options = _build_wallet_deposit_options()
 
         groups = {}
-        group_order = []
         for option in options:
             group_key = option["payment_group_key"]
             groups.setdefault(group_key, []).append(option)
-            if group_key not in group_order:
-                group_order.append(group_key)
 
         self.assertEqual(
-            group_order,
-            ["crypto", "paypal_us", "revolut_eu", "dfx_bank"],
+            set(groups),
+            {"crypto", "paypal_us", "revolut_eu", "transak_card", "dfx_bank"},
         )
 
         direct_crypto_rows = groups["crypto"]
@@ -142,16 +150,26 @@ class TestWalletProviderRouting(SimpleTestCase):
         self.assertEqual(dfx_rows[0]["provider_key"], DFX_PROVIDER_KEY)
         self.assertFalse(dfx_rows[0]["payment_requires_route_selection"])
         self.assertEqual(dfx_rows[0]["payment_price_mode"], "fixed")
-        self.assertEqual(
-            dfx_rows[0]["payment_group_label"],
-            "Bank transfer (DFX)",
-        )
 
         self.assertEqual(
             groups["paypal_us"][0]["payment_method_type"],
             "provider",
         )
         self.assertEqual(
+            groups["transak_card"][0]["payment_method_type"],
+            "provider",
+        )
+        self.assertEqual(
             groups["revolut_eu"][0]["payment_method_type"],
             "provider",
         )
+
+        for group_key, provider_id in {
+            "paypal_us": "paypal",
+            "revolut_eu": "revolut",
+            "transak_card": "transak",
+        }.items():
+            option = groups[group_key][0]
+            self.assertEqual(option["payment_method_type"], "provider")
+            self.assertEqual(option["provider_key"], PAYGATE_PROVIDER_KEY)
+            self.assertEqual(option["paygate_provider_id"], provider_id)

@@ -25,12 +25,12 @@ from ledger.providers.paygate import (
     canonical_stable_to_paygate_amount,
     check_paygate_payment,
     create_paygate_wallet,
-    get_paygate_min_canonical_stable_amount,
     get_paygate_payment_ttl_seconds,
     get_paygate_provider_id,
     get_paygate_provider_currency,
     get_paygate_provider_ids,
     get_paygate_provider_label,
+    get_paygate_provider_min_canonical_stable_amount,
     get_paygate_public_base_url,
     get_paygate_usdc_polygon_wallet,
     paygate_amount_to_canonical_stable_units,
@@ -87,7 +87,6 @@ def get_paygate_deposit_options() -> list[dict]:
         return []
 
     provider_ids = get_paygate_provider_ids()
-    min_amount = get_paygate_min_canonical_stable_amount()
 
     if not provider_ids:
         provider_ids = [""]
@@ -95,6 +94,7 @@ def get_paygate_deposit_options() -> list[dict]:
     options = []
     for provider_id in provider_ids:
         currency = get_paygate_provider_currency(provider_id)
+        min_amount = get_paygate_provider_min_canonical_stable_amount(provider_id)
         provider_label = get_paygate_provider_label(provider_id) if provider_id else PAYGATE_PAYMENT_METHOD_LABEL
         label = provider_label if provider_id else PAYGATE_PAYMENT_METHOD_LABEL
 
@@ -269,22 +269,24 @@ def open_paygate_deposit_session(
         payment_price_fixed_canonical=payment_price_fixed_canonical,
     )
     expected_canonical_amount = int(token_pack_snapshot["gross_stable_amount"])
-    min_amount = get_paygate_min_canonical_stable_amount()
-
-    if expected_canonical_amount < min_amount:
-        raise ValidationError("Selected token pack is below PayGate's minimum payment amount")
-
     provider_id = (provider_id or get_paygate_provider_id() or "").strip().lower()
     currency = get_paygate_provider_currency(provider_id)
-    currency_usd_rate = format(get_fiat_usd_rate(currency), "f")
-    checkout_amount = canonical_stable_to_paygate_amount(
-        expected_canonical_amount,
-        currency=currency,
-    )
     provider_display_label = (
         get_paygate_provider_label(provider_id)
         if provider_id
         else PAYGATE_PAYMENT_METHOD_LABEL
+    )
+    min_amount = get_paygate_provider_min_canonical_stable_amount(provider_id)
+
+    if expected_canonical_amount < min_amount:
+        raise ValidationError(
+            f"Selected token pack is below {provider_display_label}'s minimum payment amount"
+        )
+
+    currency_usd_rate = format(get_fiat_usd_rate(currency), "f")
+    checkout_amount = canonical_stable_to_paygate_amount(
+        expected_canonical_amount,
+        currency=currency,
     )
 
     existing_session = _find_reusable_paygate_session(

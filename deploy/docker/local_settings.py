@@ -72,14 +72,19 @@ PAYGATE_API_BASE_URL = "https://api.paygate.to"
 PAYGATE_CHECKOUT_BASE_URL = "https://checkout.celebfakes.ru"
 PAYGATE_PUBLIC_BASE_URL = "https://celebfakes.ru"
 PAYGATE_USDC_POLYGON_WALLET = os.getenv("PAYGATE_USDC_POLYGON_WALLET", "").strip()
-PAYGATE_PROVIDER_IDS = ("paypal", "revolut")
+PAYGATE_PROVIDER_IDS = ("paypal", "revolut", "transak")
 PAYGATE_PROVIDER_LABELS = {
     "paypal": "PayPal (US only)",
     "revolut": "Revolut (EU only)",
+    "transak": "Transak",
 }
 PAYGATE_PROVIDER_CURRENCIES = {
     "paypal": "USD",
     "revolut": "EUR",
+    "transak": "EUR",
+}
+PAYGATE_PROVIDER_MIN_CANONICAL_STABLE_AMOUNTS = {
+    "transak": 15_000_000,
 }
 WALLET_FIAT_USD_RATES = {
     "USD": "1",
@@ -120,12 +125,14 @@ DFX_SWEEPER_SIGNER_TIMEOUT_SECONDS = 10
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "paypal_us": 600,
     "revolut_eu": 500,
+    "transak_card": 600,
     "dfx_bank": 500,
     "crypto": 0,
 }
 WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
     "paypal_us": 1.3,
     "revolut_eu": 1.6,
+    "transak_card": 1.3,
     "dfx_bank": 1.8,
     "crypto": 0,
 }
