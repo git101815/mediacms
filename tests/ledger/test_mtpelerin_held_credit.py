@@ -16,6 +16,7 @@ from ledger.mtpelerin_deposits import (
 from ledger.services import (
     credit_confirmed_deposit_session,
     expire_stale_deposit_sessions,
+    ingest_deposit_observation_event,
 )
 from tests.ledger.base import BaseLedgerTestCase
 
@@ -283,3 +284,76 @@ class MtPelerinHeldCreditTests(BaseLedgerTestCase):
         self.w1.refresh_from_db()
         self.assertEqual(self.w1.balance, 0)
         self.assertEqual(self.w1.held_balance, 0)
+
+    def test_confirmed_net_amount_releases_hold_below_gross_amount(self):
+        metadata = dict(self.session.metadata or {})
+        token_pack = dict(metadata["token_pack"])
+        net_amount = int(token_pack["net_stable_amount"])
+        gross_amount = net_amount + 100_000
+
+        token_pack.update(
+            {
+                "gross_stable_amount": gross_amount,
+                "fee_stable_amount": gross_amount - net_amount,
+                "fixed_fee_stable_amount": gross_amount - net_amount,
+            }
+        )
+        metadata["token_pack"] = token_pack
+        metadata["expected_canonical_stable_amount"] = gross_amount
+        metadata["expected_route_raw_amount"] = str(gross_amount)
+
+        self.session.min_amount = gross_amount
+        self.session.expected_onchain_raw_amount = gross_amount
+        self.session.metadata = metadata
+        self.session.save(
+            update_fields=[
+                "min_amount",
+                "expected_onchain_raw_amount",
+                "metadata",
+                "updated_at",
+            ]
+        )
+        self._submit_payment()
+
+        result = ingest_deposit_observation_event(
+            actor=self.operator,
+            session_public_id=self.session.public_id,
+            chain=self.session.chain,
+            txid="0xnetthreshold",
+            log_index=0,
+            block_number=101,
+            detected_block_number=101,
+            from_address=(
+                "0x3333333333333333333333333333333333333333"
+            ),
+            to_address=self.session.deposit_address,
+            token_contract_address=self.session.token_contract_address,
+            asset_code=self.session.asset_code,
+            amount=net_amount,
+            confirmations=1,
+            detection_method="event",
+            raw_payload={
+                "amount_unit": "canonical_stable",
+                "canonical_stable_amount": net_amount,
+                "onchain_raw_amount": str(net_amount),
+            },
+        )
+
+        self.w1.refresh_from_db()
+        self.session.refresh_from_db()
+
+        self.assertIsNotNone(result["ledger_txn"])
+        self.assertEqual(
+            self.session.status,
+            DepositSession.STATUS_CREDITED,
+        )
+        self.assertEqual(
+            self.w1.balance,
+            self.default_token_pack.token_amount,
+        )
+        self.assertEqual(self.w1.held_balance, 0)
+        self.assertFalse(
+            LedgerTransaction.objects.filter(
+                kind="mtpelerin_deposit_fee",
+            ).exists()
+        )

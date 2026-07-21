@@ -3123,6 +3123,34 @@ def record_onchain_observation(
 
     return observed
 
+
+def _mtpelerin_pending_credit_required_canonical_amount(
+    deposit_session: DepositSession,
+) -> int | None:
+    if not _mtpelerin_pending_credit_is_held(deposit_session):
+        return None
+
+    token_pack_snapshot = (
+        deposit_session.metadata or {}
+    ).get("token_pack") or {}
+    expected_net_amount = int(
+        token_pack_snapshot.get("net_stable_amount") or 0
+    )
+    expected_gross_amount = int(
+        token_pack_snapshot.get("gross_stable_amount") or 0
+    )
+
+    if (
+        expected_net_amount <= 0
+        or expected_gross_amount < expected_net_amount
+    ):
+        raise ValidationError(
+            "Mt Pelerin session is missing valid net and gross amounts"
+        )
+
+    return expected_net_amount
+
+
 @transaction.atomic
 def _settle_mtpelerin_pending_credit(
     *,
@@ -3141,8 +3169,10 @@ def _settle_mtpelerin_pending_credit(
     user_credit_amount = int(
         token_pack_snapshot.get("token_amount") or 0
     )
-    expected_gross_amount = int(
-        token_pack_snapshot.get("gross_stable_amount") or 0
+    expected_net_amount = (
+        _mtpelerin_pending_credit_required_canonical_amount(
+            deposit_session
+        )
     )
     pending_amount = int(pending.get("amount") or 0)
     hold_id = int(pending.get("hold_id") or 0)
@@ -3150,7 +3180,7 @@ def _settle_mtpelerin_pending_credit(
 
     if (
         user_credit_amount <= 0
-        or expected_gross_amount <= 0
+        or expected_net_amount is None
         or pending_amount != user_credit_amount
         or hold_id <= 0
         or ledger_txn_id <= 0
@@ -3159,9 +3189,9 @@ def _settle_mtpelerin_pending_credit(
             "Mt Pelerin pending credit metadata is invalid"
         )
 
-    if observed_canonical_stable_amount < expected_gross_amount:
+    if observed_canonical_stable_amount < expected_net_amount:
         raise ValidationError(
-            "Observed amount is below the expected token pack price"
+            "Observed amount is below the token pack net amount"
         )
 
     pending_txn = (
@@ -3426,8 +3456,21 @@ def credit_confirmed_deposit_session(
 
     observed_canonical_stable_amount, observed_route_raw_amount = _observed_transfer_amounts(observed_transfer)
     session_min_canonical_amount, session_min_route_raw_amount = _deposit_session_min_amounts(deposit_session)
+    mtpelerin_net_amount = (
+        _mtpelerin_pending_credit_required_canonical_amount(
+            deposit_session
+        )
+    )
+    credit_minimum_canonical_amount = (
+        mtpelerin_net_amount
+        if mtpelerin_net_amount is not None
+        else int(session_min_canonical_amount)
+    )
 
-    if observed_canonical_stable_amount < int(session_min_canonical_amount):
+    if (
+        observed_canonical_stable_amount
+        < credit_minimum_canonical_amount
+    ):
         raise ValidationError("Observed amount is below deposit minimum")
 
     if int(observed_transfer.confirmations) < int(deposit_session.required_confirmations):
@@ -4100,11 +4143,21 @@ def ingest_deposit_observation_event(
     ledger_txn = None
     observed_canonical_amount, _observed_raw_amount = _observed_transfer_amounts(observed_transfer)
     session_min_canonical_amount, _session_min_raw_amount = _deposit_session_min_amounts(deposit_session)
+    mtpelerin_net_amount = (
+        _mtpelerin_pending_credit_required_canonical_amount(
+            deposit_session
+        )
+    )
+    credit_minimum_canonical_amount = (
+        mtpelerin_net_amount
+        if mtpelerin_net_amount is not None
+        else int(session_min_canonical_amount)
+    )
     should_credit = (
         observed_transfer.status != ObservedOnchainTransfer.STATUS_CREDITED
         and not _is_residual_observed_transfer(observed_transfer)
         and int(observed_transfer.confirmations) >= int(deposit_session.required_confirmations)
-        and int(observed_canonical_amount) >= int(session_min_canonical_amount)
+        and int(observed_canonical_amount) >= credit_minimum_canonical_amount
     )
 
     if should_credit:
