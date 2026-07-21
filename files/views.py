@@ -537,14 +537,14 @@ WALLET_PAYMENT_GROUPS = {
     },
     "mtpelerin_eur": {
         "label": "Bank transfer (Mt Pelerin · EUR)",
-        "icon_label": "SEPA",
-        "icon_path": "images/wallet/sepa.svg",
+        "icon_label": "BANK",
+        "icon_path": "images/wallet/bank.svg",
         "order": 50,
     },
     "mtpelerin_usd": {
         "label": "Bank transfer (Mt Pelerin · USD)",
         "icon_label": "SWIFT",
-        "icon_path": "images/wallet/sepa.svg",
+        "icon_path": "images/wallet/bank.svg",
         "order": 51,
     },
     "crypto": {
