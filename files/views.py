@@ -510,9 +510,9 @@ WALLET_PAYMENT_GROUPS = {
         "order": 30,
     },
     "transak_card": {
-        "label": "Card / Apple Pay / Google Pay",
+        "label": "Card / Apple Pay / Google Pay (Transak)",
         "icon_label": "Transak",
-        "icon_path": "images/wallet/crypto.svg",
+        "icon_path": "images/wallet/card.svg",
         "order": 35,
     },
     "dfx_bank": {
