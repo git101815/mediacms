@@ -148,8 +148,8 @@ WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "revolut_eu": 500,
     "transak_card": 600,
     "dfx_bank": 500,
-    "mtpelerin_eur": 0,
-    "mtpelerin_usd": 0,
+    "mtpelerin_eur": 500,
+    "mtpelerin_usd": 500,
     "crypto": 0,
 }
 WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
@@ -157,8 +157,8 @@ WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
     "revolut_eu": 1.6,
     "transak_card": 1.3,
     "dfx_bank": 1.8,
-    "mtpelerin_eur": 0,
-    "mtpelerin_usd": 0,
+    "mtpelerin_eur": 2,
+    "mtpelerin_usd": 1.5,
     "crypto": 0,
 }
 PAYGATE_CURRENCY = "USD"
