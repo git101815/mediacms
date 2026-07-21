@@ -1642,11 +1642,7 @@ def wallet_mtpelerin_launch(request, public_id):
             f"{parsed_widget_url.scheme}://"
             f"{parsed_widget_url.netloc}"
         )
-        embed_params = dict(launch.get("widget_options") or {})
-        embed_params["type"] = "web"
-        launch["embed_url"] = (
-            f"{widget_origin}/?{urlencode(embed_params)}"
-        )
+        launch["embed_url"] = launch["checkout_url"]
     except (DjangoValidationError, ImproperlyConfigured) as exc:
         messages.error(request, _extract_wallet_form_error(exc))
         return redirect(
