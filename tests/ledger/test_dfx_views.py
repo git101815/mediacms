@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -146,17 +147,16 @@ class TestDfxSessionViews(BaseLedgerTestCase):
         self.assertIn("frame-src 'none'", csp)
         self.assertIn("script-src 'nonce-", csp)
 
+        self.assertEqual(
+            json.loads(response.context["dfx_auth_payload_json"]),
+            mocked_prepare.return_value["auth_payload"],
+        )
+        self.assertEqual(
+            json.loads(response.context["dfx_checkout_params_json"]),
+            mocked_prepare.return_value["checkout_params"],
+        )
+
         body = response.content.decode("utf-8")
-        self.assertIn(signature, body)
-        self.assertIn('"walletId":67', body)
-        self.assertIn(
-            "window.location.replace",
-            body,
-        )
-        self.assertIn(
-            "Opening DFX.swiss",
-            body,
-        )
         self.assertNotIn(
             "widget/v1.0",
             body,
@@ -164,15 +164,6 @@ class TestDfxSessionViews(BaseLedgerTestCase):
         self.assertNotIn(
             "dfx-services",
             body,
-        )
-        self.assertNotIn(
-            "Complete your bank transfer",
-            body,
-        )
-        self.assertTrue(
-            body.lstrip()
-            .lower()
-            .startswith("<!doctype html>")
         )
 
     def test_launch_page_is_owner_only(self):

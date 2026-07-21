@@ -81,7 +81,7 @@ PAYGATE_PROVIDER_LABELS = {
 PAYGATE_PROVIDER_CURRENCIES = {
     "paypal": "USD",
     "revolut": "EUR",
-    "transak": "USD",
+    "transak": "EUR",
 }
 PAYGATE_PROVIDER_MIN_CANONICAL_STABLE_AMOUNTS = {
     "transak": 15_000_000,

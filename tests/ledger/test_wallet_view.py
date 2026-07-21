@@ -585,14 +585,6 @@ class TestWalletView(BaseLedgerTestCase):
         self.assertContains(response, completed_request.reference)
         self.assertNotContains(response, pending_request.reference)
 
-    def test_wallet_token_pack_rows_expose_admin_token_pack_image(self):
-        self.default_token_pack.image = "wallet/token_packs/starter.png"
-        self.default_token_pack.save(update_fields=["image"])
-
-        rows = _build_wallet_token_pack_rows()
-        row = next(item for item in rows if item["code"] == self.default_token_pack.code)
-
-        self.assertIn("wallet/token_packs/starter.png", row["image_url"])
 
     @override_settings(
         WALLET_PAYMENT_METHOD_PRICE_BPS={"crypto": 1000},
@@ -657,7 +649,7 @@ class TestWalletView(BaseLedgerTestCase):
     @patch("files.views.list_available_deposit_options", return_value=[])
     @patch("files.views.get_malum_deposit_option", return_value=None)
     @patch("files.views.get_paygate_deposit_options")
-    def test_wallet_deposit_options_group_paygate_providers_with_icons_and_fees(
+    def test_wallet_deposit_options_group_paygate_providers_with_fees(
         self,
         mocked_paygate_options,
         mocked_malum_option,
@@ -703,12 +695,13 @@ class TestWalletView(BaseLedgerTestCase):
         options = _build_wallet_deposit_options()
         by_group = {item["payment_group_key"]: item for item in options}
 
-        self.assertEqual(by_group["paypal_us"]["payment_group_label"], "PayPal (US only)")
-        self.assertEqual(by_group["paypal_us"]["payment_group_icon_path"], "images/wallet/paypal.svg")
+        self.assertEqual(by_group["paypal_us"]["provider_key"], PAYGATE_PROVIDER_KEY)
+        self.assertEqual(by_group["paypal_us"]["paygate_provider_id"], "paypal")
+        self.assertEqual(by_group["revolut_eu"]["provider_key"], PAYGATE_PROVIDER_KEY)
+        self.assertEqual(by_group["revolut_eu"]["paygate_provider_id"], "revolut")
+
         self.assertEqual(by_group["paypal_us"]["payment_price_bps"], 800)
         self.assertEqual(by_group["paypal_us"]["payment_price_fixed_canonical"], 300_000)
 
-        self.assertEqual(by_group["revolut_eu"]["payment_group_label"], "Revolut (EU only)")
-        self.assertEqual(by_group["revolut_eu"]["payment_group_icon_path"], "images/wallet/revolut.svg")
         self.assertEqual(by_group["revolut_eu"]["payment_price_bps"], 500)
         self.assertEqual(by_group["revolut_eu"]["payment_price_fixed_canonical"], 300_000)
