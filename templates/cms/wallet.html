@@ -41,23 +41,11 @@
 
         <div class="wallet-balance">
           <div class="wallet-balance__main">
-            {% if mtpelerin_pending_hold_amount %}
-            <div class="wallet-balance__label">Total balance</div>
-            <div class="wallet-balance__value" title="{{ total_balance_display }}">
-              {{ total_balance_display }}
-            </div>
-            <div class="wallet-balance__unit">platform tokens</div>
-            <p class="wallet-balance__hint">
-              {{ mtpelerin_pending_hold_display }} pending ·
-              {{ available_balance_display }} available
-            </p>
-            {% else %}
             <div class="wallet-balance__label">Available balance</div>
             <div class="wallet-balance__value" title="{{ available_balance_display }}">
               {{ available_balance_display }}
             </div>
             <div class="wallet-balance__unit">platform tokens</div>
-            {% endif %}
 
             {% if wallet_actions.hint %}
             <p class="wallet-balance__hint">{{ wallet_actions.hint }}</p>

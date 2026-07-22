@@ -54,11 +54,6 @@ urlpatterns = [
         views.wallet_mtpelerin_launch,
         name="wallet_mtpelerin_launch",
     ),
-    path(
-        "wallet/deposits/<uuid:public_id>/mtpelerin-event",
-        views.wallet_mtpelerin_event,
-        name="wallet_mtpelerin_event",
-    ),
     path("api/payments/malum/webhook", malum_webhooks.malum_webhook, name="malum_webhook"),
     path("api/payments/paygate/callback", paygate_webhooks.paygate_callback, name="paygate_callback"),
     re_path(r"^wallet$", views.wallet, name="wallet"),

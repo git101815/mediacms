@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import secrets
 from decimal import Decimal, InvalidOperation
-from urllib.parse import parse_qsl, urlparse
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -11,12 +10,9 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from ledger.fiat import get_fiat_usd_rate
-from ledger.internal_api import _get_internal_deposit_service_actor
 from ledger.models import (
     DepositSession,
     LEDGER_METADATA_VERSION,
-    LedgerHold,
-    LedgerTransaction,
     TokenPack,
     TokenWallet,
 )
@@ -35,9 +31,6 @@ from ledger.providers.mtpelerin import (
 )
 from ledger.services import (
     _build_token_pack_snapshot,
-    apply_ledger_transaction,
-    create_wallet_hold,
-    get_external_asset_clearing_wallet,
     list_available_deposit_options,
     open_user_deposit_session,
 )
@@ -110,71 +103,6 @@ def _mtpelerin_launch_url(session_public_id) -> str:
         "wallet_mtpelerin_launch",
         kwargs={"public_id": session_public_id},
     )
-
-
-MTPERELIN_EVENT_ORDER_CREATED = "orderCreated"
-MTPERELIN_EVENT_PAYMENT_SUBMITTED = "paymentSubmitted"
-MTPERELIN_PENDING_CREDIT_KEY = "mtpelerin_pending_credit"
-MTPERELIN_PENDING_CREDIT_STATUS_HELD = "held"
-MTPERELIN_PENDING_CREDIT_STATUS_SETTLED = "settled"
-MTPERELIN_PENDING_CREDIT_STATUS_EXPIRED = "expired"
-MTPERELIN_PENDING_MEMO = (
-    "Waiting for transaction to complete (can take several days)"
-)
-
-MTPERELIN_EVENT_ALLOWED_FIELDS = {
-    MTPERELIN_EVENT_ORDER_CREATED: {
-        "id",
-        "expirationDate",
-        "cryptoAddress",
-        "currencyIn",
-        "currencyOut",
-        "marketRate",
-        "network",
-        "paymentMode",
-        "type",
-        "valueIn",
-        "valueOut",
-    },
-    MTPERELIN_EVENT_PAYMENT_SUBMITTED: {
-        "paymentType",
-        "paymentId",
-    },
-}
-
-
-def _sanitize_mtpelerin_event_data(
-    event_type: str,
-    event_data,
-) -> dict:
-    if not isinstance(event_data, dict):
-        raise ValidationError("Mt Pelerin event data must be an object")
-
-    allowed_fields = MTPERELIN_EVENT_ALLOWED_FIELDS.get(event_type)
-    if allowed_fields is None:
-        raise ValidationError("Unsupported Mt Pelerin browser event")
-
-    sanitized = {}
-    for key in allowed_fields:
-        value = event_data.get(key)
-        if value in (None, ""):
-            continue
-        if isinstance(value, (str, int, float, bool)):
-            sanitized[key] = str(value).strip()[:512]
-
-    return sanitized
-
-
-def _mtpelerin_widget_options(checkout_url: str) -> dict:
-    parsed = urlparse(str(checkout_url or "").strip())
-    if parsed.scheme != "https" or not parsed.netloc:
-        raise ValidationError("Mt Pelerin checkout URL must use HTTPS")
-
-    options = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    options.pop("type", None)
-    if not options.get("_ctkn"):
-        raise ValidationError("Mt Pelerin widget options are missing _ctkn")
-    return options
 
 
 def _update_provider_metadata(
@@ -521,209 +449,6 @@ def prepare_mtpelerin_browser_launch(
     # never persisted in DepositSession metadata.
     return {
         "checkout_url": checkout_url,
-        "widget_options": _mtpelerin_widget_options(checkout_url),
-        "event_url": reverse(
-            "wallet_mtpelerin_event",
-            kwargs={"public_id": session.public_id},
-        ),
-        "wallet_url": reverse("wallet"),
-        "session_url": reverse(
-            "wallet_deposit_session",
-            kwargs={"public_id": session.public_id},
-        ),
-    }
-
-
-@transaction.atomic
-def record_mtpelerin_browser_event(
-    *,
-    session: DepositSession,
-    actor,
-    event_type: str,
-    event_data,
-) -> dict:
-    event_type = str(event_type or "").strip()
-    sanitized = _sanitize_mtpelerin_event_data(
-        event_type,
-        event_data,
-    )
-
-    session = (
-        DepositSession.objects.select_for_update()
-        .select_related("wallet")
-        .get(id=session.id)
-    )
-    if session.user_id != getattr(actor, "id", None):
-        raise ValidationError(
-            "Mt Pelerin session does not belong to this user"
-        )
-
-    metadata = dict(session.metadata or {})
-    provider = dict(metadata.get("payment_provider") or {})
-    if provider.get("key") != MTPERELIN_PROVIDER_KEY:
-        raise ValidationError("Deposit session is not a Mt Pelerin session")
-
-    if session.status in {
-        DepositSession.STATUS_CREDITED,
-        DepositSession.STATUS_SWEPT,
-        DepositSession.STATUS_EXPIRED,
-        DepositSession.STATUS_FAILED,
-        DepositSession.STATUS_CANCELED,
-    }:
-        raise ValidationError("Mt Pelerin session is no longer active")
-
-    now = timezone.now()
-    if session.expires_at <= now:
-        raise ValidationError("Mt Pelerin session has expired")
-
-    events = dict(metadata.get("mtpelerin_browser_events") or {})
-
-    if event_type == MTPERELIN_EVENT_ORDER_CREATED:
-        events["order_created"] = {
-            **sanitized,
-            "recorded_at": now.isoformat(),
-        }
-        provider["status"] = "ORDER_CREATED"
-        order_id = str(sanitized.get("id") or "").strip()
-        if order_id:
-            provider["order_id"] = order_id
-            provider["reference"] = order_id
-
-        metadata["mtpelerin_browser_events"] = events
-        metadata["payment_provider"] = provider
-        session.metadata = metadata
-        session.save(update_fields=["metadata", "updated_at"])
-
-        return {
-            "event_type": event_type,
-            "provider_status": provider["status"],
-            "pending_credit_status": "",
-        }
-
-    payment_type = str(
-        sanitized.get("paymentType") or ""
-    ).strip()
-    if payment_type != "bankTransfer":
-        raise ValidationError(
-            "Mt Pelerin paymentSubmitted must be a bank transfer"
-        )
-
-    payment_id = str(
-        sanitized.get("paymentId") or ""
-    ).strip()
-    if not payment_id:
-        raise ValidationError(
-            "Mt Pelerin paymentSubmitted is missing paymentId"
-        )
-
-    pending_credit = dict(
-        metadata.get(MTPERELIN_PENDING_CREDIT_KEY) or {}
-    )
-    pending_status = str(
-        pending_credit.get("status") or ""
-    ).strip().lower()
-
-    if pending_status in {
-        MTPERELIN_PENDING_CREDIT_STATUS_HELD,
-        MTPERELIN_PENDING_CREDIT_STATUS_SETTLED,
-    }:
-        return {
-            "event_type": event_type,
-            "provider_status": provider.get("status") or "",
-            "pending_credit_status": pending_status,
-        }
-    if pending_status == MTPERELIN_PENDING_CREDIT_STATUS_EXPIRED:
-        raise ValidationError(
-            "Mt Pelerin pending credit has already expired"
-        )
-
-    token_pack = dict(metadata.get("token_pack") or {})
-    token_amount = int(token_pack.get("token_amount") or 0)
-    if token_amount <= 0:
-        raise ValidationError(
-            "Mt Pelerin session is missing a valid token pack snapshot"
-        )
-
-    service_actor = _get_internal_deposit_service_actor()
-    clearing_wallet = get_external_asset_clearing_wallet()
-    pending_txn = apply_ledger_transaction(
-        actor=service_actor,
-        kind="mtpelerin_deposit_pending",
-        entries=[
-            (clearing_wallet, -token_amount),
-            (session.wallet, token_amount),
-        ],
-        external_id=(
-            "mtpelerin-pending-credit:"
-            f"{session.public_id}"
-        ),
-        memo=MTPERELIN_PENDING_MEMO,
-        metadata={
-            "source": "mtpelerin_payment_submitted",
-            "deposit_session_id": session.id,
-            "deposit_session_public_id": str(session.public_id),
-            "user_id": session.user_id,
-            "token_amount": token_amount,
-            "payment_id": payment_id,
-            "payment_type": payment_type,
-            "expires_at": session.expires_at.isoformat(),
-            "token_pack": token_pack,
-        },
-    )
-    if pending_txn.status != LedgerTransaction.STATUS_POSTED:
-        raise ValidationError(
-            "Mt Pelerin pending credit transaction was not posted"
-        )
-
-    hold = create_wallet_hold(
-        actor=service_actor,
-        wallet=session.wallet,
-        amount=token_amount,
-        reason=MTPERELIN_PENDING_MEMO,
-        metadata={
-            "source": "mtpelerin_payment_submitted",
-            "deposit_session_id": session.id,
-            "deposit_session_public_id": str(session.public_id),
-            "pending_ledger_txn_id": pending_txn.id,
-            "payment_id": payment_id,
-            "expires_at": session.expires_at.isoformat(),
-        },
-    )
-
-    events["payment_submitted"] = {
-        **sanitized,
-        "recorded_at": now.isoformat(),
-    }
-    provider.update(
-        {
-            "status": "PAYMENT_SUBMITTED",
-            "payment_id": payment_id,
-            "payment_type": payment_type,
-            "payment_submitted_at": now.isoformat(),
-        }
-    )
-    pending_credit = {
-        "status": MTPERELIN_PENDING_CREDIT_STATUS_HELD,
-        "amount": token_amount,
-        "ledger_txn_id": pending_txn.id,
-        "hold_id": hold.id,
-        "payment_id": payment_id,
-        "payment_type": payment_type,
-        "submitted_at": now.isoformat(),
-        "expires_at": session.expires_at.isoformat(),
-        "memo": MTPERELIN_PENDING_MEMO,
-    }
-    metadata["mtpelerin_browser_events"] = events
-    metadata["payment_provider"] = provider
-    metadata[MTPERELIN_PENDING_CREDIT_KEY] = pending_credit
-    session.metadata = metadata
-    session.save(update_fields=["metadata", "updated_at"])
-
-    return {
-        "event_type": event_type,
-        "provider_status": provider["status"],
-        "pending_credit_status": pending_credit["status"],
-        "pending_token_amount": token_amount,
     }
 
 
@@ -731,5 +456,4 @@ __all__ = [
     "get_mtpelerin_deposit_options",
     "open_mtpelerin_deposit_session",
     "prepare_mtpelerin_browser_launch",
-    "record_mtpelerin_browser_event",
 ]

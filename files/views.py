@@ -154,7 +154,6 @@ from ledger.mtpelerin_deposits import (
     get_mtpelerin_deposit_options,
     open_mtpelerin_deposit_session,
     prepare_mtpelerin_browser_launch,
-    record_mtpelerin_browser_event,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
@@ -276,16 +275,11 @@ DEPOSIT_SESSION_STATUS_ICONS = {
 }
 
 PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT = "awaiting_payment"
-PUBLIC_DEPOSIT_STATUS_SETTLEMENT_PENDING = "settlement_pending"
 PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED = "payment_detected"
 PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE = "transaction_complete"
 
 PUBLIC_DEPOSIT_STATUS_LABELS = {
     PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT: "Waiting for payment",
-    PUBLIC_DEPOSIT_STATUS_SETTLEMENT_PENDING: (
-        "Waiting for transaction to complete "
-        "(can take several days)"
-    ),
     PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED: "Payment detected",
     PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE: "Transaction complete",
     "canceled": "Canceled",
@@ -295,7 +289,6 @@ PUBLIC_DEPOSIT_STATUS_LABELS = {
 
 PUBLIC_DEPOSIT_STATUS_ICONS = {
     PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT: "schedule",
-    PUBLIC_DEPOSIT_STATUS_SETTLEMENT_PENDING: "hourglass_top",
     PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED: "visibility",
     PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE: "check_circle",
     "canceled": "cancel",
@@ -313,9 +306,6 @@ WALLET_LEDGER_STATUS_LABELS = {
 WALLET_DEPOSIT_STATUS_LABELS = {
     WALLET_STATUS_ALL: "All statuses",
     PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT: "Waiting for payment",
-    PUBLIC_DEPOSIT_STATUS_SETTLEMENT_PENDING: (
-        "Waiting for transaction to complete"
-    ),
     PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED: "Payment detected",
     PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE: "Transaction complete",
     "canceled": "Canceled",
@@ -337,9 +327,6 @@ WALLET_ALL_STATUS_LABELS = {
     LEDGER_TXN_STATUS_POSTED: "Posted",
     LEDGER_TXN_STATUS_REVERSED: "Reversed",
     PUBLIC_DEPOSIT_STATUS_AWAITING_PAYMENT: "Waiting for payment",
-    PUBLIC_DEPOSIT_STATUS_SETTLEMENT_PENDING: (
-        "Waiting for transaction to complete"
-    ),
     PUBLIC_DEPOSIT_STATUS_PAYMENT_DETECTED: "Payment detected",
     PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE: "Transaction complete",
     WalletRequest.STATUS_APPROVED: "Approved",
@@ -875,7 +862,6 @@ def _get_wallet_empty_state_message(*, tab: str, status: str) -> tuple[str, str]
 def _build_wallet_transaction_rows(*, wallet: TokenWallet, active_tab: str, active_status: str, page_number: int):
     entries_queryset = (
         wallet.entries.select_related("txn", "txn__created_by")
-        .exclude(txn__kind="mtpelerin_deposit_pending")
         .prefetch_related(
             Prefetch(
                 "txn__entries",
@@ -923,21 +909,6 @@ def _build_wallet_transaction_rows(*, wallet: TokenWallet, active_tab: str, acti
         )
 
     return rows, page_obj
-
-
-def _get_mtpelerin_pending_hold_amount(
-    wallet: TokenWallet,
-) -> int:
-    total = 0
-    holds = wallet.holds.filter(released=False).only(
-        "amount",
-        "metadata",
-    )
-    for hold in holds:
-        metadata = hold.metadata or {}
-        if metadata.get("source") == "mtpelerin_payment_submitted":
-            total += int(hold.amount)
-    return total
 
 
 def _build_wallet_hold_rows(wallet: TokenWallet) -> list[dict]:
@@ -1104,10 +1075,7 @@ def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_ST
                 "created_at": session.created_at,
                 "url": reverse("wallet_deposit_session", kwargs={"public_id": session.public_id}),
                 "show_view": public_status != PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE,
-                "show_amount": public_status in {
-                    PUBLIC_DEPOSIT_STATUS_SETTLEMENT_PENDING,
-                    PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE,
-                },
+                "show_amount": public_status == PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE,
                 "credited_amount_display": _format_platform_token_amount(
                     ((metadata.get("token_pack") or {}).get("token_amount") or 0)
                 ),
@@ -1191,16 +1159,6 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         expected_payment_amount_display = checkout_amount
         expected_payment_currency = checkout_currency
 
-    pending_credit = (
-        metadata.get("mtpelerin_pending_credit") or {}
-    )
-    pending_credit_status = str(
-        pending_credit.get("status") or ""
-    ).strip().lower()
-    pending_token_amount = int(
-        pending_credit.get("amount") or 0
-    )
-
     return {
         "public_id": str(session.public_id),
         "status": public_status,
@@ -1244,19 +1202,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "provider_key": provider.get("key") or "",
         "provider_reference": provider.get("reference") or "",
         "provider_status": provider.get("status") or provider.get("last_status") or "",
-        "pending_credit_status": pending_credit_status,
-        "pending_token_amount": pending_token_amount,
-        "pending_token_amount_display": (
-            _format_platform_token_amount(pending_token_amount)
-            if pending_token_amount > 0
-            else ""
-        ),
-        "checkout_url": (
-            ""
-            if public_status
-            == PUBLIC_DEPOSIT_STATUS_SETTLEMENT_PENDING
-            else provider.get("checkout_url") or ""
-        ),
+        "checkout_url": provider.get("checkout_url") or "",
     }
 
 def _parse_required_list(payload, key):
@@ -1340,19 +1286,6 @@ def _get_public_deposit_status(session) -> str:
 
     if raw_status == getattr(DepositSession, "STATUS_SWEPT", "swept"):
         return PUBLIC_DEPOSIT_STATUS_TRANSACTION_COMPLETE
-
-    metadata = session.metadata or {}
-    provider = metadata.get("payment_provider") or {}
-    pending_credit = (
-        metadata.get("mtpelerin_pending_credit") or {}
-    )
-    if (
-        provider.get("key") == MTPERELIN_PROVIDER_KEY
-        and str(
-            pending_credit.get("status") or ""
-        ).strip().lower() == "held"
-    ):
-        return PUBLIC_DEPOSIT_STATUS_SETTLEMENT_PENDING
 
     if raw_status == DepositSession.STATUS_CREDITED:
         if _is_provider_checkout_session(session):
@@ -1630,7 +1563,8 @@ def wallet_mtpelerin_launch(request, public_id):
             session=session,
             actor=request.user,
         )
-        parsed_widget_url = urlparse(launch["checkout_url"])
+        checkout_url = str(launch.get("checkout_url") or "").strip()
+        parsed_widget_url = urlparse(checkout_url)
         if (
             parsed_widget_url.scheme != "https"
             or not parsed_widget_url.netloc
@@ -1638,15 +1572,6 @@ def wallet_mtpelerin_launch(request, public_id):
             raise ImproperlyConfigured(
                 "Mt Pelerin widget URL must use HTTPS"
             )
-        widget_origin = (
-            f"{parsed_widget_url.scheme}://"
-            f"{parsed_widget_url.netloc}"
-        )
-        embed_params = dict(launch.get("widget_options") or {})
-        embed_params["type"] = "web"
-        launch["embed_url"] = (
-            f"{widget_origin}/?{urlencode(embed_params)}"
-        )
     except (DjangoValidationError, ImproperlyConfigured) as exc:
         messages.error(request, _extract_wallet_form_error(exc))
         return redirect(
@@ -1654,94 +1579,13 @@ def wallet_mtpelerin_launch(request, public_id):
             public_id=session.public_id,
         )
 
-    nonce = secrets.token_urlsafe(24)
-    response = render(
-        request,
-        "cms/mtpelerin_launch.html",
-        {
-            "mtpelerin_launch": launch,
-            "mtpelerin_widget_origin": widget_origin,
-            "mtpelerin_csp_nonce": nonce,
-        },
-    )
+    response = HttpResponseRedirect(checkout_url)
     response["Cache-Control"] = "no-store, private, max-age=0"
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
     response["Referrer-Policy"] = "origin"
     response["X-Content-Type-Options"] = "nosniff"
-    response["X-Frame-Options"] = "DENY"
-    response["Content-Security-Policy"] = (
-        "default-src 'none'; "
-        f"script-src 'nonce-{nonce}'; "
-        f"style-src 'nonce-{nonce}'; "
-        "img-src 'none'; "
-        "font-src 'none'; "
-        f"frame-src {widget_origin}; "
-        "connect-src 'self'; "
-        "object-src 'none'; "
-        "base-uri 'none'; "
-        "form-action 'self'; "
-        "frame-ancestors 'none'"
-    )
     return response
-
-
-@login_required
-@require_POST
-def wallet_mtpelerin_event(request, public_id):
-    session = get_object_or_404(
-        DepositSession,
-        public_id=public_id,
-        user=request.user,
-    )
-    if len(request.body or b"") > 16_384:
-        return JsonResponse(
-            {"error": "Mt Pelerin event payload is too large"},
-            status=413,
-        )
-
-    try:
-        payload = json.loads(
-            (request.body or b"{}").decode("utf-8")
-        )
-        if not isinstance(payload, dict):
-            raise DjangoValidationError(
-                "Mt Pelerin event payload must be an object"
-            )
-
-        result = record_mtpelerin_browser_event(
-            session=session,
-            actor=request.user,
-            event_type=payload.get("type") or "",
-            event_data=payload.get("data") or {},
-        )
-    except (
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-        DjangoValidationError,
-        ImproperlyConfigured,
-    ) as exc:
-        return JsonResponse(
-            {"error": _extract_wallet_form_error(exc)},
-            status=400,
-        )
-
-    session.refresh_from_db()
-    session.wallet.refresh_from_db()
-    return JsonResponse(
-        {
-            "ok": True,
-            **result,
-            "deposit": _build_deposit_session_payload(session),
-            "wallet": {
-                "total": int(session.wallet.balance),
-                "held": int(session.wallet.held_balance),
-                "available": get_wallet_available_balance(
-                    session.wallet
-                ),
-            },
-        }
-    )
 
 
 @login_required
@@ -1885,10 +1729,6 @@ def wallet(request):
         wallet_actions["can_deposit"] = False
         wallet_actions["hint"] = "Top-ups are currently unavailable."
 
-    mtpelerin_pending_hold_amount = (
-        _get_mtpelerin_pending_hold_amount(wallet_obj)
-    )
-
     context = {
         "wallet": wallet_obj,
         "wallet_banner": wallet_banner,
@@ -1897,10 +1737,6 @@ def wallet(request):
         "available_balance_display": _format_platform_token_amount(available_balance),
         "available_balance_units": int(available_balance),
         "held_balance_display": _format_platform_token_amount(wallet_obj.held_balance),
-        "mtpelerin_pending_hold_amount": mtpelerin_pending_hold_amount,
-        "mtpelerin_pending_hold_display": _format_platform_token_amount(
-            mtpelerin_pending_hold_amount
-        ),
         "wallet_status_display": wallet_obj.get_risk_status_display(),
         "active_tab": active_tab,
         "active_status": active_status,
