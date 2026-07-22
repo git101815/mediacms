@@ -128,7 +128,7 @@ MTPERELIN_ENABLED = "true"
 MTPERELIN_API_BASE_URL = "https://api.mtpelerin.com"
 MTPERELIN_WIDGET_BASE_URL = "https://widget.mtpelerin.com"
 # Public direct-link key published in Mt Pelerin's web-integration docs.
-MTPERELIN_DIRECT_LINK_CTKN = "954139b2-ef3e-4914-82ea-33192d3f43d3"
+MTPERELIN_DIRECT_LINK_CTKN = "7878aff2-dd8e-4193-95ab-3d8cf41f62fe"
 MTPERELIN_FIAT_CURRENCIES = ("EUR", "USD")
 MTPERELIN_SETTLEMENT_ROUTE_PREFERENCES = (
     "base:USDC",
