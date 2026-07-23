@@ -68,6 +68,9 @@ export default class VideoViewer extends React.PureComponent {
       displayPlayer: false,
     };
 
+    this.premiumEndCtaTimer = null;
+    this.premiumEndCtaElement = null;
+
     this.videoSources = [];
 
     filterVideoEncoding(this.props.data.encoding_status);
@@ -191,6 +194,8 @@ export default class VideoViewer extends React.PureComponent {
 
     this.playerInstance = null;
 
+    this.premiumEndCtaDuration = 5000;
+
     this.onPlayerInit = this.onPlayerInit.bind(this);
 
     this.onClickNext = this.onClickNext.bind(this);
@@ -199,6 +204,10 @@ export default class VideoViewer extends React.PureComponent {
 
     this.onVideoEnd = this.onVideoEnd.bind(this);
     this.onVideoRestart = this.onVideoRestart.bind(this);
+    this.completeVideoEnd = this.completeVideoEnd.bind(this);
+    this.onPremiumEndCtaClick = this.onPremiumEndCtaClick.bind(this);
+    this.onPremiumEndCtaTimeout = this.onPremiumEndCtaTimeout.bind(this);
+    this.hidePremiumEndCta = this.hidePremiumEndCta.bind(this);
   }
 
   componentDidMount() {
@@ -353,6 +362,7 @@ export default class VideoViewer extends React.PureComponent {
   }
 
   componentWillUnmount() {
+    this.hidePremiumEndCta();
     this.unsetRecommendedMedia();
   }
 
@@ -466,26 +476,168 @@ export default class VideoViewer extends React.PureComponent {
   }
 
   onVideoRestart() {
+    this.hidePremiumEndCta();
+
     if (null !== this.recommendedMedia) {
       this.recommendedMedia.updateDisplayType('inline');
 
       if (this.props.inEmbed) {
         this.playerInstance.player.one('pause', this.recommendedMedia.init);
       }
+    }
 
-      this.playerInstance.player.one('ended', this.onVideoEnd);
+    this.playerInstance.player.one('ended', this.onVideoEnd);
+  }
+
+  isPremiumPlaybackMode() {
+    try {
+      return new URL(window.location.href).searchParams.get('playback') === 'premium';
+    } catch (error) {
+      return false;
     }
   }
 
+  shouldShowPremiumEndCta() {
+    const premium = this.props.data.premium || {};
+
+    return !!premium.enabled && !this.isPremiumPlaybackMode();
+  }
+
+  clearPremiumEndCtaTimer() {
+    if (null !== this.premiumEndCtaTimer) {
+      window.clearTimeout(this.premiumEndCtaTimer);
+      this.premiumEndCtaTimer = null;
+    }
+  }
+
+  hidePremiumEndCta() {
+    this.clearPremiumEndCtaTimer();
+
+    if (this.premiumEndCtaElement) {
+      this.premiumEndCtaElement.removeEventListener('click', this.onPremiumEndCtaClick);
+
+      if (this.premiumEndCtaElement.parentNode) {
+        this.premiumEndCtaElement.parentNode.removeChild(this.premiumEndCtaElement);
+      }
+
+      this.premiumEndCtaElement = null;
+    }
+  }
+
+  showPremiumEndCta() {
+    if (!this.playerInstance || this.premiumEndCtaElement) {
+      return;
+    }
+
+    const premium = this.props.data.premium || {};
+    const hasUnlock = !!premium.viewer_has_unlock;
+    const cta = document.createElement('button');
+    const content = document.createElement('span');
+    const title = document.createElement('span');
+    const action = document.createElement('span');
+    const progress = document.createElement('span');
+
+    cta.setAttribute('type', 'button');
+    cta.setAttribute('class', 'premium-end-cta');
+    cta.setAttribute(
+      'aria-label',
+      hasUnlock ? 'Watch the full video' : 'Unlock the full video'
+    );
+
+    content.setAttribute('class', 'premium-end-cta__content');
+    title.setAttribute('class', 'premium-end-cta__title');
+    action.setAttribute('class', 'premium-end-cta__action');
+    progress.setAttribute('class', 'premium-end-cta__progress');
+
+    title.textContent = 'Want to watch the full video?';
+    action.textContent = hasUnlock
+      ? 'Click here to watch'
+      : 'Click here to unlock ' + (premium.price_display || '—') + ' tokens';
+
+    content.appendChild(title);
+    content.appendChild(action);
+    cta.appendChild(content);
+    cta.appendChild(progress);
+    cta.addEventListener('click', this.onPremiumEndCtaClick);
+
+    this.playerInstance.player.el_.appendChild(cta);
+    this.premiumEndCtaElement = cta;
+    this.premiumEndCtaTimer = window.setTimeout(
+      this.onPremiumEndCtaTimeout,
+      this.premiumEndCtaDuration
+    );
+
+    this.playerInstance.player.one('playing', this.onVideoRestart);
+  }
+
+  onPremiumEndCtaClick(event) {
+    event.preventDefault();
+
+    const premium = this.props.data.premium || {};
+
+    if (this.props.inEmbed) {
+      this.playerInstance.player.off('playing', this.onVideoRestart);
+      this.hidePremiumEndCta();
+
+      const targetUrl = new URL(this.props.data.url, window.location.href);
+      if (premium.viewer_has_unlock) {
+        targetUrl.searchParams.set('playback', 'premium');
+      }
+
+      window.open(targetUrl.toString(), '_blank', 'noopener,noreferrer');
+      this.completeVideoEnd();
+      return;
+    }
+
+    if (premium.viewer_has_unlock) {
+      this.playerInstance.player.off('playing', this.onVideoRestart);
+      this.hidePremiumEndCta();
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('playback', 'premium');
+      window.location.href = url.pathname + url.search + url.hash;
+      return;
+    }
+
+    // Keep the CTA behind the modal so closing the modal returns to the same choice.
+    this.clearPremiumEndCtaTimer();
+    window.dispatchEvent(
+      new CustomEvent('mediacms:open-premium-modal', {
+        detail: { source: 'video_end' },
+      })
+    );
+  }
+
+  onPremiumEndCtaTimeout() {
+    this.premiumEndCtaTimer = null;
+
+    if (this.playerInstance) {
+      this.playerInstance.player.off('playing', this.onVideoRestart);
+    }
+
+    this.hidePremiumEndCta();
+    this.completeVideoEnd();
+  }
+
   onVideoEnd() {
+    if (this.shouldShowPremiumEndCta()) {
+      this.showPremiumEndCta();
+      return;
+    }
+
+    this.completeVideoEnd();
+  }
+
+  completeVideoEnd() {
     if (null !== this.recommendedMedia) {
       if (!this.props.inEmbed) {
         this.initRecommendedMedia();
       }
 
       this.recommendedMedia.updateDisplayType('full');
-      this.playerInstance.player.one('playing', this.onVideoRestart);
     }
+
+    this.playerInstance.player.one('playing', this.onVideoRestart);
 
     const playlistId = this.props.inEmbed ? null : MediaPageStore.get('playlist-id');
 

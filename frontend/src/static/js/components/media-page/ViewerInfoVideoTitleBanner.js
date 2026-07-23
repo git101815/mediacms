@@ -29,6 +29,26 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
     this.openPremiumModal = this.openPremiumModal.bind(this);
     this.closePremiumModal = this.closePremiumModal.bind(this);
     this.openUnlockedPlayback = this.openUnlockedPlayback.bind(this);
+    this.onPremiumEndCtaRequest = this.onPremiumEndCtaRequest.bind(this);
+  }
+
+  componentDidMount() {
+    super.componentDidMount();
+    window.addEventListener('mediacms:open-premium-modal', this.onPremiumEndCtaRequest);
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener('mediacms:open-premium-modal', this.onPremiumEndCtaRequest);
+  }
+
+  onPremiumEndCtaRequest() {
+    const premium = (MediaPageStore.get('media-data') || {}).premium || {};
+
+    if (!premium.enabled || premium.viewer_has_unlock) {
+      return;
+    }
+
+    this.openPremiumModal();
   }
 
   getCookie(name) {
@@ -57,7 +77,9 @@ export default class ViewerInfoVideoTitleBanner extends ViewerInfoTitleBanner {
   }
 
   openPremiumModal(event) {
-    event.preventDefault();
+    if (event) {
+      event.preventDefault();
+    }
 
     this.setState({
       premiumModalOpen: true,
