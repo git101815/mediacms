@@ -533,7 +533,12 @@ export default class VideoViewer extends React.PureComponent {
     const hasUnlock = !!premium.viewer_has_unlock;
     const cta = document.createElement('button');
     const content = document.createElement('span');
-    const icon = document.createElement('span');
+    const thumb = document.createElement('span');
+    const thumbImage = document.createElement('span');
+    const thumbOverlay = document.createElement('span');
+    const thumbBadge = document.createElement('span');
+    const thumbBadgeIcon = document.createElement('span');
+    const thumbBadgeText = document.createElement('span');
     const copy = document.createElement('span');
     const eyebrow = document.createElement('span');
     const title = document.createElement('span');
@@ -544,6 +549,17 @@ export default class VideoViewer extends React.PureComponent {
     const actionIcon = document.createElement('span');
     const progress = document.createElement('span');
 
+    const mediaTitle = this.props.data.title || 'Untitled video';
+    const thumbSource =
+      this.props.data.poster ||
+      this.props.data.poster_url ||
+      this.props.data.thumbnail ||
+      this.props.data.thumbnail_url ||
+      this.props.data.thumb ||
+      this.props.data.thumb_url ||
+      '';
+    const thumbUrl = thumbSource ? formatInnerLink(thumbSource, this.props.siteUrl) : '';
+
     cta.setAttribute('type', 'button');
     cta.setAttribute('class', 'premium-end-cta');
     cta.setAttribute(
@@ -552,7 +568,12 @@ export default class VideoViewer extends React.PureComponent {
     );
 
     content.setAttribute('class', 'premium-end-cta__content');
-    icon.setAttribute('class', 'material-icons premium-end-cta__icon');
+    thumb.setAttribute('class', 'premium-end-cta__thumb');
+    thumbImage.setAttribute('class', 'premium-end-cta__thumb-image');
+    thumbOverlay.setAttribute('class', 'premium-end-cta__thumb-overlay');
+    thumbBadge.setAttribute('class', 'premium-end-cta__thumb-lock');
+    thumbBadgeIcon.setAttribute('class', 'material-icons premium-end-cta__thumb-lock-icon');
+    thumbBadgeText.setAttribute('class', 'premium-end-cta__thumb-lock-text');
     copy.setAttribute('class', 'premium-end-cta__copy');
     eyebrow.setAttribute('class', 'premium-end-cta__eyebrow');
     title.setAttribute('class', 'premium-end-cta__title');
@@ -563,15 +584,29 @@ export default class VideoViewer extends React.PureComponent {
     actionIcon.setAttribute('class', 'material-icons premium-end-cta__action-icon');
     progress.setAttribute('class', 'premium-end-cta__progress');
 
-    icon.textContent = hasUnlock ? 'lock_open' : 'play_circle_filled';
+    if (thumbUrl) {
+      thumbImage.style.backgroundImage = 'url(' + JSON.stringify(thumbUrl).slice(1, -1) + ')';
+    } else {
+      thumb.classList.add('premium-end-cta__thumb--no-image');
+    }
+
+    thumbBadgeIcon.textContent = hasUnlock ? 'lock_open' : 'lock';
+    thumbBadgeText.textContent = hasUnlock ? 'Unlocked' : (premium.price_display || '—') + ' tokens';
+
     eyebrow.textContent = hasUnlock ? 'FULL VIDEO UNLOCKED' : 'PREMIUM VIDEO';
-    title.textContent = 'Want to watch the full video?';
+    title.textContent = mediaTitle;
     subtitle.textContent = hasUnlock
-      ? 'Your full video is ready to watch.'
-      : 'Unlock instant access to the complete video.';
+      ? 'The full video is available now. Resume with the premium version.'
+      : 'Preview finished. Unlock the full video and continue instantly.';
     actionText.textContent = hasUnlock ? 'Watch full video' : 'Unlock full video';
     actionPrice.textContent = (premium.price_display || '—') + ' tokens';
     actionIcon.textContent = 'arrow_forward';
+
+    thumbBadge.appendChild(thumbBadgeIcon);
+    thumbBadge.appendChild(thumbBadgeText);
+    thumb.appendChild(thumbImage);
+    thumb.appendChild(thumbOverlay);
+    thumb.appendChild(thumbBadge);
 
     copy.appendChild(eyebrow);
     copy.appendChild(title);
@@ -583,7 +618,7 @@ export default class VideoViewer extends React.PureComponent {
     }
     action.appendChild(actionIcon);
 
-    content.appendChild(icon);
+    content.appendChild(thumb);
     content.appendChild(copy);
     content.appendChild(action);
     cta.appendChild(content);
