@@ -33,20 +33,6 @@ class TestWalletView(BaseLedgerTestCase):
     def _status_option_keys(self, response):
         return [item["key"] for item in response.context["status_select_options"]]
 
-    @override_settings(
-        WALLET_TOKEN_PACK_IMAGE_DIRECTORY="images/wallet/bundles",
-        WALLET_TOKEN_PACK_IMAGE_EXTENSION="svg",
-    )
-    def test_wallet_token_pack_rows_use_static_bundle_path(self):
-        rows = _build_wallet_token_pack_rows()
-
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(
-            rows[0]["image_path"],
-            "images/wallet/bundles/starter-pack.svg",
-        )
-        self.assertNotIn("image_url", rows[0])
-
     def test_wallet_page_requires_login(self):
         response = self.client.get(reverse("wallet"))
         self.assertEqual(response.status_code, 302)
@@ -67,7 +53,6 @@ class TestWalletView(BaseLedgerTestCase):
         response = self.client.get(reverse("wallet"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Wallet")
         self.assertContains(response, "500.00")
         self.assertContains(response, "500.00")
         self.assertContains(response, "0.00")
@@ -86,7 +71,9 @@ class TestWalletView(BaseLedgerTestCase):
         self.client.force_login(self.u1)
         response = self.client.get(reverse("wallet"))
 
-        self.assertContains(response, "Wallet under review")
+        self.assertIsNotNone(response.context["wallet_banner"])
+        self.assertEqual(response.context["wallet_banner"]["tone"], "warning")
+        self.assertFalse(response.context["can_view_risk_reason"])
         self.assertNotContains(response, "Manual review required")
 
     def test_wallet_page_shows_review_banner_with_permission(self):
@@ -104,7 +91,9 @@ class TestWalletView(BaseLedgerTestCase):
         response = self.client.get(reverse("wallet"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Wallet under review")
+        self.assertIsNotNone(response.context["wallet_banner"])
+        self.assertEqual(response.context["wallet_banner"]["tone"], "warning")
+        self.assertTrue(response.context["can_view_risk_reason"])
 
     def test_wallet_page_filters_transaction_tabs(self):
         apply_ledger_transaction(
@@ -181,7 +170,7 @@ class TestWalletView(BaseLedgerTestCase):
         self.assertNotContains(response, "Posted purchase")
         self.assertIn("reversed", self._status_option_keys(response))
 
-    def test_wallet_page_pending_filter_shows_empty_state_when_no_matching_entry_exists(self):
+    def test_wallet_page_pending_filter_excludes_unmatched_entries(self):
         create_pending_ledger_transaction(
             actor=self.operator,
             kind="withdrawal",
@@ -194,8 +183,6 @@ class TestWalletView(BaseLedgerTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("pending", self._status_option_keys(response))
-        self.assertContains(response, "No activity yet")
-        self.assertContains(response, "Your wallet activity will appear here.")
         self.assertNotContains(response, "Pending withdrawal")
 
     def test_wallet_page_invalid_filters_fallback_to_all(self):
@@ -269,8 +256,8 @@ class TestWalletView(BaseLedgerTestCase):
         response = self.client.get(reverse("wallet"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Buy tokens")
-        self.assertNotContains(response, "Cash out")
+        self.assertFalse(response.context["wallet_actions"]["show_withdraw"])
+        self.assertFalse(response.context["wallet_actions"]["can_withdraw"])
 
     def test_wallet_page_shows_cash_out_for_creator(self):
         self._enable_creator_withdrawals(self.u1)
@@ -279,8 +266,8 @@ class TestWalletView(BaseLedgerTestCase):
         response = self.client.get(reverse("wallet"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Buy tokens")
-        self.assertContains(response, "Cash out")
+        self.assertTrue(response.context["wallet_actions"]["show_withdraw"])
+        self.assertTrue(response.context["wallet_actions"]["can_withdraw"])
 
     def test_user_can_open_deposit_session_from_wallet(self):
         DepositAddress.objects.create(

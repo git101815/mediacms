@@ -436,29 +436,12 @@ def _format_pack_token_amount(value: int) -> str:
 
 def _build_wallet_token_pack_rows() -> list[dict]:
     rows = []
-    image_directory = str(
-        getattr(settings, "WALLET_TOKEN_PACK_IMAGE_DIRECTORY", "images/wallet/bundles")
-        or ""
-    ).strip().strip("/")
-    image_extension = str(
-        getattr(settings, "WALLET_TOKEN_PACK_IMAGE_EXTENSION", "svg")
-        or ""
-    ).strip().lstrip(".")
-
-    if not image_directory:
-        raise ImproperlyConfigured(
-            "WALLET_TOKEN_PACK_IMAGE_DIRECTORY must not be empty."
-        )
-    if not image_extension or "/" in image_extension or "\\" in image_extension:
-        raise ImproperlyConfigured(
-            "WALLET_TOKEN_PACK_IMAGE_EXTENSION must be a file extension."
-        )
-
     queryset = TokenPack.objects.filter(is_active=True).order_by("sort_order", "id")[:5]
 
     for pack in queryset:
-        base_stable_amount = _convert_platform_token_units_to_canonical_stable_units(pack.token_amount)
-        image_path = f"{image_directory}/{pack.code}.{image_extension}"
+        base_stable_amount = _convert_platform_token_units_to_canonical_stable_units(
+            pack.token_amount
+        )
 
         rows.append(
             {
@@ -470,7 +453,7 @@ def _build_wallet_token_pack_rows() -> list[dict]:
                 "token_amount_display": _format_pack_token_amount(pack.token_amount),
                 "gross_stable_amount": int(base_stable_amount),
                 "price_display": _format_canonical_stable_amount(base_stable_amount),
-                "image_path": image_path,
+                "image_path": f"images/wallet/bundles/{pack.code}.svg",
             }
         )
 
