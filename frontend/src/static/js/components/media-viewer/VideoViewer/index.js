@@ -533,8 +533,15 @@ export default class VideoViewer extends React.PureComponent {
     const hasUnlock = !!premium.viewer_has_unlock;
     const cta = document.createElement('button');
     const content = document.createElement('span');
+    const icon = document.createElement('span');
+    const copy = document.createElement('span');
+    const eyebrow = document.createElement('span');
     const title = document.createElement('span');
+    const subtitle = document.createElement('span');
     const action = document.createElement('span');
+    const actionText = document.createElement('span');
+    const actionPrice = document.createElement('span');
+    const actionIcon = document.createElement('span');
     const progress = document.createElement('span');
 
     cta.setAttribute('type', 'button');
@@ -545,16 +552,39 @@ export default class VideoViewer extends React.PureComponent {
     );
 
     content.setAttribute('class', 'premium-end-cta__content');
+    icon.setAttribute('class', 'material-icons premium-end-cta__icon');
+    copy.setAttribute('class', 'premium-end-cta__copy');
+    eyebrow.setAttribute('class', 'premium-end-cta__eyebrow');
     title.setAttribute('class', 'premium-end-cta__title');
+    subtitle.setAttribute('class', 'premium-end-cta__subtitle');
     action.setAttribute('class', 'premium-end-cta__action');
+    actionText.setAttribute('class', 'premium-end-cta__action-text');
+    actionPrice.setAttribute('class', 'premium-end-cta__price');
+    actionIcon.setAttribute('class', 'material-icons premium-end-cta__action-icon');
     progress.setAttribute('class', 'premium-end-cta__progress');
 
+    icon.textContent = hasUnlock ? 'lock_open' : 'play_circle_filled';
+    eyebrow.textContent = hasUnlock ? 'FULL VIDEO UNLOCKED' : 'PREMIUM VIDEO';
     title.textContent = 'Want to watch the full video?';
-    action.textContent = hasUnlock
-      ? 'Click here to watch'
-      : 'Click here to unlock ' + (premium.price_display || '—') + ' tokens';
+    subtitle.textContent = hasUnlock
+      ? 'Your full video is ready to watch.'
+      : 'Unlock instant access to the complete video.';
+    actionText.textContent = hasUnlock ? 'Watch full video' : 'Unlock full video';
+    actionPrice.textContent = (premium.price_display || '—') + ' tokens';
+    actionIcon.textContent = 'arrow_forward';
 
-    content.appendChild(title);
+    copy.appendChild(eyebrow);
+    copy.appendChild(title);
+    copy.appendChild(subtitle);
+
+    action.appendChild(actionText);
+    if (!hasUnlock) {
+      action.appendChild(actionPrice);
+    }
+    action.appendChild(actionIcon);
+
+    content.appendChild(icon);
+    content.appendChild(copy);
     content.appendChild(action);
     cta.appendChild(content);
     cta.appendChild(progress);
