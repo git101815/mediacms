@@ -33,6 +33,20 @@ class TestWalletView(BaseLedgerTestCase):
     def _status_option_keys(self, response):
         return [item["key"] for item in response.context["status_select_options"]]
 
+    @override_settings(
+        WALLET_TOKEN_PACK_IMAGE_DIRECTORY="images/wallet/bundles",
+        WALLET_TOKEN_PACK_IMAGE_EXTENSION="svg",
+    )
+    def test_wallet_token_pack_rows_use_static_bundle_path(self):
+        rows = _build_wallet_token_pack_rows()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            rows[0]["image_path"],
+            "images/wallet/bundles/starter-pack.svg",
+        )
+        self.assertNotIn("image_url", rows[0])
+
     def test_wallet_page_requires_login(self):
         response = self.client.get(reverse("wallet"))
         self.assertEqual(response.status_code, 302)

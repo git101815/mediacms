@@ -143,6 +143,11 @@ MTPERELIN_CACHE_SECONDS = 300
 MTPERELIN_QUOTE_CACHE_SECONDS = 60
 MTPERELIN_QUOTE_MAX_AGE_SECONDS = 30 * 60
 
+# Token-pack artwork is versioned with the frontend instead of uploaded in admin.
+# File naming: frontend/src/static/images/wallet/bundles/<TokenPack.code>.svg
+WALLET_TOKEN_PACK_IMAGE_DIRECTORY = "images/wallet/bundles"
+WALLET_TOKEN_PACK_IMAGE_EXTENSION = "svg"
+
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "paypal_us": 600,
     "revolut_eu": 500,

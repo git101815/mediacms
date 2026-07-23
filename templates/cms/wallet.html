@@ -473,10 +473,10 @@
               >
               <span class="wallet-buy-modal__package-inner">
                 <span class="wallet-buy-modal__package-copy">
-                  {% if pack.image_url %}
+                  {% if pack.image_path %}
                     <img
                       class="wallet-buy-modal__package-icon"
-                      src="{{ pack.image_url }}"
+                      src="{% static pack.image_path %}"
                       alt=""
                       loading="lazy"
                     >
