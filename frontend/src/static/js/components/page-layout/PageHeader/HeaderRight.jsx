@@ -6,6 +6,7 @@ import { CircleIconButton, MaterialIcon, NavigationContentApp, NavigationMenuLis
 import { HeaderThemeSwitcher } from './HeaderThemeSwitcher';
 import { translateString } from '../../../utils/helpers/';
 
+import cfTokenIcon from '../../../../images/cf-token.png';
 function headerPopupPages(user, popupNavItems, hasHeaderThemeSwitcher) {
   const pages = {
     main: null,
@@ -167,30 +168,44 @@ export function HeaderRight(props) {
 
                     <UploadMediaButton user={user} links={links} />
                     {!user.is.anonymous ? (
-                    <a
-                      className="token-balance"
-                      href={walletUrl}
-                      title={translateString('Token balance')}
-                      aria-label={translateString('Token balance')}
-                    >
-                      <MaterialIcon type="account_balance_wallet" />
-                      <span className="amount">
-                        {(function formatTokenBalance(rawBalance) {
-                          const normalized = Number(rawBalance || 0);
+                      <div className="token-balance-wrap">
+                        <div className="token-balance">
+                          <a
+                            className="token-balance__add"
+                            href={walletUrl}
+                            title={translateString('Add tokens')}
+                            aria-label={translateString('Add tokens')}
+                          >
+                            <span aria-hidden="true">+</span>
+                          </a>
+                          <a
+                            className="token-balance__main"
+                            href={walletUrl}
+                            title={translateString('Token balance')}
+                            aria-label={translateString('Token balance')}
+                          >
+                            <span className="token-balance__amount">
+                              {(function formatTokenBalance(rawBalance) {
+                                const normalized = Number(rawBalance || 0);
 
-                          if (!Number.isFinite(normalized)) {
-                            return '0';
-                          }
+                                if (!Number.isFinite(normalized)) {
+                                  return '0';
+                                }
 
-                          const humanBalance = normalized / 1000000;
+                                const humanBalance = normalized / 1000000;
 
-                          return humanBalance.toLocaleString(undefined, {
-                            minimumFractionDigits: 0,
-                            maximumFractionDigits: 2,
-                          });
-                        })(user.balance)}
-                      </span>
-                    </a>
+                                return humanBalance.toLocaleString(undefined, {
+                                  minimumFractionDigits: 0,
+                                  maximumFractionDigits: 2,
+                                });
+                              })(user.balance)}
+                            </span>
+                            <span className="token-balance__coin" aria-hidden="true">
+                              <img src={cfTokenIcon} alt="" />
+                            </span>
+                          </a>
+                        </div>
+                      </div>
                     ) : null}
                     <div
                       className={
