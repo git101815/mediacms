@@ -81,19 +81,29 @@
           <section class="wallet-game-card wallet-game-panel wallet-game-daily" data-wallet-module="daily-rewards">
             <div class="wallet-game-panel__head">
               <div><div class="wallet-game-card__title">Daily Rewards</div><p>Come back every day to earn CF tokens!</p></div>
-              <div class="wallet-game-daily__streak"><i class="material-icons">local_fire_department</i><strong>12</strong><span>/ 30</span></div>
+              <div class="wallet-game-daily__streak"><i class="material-icons">local_fire_department</i><strong>{{ daily_rewards.cycle_day }}</strong><span>/ {{ daily_rewards.cycle_length }}</span></div>
             </div>
             <div class="wallet-game-rewards">
-              <article class="wallet-game-reward wallet-game-reward--claimed"><i class="material-icons">done</i><strong>100</strong><span>Day 10</span></article>
-              <article class="wallet-game-reward wallet-game-reward--claimed"><i class="material-icons">done</i><strong>150</strong><span>Day 11</span></article>
-              <article class="wallet-game-reward wallet-game-reward--current"><img src="{% static 'images/wallet/dashboard/reward-chest.png' %}" alt=""><strong>250</strong><span>Day 12</span></article>
-              <article class="wallet-game-reward"><img src="{% static 'images/wallet/dashboard/reward-coins.png' %}" alt=""><strong>400</strong><span>Day 13</span></article>
-              <article class="wallet-game-reward"><img src="{% static 'images/wallet/dashboard/reward-bigchest.png' %}" alt=""><strong>1,000</strong><span>Day 14</span></article>
+              {% for reward in daily_rewards.window %}
+              <article class="wallet-game-reward{% if reward.status == 'claimed' %} wallet-game-reward--claimed{% elif reward.status == 'current' %} wallet-game-reward--current{% endif %}">
+                {% if reward.status == 'claimed' %}<i class="material-icons">done</i>{% else %}<img src="{% static reward.image_path %}" alt="">{% endif %}
+                <strong>{{ reward.amount_display }}</strong><span>Day {{ reward.day }}</span>
+              </article>
+              {% endfor %}
             </div>
-            <div class="wallet-game-daily__timeline" aria-hidden="true"><span></span><i></i><i></i><i class="is-current"></i><i></i><i></i></div>
+            <div class="wallet-game-daily__timeline" aria-hidden="true">
+              <span style="width:{{ daily_rewards.timeline_percent }}%"></span>
+              {% for reward in daily_rewards.window %}<i{% if reward.status == 'claimed' %} class="is-claimed"{% elif reward.status == 'current' %} class="is-current"{% endif %}></i>{% endfor %}
+            </div>
             <div class="wallet-game-panel__footer">
-              <button type="button" class="wallet-game-button wallet-game-button--primary" data-wallet-action="claim-daily">Claim 250 <img src="{% static 'images/wallet/cf-token.png' %}" alt=""></button>
-              <button type="button" class="wallet-game-link" data-wallet-action="view-daily-rewards">View all rewards <i class="material-icons">arrow_forward</i></button>
+              <form method="post" action="{{ daily_rewards.claim_url }}" style="display:contents">
+                {% csrf_token %}
+                <button type="submit" class="wallet-game-button wallet-game-button--primary" data-wallet-action="claim-daily"{% if not daily_rewards.can_claim %} disabled{% endif %}>
+                  {% if daily_rewards.claimed_today %}Claimed{% else %}Claim {{ daily_rewards.current_reward.amount_display }}{% endif %}
+                  <img src="{% static 'images/wallet/cf-token.png' %}" alt="">
+                </button>
+              </form>
+              <button type="button" class="wallet-game-link" data-wallet-open="daily-rewards">View all rewards <i class="material-icons">arrow_forward</i></button>
             </div>
           </section>
 
@@ -153,7 +163,7 @@
           </section>
 
           <section class="wallet-game-card wallet-game-streak" data-wallet-module="streak">
-            <div class="wallet-game-streak__badge"><span>Keep your streak!</span><strong>12</strong></div>
+            <div class="wallet-game-streak__badge"><span>Keep your streak!</span><strong>{{ daily_rewards.streak }}</strong></div>
             <div class="wallet-game-streak__copy"><strong>Day Streak</strong><span>Nice! Keep it going to earn bigger rewards.</span></div>
             <img src="{% static 'images/wallet/dashboard/streak-chest.png' %}" alt="">
           </section>
@@ -620,6 +630,25 @@
       <div class="wallet-ui__empty-text">No token pack or payment route is currently available.</div>
     </div>
     {% endif %}
+  </div>
+</div>
+
+
+<div class="wallet-modal" data-wallet-modal="daily-rewards" hidden>
+  <div class="wallet-modal__backdrop" data-wallet-close="daily-rewards"></div>
+  <div class="wallet-modal__dialog wallet-modal__dialog--deposit wallet-daily-rewards-modal" role="dialog" aria-modal="true" aria-labelledby="wallet-daily-rewards-modal-title">
+    <button type="button" class="wallet-modal__close" data-wallet-close="daily-rewards" aria-label="Close">
+      <i class="material-icons" aria-hidden="true">close</i>
+    </button>
+    <h2 id="wallet-daily-rewards-modal-title" class="wallet-modal__title">Daily Rewards</h2>
+    <div class="wallet-daily-rewards-modal__grid">
+      {% for reward in daily_rewards.all_rewards %}
+      <article class="wallet-game-reward{% if reward.status == 'claimed' %} wallet-game-reward--claimed{% elif reward.status == 'current' %} wallet-game-reward--current{% endif %}">
+        {% if reward.status == 'claimed' %}<i class="material-icons">done</i>{% else %}<img src="{% static reward.image_path %}" alt="">{% endif %}
+        <strong>{{ reward.amount_display }}</strong><span>Day {{ reward.day }}</span>
+      </article>
+      {% endfor %}
+    </div>
   </div>
 </div>
 

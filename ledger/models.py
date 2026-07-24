@@ -1279,3 +1279,7 @@ class TreasuryMetric(models.Model):
 
     def __str__(self):
         return self.label
+
+# Dashboard models are kept in ledger/dashboard while remaining part of the
+# ledger Django app.
+from .dashboard.models import DailyRewardClaim, DailyRewardState  # noqa: E402,F401

@@ -20,6 +20,7 @@ from .models import (
     TokenPack,
     TreasuryMetric,
 )
+from .dashboard.models import DailyRewardClaim, DailyRewardState
 from .services import (
     PLATFORM_TOKENS_PER_STABLECOIN,
     complete_wallet_withdrawal_request,
@@ -856,3 +857,56 @@ class TreasuryMetricAdmin(ReadOnlyAdmin):
         return _format_admin_human_amount(int(stable_amount))
 
     stable_equivalent.short_description = "Stable equivalent"
+
+
+@admin.register(DailyRewardState)
+class DailyRewardStateAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "user",
+        "current_streak",
+        "total_claims",
+        "last_claim_date",
+        "updated_at",
+    )
+    search_fields = ("user__username", "user__email")
+    readonly_fields = (
+        "user",
+        "current_streak",
+        "total_claims",
+        "last_claim_date",
+        "created_at",
+        "updated_at",
+    )
+
+
+@admin.register(DailyRewardClaim)
+class DailyRewardClaimAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "user",
+        "reward_date",
+        "streak_day",
+        "cycle_day",
+        "amount",
+        "ledger_txn",
+        "config_version",
+        "claimed_at",
+    )
+    list_filter = ("reward_date", "cycle_day", "config_version")
+    search_fields = (
+        "user__username",
+        "user__email",
+        "ledger_txn__external_id",
+    )
+    readonly_fields = (
+        "user",
+        "reward_date",
+        "streak_day",
+        "cycle_day",
+        "amount",
+        "ledger_txn",
+        "config_version",
+        "config_snapshot",
+        "claimed_at",
+    )

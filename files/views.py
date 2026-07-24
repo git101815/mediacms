@@ -129,6 +129,7 @@ from ledger.services import (
     purchase_ad_free_lifetime,
     _convert_platform_token_units_to_canonical_stable_units,
 )
+from ledger.dashboard.daily_rewards import build_daily_rewards_context
 from ledger.fiat import (
     get_fiat_currency_symbol,
     get_fiat_usd_rate,
@@ -1770,6 +1771,10 @@ def wallet(request):
                 and available_balance >= ad_free_price_tokens
         ),
     }
+    context["daily_rewards"] = build_daily_rewards_context(
+        user=request.user,
+        claim_url=reverse("wallet_claim_daily_reward"),
+    )
     return render(request, "cms/wallet.html", context)
 
 @login_required
