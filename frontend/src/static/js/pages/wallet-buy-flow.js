@@ -4,6 +4,40 @@
     return;
   }
 
+  // wallet-dashboard-view-switching-v2
+  function inferDashboardViewFromUrl() {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('view') === 'activity') {
+      return 'activity';
+    }
+    if (url.searchParams.has('tab') || url.searchParams.has('status') || url.searchParams.has('page')) {
+      return 'activity';
+    }
+    return 'home';
+  }
+
+  function setDashboardView(value, updateHistory) {
+    const view = value === 'activity' ? 'activity' : 'home';
+    document.querySelectorAll('[data-wallet-dashboard-view]').forEach(function (node) {
+      node.hidden = node.getAttribute('data-wallet-dashboard-view') !== view;
+    });
+    if (updateHistory) {
+      const url = new URL(window.location.href);
+      if (view === 'activity') {
+        url.searchParams.set('view', 'activity');
+      } else {
+        ['view', 'tab', 'status', 'page'].forEach(function (key) { url.searchParams.delete(key); });
+      }
+      window.history.pushState({ walletDashboardView: view }, '', url);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  setDashboardView(inferDashboardViewFromUrl(), false);
+  window.addEventListener('popstate', function () {
+    setDashboardView(inferDashboardViewFromUrl(), false);
+  });
+
   function getModal(name) {
     return document.querySelector('.wallet-modal[data-wallet-modal="' + name + '"]');
   }
@@ -547,6 +581,23 @@
   }
 
   document.addEventListener('click', function (event) {
+    const dashboardViewButton = event.target.closest('[data-wallet-dashboard-open]');
+    if (dashboardViewButton) {
+      event.preventDefault();
+      setDashboardView(dashboardViewButton.getAttribute('data-wallet-dashboard-open') || 'home', true);
+      return;
+    }
+
+    const scrollButton = event.target.closest('[data-wallet-scroll-to]');
+    if (scrollButton) {
+      event.preventDefault();
+      const target = document.getElementById(scrollButton.getAttribute('data-wallet-scroll-to'));
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
+    }
+
     const openButton = event.target.closest('[data-wallet-open]');
     if (openButton) {
       event.preventDefault();
