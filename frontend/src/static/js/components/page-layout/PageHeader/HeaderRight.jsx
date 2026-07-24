@@ -6,7 +6,7 @@ import { CircleIconButton, MaterialIcon, NavigationContentApp, NavigationMenuLis
 import { HeaderThemeSwitcher } from './HeaderThemeSwitcher';
 import { translateString } from '../../../utils/helpers/';
 
-import cfTokenIcon from '../../../../images/wallet/cf-token.svg';
+import cfTokenIcon from '../../../../images/wallet/cf-token.png';
 function headerPopupPages(user, popupNavItems, hasHeaderThemeSwitcher) {
   const pages = {
     main: null,
