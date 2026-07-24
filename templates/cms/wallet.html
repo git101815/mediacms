@@ -395,13 +395,6 @@
       <i class="material-icons" aria-hidden="true">close</i>
     </button>
 
-    <div class="wallet-buy-flow__steps">
-      <span class="wallet-buy-flow__step wallet-buy-flow__step--active" data-wallet-step-indicator="1">1. Package</span>
-      <span class="wallet-buy-flow__step" data-wallet-step-indicator="2">2. Payment method</span>
-      <span class="wallet-buy-flow__step" data-wallet-step-indicator="3">3. Coin</span>
-      <span class="wallet-buy-flow__step" data-wallet-step-indicator="4">4. Network</span>
-    </div>
-
     <h2 id="wallet-deposit-modal-title" class="wallet-modal__title">Buy tokens</h2>
 
     {% if token_pack_rows and deposit_options %}
@@ -497,21 +490,10 @@
                 </span>
 
                 <span class="wallet-buy-modal__package-copy">
-                  <span class="wallet-buy-modal__package-name">{{ pack.name }}</span>
-                  <span class="wallet-buy-modal__package-title">
-                    <strong>{{ pack.token_amount_display }}</strong>
-                    <span>tokens</span>
-                  </span>
-
-                  {% if pack.description %}
-                  <span class="wallet-buy-modal__package-description">
-                    {{ pack.description }}
-                  </span>
-                  {% endif %}
+                  <span class="wallet-buy-modal__package-title">{{ pack.token_amount_display }} tokens</span>
                 </span>
 
                 <span class="wallet-buy-modal__package-footer">
-                  <span class="wallet-buy-modal__package-price-label">From</span>
                   <span class="wallet-buy-modal__package-price">${{ pack.price_display }}</span>
                 </span>
               </span>
