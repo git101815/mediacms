@@ -470,6 +470,10 @@
                 <span class="wallet-buy-modal__package-tag">{{ pack.badge_text }}</span>
                 {% endif %}
 
+                <span class="wallet-buy-modal__package-copy">
+                  <span class="wallet-buy-modal__package-title">{{ pack.token_amount_display }} tokens</span>
+                </span>
+
                 <span class="wallet-buy-modal__package-visual">
                   {% if pack.image_path %}
                   <img
@@ -487,10 +491,6 @@
                   <span class="wallet-buy-modal__package-selected" aria-hidden="true">
                     <i class="material-icons">check</i>
                   </span>
-                </span>
-
-                <span class="wallet-buy-modal__package-copy">
-                  <span class="wallet-buy-modal__package-title">{{ pack.token_amount_display }} tokens</span>
                 </span>
 
                 <span class="wallet-buy-modal__package-footer">

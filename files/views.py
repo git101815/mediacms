@@ -453,7 +453,7 @@ def _build_wallet_token_pack_rows() -> list[dict]:
                 "token_amount_display": _format_pack_token_amount(pack.token_amount),
                 "gross_stable_amount": int(base_stable_amount),
                 "price_display": _format_canonical_stable_amount(base_stable_amount),
-                "image_path": f"images/wallet/bundles/{pack.code}.svg",
+                "image_path": f"images/wallet/bundles/{pack.code}.png",
             }
         )
 
