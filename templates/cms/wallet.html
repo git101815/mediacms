@@ -43,8 +43,11 @@
           <div class="wallet-balance__main">
             <div class="wallet-balance__label">Available balance</div>
             <div class="wallet-balance__value" title="{{ available_balance_display }}">
-              {{ available_balance_display }}
-            </div>
+  <span class="wallet-balance__amount-row">
+    <span class="wallet-balance__amount-text">{{ available_balance_display }}</span>
+    <img class="wallet-balance__token-icon" src="{% static 'images/wallet/cf-token.png' %}" alt="" aria-hidden="true">
+  </span>
+</div>
             <div class="wallet-balance__unit">platform tokens</div>
 
             {% if wallet_actions.hint %}

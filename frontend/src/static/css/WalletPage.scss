@@ -218,7 +218,7 @@ $error-text: #ff9a9a;
 .wallet-balance__value {
   margin-top: 8px;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   text-overflow: ellipsis;
   font-family: 'Avenir-Heavy', 'Roboto', sans-serif;
   font-size: clamp(34px, 4.2vw, 56px);
@@ -706,6 +706,39 @@ $error-text: #ff9a9a;
 .wallet-buy-flow__panel[hidden] {
   display: none !important;
 }
+
+
+/* CF balance icon alignment */
+.wallet-balance__amount-row {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.18em;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.wallet-balance__amount-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  line-height: .96;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wallet-balance__token-icon {
+  display: block;
+  width: 0.82em;
+  height: 0.82em;
+  flex: 0 0 0.82em;
+  object-fit: contain;
+  align-self: center;
+  transform: none;
+  user-select: none;
+  pointer-events: none;
+}
+
 
 .wallet-buy-flow__actions {
   margin-top: 18px;
