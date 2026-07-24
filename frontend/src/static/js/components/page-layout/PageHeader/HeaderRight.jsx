@@ -192,11 +192,12 @@ export function HeaderRight(props) {
                                   return '0';
                                 }
 
-                                const humanBalance = normalized / 1000000;
+                                const wholeTokens = Math.trunc(
+                                  normalized / 1000000
+                                );
 
-                                return humanBalance.toLocaleString(undefined, {
-                                  minimumFractionDigits: 0,
-                                  maximumFractionDigits: 2,
+                                return wholeTokens.toLocaleString(undefined, {
+                                  maximumFractionDigits: 0,
                                 });
                               })(user.balance)}
                             </span>

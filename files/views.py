@@ -389,16 +389,14 @@ def add_subtitle(request):
     return render(request, "cms/add_subtitle.html", context)
 
 PLATFORM_TOKEN_DECIMALS = 6
-PLATFORM_TOKEN_UI_DECIMALS = 2
 
 def _format_platform_token_amount(value: int, *, signed: bool = False) -> str:
     value = int(value)
-    scaled = Decimal(abs(value)) / (Decimal(10) ** PLATFORM_TOKEN_DECIMALS)
-    text = format(scaled.quantize(Decimal("0.01")), "f")
+    whole_tokens = abs(value) // (10 ** PLATFORM_TOKEN_DECIMALS)
     prefix = ""
-    if signed:
-        prefix = "+" if value >= 0 else "-"
-    return f"{prefix}{text}"
+    if signed and whole_tokens:
+        prefix = "+" if value > 0 else "-"
+    return f"{prefix}{whole_tokens}"
 
 def _format_canonical_stable_amount(value: int) -> str:
     scaled = Decimal(int(value)) / (Decimal(10) ** 6)
