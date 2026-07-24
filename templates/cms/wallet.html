@@ -471,24 +471,49 @@
                 data-pack-gross-canonical="{{ pack.gross_stable_amount }}"
                 {% if forloop.first %}checked{% endif %}
               >
-              <span class="wallet-buy-modal__package-inner">
-                <span class="wallet-buy-modal__package-copy">
-                  {% if pack.image_path %}
-                    <img
-                      class="wallet-buy-modal__package-icon"
-                      src="{% static pack.image_path %}"
-                      alt=""
-                      loading="lazy"
-                    >
-                  {% endif %}
 
-                  <span class="wallet-buy-modal__package-title">
-                    {{ pack.token_amount_display }} tokens
-                  </span>
-                </span>
+              <span class="wallet-buy-modal__package-inner">
                 {% if pack.badge_text %}
                 <span class="wallet-buy-modal__package-tag">{{ pack.badge_text }}</span>
                 {% endif %}
+
+                <span class="wallet-buy-modal__package-visual">
+                  {% if pack.image_path %}
+                  <img
+                    class="wallet-buy-modal__package-icon"
+                    src="{% static pack.image_path %}"
+                    alt=""
+                    loading="lazy"
+                  >
+                  {% else %}
+                  <span class="wallet-buy-modal__package-fallback" aria-hidden="true">
+                    <i class="material-icons">monetization_on</i>
+                  </span>
+                  {% endif %}
+
+                  <span class="wallet-buy-modal__package-selected" aria-hidden="true">
+                    <i class="material-icons">check</i>
+                  </span>
+                </span>
+
+                <span class="wallet-buy-modal__package-copy">
+                  <span class="wallet-buy-modal__package-name">{{ pack.name }}</span>
+                  <span class="wallet-buy-modal__package-title">
+                    <strong>{{ pack.token_amount_display }}</strong>
+                    <span>tokens</span>
+                  </span>
+
+                  {% if pack.description %}
+                  <span class="wallet-buy-modal__package-description">
+                    {{ pack.description }}
+                  </span>
+                  {% endif %}
+                </span>
+
+                <span class="wallet-buy-modal__package-footer">
+                  <span class="wallet-buy-modal__package-price-label">From</span>
+                  <span class="wallet-buy-modal__package-price">${{ pack.price_display }}</span>
+                </span>
               </span>
             </label>
             {% endfor %}
