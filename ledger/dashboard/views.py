@@ -13,10 +13,18 @@ def wallet_claim_daily_reward(request):
     try:
         result = claim_daily_reward(user=request.user)
     except (PermissionDenied, ValidationError) as exc:
-        messages.error(request, exc.messages[0] if hasattr(exc, "messages") else str(exc))
+        messages.error(
+            request,
+            exc.messages[0] if hasattr(exc, "messages") else str(exc),
+        )
         return redirect("wallet")
 
-    if result["claimed"]:
+    if result["claimed"] and result["reward_kind"] == "chest":
+        messages.success(
+            request,
+            f"Reward Chest opened: {result['amount_tokens']:,} tokens.",
+        )
+    elif result["claimed"]:
         messages.success(request, "Daily reward claimed.")
     else:
         messages.info(request, "Today's daily reward was already claimed.")

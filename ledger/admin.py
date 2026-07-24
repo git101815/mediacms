@@ -20,7 +20,7 @@ from .models import (
     TokenPack,
     TreasuryMetric,
 )
-from .dashboard.models import DailyRewardClaim, DailyRewardState
+from .dashboard.models import DailyRewardClaim, DailyRewardState, RewardChestGrant
 from .services import (
     PLATFORM_TOKENS_PER_STABLECOIN,
     complete_wallet_withdrawal_request,
@@ -890,6 +890,7 @@ class DailyRewardClaimAdmin(ReadOnlyAdmin):
         "cycle_day",
         "amount",
         "ledger_txn",
+        "reward_chest_grant",
         "config_version",
         "claimed_at",
     )
@@ -898,6 +899,7 @@ class DailyRewardClaimAdmin(ReadOnlyAdmin):
         "user__username",
         "user__email",
         "ledger_txn__external_id",
+        "reward_chest_grant__public_id",
     )
     readonly_fields = (
         "user",
@@ -906,7 +908,57 @@ class DailyRewardClaimAdmin(ReadOnlyAdmin):
         "cycle_day",
         "amount",
         "ledger_txn",
+        "reward_chest_grant",
         "config_version",
         "config_snapshot",
         "claimed_at",
+    )
+
+
+@admin.register(RewardChestGrant)
+class RewardChestGrantAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "public_id",
+        "user",
+        "chest_key",
+        "source_type",
+        "status",
+        "drop_key",
+        "rarity",
+        "amount",
+        "ledger_txn",
+        "granted_at",
+        "opened_at",
+    )
+    list_filter = ("status", "chest_key", "source_type", "rarity")
+    search_fields = (
+        "public_id",
+        "user__username",
+        "user__email",
+        "source_ref",
+        "drop_key",
+        "ledger_txn__external_id",
+    )
+    readonly_fields = (
+        "public_id",
+        "user",
+        "chest_key",
+        "source_type",
+        "source_ref",
+        "status",
+        "config_version",
+        "config_snapshot",
+        "metadata",
+        "roll",
+        "drop_key",
+        "drop_label",
+        "rarity",
+        "chance_bps",
+        "amount",
+        "ledger_txn",
+        "expires_at",
+        "granted_at",
+        "opened_at",
+        "revoked_at",
     )

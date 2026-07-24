@@ -23,6 +23,7 @@ from ledger.models import (
 
 from . import config
 from .models import DailyRewardClaim, DailyRewardState
+from .reward_chests import grant_reward_chest, open_reward_chest
 
 
 DAILY_REWARD_TRANSACTION_KIND = "daily_reward"
@@ -108,16 +109,21 @@ def _lock_wallet_pair(user_wallet: TokenWallet, issuance_wallet: TokenWallet):
     ids = sorted({user_wallet.pk, issuance_wallet.pk})
     locked = {
         wallet.pk: wallet
-        for wallet in TokenWallet.objects.select_for_update().filter(pk__in=ids).order_by("pk")
+        for wallet in TokenWallet.objects.select_for_update()
+        .filter(pk__in=ids)
+        .order_by("pk")
     }
     if len(locked) != 2:
         raise ValidationError("Could not lock daily reward wallets")
     return locked[user_wallet.pk], locked[issuance_wallet.pk]
 
 
-def _build_transaction_payload(*, user_id, reward_date, streak_day, cycle_day, reward):
+def _build_fixed_transaction_payload(
+    *, user_id, reward_date, streak_day, cycle_day, reward
+):
     metadata = {
         "source": "wallet_daily_rewards",
+        "reward_kind": "fixed",
         "user_id": int(user_id),
         "reward_date": reward_date.isoformat(),
         "streak_day": int(streak_day),
@@ -140,9 +146,13 @@ def _build_transaction_payload(*, user_id, reward_date, streak_day, cycle_day, r
     return external_id, request_hash, metadata
 
 
-def _validate_existing_transaction(*, txn, user_wallet, issuance_wallet, amount, request_hash):
+def _validate_existing_fixed_transaction(
+    *, txn, user_wallet, issuance_wallet, amount, request_hash
+):
     if txn.kind != DAILY_REWARD_TRANSACTION_KIND:
-        raise ValidationError("Daily reward idempotency key belongs to another transaction kind")
+        raise ValidationError(
+            "Daily reward idempotency key belongs to another transaction kind"
+        )
     if txn.status != LedgerTransaction.STATUS_POSTED:
         raise ValidationError("Existing daily reward transaction is not posted")
     if txn.request_hash and txn.request_hash != request_hash:
@@ -160,10 +170,10 @@ def _validate_existing_transaction(*, txn, user_wallet, issuance_wallet, amount,
         raise ValidationError("Existing daily reward ledger entries do not match")
 
 
-def _create_daily_reward_ledger_transaction(
+def _create_fixed_daily_reward_ledger_transaction(
     *, user, user_wallet, issuance_wallet, reward_date, streak_day, cycle_day, reward
 ):
-    external_id, request_hash, metadata = _build_transaction_payload(
+    external_id, request_hash, metadata = _build_fixed_transaction_payload(
         user_id=user.pk,
         reward_date=reward_date,
         streak_day=streak_day,
@@ -173,7 +183,7 @@ def _create_daily_reward_ledger_transaction(
 
     existing = LedgerTransaction.objects.filter(external_id=external_id).first()
     if existing is not None:
-        _validate_existing_transaction(
+        _validate_existing_fixed_transaction(
             txn=existing,
             user_wallet=user_wallet,
             issuance_wallet=issuance_wallet,
@@ -226,45 +236,12 @@ def _create_daily_reward_ledger_transaction(
     return txn, metadata
 
 
-@transaction.atomic
-def claim_daily_reward(*, user, at=None) -> dict:
-    user = _require_eligible_user(user)
-    if not config.DAILY_REWARDS_ENABLED:
-        raise ValidationError("Daily rewards are disabled")
-
-    definitions = config.get_daily_reward_definitions()
-    reward_date = get_daily_reward_date(at)
-
-    user_model = get_user_model()
-    locked_user = user_model.objects.select_for_update().get(pk=user.pk)
-
-    state, _created = DailyRewardState.objects.get_or_create(user=locked_user)
-    state = DailyRewardState.objects.select_for_update().get(pk=state.pk)
-
-    existing_claim = (
-        DailyRewardClaim.objects.select_related("ledger_txn")
-        .filter(user=locked_user, reward_date=reward_date)
-        .first()
-    )
-    if existing_claim is not None:
-        return {
-            "claimed": False,
-            "already_claimed": True,
-            "claim": existing_claim,
-            "txn": existing_claim.ledger_txn,
-            "amount_units": int(existing_claim.amount),
-            "streak_day": int(existing_claim.streak_day),
-            "cycle_day": int(existing_claim.cycle_day),
-            "reward_date": reward_date,
-        }
-
-    streak_day = _calculate_claim_streak(state, reward_date)
-    cycle_day = _get_cycle_day(streak_day, len(definitions))
-    reward = definitions[cycle_day - 1]
-
+def _claim_fixed_reward(
+    *, user, reward_date, streak_day, cycle_day, reward
+) -> tuple[LedgerTransaction, dict, None, dict]:
     user_wallet, _created = TokenWallet.objects.get_or_create(
         wallet_type=TokenWallet.TYPE_USER,
-        user=locked_user,
+        user=user,
         defaults={"allow_negative": False},
     )
     issuance_wallet, _created = TokenWallet.objects.get_or_create(
@@ -281,10 +258,12 @@ def claim_daily_reward(*, user, at=None) -> dict:
     if block_reason:
         raise ValidationError(block_reason)
     if issuance_block_reason:
-        raise ValidationError(f"Daily reward issuance is unavailable: {issuance_block_reason}")
+        raise ValidationError(
+            f"Daily reward issuance is unavailable: {issuance_block_reason}"
+        )
 
-    txn, metadata = _create_daily_reward_ledger_transaction(
-        user=locked_user,
+    txn, metadata = _create_fixed_daily_reward_ledger_transaction(
+        user=user,
         user_wallet=user_wallet,
         issuance_wallet=issuance_wallet,
         reward_date=reward_date,
@@ -292,16 +271,164 @@ def claim_daily_reward(*, user, at=None) -> dict:
         cycle_day=cycle_day,
         reward=reward,
     )
+    result = {
+        "reward_kind": "fixed",
+        "amount_units": int(reward.amount_units),
+        "amount_tokens": int(reward.amount_tokens),
+        "drop_key": "",
+        "drop_label": "",
+        "rarity": "",
+    }
+    return txn, metadata, None, result
+
+
+def _claim_chest_reward(
+    *, user, reward_date, streak_day, cycle_day, reward
+):
+    source_ref = f"user:{user.pk}:date:{reward_date.isoformat()}"
+    grant = grant_reward_chest(
+        user=user,
+        chest_key=reward.chest_key,
+        source_type="daily_reward",
+        source_ref=source_ref,
+        metadata={
+            "reward_date": reward_date.isoformat(),
+            "streak_day": int(streak_day),
+            "cycle_day": int(cycle_day),
+            "daily_reward_config_version": int(config.DAILY_REWARD_CONFIG_VERSION),
+        },
+    )
+    opened = open_reward_chest(user=user, grant=grant)
+    snapshot = {
+        "source": "wallet_daily_rewards",
+        "reward_kind": "chest",
+        "user_id": int(user.pk),
+        "reward_date": reward_date.isoformat(),
+        "streak_day": int(streak_day),
+        "cycle_day": int(cycle_day),
+        "cycle_length": len(config.get_daily_reward_definitions()),
+        "asset": reward.asset,
+        "chest_key": reward.chest_key,
+        "chest_label": reward.chest_label,
+        "reward_chest_grant_id": grant.pk,
+        "reward_chest_public_id": str(grant.public_id),
+        "amount_tokens": int(opened["amount_tokens"]),
+        "amount_units": int(opened["amount_units"]),
+        "drop_key": opened["drop_key"],
+        "drop_label": opened["drop_label"],
+        "rarity": opened["rarity"],
+        "chance_bps": int(opened["chance_bps"]),
+        "roll": int(opened["roll"]),
+        "daily_reward_config_version": int(config.DAILY_REWARD_CONFIG_VERSION),
+        "reward_chest_config_version": int(grant.config_version),
+        "reward_chest_config_fingerprint": str(
+            grant.config_snapshot.get("fingerprint") or ""
+        ),
+    }
+    LedgerOutbox.objects.create(
+        txn=opened["txn"],
+        topic=DAILY_REWARD_OUTBOX_TOPIC,
+        aggregate_type="ledger_transaction",
+        aggregate_id=opened["txn"].pk,
+        status=LedgerOutbox.STATUS_PENDING,
+        payload={
+            "txn_id": opened["txn"].pk,
+            "external_id": opened["txn"].external_id,
+            **snapshot,
+        },
+        metadata_version=LEDGER_METADATA_VERSION,
+    )
+    result = {
+        "reward_kind": "chest",
+        "amount_units": int(opened["amount_units"]),
+        "amount_tokens": int(opened["amount_tokens"]),
+        "drop_key": opened["drop_key"],
+        "drop_label": opened["drop_label"],
+        "rarity": opened["rarity"],
+    }
+    return opened["txn"], snapshot, grant, result
+
+
+def _existing_claim_result(existing_claim: DailyRewardClaim, reward_date) -> dict:
+    snapshot = existing_claim.config_snapshot or {}
+    reward_kind = str(snapshot.get("reward_kind") or "fixed")
+    amount_units = int(existing_claim.amount)
+    return {
+        "claimed": False,
+        "already_claimed": True,
+        "claim": existing_claim,
+        "txn": existing_claim.ledger_txn,
+        "reward_chest_grant": existing_claim.reward_chest_grant,
+        "reward_kind": reward_kind,
+        "amount_units": amount_units,
+        "amount_tokens": amount_units // (10 ** config.PLATFORM_TOKEN_DECIMALS),
+        "drop_key": str(snapshot.get("drop_key") or ""),
+        "drop_label": str(snapshot.get("drop_label") or ""),
+        "rarity": str(snapshot.get("rarity") or ""),
+        "streak_day": int(existing_claim.streak_day),
+        "cycle_day": int(existing_claim.cycle_day),
+        "reward_date": reward_date,
+    }
+
+
+@transaction.atomic
+def claim_daily_reward(*, user, at=None) -> dict:
+    user = _require_eligible_user(user)
+    if not config.DAILY_REWARDS_ENABLED:
+        raise ValidationError("Daily rewards are disabled")
+
+    definitions = config.get_daily_reward_definitions()
+    reward_date = get_daily_reward_date(at)
+
+    user_model = get_user_model()
+    locked_user = user_model.objects.select_for_update().get(pk=user.pk)
+
+    state, _created = DailyRewardState.objects.get_or_create(user=locked_user)
+    state = DailyRewardState.objects.select_for_update().get(pk=state.pk)
+
+    existing_claim = (
+        DailyRewardClaim.objects.select_related(
+            "ledger_txn", "reward_chest_grant"
+        )
+        .filter(user=locked_user, reward_date=reward_date)
+        .first()
+    )
+    if existing_claim is not None:
+        return _existing_claim_result(existing_claim, reward_date)
+
+    streak_day = _calculate_claim_streak(state, reward_date)
+    cycle_day = _get_cycle_day(streak_day, len(definitions))
+    reward = definitions[cycle_day - 1]
+
+    if reward.kind == "fixed":
+        txn, claim_snapshot, chest_grant, reward_result = _claim_fixed_reward(
+            user=locked_user,
+            reward_date=reward_date,
+            streak_day=streak_day,
+            cycle_day=cycle_day,
+            reward=reward,
+        )
+    elif reward.kind == "chest":
+        txn, claim_snapshot, chest_grant, reward_result = _claim_chest_reward(
+            user=locked_user,
+            reward_date=reward_date,
+            streak_day=streak_day,
+            cycle_day=cycle_day,
+            reward=reward,
+        )
+    else:
+        raise ValidationError("Unsupported daily reward kind")
 
     claim = DailyRewardClaim.objects.create(
         user=locked_user,
         reward_date=reward_date,
         streak_day=streak_day,
         cycle_day=cycle_day,
-        amount=reward.amount_units,
+        amount=reward_result["amount_units"],
         ledger_txn=txn,
+        reward_chest_grant=chest_grant,
         config_version=config.DAILY_REWARD_CONFIG_VERSION,
-        config_snapshot=metadata,
+        config_snapshot=claim_snapshot,
     )
 
     state.current_streak = streak_day
@@ -321,7 +448,8 @@ def claim_daily_reward(*, user, at=None) -> dict:
         "already_claimed": False,
         "claim": claim,
         "txn": txn,
-        "amount_units": int(reward.amount_units),
+        "reward_chest_grant": chest_grant,
+        **reward_result,
         "streak_day": streak_day,
         "cycle_day": cycle_day,
         "reward_date": reward_date,
@@ -332,7 +460,9 @@ def _format_token_amount(amount_tokens: int) -> str:
     return f"{int(amount_tokens):,}"
 
 
-def _get_display_streak(state: DailyRewardState | None, reward_date) -> tuple[int, bool, bool]:
+def _get_display_streak(
+    state: DailyRewardState | None, reward_date
+) -> tuple[int, bool, bool]:
     if state is None or state.last_claim_date is None:
         return 1, False, True
     if state.last_claim_date == reward_date:
@@ -345,13 +475,50 @@ def _get_display_streak(state: DailyRewardState | None, reward_date) -> tuple[in
 
 
 def _build_reward_row(definition, *, status: str) -> dict:
+    if definition.kind == "fixed":
+        amount_display = _format_token_amount(definition.amount_tokens)
+        claim_label = f"Claim {amount_display}"
+        button_image_path = "images/wallet/cf-token.png"
+        odds = []
+    else:
+        if definition.min_amount_tokens == definition.max_amount_tokens:
+            amount_display = _format_token_amount(definition.min_amount_tokens)
+        else:
+            amount_display = (
+                f"{_format_token_amount(definition.min_amount_tokens)}–"
+                f"{_format_token_amount(definition.max_amount_tokens)}"
+            )
+        claim_label = "Open chest"
+        button_image_path = _ASSET_IMAGE_PATHS[definition.asset]
+        chest = config.get_reward_chest_definition(definition.chest_key)
+        odds = [
+            {
+                "key": drop.key,
+                "label": drop.label,
+                "rarity": drop.rarity,
+                "chance_bps": drop.chance_bps,
+                "chance_percent": drop.chance_bps / 100,
+                "amount_tokens": drop.amount_tokens,
+                "amount_display": _format_token_amount(drop.amount_tokens),
+            }
+            for drop in chest.drops
+        ]
+
     return {
         "day": definition.day,
+        "kind": definition.kind,
         "amount_tokens": definition.amount_tokens,
         "amount_units": definition.amount_units,
-        "amount_display": _format_token_amount(definition.amount_tokens),
+        "amount_display": amount_display,
         "asset": definition.asset,
         "image_path": _ASSET_IMAGE_PATHS[definition.asset],
+        "button_image_path": button_image_path,
+        "claim_label": claim_label,
+        "chest_key": definition.chest_key,
+        "chest_label": definition.chest_label,
+        "min_amount_tokens": definition.min_amount_tokens,
+        "max_amount_tokens": definition.max_amount_tokens,
+        "odds": odds,
         "status": status,
     }
 
@@ -387,7 +554,13 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
     )
 
     window_size = int(config.DAILY_REWARD_WINDOW_SIZE)
-    start_day = max(1, min(cycle_day - (window_size // 2), len(definitions) - window_size + 1))
+    start_day = max(
+        1,
+        min(
+            cycle_day - (window_size // 2),
+            len(definitions) - window_size + 1,
+        ),
+    )
     end_day = start_day + window_size - 1
 
     def status_for(day):
@@ -408,7 +581,10 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
     current_position = cycle_day - start_day
     timeline_percent = 0
     if window_size > 1:
-        timeline_percent = round((current_position / (window_size - 1)) * 90, 2)
+        timeline_percent = round(
+            (current_position / (window_size - 1)) * 90,
+            2,
+        )
 
     return {
         "enabled": bool(config.DAILY_REWARDS_ENABLED),

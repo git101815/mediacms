@@ -1282,4 +1282,8 @@ class TreasuryMetric(models.Model):
 
 # Dashboard models are kept in ledger/dashboard while remaining part of the
 # ledger Django app.
-from .dashboard.models import DailyRewardClaim, DailyRewardState  # noqa: E402,F401
+from .dashboard.models import (  # noqa: E402,F401
+    DailyRewardClaim,
+    DailyRewardState,
+    RewardChestGrant,
+)

@@ -99,8 +99,8 @@
               <form method="post" action="{{ daily_rewards.claim_url }}" style="display:contents">
                 {% csrf_token %}
                 <button type="submit" class="wallet-game-button wallet-game-button--primary" data-wallet-action="claim-daily"{% if not daily_rewards.can_claim %} disabled{% endif %}>
-                  {% if daily_rewards.claimed_today %}Claimed{% else %}Claim {{ daily_rewards.current_reward.amount_display }}{% endif %}
-                  <img src="{% static 'images/wallet/cf-token.png' %}" alt="">
+                  {% if daily_rewards.claimed_today %}Claimed{% else %}{{ daily_rewards.current_reward.claim_label }}{% endif %}
+                  <img src="{% static daily_rewards.current_reward.button_image_path %}" alt="">
                 </button>
               </form>
               <button type="button" class="wallet-game-link" data-wallet-open="daily-rewards">View all rewards <i class="material-icons">arrow_forward</i></button>
