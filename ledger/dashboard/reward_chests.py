@@ -228,6 +228,7 @@ def _opened_result(grant: RewardChestGrant) -> dict:
         or not grant.drop_key
     ):
         raise ValidationError("Reward Chest opened state is incomplete")
+    definition = config.reward_chest_definition_from_snapshot(grant.config_snapshot)
     return {
         "opened": False,
         "already_opened": True,
@@ -240,6 +241,10 @@ def _opened_result(grant: RewardChestGrant) -> dict:
         "chance_bps": int(grant.chance_bps or 0),
         "amount_units": int(grant.amount),
         "amount_tokens": int(grant.amount) // (10 ** config.PLATFORM_TOKEN_DECIMALS),
+        "chest_name": definition.label,
+        "closed_image_path": definition.closed_image,
+        "opened_image_path": definition.opened_image,
+        "box_state": "opened",
     }
 
 
@@ -383,4 +388,8 @@ def open_reward_chest(*, user, grant, at=None) -> dict:
         "chance_bps": drop.chance_bps,
         "amount_units": amount,
         "amount_tokens": drop.amount_tokens,
+        "chest_name": definition.label,
+        "closed_image_path": definition.closed_image,
+        "opened_image_path": definition.opened_image,
+        "box_state": "opened",
     }

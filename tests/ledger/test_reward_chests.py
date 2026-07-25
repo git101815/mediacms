@@ -27,7 +27,7 @@ class TestRewardChests(BaseLedgerTestCase):
     def instant(self, year=2026, month=7, day=24, hour=12):
         return datetime(year, month, day, hour, tzinfo=datetime_timezone.utc)
 
-    def grant(self, *, user=None, chest_key="daily_standard", source_ref="test:1"):
+    def grant(self, *, user=None, chest_key="small_chest", source_ref="test:1"):
         return grant_reward_chest(
             user=user or self.u1,
             chest_key=chest_key,
@@ -40,7 +40,7 @@ class TestRewardChests(BaseLedgerTestCase):
         broken = {
             "broken": {
                 "label": "Broken",
-                "asset": "chest",
+                "asset": "small_chest",
                 "drops": (
                     {
                         "key": "only",
@@ -58,7 +58,7 @@ class TestRewardChests(BaseLedgerTestCase):
         duplicate = {
             "broken": {
                 "label": "Broken",
-                "asset": "chest",
+                "asset": "small_chest",
                 "drops": (
                     {"key": "same", "chance_bps": 5_000, "amount": 100},
                     {"key": "same", "chance_bps": 5_000, "amount": 200},
@@ -72,7 +72,7 @@ class TestRewardChests(BaseLedgerTestCase):
         excessive = {
             "broken": {
                 "label": "Broken",
-                "asset": "bigchest",
+                "asset": "big_chest",
                 "drops": (
                     {
                         "key": "too_large_ev",
@@ -101,12 +101,12 @@ class TestRewardChests(BaseLedgerTestCase):
         with self.assertRaises(ValidationError):
             self.grant(user=self.u2, source_ref="shared-source")
         with self.assertRaises(ValidationError):
-            self.grant(chest_key="daily_mega", source_ref="shared-source")
+            self.grant(chest_key="medium_chest", source_ref="shared-source")
 
     def test_roll_boundaries_select_configured_drops_and_credit_balanced_ledger(self):
         first_grant = self.grant(source_ref="boundary-first")
         second_grant = self.grant(source_ref="boundary-second")
-        definition = config.get_reward_chest_definition("daily_standard")
+        definition = config.get_reward_chest_definition("small_chest")
         first_drop = definition.drops[0]
         second_drop = definition.drops[1]
 
@@ -190,11 +190,11 @@ class TestRewardChests(BaseLedgerTestCase):
 
     def test_granted_snapshot_survives_later_config_changes(self):
         grant = self.grant(source_ref="snapshot-stable")
-        original = config.get_reward_chest_definition("daily_standard")
+        original = config.get_reward_chest_definition("small_chest")
         changed = dict(config.REWARD_CHESTS)
-        changed["daily_standard"] = {
+        changed["small_chest"] = {
             "label": "Changed",
-            "asset": "chest",
+            "asset": "small_chest",
             "drops": (
                 {
                     "key": "changed",
@@ -229,15 +229,24 @@ class TestRewardChests(BaseLedgerTestCase):
         self.assertEqual(self.w1.balance, 0)
         self.assertEqual(LedgerTransaction.objects.filter(kind="reward_chest").count(), 0)
 
-    def test_chest_name_and_state_images_are_exposed_by_config(self):
-        definition = config.get_reward_chest_definition("daily_standard")
-        self.assertEqual(definition.label, "Daily Reward Chest")
-        self.assertTrue(definition.closed_image.endswith("daily-standard-closed.png"))
-        self.assertTrue(definition.opened_image.endswith("daily-standard-opened.png"))
-        self.assertNotEqual(definition.closed_image, definition.opened_image)
+    def test_chest_identity_exposes_distinct_opened_and_closed_assets(self):
+        for chest_key in ("small_chest", "medium_chest", "big_chest"):
+            definition = config.get_reward_chest_definition(chest_key)
+            self.assertTrue(definition.label)
+            self.assertTrue(
+                definition.closed_image.startswith(
+                    "images/wallet/dashboard/chests/"
+                )
+            )
+            self.assertTrue(
+                definition.opened_image.startswith(
+                    "images/wallet/dashboard/chests/"
+                )
+            )
+            self.assertNotEqual(definition.closed_image, definition.opened_image)
 
     def test_chest_snapshot_persists_name_and_both_state_images(self):
-        definition = config.get_reward_chest_definition("daily_standard")
+        definition = config.get_reward_chest_definition("small_chest")
         snapshot = config.build_reward_chest_snapshot(definition)
         restored = config.reward_chest_definition_from_snapshot(snapshot)
         self.assertEqual(restored.label, definition.label)
@@ -248,7 +257,7 @@ class TestRewardChests(BaseLedgerTestCase):
         changed = dict(config.REWARD_CHESTS)
         changed["unsafe"] = {
             "label": "Unsafe",
-            "asset": "chest",
+            "asset": "small_chest",
             "closed_image": "../secret.png",
             "opened_image": "https://example.com/open.png",
             "drops": ({"key": "only", "chance_bps": 10_000, "amount": 1},),
@@ -258,8 +267,8 @@ class TestRewardChests(BaseLedgerTestCase):
                 config.get_reward_chest_definitions()
 
     def test_daily_reward_chest_opens_seamlessly_and_links_audit_rows(self):
-        chest_day = ({"kind": "chest", "chest": "daily_standard"},)
-        standard = config.get_reward_chest_definition("daily_standard")
+        chest_day = ({"kind": "chest", "chest": "small_chest"},)
+        standard = config.get_reward_chest_definition("small_chest")
         jackpot = standard.drops[-1]
 
         with patch.object(config, "DAILY_REWARDS", chest_day), patch.object(
@@ -294,7 +303,7 @@ class TestRewardChests(BaseLedgerTestCase):
         self.assertEqual(state.current_streak, 1)
 
     def test_daily_reward_chest_same_day_cannot_reroll(self):
-        chest_day = ({"kind": "chest", "chest": "daily_standard"},)
+        chest_day = ({"kind": "chest", "chest": "small_chest"},)
         with patch.object(config, "DAILY_REWARDS", chest_day), patch.object(
             config, "DAILY_REWARD_WINDOW_SIZE", 1
         ), patch(

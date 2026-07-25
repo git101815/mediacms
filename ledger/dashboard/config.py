@@ -23,7 +23,7 @@ PLATFORM_TOKEN_DECIMALS = 6
 # ---------------------------------------------------------------------------
 # Generic Reward Chests
 # ---------------------------------------------------------------------------
-REWARD_CHEST_CONFIG_VERSION = 3
+REWARD_CHEST_CONFIG_VERSION = 4
 REWARD_CHEST_TOTAL_CHANCE_BPS = 10_000
 REWARD_CHEST_MAX_DROPS = 100
 REWARD_CHEST_MAX_TOKENS_PER_DROP = 100_000
@@ -38,9 +38,9 @@ _LEDGER_MAX_HUMAN_TOKENS = ((2 ** 63) - 1) // (10 ** PLATFORM_TOKEN_DECIMALS)
 REWARD_CHESTS = {
     "small_chest": {
         "label": "Small Chest",
-        "asset": "smallchest",
-        "closed_image": "images/wallet/dashboard/chests/daily-standard-closed.png",
-        "opened_image": "images/wallet/dashboard/chests/daily-standard-opened.png",
+        "asset": "small_chest",
+        "closed_image": "images/wallet/dashboard/chests/small_closed.png",
+        "opened_image": "images/wallet/dashboard/chests/small_open.png",
         "drops": (
             {"key": "common_100", "label": "100 tokens", "rarity": "common", "chance_bps": 5_500, "amount": 100},
             {"key": "uncommon_250", "label": "250 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 250},
@@ -51,9 +51,9 @@ REWARD_CHESTS = {
     },
     "medium_chest": {
         "label": "Big Chest",
-        "asset": "medchest",
-        "closed_image": "images/wallet/dashboard/chests/daily-mega-closed.png",
-        "opened_image": "images/wallet/dashboard/chests/daily-mega-opened.png",
+        "asset": "medium_chest",
+        "closed_image": "images/wallet/dashboard/chests/medium_closed.png",
+        "opened_image": "images/wallet/dashboard/chests/medium_open.png",
         "drops": (
             {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 5_000, "amount": 350},
             {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 750},
@@ -64,9 +64,9 @@ REWARD_CHESTS = {
     },
     "big_chest": {
         "label": "Huge Chest",
-        "asset": "bigchest",
-        "closed_image": "images/wallet/dashboard/chests/daily-mega-closed.png",
-        "opened_image": "images/wallet/dashboard/chests/daily-mega-opened.png",
+        "asset": "big_chest",
+        "closed_image": "images/wallet/dashboard/chests/big_closed.png",
+        "opened_image": "images/wallet/dashboard/chests/big_open.png",
         "drops": (
             {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 5_000, "amount": 350},
             {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 750},
@@ -80,7 +80,7 @@ REWARD_CHESTS = {
 # ---------------------------------------------------------------------------
 # Daily Rewards
 # ---------------------------------------------------------------------------
-DAILY_REWARD_CONFIG_VERSION = 2
+DAILY_REWARD_CONFIG_VERSION = 3
 DAILY_REWARDS_ENABLED = True
 
 # None means: use django.conf.settings.TIME_ZONE.
@@ -95,44 +95,70 @@ DAILY_REWARD_MAX_TOKENS_PER_CLAIM = 100_000
 # Fixed reward:
 #   {"kind": "fixed", "amount": 100, "asset": "coins"}
 # Reward Chest:
-#   {"kind": "chest", "chest": "daily_standard"}
+#   {"kind": "chest", "chest": "small_chest"}
 # Rows without ``kind`` remain backward-compatible and are treated as fixed.
 DAILY_REWARDS = (
     {"kind": "fixed", "amount": 50, "asset": "coins"},
     {"kind": "fixed", "amount": 75, "asset": "coins"},
     {"kind": "fixed", "amount": 100, "asset": "coins"},
     {"kind": "fixed", "amount": 125, "asset": "coins"},
-    {"kind": "chest", "chest": "daily_standard"},
+    {"kind": "chest", "chest": "small_chest"},
     {"kind": "fixed", "amount": 200, "asset": "coins"},
-    {"kind": "chest", "chest": "daily_mega"},
+    {"kind": "chest", "chest": "medium_chest"},
     {"kind": "fixed", "amount": 75, "asset": "coins"},
     {"kind": "fixed", "amount": 100, "asset": "coins"},
     {"kind": "fixed", "amount": 100, "asset": "coins"},
     {"kind": "fixed", "amount": 150, "asset": "coins"},
-    {"kind": "chest", "chest": "daily_standard"},
+    {"kind": "chest", "chest": "small_chest"},
     {"kind": "fixed", "amount": 400, "asset": "coins"},
-    {"kind": "chest", "chest": "daily_mega"},
+    {"kind": "chest", "chest": "medium_chest"},
     {"kind": "fixed", "amount": 100, "asset": "coins"},
     {"kind": "fixed", "amount": 125, "asset": "coins"},
     {"kind": "fixed", "amount": 150, "asset": "coins"},
     {"kind": "fixed", "amount": 200, "asset": "coins"},
-    {"kind": "chest", "chest": "daily_standard"},
+    {"kind": "chest", "chest": "small_chest"},
     {"kind": "fixed", "amount": 350, "asset": "coins"},
-    {"kind": "chest", "chest": "daily_mega"},
+    {"kind": "chest", "chest": "medium_chest"},
     {"kind": "fixed", "amount": 150, "asset": "coins"},
     {"kind": "fixed", "amount": 175, "asset": "coins"},
     {"kind": "fixed", "amount": 200, "asset": "coins"},
-    {"kind": "chest", "chest": "daily_standard"},
+    {"kind": "chest", "chest": "small_chest"},
     {"kind": "fixed", "amount": 300, "asset": "coins"},
     {"kind": "fixed", "amount": 450, "asset": "coins"},
-    {"kind": "chest", "chest": "daily_mega"},
-    {"kind": "chest", "chest": "daily_standard"},
-    {"kind": "chest", "chest": "daily_mega"},
+    {"kind": "chest", "chest": "medium_chest"},
+    {"kind": "chest", "chest": "small_chest"},
+    {"kind": "chest", "chest": "big_chest"},
 )
 
 
-_ALLOWED_DAILY_ASSETS = frozenset({"coins", "chest", "bigchest"})
-_ALLOWED_CHEST_ASSETS = frozenset({"chest", "bigchest"})
+# Current config uses canonical names. Aliases are kept only so already granted
+# version 1-3 snapshots remain openable after this cleanup.
+_CHEST_ASSET_ALIASES = {
+    "chest": "small_chest",
+    "smallchest": "small_chest",
+    "small_chest": "small_chest",
+    "medchest": "medium_chest",
+    "mediumchest": "medium_chest",
+    "medium_chest": "medium_chest",
+    "bigchest": "big_chest",
+    "big_chest": "big_chest",
+}
+_CHEST_IMAGE_PATHS = {
+    "small_chest": {
+        "closed": "images/wallet/dashboard/chests/small_closed.png",
+        "opened": "images/wallet/dashboard/chests/small_open.png",
+    },
+    "medium_chest": {
+        "closed": "images/wallet/dashboard/chests/medium_closed.png",
+        "opened": "images/wallet/dashboard/chests/medium_open.png",
+    },
+    "big_chest": {
+        "closed": "images/wallet/dashboard/chests/big_closed.png",
+        "opened": "images/wallet/dashboard/chests/big_open.png",
+    },
+}
+_ALLOWED_DAILY_ASSETS = frozenset({"coins"})
+_ALLOWED_CHEST_ASSETS = frozenset(_CHEST_IMAGE_PATHS)
 _IDENTIFIER_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
@@ -223,10 +249,20 @@ def _normalize_static_image_path(value, *, field_name: str) -> str:
     return normalized
 
 
-def _default_chest_image(asset: str) -> str:
-    if asset == "bigchest":
-        return "images/wallet/dashboard/chests/"
-    return "images/wallet/dashboard/reward-chest.png"
+def _normalize_chest_asset(value, *, field_name: str) -> str:
+    raw = str(value or "").strip().lower()
+    normalized = _CHEST_ASSET_ALIASES.get(raw)
+    if normalized is None:
+        raise ImproperlyConfigured(
+            f"{field_name} has an invalid asset: {raw or '<empty>'}"
+        )
+    return normalized
+
+
+def _default_chest_image(asset: str, *, opened: bool) -> str:
+    normalized = _normalize_chest_asset(asset, field_name="Reward Chest")
+    state = "opened" if opened else "closed"
+    return _CHEST_IMAGE_PATHS[normalized][state]
 
 
 def _normalize_reward_chest_definition(
@@ -243,16 +279,17 @@ def _normalize_reward_chest_definition(
     if not label or len(label) > 80:
         raise ImproperlyConfigured(f"Reward Chest {key} requires a label of at most 80 characters")
 
-    asset = str(raw.get("asset") or "").strip().lower()
-    if asset not in _ALLOWED_CHEST_ASSETS:
-        raise ImproperlyConfigured(f"Reward Chest {key} has an invalid asset: {asset or '<empty>'}")
+    asset = _normalize_chest_asset(
+        raw.get("asset"),
+        field_name=f"Reward Chest {key}",
+    )
 
     closed_image = _normalize_static_image_path(
-        raw.get("closed_image") or _default_chest_image(asset),
+        raw.get("closed_image") or _default_chest_image(asset, opened=False),
         field_name=f"Reward Chest {key} closed_image",
     )
     opened_image = _normalize_static_image_path(
-        raw.get("opened_image") or _default_chest_image(asset),
+        raw.get("opened_image") or _default_chest_image(asset, opened=True),
         field_name=f"Reward Chest {key} opened_image",
     )
 
@@ -425,14 +462,19 @@ def reward_chest_definition_from_snapshot(snapshot: dict) -> RewardChestDefiniti
     if expected != fingerprint:
         raise ImproperlyConfigured("Reward Chest snapshot fingerprint does not match")
 
-    asset = str(payload.get("asset") or "").strip().lower()
+    asset = _normalize_chest_asset(
+        payload.get("asset"),
+        field_name="Reward Chest snapshot",
+    )
     return _normalize_reward_chest_definition(
         str(payload.get("key") or ""),
         {
             "label": payload.get("label"),
             "asset": asset,
-            "closed_image": payload.get("closed_image") or _default_chest_image(asset),
-            "opened_image": payload.get("opened_image") or _default_chest_image(asset),
+            "closed_image": payload.get("closed_image")
+            or _default_chest_image(asset, opened=False),
+            "opened_image": payload.get("opened_image")
+            or _default_chest_image(asset, opened=True),
             "drops": payload.get("drops"),
         },
         enforce_economy_limits=False,

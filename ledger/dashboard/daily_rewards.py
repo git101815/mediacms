@@ -31,8 +31,6 @@ DAILY_REWARD_OUTBOX_TOPIC = "ledger.daily_reward.claimed"
 
 _ASSET_IMAGE_PATHS = {
     "coins": "images/wallet/dashboard/reward-coins.png",
-    "chest": "images/wallet/dashboard/reward-chest.png",
-    "bigchest": "images/wallet/dashboard/reward-bigchest.png",
 }
 
 
@@ -310,6 +308,8 @@ def _claim_chest_reward(
         "asset": reward.asset,
         "chest_key": reward.chest_key,
         "chest_label": reward.chest_label,
+        "chest_closed_image": reward.chest_closed_image,
+        "chest_opened_image": reward.chest_opened_image,
         "reward_chest_grant_id": grant.pk,
         "reward_chest_public_id": str(grant.public_id),
         "amount_tokens": int(opened["amount_tokens"]),
@@ -345,6 +345,10 @@ def _claim_chest_reward(
         "drop_key": opened["drop_key"],
         "drop_label": opened["drop_label"],
         "rarity": opened["rarity"],
+        "chest_label": reward.chest_label,
+        "closed_image_path": reward.chest_closed_image,
+        "opened_image_path": reward.chest_opened_image,
+        "box_state": "opened",
     }
     return opened["txn"], snapshot, grant, result
 
@@ -365,6 +369,10 @@ def _existing_claim_result(existing_claim: DailyRewardClaim, reward_date) -> dic
         "drop_key": str(snapshot.get("drop_key") or ""),
         "drop_label": str(snapshot.get("drop_label") or ""),
         "rarity": str(snapshot.get("rarity") or ""),
+        "chest_label": str(snapshot.get("chest_label") or ""),
+        "closed_image_path": str(snapshot.get("chest_closed_image") or ""),
+        "opened_image_path": str(snapshot.get("chest_opened_image") or ""),
+        "box_state": "opened" if reward_kind == "chest" else "",
         "streak_day": int(existing_claim.streak_day),
         "cycle_day": int(existing_claim.cycle_day),
         "reward_date": reward_date,
