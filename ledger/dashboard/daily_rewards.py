@@ -474,22 +474,18 @@ def _get_display_streak(
     return max(1, int(state.current_streak)), False, False
 
 
-def _build_reward_row(definition, *, status: str) -> dict:
+def _build_reward_row(definition, *, status: str, opened: bool = False) -> dict:
     if definition.kind == "fixed":
         amount_display = _format_token_amount(definition.amount_tokens)
         claim_label = f"Claim {amount_display}"
         button_image_path = "images/wallet/cf-token.png"
         odds = []
     else:
-        if definition.min_amount_tokens == definition.max_amount_tokens:
-            amount_display = _format_token_amount(definition.min_amount_tokens)
-        else:
-            amount_display = (
-                f"{_format_token_amount(definition.min_amount_tokens)}–"
-                f"{_format_token_amount(definition.max_amount_tokens)}"
-            )
+        amount_display = definition.chest_label
         claim_label = "Open chest"
-        button_image_path = _ASSET_IMAGE_PATHS[definition.asset]
+        box_state = "opened" if opened else "closed"
+        image_path = definition.chest_opened_image if opened else definition.chest_closed_image
+        button_image_path = image_path
         chest = config.get_reward_chest_definition(definition.chest_key)
         odds = [
             {
@@ -504,6 +500,10 @@ def _build_reward_row(definition, *, status: str) -> dict:
             for drop in chest.drops
         ]
 
+    if definition.kind == "fixed":
+        box_state = ""
+        image_path = _ASSET_IMAGE_PATHS[definition.asset]
+
     return {
         "day": definition.day,
         "kind": definition.kind,
@@ -511,7 +511,10 @@ def _build_reward_row(definition, *, status: str) -> dict:
         "amount_units": definition.amount_units,
         "amount_display": amount_display,
         "asset": definition.asset,
-        "image_path": _ASSET_IMAGE_PATHS[definition.asset],
+        "image_path": image_path,
+        "closed_image_path": definition.chest_closed_image,
+        "opened_image_path": definition.chest_opened_image,
+        "box_state": box_state,
         "button_image_path": button_image_path,
         "claim_label": claim_label,
         "chest_key": definition.chest_key,
@@ -570,14 +573,22 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
             return "claimed"
         return "future"
 
-    window = [
-        _build_reward_row(definitions[day - 1], status=status_for(day))
-        for day in range(start_day, end_day + 1)
-    ]
-    all_rewards = [
-        _build_reward_row(definition, status=status_for(definition.day))
-        for definition in definitions
-    ]
+    def is_opened(day, status):
+        return status == "claimed" or (claimed_today and day == cycle_day)
+
+    window = []
+    for day in range(start_day, end_day + 1):
+        status = status_for(day)
+        window.append(_build_reward_row(
+            definitions[day - 1], status=status, opened=is_opened(day, status)
+        ))
+
+    all_rewards = []
+    for definition in definitions:
+        status = status_for(definition.day)
+        all_rewards.append(_build_reward_row(
+            definition, status=status, opened=is_opened(definition.day, status)
+        ))
     current_position = cycle_day - start_day
     timeline_percent = 0
     if window_size > 1:
@@ -598,7 +609,9 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
         "claimed_today": claimed_today,
         "can_claim": can_claim,
         "block_reason": block_reason,
-        "current_reward": _build_reward_row(current_reward, status="current"),
+        "current_reward": _build_reward_row(
+            current_reward, status="current", opened=claimed_today
+        ),
         "window": window,
         "all_rewards": all_rewards,
         "timeline_percent": timeline_percent,

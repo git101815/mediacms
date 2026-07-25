@@ -23,7 +23,7 @@ PLATFORM_TOKEN_DECIMALS = 6
 # ---------------------------------------------------------------------------
 # Generic Reward Chests
 # ---------------------------------------------------------------------------
-REWARD_CHEST_CONFIG_VERSION = 1
+REWARD_CHEST_CONFIG_VERSION = 3
 REWARD_CHEST_TOTAL_CHANCE_BPS = 10_000
 REWARD_CHEST_MAX_DROPS = 100
 REWARD_CHEST_MAX_TOKENS_PER_DROP = 100_000
@@ -31,13 +31,16 @@ REWARD_CHEST_MAX_EXPECTED_VALUE_TOKENS = 20_000
 _REWARD_CHEST_ABSOLUTE_MAX_DROPS = 1_000
 _LEDGER_MAX_HUMAN_TOKENS = ((2 ** 63) - 1) // (10 ** PLATFORM_TOKEN_DECIMALS)
 
-# ``asset`` accepts "chest" or "bigchest" and only controls the existing UI
-# illustration. ``drops`` are evaluated from top to bottom with a secure,
-# server-side roll in [0, 9_999].
+# Each Reward Chest has a public name and two independent static images.
+# Paths are relative to the Django static root. The closed image is shown before
+# opening; the opened image is shown once the reward has been claimed.
+# ``drops`` are evaluated from top to bottom with a secure server-side roll.
 REWARD_CHESTS = {
-    "daily_standard": {
-        "label": "Daily Reward Chest",
-        "asset": "chest",
+    "small_chest": {
+        "label": "Small Chest",
+        "asset": "smallchest",
+        "closed_image": "images/wallet/dashboard/chests/daily-standard-closed.png",
+        "opened_image": "images/wallet/dashboard/chests/daily-standard-opened.png",
         "drops": (
             {"key": "common_100", "label": "100 tokens", "rarity": "common", "chance_bps": 5_500, "amount": 100},
             {"key": "uncommon_250", "label": "250 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 250},
@@ -46,9 +49,24 @@ REWARD_CHESTS = {
             {"key": "jackpot_5000", "label": "5,000 tokens", "rarity": "jackpot", "chance_bps": 20, "amount": 5_000},
         ),
     },
-    "daily_mega": {
-        "label": "Mega Reward Chest",
+    "medium_chest": {
+        "label": "Big Chest",
+        "asset": "medchest",
+        "closed_image": "images/wallet/dashboard/chests/daily-mega-closed.png",
+        "opened_image": "images/wallet/dashboard/chests/daily-mega-opened.png",
+        "drops": (
+            {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 5_000, "amount": 350},
+            {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 750},
+            {"key": "rare_1500", "label": "1,500 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 1_500},
+            {"key": "epic_3000", "label": "3,000 tokens", "rarity": "epic", "chance_bps": 450, "amount": 3_000},
+            {"key": "jackpot_10000", "label": "10,000 tokens", "rarity": "jackpot", "chance_bps": 50, "amount": 10_000},
+        ),
+    },
+    "big_chest": {
+        "label": "Huge Chest",
         "asset": "bigchest",
+        "closed_image": "images/wallet/dashboard/chests/daily-mega-closed.png",
+        "opened_image": "images/wallet/dashboard/chests/daily-mega-opened.png",
         "drops": (
             {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 5_000, "amount": 350},
             {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 750},
@@ -134,6 +152,8 @@ class RewardChestDefinition:
     key: str
     label: str
     asset: str
+    closed_image: str
+    opened_image: str
     drops: tuple[RewardChestDropDefinition, ...]
     min_amount_tokens: int
     max_amount_tokens: int
@@ -149,6 +169,8 @@ class DailyRewardDefinition:
     day: int
     kind: str
     asset: str
+    chest_closed_image: str
+    chest_opened_image: str
     amount_tokens: int | None
     amount_units: int | None
     chest_key: str
@@ -188,6 +210,25 @@ def _normalize_identifier(value, *, field_name: str) -> str:
     return normalized
 
 
+def _normalize_static_image_path(value, *, field_name: str) -> str:
+    normalized = str(value or "").strip().replace("\\", "/")
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or "://" in normalized
+        or any(part in {"", ".", ".."} for part in normalized.split("/"))
+        or len(normalized) > 255
+    ):
+        raise ImproperlyConfigured(f"{field_name} must be a safe static-relative path")
+    return normalized
+
+
+def _default_chest_image(asset: str) -> str:
+    if asset == "bigchest":
+        return "images/wallet/dashboard/chests/"
+    return "images/wallet/dashboard/reward-chest.png"
+
+
 def _normalize_reward_chest_definition(
     key: str,
     raw: dict,
@@ -205,6 +246,15 @@ def _normalize_reward_chest_definition(
     asset = str(raw.get("asset") or "").strip().lower()
     if asset not in _ALLOWED_CHEST_ASSETS:
         raise ImproperlyConfigured(f"Reward Chest {key} has an invalid asset: {asset or '<empty>'}")
+
+    closed_image = _normalize_static_image_path(
+        raw.get("closed_image") or _default_chest_image(asset),
+        field_name=f"Reward Chest {key} closed_image",
+    )
+    opened_image = _normalize_static_image_path(
+        raw.get("opened_image") or _default_chest_image(asset),
+        field_name=f"Reward Chest {key} opened_image",
+    )
 
     raw_drops = raw.get("drops")
     if not isinstance(raw_drops, (list, tuple)) or not raw_drops:
@@ -291,6 +341,8 @@ def _normalize_reward_chest_definition(
         key=key,
         label=label,
         asset=asset,
+        closed_image=closed_image,
+        opened_image=opened_image,
         drops=tuple(drops),
         min_amount_tokens=min(amounts),
         max_amount_tokens=max(amounts),
@@ -324,6 +376,8 @@ def build_reward_chest_snapshot(definition: RewardChestDefinition) -> dict:
         "key": definition.key,
         "label": definition.label,
         "asset": definition.asset,
+        "closed_image": definition.closed_image,
+        "opened_image": definition.opened_image,
         "drops": [
             {
                 "key": drop.key,
@@ -347,23 +401,38 @@ def reward_chest_definition_from_snapshot(snapshot: dict) -> RewardChestDefiniti
     if len(fingerprint) != 64:
         raise ImproperlyConfigured("Reward Chest snapshot fingerprint is missing")
 
-    payload = {
-        "config_version": snapshot.get("config_version"),
-        "key": snapshot.get("key"),
-        "label": snapshot.get("label"),
-        "asset": snapshot.get("asset"),
-        "drops": snapshot.get("drops"),
-    }
+    config_version = int(snapshot.get("config_version") or 0)
+    if config_version <= 1:
+        payload = {
+            "config_version": snapshot.get("config_version"),
+            "key": snapshot.get("key"),
+            "label": snapshot.get("label"),
+            "asset": snapshot.get("asset"),
+            "drops": snapshot.get("drops"),
+        }
+    else:
+        payload = {
+            "config_version": snapshot.get("config_version"),
+            "key": snapshot.get("key"),
+            "label": snapshot.get("label"),
+            "asset": snapshot.get("asset"),
+            "closed_image": snapshot.get("closed_image"),
+            "opened_image": snapshot.get("opened_image"),
+            "drops": snapshot.get("drops"),
+        }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     if expected != fingerprint:
         raise ImproperlyConfigured("Reward Chest snapshot fingerprint does not match")
 
+    asset = str(payload.get("asset") or "").strip().lower()
     return _normalize_reward_chest_definition(
         str(payload.get("key") or ""),
         {
             "label": payload.get("label"),
-            "asset": payload.get("asset"),
+            "asset": asset,
+            "closed_image": payload.get("closed_image") or _default_chest_image(asset),
+            "opened_image": payload.get("opened_image") or _default_chest_image(asset),
             "drops": payload.get("drops"),
         },
         enforce_economy_limits=False,
@@ -397,6 +466,8 @@ def _normalize_reward_rows(rows: Iterable[dict]) -> tuple[DailyRewardDefinition,
                     day=index,
                     kind="fixed",
                     asset=asset,
+                    chest_closed_image="",
+                    chest_opened_image="",
                     amount_tokens=amount_tokens,
                     amount_units=amount_tokens * (10 ** PLATFORM_TOKEN_DECIMALS),
                     chest_key="",
@@ -426,6 +497,8 @@ def _normalize_reward_rows(rows: Iterable[dict]) -> tuple[DailyRewardDefinition,
                     day=index,
                     kind="chest",
                     asset=chest.asset,
+                    chest_closed_image=chest.closed_image,
+                    chest_opened_image=chest.opened_image,
                     amount_tokens=None,
                     amount_units=None,
                     chest_key=chest.key,

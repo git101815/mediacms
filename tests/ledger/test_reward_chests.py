@@ -229,6 +229,34 @@ class TestRewardChests(BaseLedgerTestCase):
         self.assertEqual(self.w1.balance, 0)
         self.assertEqual(LedgerTransaction.objects.filter(kind="reward_chest").count(), 0)
 
+    def test_chest_name_and_state_images_are_exposed_by_config(self):
+        definition = config.get_reward_chest_definition("daily_standard")
+        self.assertEqual(definition.label, "Daily Reward Chest")
+        self.assertTrue(definition.closed_image.endswith("daily-standard-closed.png"))
+        self.assertTrue(definition.opened_image.endswith("daily-standard-opened.png"))
+        self.assertNotEqual(definition.closed_image, definition.opened_image)
+
+    def test_chest_snapshot_persists_name_and_both_state_images(self):
+        definition = config.get_reward_chest_definition("daily_standard")
+        snapshot = config.build_reward_chest_snapshot(definition)
+        restored = config.reward_chest_definition_from_snapshot(snapshot)
+        self.assertEqual(restored.label, definition.label)
+        self.assertEqual(restored.closed_image, definition.closed_image)
+        self.assertEqual(restored.opened_image, definition.opened_image)
+
+    def test_chest_config_rejects_unsafe_static_image_paths(self):
+        changed = dict(config.REWARD_CHESTS)
+        changed["unsafe"] = {
+            "label": "Unsafe",
+            "asset": "chest",
+            "closed_image": "../secret.png",
+            "opened_image": "https://example.com/open.png",
+            "drops": ({"key": "only", "chance_bps": 10_000, "amount": 1},),
+        }
+        with patch.object(config, "REWARD_CHESTS", changed):
+            with self.assertRaises(ImproperlyConfigured):
+                config.get_reward_chest_definitions()
+
     def test_daily_reward_chest_opens_seamlessly_and_links_audit_rows(self):
         chest_day = ({"kind": "chest", "chest": "daily_standard"},)
         standard = config.get_reward_chest_definition("daily_standard")

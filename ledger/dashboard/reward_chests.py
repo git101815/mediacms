@@ -192,6 +192,8 @@ def _build_transaction_payload(
         "user_id": grant.user_id,
         "chest_key": definition.key,
         "chest_label": definition.label,
+        "chest_closed_image": definition.closed_image,
+        "chest_opened_image": definition.opened_image,
         "source_type": grant.source_type,
         "source_ref": grant.source_ref,
         "roll": int(roll),

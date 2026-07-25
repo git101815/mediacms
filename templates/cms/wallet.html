@@ -85,8 +85,8 @@
             </div>
             <div class="wallet-game-rewards">
               {% for reward in daily_rewards.window %}
-              <article class="wallet-game-reward{% if reward.status == 'claimed' %} wallet-game-reward--claimed{% elif reward.status == 'current' %} wallet-game-reward--current{% endif %}">
-                {% if reward.status == 'claimed' %}<i class="material-icons">done</i>{% else %}<img src="{% static reward.image_path %}" alt="">{% endif %}
+              <article class="wallet-game-reward{% if reward.status == 'claimed' %} wallet-game-reward--claimed{% elif reward.status == 'current' %} wallet-game-reward--current{% endif %}"{% if reward.kind == 'chest' %} data-reward-chest="{{ reward.chest_key }}" data-box-state="{{ reward.box_state }}"{% endif %}>
+                {% if reward.kind == 'chest' %}<img src="{% static reward.image_path %}" alt="">{% elif reward.status == 'claimed' %}<i class="material-icons">done</i>{% else %}<img src="{% static reward.image_path %}" alt="">{% endif %}
                 <strong>{{ reward.amount_display }}</strong><span>Day {{ reward.day }}</span>
               </article>
               {% endfor %}
@@ -643,8 +643,8 @@
     <h2 id="wallet-daily-rewards-modal-title" class="wallet-modal__title">Daily Rewards</h2>
     <div class="wallet-daily-rewards-modal__grid">
       {% for reward in daily_rewards.all_rewards %}
-      <article class="wallet-game-reward{% if reward.status == 'claimed' %} wallet-game-reward--claimed{% elif reward.status == 'current' %} wallet-game-reward--current{% endif %}">
-        {% if reward.status == 'claimed' %}<i class="material-icons">done</i>{% else %}<img src="{% static reward.image_path %}" alt="">{% endif %}
+      <article class="wallet-game-reward{% if reward.status == 'claimed' %} wallet-game-reward--claimed{% elif reward.status == 'current' %} wallet-game-reward--current{% endif %}"{% if reward.kind == 'chest' %} data-reward-chest="{{ reward.chest_key }}" data-box-state="{{ reward.box_state }}"{% endif %}>
+        {% if reward.kind == 'chest' %}<img src="{% static reward.image_path %}" alt="">{% elif reward.status == 'claimed' %}<i class="material-icons">done</i>{% else %}<img src="{% static reward.image_path %}" alt="">{% endif %}
         <strong>{{ reward.amount_display }}</strong><span>Day {{ reward.day }}</span>
       </article>
       {% endfor %}
