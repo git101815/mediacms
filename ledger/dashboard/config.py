@@ -130,6 +130,24 @@ WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS = {
 }
 
 # ---------------------------------------------------------------------------
+# Bonus Vault
+# ---------------------------------------------------------------------------
+# Posted token purchase debits fill the vault. Every full threshold unlocks one
+# generic Reward Chest. Several completed vaults can be accumulated and opened
+# one by one.
+BONUS_VAULT_CONFIG_VERSION = 1
+BONUS_VAULT_ENABLED = True
+BONUS_VAULT_THRESHOLD_TOKENS = 10_000
+BONUS_VAULT_CHEST_KEY = "big_chest"
+BONUS_VAULT_ELIGIBLE_TRANSACTION_KINDS = ("purchase",)
+BONUS_VAULT_SOURCE_TYPE = "bonus_vault"
+
+# Launch cutoff. Purchases before this timestamp do not generate retroactive
+# vault rewards. Change this value before deployment when needed.
+BONUS_VAULT_START_AT = "2026-07-25T00:00:00+03:00"
+
+
+# ---------------------------------------------------------------------------
 # Generic Reward Chests
 # ---------------------------------------------------------------------------
 REWARD_CHEST_CONFIG_VERSION = 4

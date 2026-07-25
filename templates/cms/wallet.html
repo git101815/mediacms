@@ -63,17 +63,45 @@
             </div>
           </section>
 
-          <section class="wallet-game-card wallet-game-vault" data-wallet-module="vault">
+          <section
+            class="wallet-game-card wallet-game-vault"
+            data-wallet-module="vault"
+            data-wallet-vault-ready-count="{{ bonus_vault.ready_count }}"
+            data-reward-chest="{{ bonus_vault.chest_key }}"
+            data-box-state="closed"
+          >
             <div class="wallet-game-vault__copy">
               <div class="wallet-game-card__title wallet-game-card__title--gold">
                 <i class="material-icons" aria-hidden="true">stars</i><span>Bonus Vault</span>
               </div>
-              <p>Complete actions to fill your vault and unlock a reward chest.</p>
-              <div class="wallet-game-vault__progress-copy"><span>Vault progress</span><strong data-wallet-vault-progress-label>68%</strong></div>
-              <div class="wallet-game-meter"><span data-wallet-vault-progress style="width:68%"></span></div>
+              {% if bonus_vault.ready_count %}
+              <p>Your vault is ready. Open it for a {{ bonus_vault.reward_range_display }} token drop.</p>
+              {% else %}
+              <p>Spend {{ bonus_vault.remaining_display }} more tokens to unlock a {{ bonus_vault.reward_range_display }} token chest.</p>
+              {% endif %}
+              <div class="wallet-game-vault__progress-copy">
+                <span>Vault progress</span>
+                <strong data-wallet-vault-progress-label>{{ bonus_vault.progress_percent }}%</strong>
+              </div>
+              <div class="wallet-game-meter">
+                <span data-wallet-vault-progress style="width:{{ bonus_vault.progress_percent }}%"></span>
+              </div>
             </div>
-            <img class="wallet-game-vault__art" src="{% static daily_rewards.assets.vault_chest %}" alt="" aria-hidden="true">
-            <button type="button" class="wallet-game-button wallet-game-button--primary wallet-game-button--full" data-wallet-action="open-vault">Open Vault</button>
+            <img
+              class="wallet-game-vault__art"
+              src="{% static bonus_vault.image_path %}"
+              alt=""
+              aria-hidden="true"
+            >
+            <form method="post" action="{{ bonus_vault.open_url }}" style="display:contents">
+              {% csrf_token %}
+              <button
+                type="submit"
+                class="wallet-game-button wallet-game-button--primary wallet-game-button--full"
+                data-wallet-action="open-vault"
+                {% if not bonus_vault.can_open %}disabled{% endif %}
+              >{{ bonus_vault.button_label }}</button>
+            </form>
           </section>
         </div>
 

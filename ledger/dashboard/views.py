@@ -4,7 +4,33 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import redirect
 from django.views.decorators.http import require_POST
 
+from .bonus_vault import open_bonus_vault
 from .daily_rewards import claim_daily_reward
+
+
+@login_required
+@require_POST
+def wallet_open_bonus_vault(request):
+    try:
+        result = open_bonus_vault(user=request.user)
+    except (PermissionDenied, ValidationError) as exc:
+        messages.error(
+            request,
+            exc.messages[0] if hasattr(exc, "messages") else str(exc),
+        )
+        return redirect("wallet")
+
+    if result["opened"]:
+        messages.success(
+            request,
+            (
+                f"Bonus Vault opened: {result['amount_tokens']:,} tokens "
+                f"({result['rarity']})."
+            ),
+        )
+    else:
+        messages.info(request, "This Bonus Vault was already opened.")
+    return redirect("wallet")
 
 
 @login_required

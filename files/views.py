@@ -130,6 +130,7 @@ from ledger.services import (
     _convert_platform_token_units_to_canonical_stable_units,
 )
 from ledger.dashboard import config as wallet_config
+from ledger.dashboard.bonus_vault import build_bonus_vault_context
 from ledger.dashboard.daily_rewards import build_daily_rewards_context
 from ledger.fiat import (
     get_fiat_currency_symbol,
@@ -1683,6 +1684,11 @@ def wallet(request):
     context["daily_rewards"] = build_daily_rewards_context(
         user=request.user,
         claim_url=reverse("wallet_claim_daily_reward"),
+    )
+    context["bonus_vault"] = build_bonus_vault_context(
+        user=request.user,
+        wallet=wallet_obj,
+        open_url=reverse("wallet_open_bonus_vault"),
     )
     return render(request, "cms/wallet.html", context)
 

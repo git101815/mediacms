@@ -33,6 +33,11 @@ urlpatterns = [
         wallet_dashboard_views.wallet_claim_daily_reward,
         name="wallet_claim_daily_reward",
     ),
+    path(
+        "wallet/bonus-vault/open",
+        wallet_dashboard_views.wallet_open_bonus_vault,
+        name="wallet_open_bonus_vault",
+    ),
     re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/$", views.wallet_deposit_session, name="wallet_deposit_session"),
     re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/status/$", views.wallet_deposit_session_status, name="wallet_deposit_session_status"),
     re_path(
