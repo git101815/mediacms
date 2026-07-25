@@ -6,7 +6,11 @@ from django.test import override_settings
 from django.urls import reverse
 
 from ledger.dashboard import config
-from ledger.dashboard.daily_rewards import claim_daily_reward, get_daily_reward_date
+from ledger.dashboard.daily_rewards import (
+    build_daily_rewards_context,
+    claim_daily_reward,
+    get_daily_reward_date,
+)
 from ledger.dashboard.models import DailyRewardClaim, DailyRewardState
 from ledger.models import (
     LEDGER_RISK_STATUS_BLOCKED,
@@ -149,6 +153,66 @@ class TestDailyRewards(BaseLedgerTestCase):
         self.w1.refresh_from_db()
         self.assertEqual(self.w1.balance, 0)
         self.assertEqual(DailyRewardClaim.objects.filter(user=self.u1).count(), 0)
+
+    def test_next_streak_chest_comes_from_reward_rotation(self):
+        context = build_daily_rewards_context(
+            user=self.u1,
+            claim_url="/wallet/daily-reward/claim/",
+            at=self.instant(),
+        )
+        chest = config.get_reward_chest_definition("small_chest")
+
+        self.assertEqual(context["cycle_day"], 1)
+        self.assertEqual(context["next_chest"]["day"], 5)
+        self.assertEqual(context["next_chest"]["chest_key"], "small_chest")
+        self.assertEqual(context["next_chest"]["days_until_unlock"], 4)
+        self.assertEqual(context["next_chest"]["image_path"], chest.closed_image)
+
+    def test_next_streak_chest_advances_after_current_day_is_claimed(self):
+        reward_date = get_daily_reward_date(self.instant())
+        DailyRewardState.objects.create(
+            user=self.u1,
+            current_streak=29,
+            total_claims=29,
+            last_claim_date=reward_date,
+        )
+
+        context = build_daily_rewards_context(
+            user=self.u1,
+            claim_url="/wallet/daily-reward/claim/",
+            at=self.instant(),
+        )
+        chest = config.get_reward_chest_definition("big_chest")
+
+        self.assertTrue(context["claimed_today"])
+        self.assertEqual(context["cycle_day"], 29)
+        self.assertEqual(context["next_chest"]["day"], 30)
+        self.assertEqual(context["next_chest"]["chest_key"], "big_chest")
+        self.assertEqual(context["next_chest"]["days_until_unlock"], 1)
+        self.assertEqual(context["next_chest"]["image_path"], chest.closed_image)
+
+    def test_next_streak_chest_wraps_with_the_reward_cycle(self):
+        reward_date = get_daily_reward_date(self.instant())
+        DailyRewardState.objects.create(
+            user=self.u1,
+            current_streak=30,
+            total_claims=30,
+            last_claim_date=reward_date,
+        )
+
+        context = build_daily_rewards_context(
+            user=self.u1,
+            claim_url="/wallet/daily-reward/claim/",
+            at=self.instant(),
+        )
+        chest = config.get_reward_chest_definition("small_chest")
+
+        self.assertTrue(context["claimed_today"])
+        self.assertEqual(context["cycle_day"], 30)
+        self.assertEqual(context["next_chest"]["day"], 5)
+        self.assertEqual(context["next_chest"]["chest_key"], "small_chest")
+        self.assertEqual(context["next_chest"]["days_until_unlock"], 5)
+        self.assertEqual(context["next_chest"]["image_path"], chest.closed_image)
 
     def test_config_rejects_invalid_or_dangerous_amounts(self):
         with patch.object(config, "DAILY_REWARDS", ({"amount": 0, "asset": "coins"},)):

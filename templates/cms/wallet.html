@@ -165,7 +165,15 @@
           <section class="wallet-game-card wallet-game-streak" data-wallet-module="streak">
             <div class="wallet-game-streak__badge"><span>Keep your streak!</span><strong>{{ daily_rewards.streak }}</strong></div>
             <div class="wallet-game-streak__copy"><strong>Day Streak</strong><span>Nice! Keep it going to earn bigger rewards.</span></div>
-            <img src="{% static 'images/wallet/dashboard/streak-chest.png' %}" alt="">
+            {% if daily_rewards.next_chest %}
+            <img
+              src="{% static daily_rewards.next_chest.image_path %}"
+              alt=""
+              data-reward-chest="{{ daily_rewards.next_chest.chest_key }}"
+              data-box-state="closed"
+              data-days-until-unlock="{{ daily_rewards.next_chest.days_until_unlock }}"
+            >
+            {% endif %}
           </section>
         </div>
       </main>

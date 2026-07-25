@@ -534,6 +534,26 @@ def _build_reward_row(definition, *, status: str, opened: bool = False) -> dict:
     }
 
 
+
+def _build_next_chest_row(
+    definitions,
+    *,
+    cycle_day: int,
+    claimed_today: bool,
+) -> dict | None:
+    """Return the next unopened chest in the configured streak rotation."""
+    first_offset = 1 if claimed_today else 0
+    cycle_length = len(definitions)
+
+    for offset in range(first_offset, first_offset + cycle_length):
+        definition = definitions[(cycle_day - 1 + offset) % cycle_length]
+        if definition.kind == "chest":
+            row = _build_reward_row(definition, status="future", opened=False)
+            row["days_until_unlock"] = offset
+            return row
+    return None
+
+
 def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
     definitions = config.get_daily_reward_definitions()
     reward_date = get_daily_reward_date(at)
@@ -543,6 +563,11 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
     )
     cycle_day = _get_cycle_day(display_streak, len(definitions))
     current_reward = definitions[cycle_day - 1]
+    next_chest = _build_next_chest_row(
+        definitions,
+        cycle_day=cycle_day,
+        claimed_today=claimed_today,
+    )
 
     wallet = TokenWallet.objects.filter(
         wallet_type=TokenWallet.TYPE_USER,
@@ -620,6 +645,7 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
         "current_reward": _build_reward_row(
             current_reward, status="current", opened=claimed_today
         ),
+        "next_chest": next_chest,
         "window": window,
         "all_rewards": all_rewards,
         "timeline_percent": timeline_percent,
