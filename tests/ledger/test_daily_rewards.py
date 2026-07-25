@@ -154,6 +154,38 @@ class TestDailyRewards(BaseLedgerTestCase):
         self.assertEqual(self.w1.balance, 0)
         self.assertEqual(DailyRewardClaim.objects.filter(user=self.u1).count(), 0)
 
+    def test_claimed_current_day_is_exposed_as_claimed(self):
+        reward_date = get_daily_reward_date(self.instant())
+        DailyRewardState.objects.create(
+            user=self.u1,
+            current_streak=2,
+            total_claims=2,
+            last_claim_date=reward_date,
+        )
+
+        context = build_daily_rewards_context(
+            user=self.u1,
+            claim_url="/wallet/daily-reward/claim/",
+            at=self.instant(),
+        )
+
+        day_two = next(
+            reward
+            for reward in context["window"]
+            if reward["day"] == 2
+        )
+        modal_day_two = next(
+            reward
+            for reward in context["all_rewards"]
+            if reward["day"] == 2
+        )
+
+        self.assertTrue(context["claimed_today"])
+        self.assertEqual(context["cycle_day"], 2)
+        self.assertEqual(context["current_reward"]["status"], "claimed")
+        self.assertEqual(day_two["status"], "claimed")
+        self.assertEqual(modal_day_two["status"], "claimed")
+
     def test_next_streak_chest_comes_from_reward_rotation(self):
         context = build_daily_rewards_context(
             user=self.u1,

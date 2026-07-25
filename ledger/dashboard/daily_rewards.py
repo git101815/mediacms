@@ -608,7 +608,7 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
 
     def status_for(day):
         if day == cycle_day:
-            return "current"
+            return "claimed" if claimed_today else "current"
         if day < cycle_day:
             return "claimed"
         return "future"
@@ -651,7 +651,9 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
         "can_claim": can_claim,
         "block_reason": block_reason,
         "current_reward": _build_reward_row(
-            current_reward, status="current", opened=claimed_today
+            current_reward,
+            status=status_for(cycle_day),
+            opened=claimed_today,
         ),
         "next_chest": next_chest,
         "window": window,
