@@ -45,6 +45,23 @@ class User(AbstractUser):
 
     dfans_url = models.URLField("Dfans URL", blank=True, default="")
 
+    referral_code = models.CharField(
+        max_length=32,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        editable=False,
+    )
+    referred_by = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        related_name="referred_users",
+        null=True,
+        blank=True,
+        editable=False,
+    )
+
     class Meta:
         ordering = ["-date_added", "name"]
         indexes = [models.Index(fields=["-date_added", "name"])]

@@ -10,7 +10,7 @@
 
 		<p>Already have an account? Then please <a href="{{ login_url }}">sign in</a>.</p>
 
-		<form class="signup" id="signup_form" method="post" action="{% url 'account_signup' %}">
+		<form class="signup" id="signup_form" method="post" action="{% if referral_signup_url %}{{ referral_signup_url }}{% else %}{% url 'account_signup' %}{% endif %}">
 			{% csrf_token %}
 			{{ form.as_p }}
 			{% if redirect_field_value %}

@@ -580,7 +580,74 @@
     syncLock();
   }
 
+  function getReferralUrl() {
+    const module = document.querySelector('[data-wallet-module="referral"]');
+    return module ? module.getAttribute('data-referral-url') || '' : '';
+  }
+
+  function flashReferralLabel(button, text) {
+    const label = button.querySelector('[data-wallet-referral-label]');
+    if (!label) {
+      return;
+    }
+    const original = label.textContent;
+    label.textContent = text;
+    window.setTimeout(function () {
+      label.textContent = original;
+    }, 1600);
+  }
+
+  function copyReferralUrl(button) {
+    const url = getReferralUrl();
+    if (!url) {
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () {
+        flashReferralLabel(button, 'Copied');
+      });
+      return;
+    }
+
+    const input = document.createElement('textarea');
+    input.value = url;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    document.body.removeChild(input);
+    flashReferralLabel(button, 'Copied');
+  }
+
   document.addEventListener('click', function (event) {
+    const referralCopy = event.target.closest('[data-wallet-referral-copy]');
+    if (referralCopy) {
+      event.preventDefault();
+      copyReferralUrl(referralCopy);
+      return;
+    }
+
+    const referralShare = event.target.closest('[data-wallet-referral-share]');
+    if (referralShare) {
+      event.preventDefault();
+      const url = getReferralUrl();
+      if (!url) {
+        return;
+      }
+      if (navigator.share) {
+        navigator.share({
+          title: 'Join me',
+          text: 'Join using my referral link.',
+          url: url,
+        }).catch(function () {});
+      } else {
+        copyReferralUrl(referralShare);
+      }
+      return;
+    }
+
     const dashboardViewButton = event.target.closest('[data-wallet-dashboard-open]');
     if (dashboardViewButton) {
       event.preventDefault();

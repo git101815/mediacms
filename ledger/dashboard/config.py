@@ -162,6 +162,21 @@ QUEST_BOARD_QUESTS = (
 
 
 # ---------------------------------------------------------------------------
+# Referral Program
+# ---------------------------------------------------------------------------
+# referral_code is generated lazily when the wallet referral module first
+# needs it. Attribution is stored directly on users.User.referred_by at signup.
+REFERRAL_CONFIG_VERSION = 1
+REFERRAL_PROGRAM_ENABLED = True
+REFERRAL_REWARD_TOKENS = 200
+REFERRAL_GOAL = 10
+REFERRAL_MAX_REWARDED_FRIENDS = 10
+REFERRAL_MIN_PURCHASE_TOKENS = 1
+REFERRAL_CODE_LENGTH = 12
+REFERRAL_MAX_REWARD_TOKENS = 100_000
+
+
+# ---------------------------------------------------------------------------
 # Bonus Vault
 # ---------------------------------------------------------------------------
 # Posted token purchase debits fill the vault. Every full threshold unlocks one

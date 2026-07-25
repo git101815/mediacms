@@ -174,16 +174,22 @@
             </div>
           </section>
 
-          <section class="wallet-game-card wallet-game-panel wallet-game-referral" data-wallet-module="referral">
+          <section class="wallet-game-card wallet-game-panel wallet-game-referral" data-wallet-module="referral" data-referral-url="{{ referral.share_url }}">
             <div class="wallet-game-referral__head">
-              <div><div class="wallet-game-card__title"><i class="material-icons">group</i><span>Invite Friends, Earn Tokens</span></div><p>Earn CF tokens for every friend who joins and purchases.</p></div>
+              <div>
+                <div class="wallet-game-card__title"><i class="material-icons">group</i><span>Invite Friends, Earn Tokens</span></div>
+                <p>Earn {{ referral.reward_per_friend_display }} CF tokens when a referred friend completes their first purchase.</p>
+              </div>
               <img src="{% static daily_rewards.assets.referral_art %}" alt="">
             </div>
-            <div class="wallet-game-referral__stats"><span>3 / 10 friends invited</span><strong>600 <img src="{% static daily_rewards.assets.token_icon %}" alt=""></strong></div>
-            <div class="wallet-game-meter wallet-game-meter--small"><span style="width:30%"></span></div>
+            <div class="wallet-game-referral__stats">
+              <span>{{ referral.rewarded_count }} / {{ referral.goal }} friends rewarded</span>
+              <strong>{{ referral.earned_display }} <img src="{% static daily_rewards.assets.token_icon %}" alt=""></strong>
+            </div>
+            <div class="wallet-game-meter wallet-game-meter--small"><span style="width:{{ referral.progress_percent }}%"></span></div>
             <div class="wallet-game-referral__actions">
-              <button type="button" class="wallet-game-button wallet-game-button--primary wallet-game-button--full" data-wallet-action="invite-friends"><i class="material-icons">group_add</i><span>Invite Friends</span></button>
-              <button type="button" class="wallet-game-button wallet-game-button--secondary wallet-game-button--full" data-wallet-action="copy-referral-link"><i class="material-icons">link</i><span>Copy Link</span></button>
+              <button type="button" class="wallet-game-button wallet-game-button--primary wallet-game-button--full" data-wallet-referral-share{% if not referral.enabled %} disabled{% endif %}><i class="material-icons">group_add</i><span data-wallet-referral-label>Invite Friends</span></button>
+              <button type="button" class="wallet-game-button wallet-game-button--secondary wallet-game-button--full" data-wallet-referral-copy{% if not referral.enabled %} disabled{% endif %}><i class="material-icons">link</i><span data-wallet-referral-label>Copy Link</span></button>
             </div>
           </section>
         </div>

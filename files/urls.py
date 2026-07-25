@@ -7,6 +7,7 @@ from cms.views_video_sitemap import video_sitemap
 from . import download_views, management_views, views, malum_webhooks, paygate_webhooks
 from .feeds import IndexRSSFeed, SearchRSSFeed
 from ledger.dashboard import views as wallet_dashboard_views
+from users.views import ReferralSignupView
 
 urlpatterns = [
     path("i18n/", include("django.conf.urls.i18n")),
@@ -25,6 +26,11 @@ urlpatterns = [
     re_path(r"^edit", views.edit_media, name="edit_media"),
     re_path(r"^embed", views.embed_media, name="get_embed"),
     re_path(r"^featured$", views.featured_media),
+    path(
+        "r/<str:referral_code>",
+        ReferralSignupView.as_view(),
+        name="account_referral_signup",
+    ),
     re_path(r"^wallet/deposit-request$", views.wallet_deposit_request, name="wallet_deposit_request"),
     re_path(r"^wallet/withdrawal-request$", views.wallet_withdrawal_request, name="wallet_withdrawal_request"),
     re_path(r"^wallet/ad-free/purchase$", views.wallet_purchase_ad_free, name="wallet_purchase_ad_free"),

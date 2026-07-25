@@ -133,6 +133,7 @@ from ledger.dashboard import config as wallet_config
 from ledger.dashboard.bonus_vault import build_bonus_vault_context
 from ledger.dashboard.daily_rewards import build_daily_rewards_context
 from ledger.dashboard.quests import build_quest_board_context
+from ledger.dashboard.referrals import build_referral_context
 from ledger.fiat import (
     get_fiat_currency_symbol,
     get_fiat_usd_rate,
@@ -1630,6 +1631,19 @@ def wallet(request):
         },
     )
 
+    referral_context = build_referral_context(
+        user=request.user,
+        request=request,
+    )
+    wallet_obj.refresh_from_db(
+        fields=[
+            "balance",
+            "held_balance",
+            "risk_status",
+            "review_required",
+        ],
+    )
+
     active_tab = _normalize_wallet_tab((request.GET.get("tab") or WALLET_TAB_ALL).strip())
     active_status = _normalize_wallet_status(
         (request.GET.get("status") or WALLET_STATUS_ALL).strip(),
@@ -1750,6 +1764,7 @@ def wallet(request):
     context["quest_board"] = build_quest_board_context(
         user=request.user,
     )
+    context["referral"] = referral_context
     return render(request, "cms/wallet.html", context)
 
 @login_required
