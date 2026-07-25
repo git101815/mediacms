@@ -486,7 +486,10 @@ def _build_reward_row(definition, *, status: str, opened: bool = False) -> dict:
     if definition.kind == "fixed":
         amount_display = _format_token_amount(definition.amount_tokens)
         claim_label = f"Claim {amount_display}"
-        asset_definition = config.get_daily_reward_asset_definition(definition.asset)
+        asset_definition = config.get_daily_reward_asset_definition(
+            definition.asset,
+            amount_tokens=definition.amount_tokens,
+        )
         image_path = asset_definition["image"]
         button_image_path = asset_definition["button_image"]
         box_state = ""
@@ -518,6 +521,11 @@ def _build_reward_row(definition, *, status: str, opened: bool = False) -> dict:
         "amount_units": definition.amount_units,
         "amount_display": amount_display,
         "asset": definition.asset,
+        "asset_tier_min_amount": (
+            asset_definition["tier_min_amount"]
+            if definition.kind == "fixed"
+            else None
+        ),
         "image_path": image_path,
         "closed_image_path": definition.chest_closed_image,
         "opened_image_path": definition.chest_opened_image,

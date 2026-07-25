@@ -220,11 +220,86 @@ class TestDailyRewards(BaseLedgerTestCase):
             claim_url="/wallet/daily-reward/claim/",
             at=self.instant(),
         )
-        asset = config.get_daily_reward_asset_definition("coins")
+        asset = config.get_daily_reward_asset_definition(
+            "coins",
+            amount_tokens=50,
+        )
 
         self.assertEqual(context["current_reward"]["image_path"], asset["image"])
         self.assertEqual(context["current_reward"]["button_image_path"], asset["button_image"])
+        self.assertEqual(context["current_reward"]["asset_tier_min_amount"], 1)
         self.assertEqual(context["assets"], config.get_wallet_asset_paths())
+
+    def test_coin_asset_tiers_follow_reward_amount(self):
+        few = config.get_daily_reward_asset_definition(
+            "coins",
+            amount_tokens=199,
+        )
+        pile = config.get_daily_reward_asset_definition(
+            "coins",
+            amount_tokens=200,
+        )
+
+        self.assertEqual(
+            few["image"],
+            config.WALLET_ASSETS["daily_reward_coins_few"],
+        )
+        self.assertEqual(few["tier_min_amount"], 1)
+        self.assertEqual(
+            pile["image"],
+            config.WALLET_ASSETS["daily_reward_coins_pile"],
+        )
+        self.assertEqual(pile["tier_min_amount"], 200)
+        self.assertNotEqual(few["image"], pile["image"])
+
+    def test_daily_reward_context_uses_large_coin_asset_at_threshold(self):
+        reward_date = get_daily_reward_date(self.instant())
+        DailyRewardState.objects.create(
+            user=self.u1,
+            current_streak=5,
+            total_claims=5,
+            last_claim_date=reward_date - timedelta(days=1),
+        )
+
+        context = build_daily_rewards_context(
+            user=self.u1,
+            claim_url="/wallet/daily-reward/claim/",
+            at=self.instant(),
+        )
+
+        self.assertEqual(context["cycle_day"], 6)
+        self.assertEqual(context["current_reward"]["amount_tokens"], 200)
+        self.assertEqual(
+            context["current_reward"]["image_path"],
+            config.WALLET_ASSETS["daily_reward_coins_pile"],
+        )
+        self.assertEqual(
+            context["current_reward"]["asset_tier_min_amount"],
+            200,
+        )
+
+    def test_coin_asset_tiers_reject_invalid_order(self):
+        changed = {
+            "coins": {
+                "button_asset": "token_icon",
+                "tiers": (
+                    {
+                        "min_amount": 200,
+                        "image_asset": "daily_reward_coins_pile",
+                    },
+                    {
+                        "min_amount": 1,
+                        "image_asset": "daily_reward_coins_few",
+                    },
+                ),
+            },
+        }
+        with patch.object(config, "DAILY_REWARD_ASSETS", changed):
+            with self.assertRaises(ImproperlyConfigured):
+                config.get_daily_reward_asset_definition(
+                    "coins",
+                    amount_tokens=200,
+                )
 
     def test_wallet_asset_paths_are_validated(self):
         changed = dict(config.WALLET_ASSETS)

@@ -44,7 +44,8 @@ WALLET_ASSETS = {
     "token_icon": "images/wallet/cf-token.png",
     "hero_art": "images/wallet/dashboard/hero-art.png",
     "vault_chest": WALLET_CHEST_ASSETS["big_chest"]["closed"],
-    "daily_reward_coins": "images/wallet/dashboard/reward-coins.png",
+    "daily_reward_coins_few": "images/wallet/dashboard/few_coins.png",
+    "daily_reward_coins_pile": "images/wallet/dashboard/coin_pile.png",
     "quest_daily_login": "images/wallet/dashboard/quest-login.png",
     "quest_watch_previews": "images/wallet/dashboard/quest-watch.png",
     "quest_invite_friend": "images/wallet/dashboard/quest-invite.png",
@@ -53,10 +54,23 @@ WALLET_ASSETS = {
     "remove_ads_art": "images/wallet/dashboard/remove-ads.png",
 }
 
+# Amount tiers are evaluated from the highest matching ``min_amount``.
+# Current split:
+#   1-199 tokens  -> few_coins.png
+#   200+ tokens   -> coin_pile.png
 DAILY_REWARD_ASSETS = {
     "coins": {
-        "image_asset": "daily_reward_coins",
         "button_asset": "token_icon",
+        "tiers": (
+            {
+                "min_amount": 1,
+                "image_asset": "daily_reward_coins_few",
+            },
+            {
+                "min_amount": 200,
+                "image_asset": "daily_reward_coins_pile",
+            },
+        ),
     },
 }
 
@@ -342,18 +356,90 @@ def get_wallet_asset_paths() -> dict[str, str]:
     }
 
 
-def get_daily_reward_asset_definition(asset_key: str) -> dict[str, str]:
+def get_daily_reward_asset_definition(
+    asset_key: str,
+    *,
+    amount_tokens: int,
+) -> dict[str, str | int]:
     key = _normalize_identifier(asset_key, field_name="Daily reward asset")
     raw = DAILY_REWARD_ASSETS.get(key)
     if not isinstance(raw, dict):
         raise ImproperlyConfigured(f"Unknown daily reward asset: {key}")
 
+    normalized_amount = _require_whole_positive_int(
+        amount_tokens,
+        field_name=f"Daily reward asset {key} amount",
+        maximum=DAILY_REWARD_MAX_TOKENS_PER_CLAIM,
+    )
     assets = get_wallet_asset_paths()
-    image_asset = _normalize_identifier(raw.get("image_asset"), field_name=f"Daily reward asset {key} image_asset")
-    button_asset = _normalize_identifier(raw.get("button_asset"), field_name=f"Daily reward asset {key} button_asset")
-    if image_asset not in assets or button_asset not in assets:
-        raise ImproperlyConfigured(f"Daily reward asset {key} references an unknown wallet asset")
-    return {"image": assets[image_asset], "button_image": assets[button_asset]}
+
+    button_asset = _normalize_identifier(
+        raw.get("button_asset"),
+        field_name=f"Daily reward asset {key} button_asset",
+    )
+    if button_asset not in assets:
+        raise ImproperlyConfigured(
+            f"Daily reward asset {key} references unknown wallet asset {button_asset}"
+        )
+
+    raw_tiers = raw.get("tiers")
+    if not isinstance(raw_tiers, (list, tuple)) or not raw_tiers:
+        raise ImproperlyConfigured(
+            f"Daily reward asset {key} requires at least one amount tier"
+        )
+
+    tiers = []
+    previous_minimum = 0
+    for index, raw_tier in enumerate(raw_tiers, start=1):
+        if not isinstance(raw_tier, dict):
+            raise ImproperlyConfigured(
+                f"Daily reward asset {key} tier {index} must be a dictionary"
+            )
+
+        minimum = _require_whole_positive_int(
+            raw_tier.get("min_amount"),
+            field_name=f"Daily reward asset {key} tier {index} min_amount",
+            maximum=DAILY_REWARD_MAX_TOKENS_PER_CLAIM,
+        )
+        if minimum <= previous_minimum:
+            raise ImproperlyConfigured(
+                f"Daily reward asset {key} tiers must be ordered by increasing min_amount"
+            )
+
+        image_asset = _normalize_identifier(
+            raw_tier.get("image_asset"),
+            field_name=f"Daily reward asset {key} tier {index} image_asset",
+        )
+        if image_asset not in assets:
+            raise ImproperlyConfigured(
+                f"Daily reward asset {key} tier {index} references "
+                f"unknown wallet asset {image_asset}"
+            )
+
+        tiers.append(
+            {
+                "min_amount": minimum,
+                "image_asset": image_asset,
+            }
+        )
+        previous_minimum = minimum
+
+    if tiers[0]["min_amount"] != 1:
+        raise ImproperlyConfigured(
+            f"Daily reward asset {key} first tier must start at 1"
+        )
+
+    selected = tiers[0]
+    for tier in tiers[1:]:
+        if normalized_amount < tier["min_amount"]:
+            break
+        selected = tier
+
+    return {
+        "image": assets[selected["image_asset"]],
+        "button_image": assets[button_asset],
+        "tier_min_amount": selected["min_amount"],
+    }
 
 
 def get_wallet_token_pack_image_path(pack_code: str) -> str:
