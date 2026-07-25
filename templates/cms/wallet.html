@@ -351,10 +351,10 @@
 
         {% elif active_tab == "all" %}
 
-          {% if recent_deposit_session_rows or recent_request_rows or transaction_rows %}
+          {% if activity_rows %}
           <div class="wallet-ui__list">
-
-            {% for row in recent_deposit_session_rows %}
+            {% for row in activity_rows %}
+              {% if row.activity_type == "deposit" %}
             <article class="wallet-ui__card wallet-ui__card--soft">
               <div class="wallet-ui__card-main">
                 <div class="wallet-ui__card-top">
@@ -364,28 +364,20 @@
                     <span>{{ row.status_label }}</span>
                   </span>
                 </div>
-
                 <div class="wallet-ui__card-title">Top up · {{ row.display_label|default:row.label }}</div>
                 <div class="wallet-ui__card-meta">{{ row.deposit_address }}</div>
               </div>
-
-                <div class="wallet-ui__card-side">
-                  {% if row.show_amount %}
-                    <strong
-                      class="wallet-ui__delta wallet-ui__delta--credit"
-                      title="+{{ row.credited_amount_display }}"
-                    >
-                      +{{ row.credited_amount_display }}
-                    </strong>
-                    <span>tokens</span>
-                  {% elif row.show_view %}
-                    <a href="{{ row.url }}" class="wallet-ui__ghost-link">View</a>
-                  {% endif %}
-                </div>
+              <div class="wallet-ui__card-side">
+                {% if row.show_amount %}
+                <strong class="wallet-ui__delta wallet-ui__delta--credit" title="+{{ row.credited_amount_display }}">+{{ row.credited_amount_display }}</strong>
+                <span>tokens</span>
+                {% elif row.show_view %}
+                <a href="{{ row.url }}" class="wallet-ui__ghost-link">View</a>
+                {% endif %}
+              </div>
             </article>
-            {% endfor %}
 
-            {% for row in recent_request_rows %}
+              {% elif row.activity_type == "request" %}
             <article class="wallet-ui__card wallet-ui__card--soft">
               <div class="wallet-ui__card-main">
                 <div class="wallet-ui__card-top">
@@ -395,25 +387,19 @@
                     <span>{{ row.status_label }}</span>
                   </span>
                 </div>
-
-                <div class="wallet-ui__card-title">
-                  Cash out{% if row.notes %} · {{ row.notes }}{% endif %}
-                </div>
-
+                <div class="wallet-ui__card-title">Cash out{% if row.notes %} · {{ row.notes }}{% endif %}</div>
                 {% if row.destination_address %}
                 <div class="wallet-ui__card-meta">Destination {{ row.destination_address }}</div>
                 {% endif %}
                 <div class="wallet-ui__card-meta">Reference {{ row.reference }}</div>
               </div>
-
               <div class="wallet-ui__card-side">
                 <strong title="{{ row.amount_display }}">{{ row.amount_display }}</strong>
                 <span>tokens</span>
               </div>
             </article>
-            {% endfor %}
 
-            {% for row in transaction_rows %}
+              {% else %}
             <article class="wallet-ui__card wallet-ui__card--soft">
               <div class="wallet-ui__card-main">
                 <div class="wallet-ui__card-top">
@@ -423,28 +409,28 @@
                     <span>{{ row.status_label }}</span>
                   </span>
                 </div>
-
-                <div class="wallet-ui__card-title">
-                  {% if row.memo %}{{ row.memo }}{% else %}{{ row.kind }}{% endif %}
-                </div>
-
+                <div class="wallet-ui__card-title">{% if row.memo %}{{ row.memo }}{% else %}{{ row.kind }}{% endif %}</div>
                 {% if row.counterparty != "—" %}
                 <div class="wallet-ui__card-meta">{{ row.counterparty }}</div>
                 {% endif %}
                 <div class="wallet-ui__card-meta">Ref #{{ row.txn_id }}</div>
               </div>
-
               <div class="wallet-ui__card-side">
-                <strong class="wallet-ui__delta wallet-ui__delta--{{ row.direction }}" title="{{ row.delta_display }}">
-                  {{ row.delta_display }}
-                </strong>
+                <strong class="wallet-ui__delta wallet-ui__delta--{{ row.direction }}" title="{{ row.delta_display }}">{{ row.delta_display }}</strong>
                 <span title="{{ row.balance_after_display }}">Balance {{ row.balance_after_display }}</span>
               </div>
             </article>
+              {% endif %}
             {% endfor %}
-
           </div>
           {% else %}
+          <div class="wallet-ui__empty">
+            <div class="wallet-ui__empty-title">No activity yet</div>
+            <div class="wallet-ui__empty-text">Your wallet activity will appear here.</div>
+          </div>
+          {% endif %}
+
+        {% else %}
           <div class="wallet-ui__empty">
             <div class="wallet-ui__empty-title">No activity yet</div>
             <div class="wallet-ui__empty-text">Your wallet activity will appear here.</div>

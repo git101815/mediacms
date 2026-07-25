@@ -925,7 +925,7 @@ def _build_wallet_request_rows(wallet: TokenWallet, *, active_status: str = WALL
         wallet_requests = wallet_requests.filter(status=active_status)
 
     rows = []
-    for wallet_request in wallet_requests[:10]:
+    for wallet_request in wallet_requests[:WALLET_PAGE_SIZE]:
         rows.append(
             {
                 "created_at": wallet_request.created_at,
@@ -988,10 +988,56 @@ def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_ST
             }
         )
 
-        if len(rows) >= 5:
+        if len(rows) >= WALLET_PAGE_SIZE:
             break
 
     return rows
+
+
+def _build_wallet_activity_rows(
+    *,
+    deposit_rows: list[dict],
+    request_rows: list[dict],
+    transaction_rows: list[dict],
+    limit: int = WALLET_PAGE_SIZE,
+) -> list[dict]:
+    # Merge heterogeneous wallet activity using time as the primary key.
+    # Status is deliberately not part of the ordering.
+    merged_rows = []
+    sources = (
+        ("deposit", deposit_rows),
+        ("request", request_rows),
+        ("transaction", transaction_rows),
+    )
+    source_rank = {
+        "transaction": 3,
+        "request": 2,
+        "deposit": 1,
+    }
+
+    for activity_type, source_rows in sources:
+        for source_position, source_row in enumerate(source_rows):
+            row = dict(source_row)
+            row["activity_type"] = activity_type
+            row["_activity_source_rank"] = source_rank[activity_type]
+            row["_activity_source_position"] = source_position
+            merged_rows.append(row)
+
+    merged_rows.sort(
+        key=lambda row: (
+            row["created_at"],
+            row["_activity_source_rank"],
+            -row["_activity_source_position"],
+        ),
+        reverse=True,
+    )
+
+    visible_rows = merged_rows[:max(1, int(limit))]
+    for row in visible_rows:
+        row.pop("_activity_source_rank", None)
+        row.pop("_activity_source_position", None)
+    return visible_rows
+
 
 def _build_deposit_session_payload(session: DepositSession) -> dict:
     metadata = session.metadata or {}
@@ -1624,6 +1670,15 @@ def wallet(request):
         active_status=active_status,
         page_number=page_number,
     )
+    recent_deposit_session_rows = _build_recent_deposit_session_rows(
+        wallet_obj,
+        active_status=active_status,
+    )
+    activity_rows = _build_wallet_activity_rows(
+        deposit_rows=recent_deposit_session_rows,
+        request_rows=recent_request_rows,
+        transaction_rows=transaction_rows,
+    )
     empty_state_title, empty_state_text = _get_wallet_empty_state_message(
         tab=active_tab,
         status=active_status,
@@ -1666,7 +1721,8 @@ def wallet(request):
         "wallet_deposit_request_url": reverse("wallet_deposit_request"),
         "wallet_withdrawal_request_url": reverse("wallet_withdrawal_request"),
         "deposit_options": deposit_options,
-        "recent_deposit_session_rows": _build_recent_deposit_session_rows(wallet_obj,active_status=active_status),
+        "recent_deposit_session_rows": recent_deposit_session_rows,
+        "activity_rows": activity_rows,
         "token_pack_rows": token_pack_rows,
     }
     ad_free_price_tokens = get_ad_free_lifetime_price_tokens()
