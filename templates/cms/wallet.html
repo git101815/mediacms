@@ -138,29 +138,39 @@
           <section class="wallet-game-card wallet-game-panel wallet-game-quests" data-wallet-module="quests">
             <div class="wallet-game-panel__head">
               <div><div class="wallet-game-card__title"><i class="material-icons wallet-game-card__title-accent">track_changes</i><span>Quests Board</span></div><p>Complete missions to earn CF tokens!</p></div>
-              <div class="wallet-game-quests__reset"><span>Resets in</span><strong>09h 45m</strong></div>
+              {% if quest_board.reset_label %}
+              <div class="wallet-game-quests__reset"><span>Schedule</span><strong>{{ quest_board.reset_label }}</strong></div>
+              {% endif %}
             </div>
             <div class="wallet-game-quests__grid">
-              <article class="wallet-game-quest" data-wallet-quest="daily-login">
-                <img src="{% static daily_rewards.assets.quest_daily_login %}" alt=""><strong>Daily Login</strong><span>Login to the platform</span>
-                <div class="wallet-game-quest__meter"><i style="width:100%"></i></div><div class="wallet-game-quest__progress">1 / 1</div>
-                <div class="wallet-game-quest__reward">+50 <img src="{% static daily_rewards.assets.token_icon %}" alt=""></div><button type="button" data-wallet-action="claim-quest">Claim</button>
+              {% for quest in quest_board.slots %}
+                {% if quest.empty %}
+              <article class="wallet-game-quest wallet-game-quest--empty" aria-hidden="true" style="visibility:hidden"></article>
+                {% else %}
+              <article class="wallet-game-quest{% if quest.claimed %} wallet-game-quest--claimed{% elif quest.complete %} wallet-game-quest--complete{% endif %}" data-wallet-quest="{{ quest.key }}">
+                <img src="{% static quest.icon_path %}" alt="">
+                <strong>{{ quest.title }}</strong>
+                <span>{{ quest.description }}</span>
+                <div class="wallet-game-quest__meter{% if not quest.complete %} wallet-game-quest__meter--amber{% endif %}"><i style="width:{{ quest.progress_percent }}%"></i></div>
+                <div class="wallet-game-quest__progress">{{ quest.current }} / {{ quest.target }}</div>
+                <div class="wallet-game-quest__reward">+{{ quest.reward_display }} <img src="{% static daily_rewards.assets.token_icon %}" alt=""></div>
+                {% if quest.claimed %}
+                <button type="button" disabled>Claimed</button>
+                {% elif quest.can_claim %}
+                <form method="post" action="{{ quest.claim_url }}" style="display:contents">
+                  {% csrf_token %}
+                  <button type="submit" data-wallet-action="claim-quest">Claim</button>
+                </form>
+                {% elif quest.action_url %}
+                <form method="get" action="{{ quest.action_url }}" style="display:contents">
+                  <button type="submit" data-wallet-action="go-quest">{{ quest.button_label }}</button>
+                </form>
+                {% else %}
+                <button type="button" disabled>{{ quest.button_label }}</button>
+                {% endif %}
               </article>
-              <article class="wallet-game-quest" data-wallet-quest="watch-previews">
-                <img src="{% static daily_rewards.assets.quest_watch_previews %}" alt=""><strong>Watch Previews</strong><span>Watch 3 previews</span>
-                <div class="wallet-game-quest__meter wallet-game-quest__meter--amber"><i style="width:66%"></i></div><div class="wallet-game-quest__progress">2 / 3</div>
-                <div class="wallet-game-quest__reward">+75 <img src="{% static daily_rewards.assets.token_icon %}" alt=""></div><button type="button" data-wallet-action="go-quest">Go</button>
-              </article>
-              <article class="wallet-game-quest" data-wallet-quest="invite-friend">
-                <img src="{% static daily_rewards.assets.quest_invite_friend %}" alt=""><strong>Invite a Friend</strong><span>Invite 1 friend</span>
-                <div class="wallet-game-quest__meter"><i style="width:0%"></i></div><div class="wallet-game-quest__progress">0 / 1</div>
-                <div class="wallet-game-quest__reward">+200 <img src="{% static daily_rewards.assets.token_icon %}" alt=""></div><button type="button" data-wallet-action="invite-friend">Invite</button>
-              </article>
-              <article class="wallet-game-quest" data-wallet-quest="remove-ads">
-                <img src="{% static daily_rewards.assets.quest_remove_ads %}" alt=""><strong>Unlock Ad-Free</strong><span>Remove ads forever</span>
-                <div class="wallet-game-quest__meter"><i style="width:{% if ad_free.active %}100{% else %}0{% endif %}%"></i></div><div class="wallet-game-quest__progress">{% if ad_free.active %}1 / 1{% else %}0 / 1{% endif %}</div>
-                <div class="wallet-game-quest__reward">+500 <img src="{% static daily_rewards.assets.token_icon %}" alt=""></div><button type="button" data-wallet-scroll-to="wallet-ad-free-offer">{% if ad_free.active %}Done{% else %}View Offer{% endif %}</button>
-              </article>
+                {% endif %}
+              {% endfor %}
             </div>
           </section>
 

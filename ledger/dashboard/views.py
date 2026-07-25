@@ -6,6 +6,35 @@ from django.views.decorators.http import require_POST
 
 from .bonus_vault import open_bonus_vault
 from .daily_rewards import claim_daily_reward
+from .quests import claim_quest_reward
+
+
+@login_required
+@require_POST
+def wallet_claim_quest(request, quest_key):
+    try:
+        result = claim_quest_reward(
+            user=request.user,
+            quest_key=quest_key,
+        )
+    except (PermissionDenied, ValidationError) as exc:
+        messages.error(
+            request,
+            exc.messages[0] if hasattr(exc, "messages") else str(exc),
+        )
+        return redirect("wallet")
+
+    if result["claimed"]:
+        messages.success(
+            request,
+            (
+                f"Quest completed: {result['quest_title']} "
+                f"(+{result['amount_tokens']:,} tokens)."
+            ),
+        )
+    else:
+        messages.info(request, "This quest reward was already claimed.")
+    return redirect("wallet")
 
 
 @login_required

@@ -132,6 +132,7 @@ from ledger.services import (
 from ledger.dashboard import config as wallet_config
 from ledger.dashboard.bonus_vault import build_bonus_vault_context
 from ledger.dashboard.daily_rewards import build_daily_rewards_context
+from ledger.dashboard.quests import build_quest_board_context
 from ledger.fiat import (
     get_fiat_currency_symbol,
     get_fiat_usd_rate,
@@ -1689,6 +1690,9 @@ def wallet(request):
         user=request.user,
         wallet=wallet_obj,
         open_url=reverse("wallet_open_bonus_vault"),
+    )
+    context["quest_board"] = build_quest_board_context(
+        user=request.user,
     )
     return render(request, "cms/wallet.html", context)
 

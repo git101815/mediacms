@@ -46,6 +46,7 @@ WALLET_ASSETS = {
     "vault_chest": WALLET_CHEST_ASSETS["big_chest"]["closed"],
     "daily_reward_coins_few": "images/wallet/dashboard/few_coins.png",
     "daily_reward_coins_pile": "images/wallet/dashboard/coin_pile.png",
+    "quest_confirm_email": "images/wallet/dashboard/quest-login.png",
     "quest_daily_login": "images/wallet/dashboard/quest-login.png",
     "quest_watch_previews": "images/wallet/dashboard/quest-watch.png",
     "quest_invite_friend": "images/wallet/dashboard/quest-invite.png",
@@ -128,6 +129,37 @@ WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS = {
     "revolut": "revolut_eu",
     "transak": "transak_card",
 }
+
+# ---------------------------------------------------------------------------
+# Quest Board
+# ---------------------------------------------------------------------------
+# The board always keeps this many visual slots. Only definitions present in
+# QUEST_BOARD_QUESTS are active; remaining slots are intentionally empty.
+QUEST_BOARD_CONFIG_VERSION = 1
+QUEST_BOARD_ENABLED = True
+QUEST_BOARD_SLOT_COUNT = 4
+QUEST_BOARD_RESET_LABEL = "One-time"
+QUEST_BOARD_MAX_REWARD_TOKENS = 100_000
+
+# Supported condition types are implemented in ledger/dashboard/quests.py.
+# Reward amounts are HUMAN token amounts and are converted to ledger units.
+QUEST_BOARD_QUESTS = (
+    {
+        "key": "confirm_email",
+        "title": "Confirm Email",
+        "description": "Verify your email address",
+        "condition": "email_verified",
+        "icon_asset": "quest_confirm_email",
+        "action_label": "Confirm",
+        "action_url_name": "account_email",
+        "reward": {
+            "kind": "fixed",
+            "amount": 50,
+            "asset": "coins",
+        },
+    },
+)
+
 
 # ---------------------------------------------------------------------------
 # Bonus Vault
