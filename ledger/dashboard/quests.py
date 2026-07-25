@@ -366,6 +366,13 @@ def build_quest_board_context(*, user) -> dict:
             }
         )
 
+    reset_label = str(config.QUEST_BOARD_RESET_LABEL or "").strip()
+    normalized_schedule = re.sub(r"[\\s_-]+", " ", reset_label).strip().lower()
+    show_schedule = bool(
+        reset_label
+        and normalized_schedule not in {"one time", "once"}
+    )
+
     return {
         "enabled": enabled,
         "config_version": int(config.QUEST_BOARD_CONFIG_VERSION),
@@ -373,7 +380,8 @@ def build_quest_board_context(*, user) -> dict:
         "active_count": len(definitions),
         "completed_count": completed_count,
         "claimed_count": claimed_count,
-        "reset_label": str(config.QUEST_BOARD_RESET_LABEL or "").strip(),
+        "reset_label": reset_label,
+        "show_schedule": show_schedule,
         "slots": rows,
     }
 

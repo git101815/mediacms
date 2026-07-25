@@ -1800,3 +1800,16 @@ $error-text: #ff9a9a;
 @media(max-width:560px){.wallet-game-hero{padding:22px 18px 16px}.wallet-game-hero__balance strong{font-size:55px}.wallet-game-hero__balance img{width:46px;height:46px;flex-basis:46px}.wallet-game-rewards,.wallet-game-quests__grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wallet-game-reward:nth-child(5){grid-column:1/-1}.wallet-game-referral__head{grid-template-columns:1fr}.wallet-game-referral__head>img{justify-self:center}}
 
 .wallet-daily-rewards-modal{max-width:760px}.wallet-daily-rewards-modal__grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;max-height:min(68vh,680px);margin-top:20px;padding-right:4px;overflow:auto}.wallet-daily-rewards-modal__grid .wallet-game-reward{min-height:112px}@media(max-width:760px){.wallet-daily-rewards-modal__grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:430px){.wallet-daily-rewards-modal__grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* quest-board-claimed-button */
+.wallet-game-quest button.wallet-game-quest__button--claimed:disabled,
+.wallet-game-quest:first-child button.wallet-game-quest__button--claimed:disabled {
+  border-color: rgba(255, 255, 255, 0.10);
+  background: #30343c;
+  color: #aeb4c0;
+  opacity: 1;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+}
+

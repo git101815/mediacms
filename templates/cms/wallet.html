@@ -138,7 +138,7 @@
           <section class="wallet-game-card wallet-game-panel wallet-game-quests" data-wallet-module="quests">
             <div class="wallet-game-panel__head">
               <div><div class="wallet-game-card__title"><i class="material-icons wallet-game-card__title-accent">track_changes</i><span>Quests Board</span></div><p>Complete missions to earn CF tokens!</p></div>
-              {% if quest_board.reset_label %}
+              {% if quest_board.show_schedule %}
               <div class="wallet-game-quests__reset"><span>Schedule</span><strong>{{ quest_board.reset_label }}</strong></div>
               {% endif %}
             </div>
@@ -155,7 +155,7 @@
                 <div class="wallet-game-quest__progress">{{ quest.current }} / {{ quest.target }}</div>
                 <div class="wallet-game-quest__reward">+{{ quest.reward_display }} <img src="{% static daily_rewards.assets.token_icon %}" alt=""></div>
                 {% if quest.claimed %}
-                <button type="button" disabled>Claimed</button>
+                <button type="button" class="wallet-game-quest__button--claimed" disabled>Claimed</button>
                 {% elif quest.can_claim %}
                 <form method="post" action="{{ quest.claim_url }}" style="display:contents">
                   {% csrf_token %}

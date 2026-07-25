@@ -52,6 +52,18 @@ class TestQuestBoard(BaseLedgerTestCase):
             3,
         )
 
+    def test_one_time_schedule_is_not_exposed(self):
+        context = self._context()
+
+        self.assertEqual(context["reset_label"], "One-time")
+        self.assertFalse(context["show_schedule"])
+
+        with patch.object(config, "QUEST_BOARD_RESET_LABEL", "Daily"):
+            recurring_context = self._context()
+
+        self.assertEqual(recurring_context["reset_label"], "Daily")
+        self.assertTrue(recurring_context["show_schedule"])
+
     def test_unverified_email_cannot_claim(self):
         context = self._context()
         quest = context["slots"][0]
