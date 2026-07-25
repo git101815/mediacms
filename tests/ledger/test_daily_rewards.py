@@ -61,7 +61,7 @@ class TestDailyRewards(BaseLedgerTestCase):
 
         second = claim_daily_reward(
             user=self.u1,
-            at=self.instant(hour=23),
+            at=self.instant(hour=20),
         )
         self.w1.refresh_from_db()
 

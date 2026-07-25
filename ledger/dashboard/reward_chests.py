@@ -247,11 +247,7 @@ def open_reward_chest(*, user, grant, at=None) -> dict:
 
     user = _require_eligible_user(user)
     grant_id = grant.pk if isinstance(grant, RewardChestGrant) else int(grant)
-    locked_grant = (
-        RewardChestGrant.objects.select_for_update()
-        .select_related("ledger_txn")
-        .get(pk=grant_id)
-    )
+    locked_grant = RewardChestGrant.objects.select_for_update().get(pk=grant_id)
 
     if locked_grant.user_id != user.pk:
         raise PermissionDenied("Cannot open another user's Reward Chest")

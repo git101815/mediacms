@@ -274,7 +274,7 @@ class TestRewardChests(BaseLedgerTestCase):
             return_value=0,
         ) as mocked_roll:
             first = claim_daily_reward(user=self.u1, at=self.instant())
-            second = claim_daily_reward(user=self.u1, at=self.instant(hour=23))
+            second = claim_daily_reward(user=self.u1, at=self.instant(hour=20))
 
         self.assertTrue(first["claimed"])
         self.assertFalse(second["claimed"])
