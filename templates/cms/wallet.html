@@ -35,12 +35,12 @@
       <main class="wallet-game" data-wallet-dashboard-view="home">
         <div class="wallet-game__top-grid">
           <section class="wallet-game-card wallet-game-hero">
-            <img class="wallet-game-hero__art" src="{% static 'images/wallet/dashboard/hero-art.png' %}" alt="" aria-hidden="true">
+            <img class="wallet-game-hero__art" src="{% static daily_rewards.assets.hero_art %}" alt="" aria-hidden="true">
             <div class="wallet-game-hero__content">
               <div class="wallet-game__eyebrow">Available balance</div>
               <div class="wallet-game-hero__balance">
                 <strong>{{ available_balance_display }}</strong>
-                <img src="{% static 'images/wallet/cf-token.png' %}" alt="" aria-hidden="true">
+                <img src="{% static daily_rewards.assets.token_icon %}" alt="" aria-hidden="true">
               </div>
               <div class="wallet-game-hero__unit">platform tokens</div>
               <div class="wallet-game-hero__note">
@@ -72,7 +72,7 @@
               <div class="wallet-game-vault__progress-copy"><span>Vault progress</span><strong data-wallet-vault-progress-label>68%</strong></div>
               <div class="wallet-game-meter"><span data-wallet-vault-progress style="width:68%"></span></div>
             </div>
-            <img class="wallet-game-vault__art" src="{% static 'images/wallet/dashboard/vault-chest.png' %}" alt="" aria-hidden="true">
+            <img class="wallet-game-vault__art" src="{% static daily_rewards.assets.vault_chest %}" alt="" aria-hidden="true">
             <button type="button" class="wallet-game-button wallet-game-button--primary wallet-game-button--full" data-wallet-action="open-vault">Open Vault</button>
           </section>
         </div>
@@ -114,24 +114,24 @@
             </div>
             <div class="wallet-game-quests__grid">
               <article class="wallet-game-quest" data-wallet-quest="daily-login">
-                <img src="{% static 'images/wallet/dashboard/quest-login.png' %}" alt=""><strong>Daily Login</strong><span>Login to the platform</span>
+                <img src="{% static daily_rewards.assets.quest_daily_login %}" alt=""><strong>Daily Login</strong><span>Login to the platform</span>
                 <div class="wallet-game-quest__meter"><i style="width:100%"></i></div><div class="wallet-game-quest__progress">1 / 1</div>
-                <div class="wallet-game-quest__reward">+50 <img src="{% static 'images/wallet/cf-token.png' %}" alt=""></div><button type="button" data-wallet-action="claim-quest">Claim</button>
+                <div class="wallet-game-quest__reward">+50 <img src="{% static daily_rewards.assets.token_icon %}" alt=""></div><button type="button" data-wallet-action="claim-quest">Claim</button>
               </article>
               <article class="wallet-game-quest" data-wallet-quest="watch-previews">
-                <img src="{% static 'images/wallet/dashboard/quest-watch.png' %}" alt=""><strong>Watch Previews</strong><span>Watch 3 previews</span>
+                <img src="{% static daily_rewards.assets.quest_watch_previews %}" alt=""><strong>Watch Previews</strong><span>Watch 3 previews</span>
                 <div class="wallet-game-quest__meter wallet-game-quest__meter--amber"><i style="width:66%"></i></div><div class="wallet-game-quest__progress">2 / 3</div>
-                <div class="wallet-game-quest__reward">+75 <img src="{% static 'images/wallet/cf-token.png' %}" alt=""></div><button type="button" data-wallet-action="go-quest">Go</button>
+                <div class="wallet-game-quest__reward">+75 <img src="{% static daily_rewards.assets.token_icon %}" alt=""></div><button type="button" data-wallet-action="go-quest">Go</button>
               </article>
               <article class="wallet-game-quest" data-wallet-quest="invite-friend">
-                <img src="{% static 'images/wallet/dashboard/quest-invite.png' %}" alt=""><strong>Invite a Friend</strong><span>Invite 1 friend</span>
+                <img src="{% static daily_rewards.assets.quest_invite_friend %}" alt=""><strong>Invite a Friend</strong><span>Invite 1 friend</span>
                 <div class="wallet-game-quest__meter"><i style="width:0%"></i></div><div class="wallet-game-quest__progress">0 / 1</div>
-                <div class="wallet-game-quest__reward">+200 <img src="{% static 'images/wallet/cf-token.png' %}" alt=""></div><button type="button" data-wallet-action="invite-friend">Invite</button>
+                <div class="wallet-game-quest__reward">+200 <img src="{% static daily_rewards.assets.token_icon %}" alt=""></div><button type="button" data-wallet-action="invite-friend">Invite</button>
               </article>
               <article class="wallet-game-quest" data-wallet-quest="remove-ads">
-                <img src="{% static 'images/wallet/dashboard/quest-adfree.png' %}" alt=""><strong>Unlock Ad-Free</strong><span>Remove ads forever</span>
+                <img src="{% static daily_rewards.assets.quest_remove_ads %}" alt=""><strong>Unlock Ad-Free</strong><span>Remove ads forever</span>
                 <div class="wallet-game-quest__meter"><i style="width:{% if ad_free.active %}100{% else %}0{% endif %}%"></i></div><div class="wallet-game-quest__progress">{% if ad_free.active %}1 / 1{% else %}0 / 1{% endif %}</div>
-                <div class="wallet-game-quest__reward">+500 <img src="{% static 'images/wallet/cf-token.png' %}" alt=""></div><button type="button" data-wallet-scroll-to="wallet-ad-free-offer">{% if ad_free.active %}Done{% else %}View Offer{% endif %}</button>
+                <div class="wallet-game-quest__reward">+500 <img src="{% static daily_rewards.assets.token_icon %}" alt=""></div><button type="button" data-wallet-scroll-to="wallet-ad-free-offer">{% if ad_free.active %}Done{% else %}View Offer{% endif %}</button>
               </article>
             </div>
           </section>
@@ -139,9 +139,9 @@
           <section class="wallet-game-card wallet-game-panel wallet-game-referral" data-wallet-module="referral">
             <div class="wallet-game-referral__head">
               <div><div class="wallet-game-card__title"><i class="material-icons">group</i><span>Invite Friends, Earn Tokens</span></div><p>Earn CF tokens for every friend who joins and purchases.</p></div>
-              <img src="{% static 'images/wallet/dashboard/referral-coins.png' %}" alt="">
+              <img src="{% static daily_rewards.assets.referral_art %}" alt="">
             </div>
-            <div class="wallet-game-referral__stats"><span>3 / 10 friends invited</span><strong>600 <img src="{% static 'images/wallet/cf-token.png' %}" alt=""></strong></div>
+            <div class="wallet-game-referral__stats"><span>3 / 10 friends invited</span><strong>600 <img src="{% static daily_rewards.assets.token_icon %}" alt=""></strong></div>
             <div class="wallet-game-meter wallet-game-meter--small"><span style="width:30%"></span></div>
             <div class="wallet-game-referral__actions">
               <button type="button" class="wallet-game-button wallet-game-button--primary wallet-game-button--full" data-wallet-action="invite-friends"><i class="material-icons">group_add</i><span>Invite Friends</span></button>
@@ -152,9 +152,9 @@
 
         <div class="wallet-game__bottom-grid">
           <section id="wallet-ad-free-offer" class="wallet-game-card wallet-game-adfree" data-wallet-module="ad-free">
-            <img class="wallet-game-adfree__art" src="{% static 'images/wallet/dashboard/remove-ads.png' %}" alt="">
+            <img class="wallet-game-adfree__art" src="{% static daily_rewards.assets.remove_ads_art %}" alt="">
             <div class="wallet-game-adfree__copy"><strong>Remove ads forever</strong><span>Enjoy the platform without ads.</span></div>
-            <div class="wallet-game-adfree__price"><strong>{{ ad_free.price_display }}</strong><img src="{% static 'images/wallet/cf-token.png' %}" alt=""></div>
+            <div class="wallet-game-adfree__price"><strong>{{ ad_free.price_display }}</strong><img src="{% static daily_rewards.assets.token_icon %}" alt=""></div>
             {% if ad_free.active %}
             <button type="button" class="wallet-game-button wallet-game-button--secondary" disabled>Ads removed</button>
             {% else %}

@@ -214,6 +214,31 @@ class TestDailyRewards(BaseLedgerTestCase):
         self.assertEqual(context["next_chest"]["days_until_unlock"], 5)
         self.assertEqual(context["next_chest"]["image_path"], chest.closed_image)
 
+    def test_fixed_reward_assets_come_from_central_wallet_config(self):
+        context = build_daily_rewards_context(
+            user=self.u1,
+            claim_url="/wallet/daily-reward/claim/",
+            at=self.instant(),
+        )
+        asset = config.get_daily_reward_asset_definition("coins")
+
+        self.assertEqual(context["current_reward"]["image_path"], asset["image"])
+        self.assertEqual(context["current_reward"]["button_image_path"], asset["button_image"])
+        self.assertEqual(context["assets"], config.get_wallet_asset_paths())
+
+    def test_wallet_asset_paths_are_validated(self):
+        changed = dict(config.WALLET_ASSETS)
+        changed["hero_art"] = "../outside-static.png"
+        with patch.object(config, "WALLET_ASSETS", changed):
+            with self.assertRaises(ImproperlyConfigured):
+                config.get_wallet_asset_paths()
+
+    def test_token_pack_asset_path_is_centralized(self):
+        self.assertEqual(
+            config.get_wallet_token_pack_image_path("token_pkg_500"),
+            config.WALLET_TOKEN_PACK_ASSETS["token_pkg_500"],
+        )
+
     def test_config_rejects_invalid_or_dangerous_amounts(self):
         with patch.object(config, "DAILY_REWARDS", ({"amount": 0, "asset": "coins"},)):
             with self.assertRaises(ImproperlyConfigured):

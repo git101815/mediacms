@@ -129,6 +129,7 @@ from ledger.services import (
     purchase_ad_free_lifetime,
     _convert_platform_token_units_to_canonical_stable_units,
 )
+from ledger.dashboard import config as wallet_config
 from ledger.dashboard.daily_rewards import build_daily_rewards_context
 from ledger.fiat import (
     get_fiat_currency_symbol,
@@ -389,7 +390,7 @@ def add_subtitle(request):
     context = {"media": media, "form": form, "subtitles": subtitles}
     return render(request, "cms/add_subtitle.html", context)
 
-PLATFORM_TOKEN_DECIMALS = 6
+PLATFORM_TOKEN_DECIMALS = wallet_config.PLATFORM_TOKEN_DECIMALS
 
 def _format_platform_token_amount(value: int, *, signed: bool = False) -> str:
     value = int(value)
@@ -452,29 +453,15 @@ def _build_wallet_token_pack_rows() -> list[dict]:
                 "token_amount_display": _format_pack_token_amount(pack.token_amount),
                 "gross_stable_amount": int(base_stable_amount),
                 "price_display": _format_canonical_stable_amount(base_stable_amount),
-                "image_path": f"images/wallet/bundles/{pack.code}.png",
+                "image_path": wallet_config.get_wallet_token_pack_image_path(pack.code),
             }
         )
 
     return rows
 
-NETWORK_DISPLAY_LABELS = {
-    "ethereum": "Ethereum",
-    "arbitrum": "Arbitrum One",
-    "base": "Base",
-    "bsc": "BNB Chain",
-}
+NETWORK_DISPLAY_LABELS = wallet_config.WALLET_NETWORK_DISPLAY_LABELS
+ROUTE_ONCHAIN_DECIMALS = wallet_config.WALLET_ROUTE_ONCHAIN_DECIMALS
 
-ROUTE_ONCHAIN_DECIMALS = {
-    ("ethereum", "USDT"): 6,
-    ("ethereum", "USDC"): 6,
-    ("arbitrum", "USDT"): 6,
-    ("arbitrum", "USDC"): 6,
-    ("base", "USDT"): 6,
-    ("base", "USDC"): 6,
-    ("bsc", "USDT"): 18,
-    ("bsc", "USDC"): 18,
-}
 
 
 def _get_network_display_label(chain: str) -> str:
@@ -498,89 +485,11 @@ def _format_route_amount(value, *, chain: str, asset_code: str) -> str:
     text = format(scaled.quantize(Decimal("0.01")), "f")
     return text
 
-WALLET_PAYMENT_GROUPS = {
-    "paypal_us": {
-        "label": "PayPal (US only)",
-        "icon_label": "PayPal",
-        "icon_path": "images/wallet/paypal.svg",
-        "order": 20,
-    },
-    "revolut_eu": {
-        "label": "Revolut (EU only)",
-        "icon_label": "Revolut",
-        "icon_path": "images/wallet/revolut.svg",
-        "order": 30,
-    },
-    "transak_card": {
-        "label": "Card / Apple Pay / Google Pay (Transak)",
-        "icon_label": "Transak",
-        "icon_path": "images/wallet/google_apple_card.svg",
-        "order": 35,
-    },
-    "dfx_bank": {
-        "label": "Bank transfer (DFX)",
-        "icon_label": "SEPA",
-        "icon_path": "images/wallet/sepa.svg",
-        "order": 40,
-    },
-    "mtpelerin_eur": {
-        "label": "Bank transfer (Mt Pelerin · EUR)",
-        "icon_label": "BANK",
-        "icon_path": "images/wallet/bank.svg",
-        "order": 50,
-    },
-    "mtpelerin_usd": {
-        "label": "Bank transfer (Mt Pelerin · USD)",
-        "icon_label": "SWIFT",
-        "icon_path": "images/wallet/bank.svg",
-        "order": 51,
-    },
-    "crypto": {
-        "label": "Crypto",
-        "icon_label": "Crypto",
-        "icon_path": "images/wallet/crypto.svg",
-        "order": 10,
-    },
-}
-WALLET_CRYPTO_ASSET_GROUPS = {
-    "USDC": {
-        "label": "USDC",
-        "icon_path": "images/wallet/usdc.svg",
-        "order": 10,
-    },
-    "USDT": {
-        "label": "USDT",
-        "icon_path": "images/wallet/usdt.svg",
-        "order": 20,
-    },
-}
-WALLET_CRYPTO_NETWORK_GROUPS = {
-    "ethereum": {
-        "label": "Ethereum",
-        "icon_path": "images/wallet/eth.svg",
-        "order": 10,
-    },
-    "arbitrum": {
-        "label": "Arbitrum One",
-        "icon_path": "images/wallet/arb.svg",
-        "order": 20,
-    },
-    "base": {
-        "label": "Base",
-        "icon_path": "images/wallet/base.svg",
-        "order": 30,
-    },
-    "bsc": {
-        "label": "BNB Chain",
-        "icon_path": "images/wallet/bnb.svg",
-        "order": 40,
-    },
-}
-PAYGATE_PROVIDER_PAYMENT_GROUPS = {
-    "paypal": "paypal_us",
-    "revolut": "revolut_eu",
-    "transak": "transak_card",
-}
+WALLET_PAYMENT_GROUPS = wallet_config.get_wallet_payment_groups()
+WALLET_CRYPTO_ASSET_GROUPS = wallet_config.get_wallet_crypto_asset_groups()
+WALLET_CRYPTO_NETWORK_GROUPS = wallet_config.get_wallet_crypto_network_groups()
+PAYGATE_PROVIDER_PAYMENT_GROUPS = wallet_config.WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS
+
 
 
 def _get_wallet_payment_price_bps(group_key: str) -> int:

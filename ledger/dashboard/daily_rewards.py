@@ -486,7 +486,10 @@ def _build_reward_row(definition, *, status: str, opened: bool = False) -> dict:
     if definition.kind == "fixed":
         amount_display = _format_token_amount(definition.amount_tokens)
         claim_label = f"Claim {amount_display}"
-        button_image_path = "images/wallet/cf-token.png"
+        asset_definition = config.get_daily_reward_asset_definition(definition.asset)
+        image_path = asset_definition["image"]
+        button_image_path = asset_definition["button_image"]
+        box_state = ""
         odds = []
     else:
         amount_display = definition.chest_label
@@ -507,10 +510,6 @@ def _build_reward_row(definition, *, status: str, opened: bool = False) -> dict:
             }
             for drop in chest.drops
         ]
-
-    if definition.kind == "fixed":
-        box_state = ""
-        image_path = _ASSET_IMAGE_PATHS[definition.asset]
 
     return {
         "day": definition.day,
@@ -632,6 +631,7 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
 
     return {
         "enabled": bool(config.DAILY_REWARDS_ENABLED),
+        "assets": config.get_wallet_asset_paths(),
         "claim_url": claim_url,
         "reward_date": reward_date,
         "timezone": str(get_daily_reward_timezone()),

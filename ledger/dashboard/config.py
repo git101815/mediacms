@@ -21,6 +21,101 @@ from django.core.exceptions import ImproperlyConfigured
 PLATFORM_TOKEN_DECIMALS = 6
 
 # ---------------------------------------------------------------------------
+# Wallet visual assets
+# ---------------------------------------------------------------------------
+# Every path is relative to Django's static root. Templates and services must
+# consume these mappings instead of embedding wallet image paths themselves.
+WALLET_CHEST_ASSETS = {
+    "small_chest": {
+        "closed": "images/wallet/dashboard/chests/small_closed.png",
+        "opened": "images/wallet/dashboard/chests/small_open.png",
+    },
+    "medium_chest": {
+        "closed": "images/wallet/dashboard/chests/medium_closed.png",
+        "opened": "images/wallet/dashboard/chests/medium_open.png",
+    },
+    "big_chest": {
+        "closed": "images/wallet/dashboard/chests/big_closed.png",
+        "opened": "images/wallet/dashboard/chests/big_open.png",
+    },
+}
+
+WALLET_ASSETS = {
+    "token_icon": "images/wallet/cf-token.png",
+    "hero_art": "images/wallet/dashboard/hero-art.png",
+    "vault_chest": WALLET_CHEST_ASSETS["big_chest"]["closed"],
+    "daily_reward_coins": "images/wallet/dashboard/reward-coins.png",
+    "quest_daily_login": "images/wallet/dashboard/quest-login.png",
+    "quest_watch_previews": "images/wallet/dashboard/quest-watch.png",
+    "quest_invite_friend": "images/wallet/dashboard/quest-invite.png",
+    "quest_remove_ads": "images/wallet/dashboard/quest-adfree.png",
+    "referral_art": "images/wallet/dashboard/referral-coins.png",
+    "remove_ads_art": "images/wallet/dashboard/remove-ads.png",
+}
+
+DAILY_REWARD_ASSETS = {
+    "coins": {
+        "image_asset": "daily_reward_coins",
+        "button_asset": "token_icon",
+    },
+}
+
+WALLET_TOKEN_PACK_ASSETS = {
+    "token_pkg_500": "images/wallet/bundles/token_pkg_500.png",
+    "token_pkg_1000": "images/wallet/bundles/token_pkg_1000.png",
+    "token_pkg_2000": "images/wallet/bundles/token_pkg_2000.png",
+    "token_pkg_5000": "images/wallet/bundles/token_pkg_5000.png",
+    "token_pkg_10000": "images/wallet/bundles/token_pkg_10000.png",
+}
+WALLET_TOKEN_PACK_IMAGE_TEMPLATE = "images/wallet/bundles/{code}.png"
+
+WALLET_NETWORK_DISPLAY_LABELS = {
+    "ethereum": "Ethereum",
+    "arbitrum": "Arbitrum One",
+    "base": "Base",
+    "bsc": "BNB Chain",
+}
+
+WALLET_ROUTE_ONCHAIN_DECIMALS = {
+    ("ethereum", "USDT"): 6,
+    ("ethereum", "USDC"): 6,
+    ("arbitrum", "USDT"): 6,
+    ("arbitrum", "USDC"): 6,
+    ("base", "USDT"): 6,
+    ("base", "USDC"): 6,
+    ("bsc", "USDT"): 18,
+    ("bsc", "USDC"): 18,
+}
+
+WALLET_PAYMENT_GROUPS = {
+    "paypal_us": {"label": "PayPal (US only)", "icon_label": "PayPal", "icon_path": "images/wallet/paypal.svg", "order": 20},
+    "revolut_eu": {"label": "Revolut (EU only)", "icon_label": "Revolut", "icon_path": "images/wallet/revolut.svg", "order": 30},
+    "transak_card": {"label": "Card / Apple Pay / Google Pay (Transak)", "icon_label": "Transak", "icon_path": "images/wallet/google_apple_card.svg", "order": 35},
+    "dfx_bank": {"label": "Bank transfer (DFX)", "icon_label": "SEPA", "icon_path": "images/wallet/sepa.svg", "order": 40},
+    "mtpelerin_eur": {"label": "Bank transfer (Mt Pelerin · EUR)", "icon_label": "BANK", "icon_path": "images/wallet/bank.svg", "order": 50},
+    "mtpelerin_usd": {"label": "Bank transfer (Mt Pelerin · USD)", "icon_label": "SWIFT", "icon_path": "images/wallet/bank.svg", "order": 51},
+    "crypto": {"label": "Crypto", "icon_label": "Crypto", "icon_path": "images/wallet/crypto.svg", "order": 10},
+}
+
+WALLET_CRYPTO_ASSET_GROUPS = {
+    "USDC": {"label": "USDC", "icon_path": "images/wallet/usdc.svg", "order": 10},
+    "USDT": {"label": "USDT", "icon_path": "images/wallet/usdt.svg", "order": 20},
+}
+
+WALLET_CRYPTO_NETWORK_GROUPS = {
+    "ethereum": {"label": "Ethereum", "icon_path": "images/wallet/eth.svg", "order": 10},
+    "arbitrum": {"label": "Arbitrum One", "icon_path": "images/wallet/arb.svg", "order": 20},
+    "base": {"label": "Base", "icon_path": "images/wallet/base.svg", "order": 30},
+    "bsc": {"label": "BNB Chain", "icon_path": "images/wallet/bnb.svg", "order": 40},
+}
+
+WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS = {
+    "paypal": "paypal_us",
+    "revolut": "revolut_eu",
+    "transak": "transak_card",
+}
+
+# ---------------------------------------------------------------------------
 # Generic Reward Chests
 # ---------------------------------------------------------------------------
 REWARD_CHEST_CONFIG_VERSION = 4
@@ -39,8 +134,8 @@ REWARD_CHESTS = {
     "small_chest": {
         "label": "Small Chest",
         "asset": "small_chest",
-        "closed_image": "images/wallet/dashboard/chests/small_closed.png",
-        "opened_image": "images/wallet/dashboard/chests/small_open.png",
+        "closed_image": WALLET_CHEST_ASSETS["small_chest"]["closed"],
+        "opened_image": WALLET_CHEST_ASSETS["small_chest"]["opened"],
         "drops": (
             {"key": "common_100", "label": "100 tokens", "rarity": "common", "chance_bps": 5_500, "amount": 100},
             {"key": "uncommon_250", "label": "250 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 250},
@@ -52,8 +147,8 @@ REWARD_CHESTS = {
     "medium_chest": {
         "label": "Big Chest",
         "asset": "medium_chest",
-        "closed_image": "images/wallet/dashboard/chests/medium_closed.png",
-        "opened_image": "images/wallet/dashboard/chests/medium_open.png",
+        "closed_image": WALLET_CHEST_ASSETS["medium_chest"]["closed"],
+        "opened_image": WALLET_CHEST_ASSETS["medium_chest"]["opened"],
         "drops": (
             {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 5_000, "amount": 350},
             {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 750},
@@ -65,8 +160,8 @@ REWARD_CHESTS = {
     "big_chest": {
         "label": "Huge Chest",
         "asset": "big_chest",
-        "closed_image": "images/wallet/dashboard/chests/big_closed.png",
-        "opened_image": "images/wallet/dashboard/chests/big_open.png",
+        "closed_image": WALLET_CHEST_ASSETS["big_chest"]["closed"],
+        "opened_image": WALLET_CHEST_ASSETS["big_chest"]["opened"],
         "drops": (
             {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 5_000, "amount": 350},
             {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 750},
@@ -143,22 +238,8 @@ _CHEST_ASSET_ALIASES = {
     "bigchest": "big_chest",
     "big_chest": "big_chest",
 }
-_CHEST_IMAGE_PATHS = {
-    "small_chest": {
-        "closed": "images/wallet/dashboard/chests/small_closed.png",
-        "opened": "images/wallet/dashboard/chests/small_open.png",
-    },
-    "medium_chest": {
-        "closed": "images/wallet/dashboard/chests/medium_closed.png",
-        "opened": "images/wallet/dashboard/chests/medium_open.png",
-    },
-    "big_chest": {
-        "closed": "images/wallet/dashboard/chests/big_closed.png",
-        "opened": "images/wallet/dashboard/chests/big_open.png",
-    },
-}
-_ALLOWED_DAILY_ASSETS = frozenset({"coins"})
-_ALLOWED_CHEST_ASSETS = frozenset(_CHEST_IMAGE_PATHS)
+_ALLOWED_DAILY_ASSETS = frozenset(DAILY_REWARD_ASSETS)
+_ALLOWED_CHEST_ASSETS = frozenset(WALLET_CHEST_ASSETS)
 _IDENTIFIER_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
@@ -249,6 +330,71 @@ def _normalize_static_image_path(value, *, field_name: str) -> str:
     return normalized
 
 
+def get_wallet_asset_paths() -> dict[str, str]:
+    if not isinstance(WALLET_ASSETS, dict) or not WALLET_ASSETS:
+        raise ImproperlyConfigured("WALLET_ASSETS must be a non-empty dictionary")
+    return {
+        _normalize_identifier(key, field_name="Wallet asset key"): _normalize_static_image_path(
+            path,
+            field_name=f"Wallet asset {key}",
+        )
+        for key, path in WALLET_ASSETS.items()
+    }
+
+
+def get_daily_reward_asset_definition(asset_key: str) -> dict[str, str]:
+    key = _normalize_identifier(asset_key, field_name="Daily reward asset")
+    raw = DAILY_REWARD_ASSETS.get(key)
+    if not isinstance(raw, dict):
+        raise ImproperlyConfigured(f"Unknown daily reward asset: {key}")
+
+    assets = get_wallet_asset_paths()
+    image_asset = _normalize_identifier(raw.get("image_asset"), field_name=f"Daily reward asset {key} image_asset")
+    button_asset = _normalize_identifier(raw.get("button_asset"), field_name=f"Daily reward asset {key} button_asset")
+    if image_asset not in assets or button_asset not in assets:
+        raise ImproperlyConfigured(f"Daily reward asset {key} references an unknown wallet asset")
+    return {"image": assets[image_asset], "button_image": assets[button_asset]}
+
+
+def get_wallet_token_pack_image_path(pack_code: str) -> str:
+    code = _normalize_identifier(pack_code, field_name="Token pack code")
+    path = WALLET_TOKEN_PACK_ASSETS.get(code)
+    if path in (None, ""):
+        try:
+            path = str(WALLET_TOKEN_PACK_IMAGE_TEMPLATE).format(code=code)
+        except (KeyError, ValueError) as exc:
+            raise ImproperlyConfigured("Invalid WALLET_TOKEN_PACK_IMAGE_TEMPLATE") from exc
+    return _normalize_static_image_path(path, field_name=f"Token pack {code} image")
+
+
+def _get_wallet_visual_groups(raw_groups, *, field_name: str, uppercase_keys: bool = False) -> dict[str, dict]:
+    if not isinstance(raw_groups, dict):
+        raise ImproperlyConfigured(f"{field_name} must be a dictionary")
+    normalized = {}
+    for raw_key, raw_group in raw_groups.items():
+        key = str(raw_key or "").strip()
+        key = key.upper() if uppercase_keys else _normalize_identifier(key, field_name=f"{field_name} key")
+        if not key or not isinstance(raw_group, dict):
+            raise ImproperlyConfigured(f"Invalid {field_name} entry: {raw_key}")
+        group = dict(raw_group)
+        if group.get("icon_path") not in (None, ""):
+            group["icon_path"] = _normalize_static_image_path(group["icon_path"], field_name=f"{field_name} {key} icon_path")
+        normalized[key] = group
+    return normalized
+
+
+def get_wallet_payment_groups() -> dict[str, dict]:
+    return _get_wallet_visual_groups(WALLET_PAYMENT_GROUPS, field_name="WALLET_PAYMENT_GROUPS")
+
+
+def get_wallet_crypto_asset_groups() -> dict[str, dict]:
+    return _get_wallet_visual_groups(WALLET_CRYPTO_ASSET_GROUPS, field_name="WALLET_CRYPTO_ASSET_GROUPS", uppercase_keys=True)
+
+
+def get_wallet_crypto_network_groups() -> dict[str, dict]:
+    return _get_wallet_visual_groups(WALLET_CRYPTO_NETWORK_GROUPS, field_name="WALLET_CRYPTO_NETWORK_GROUPS")
+
+
 def _normalize_chest_asset(value, *, field_name: str) -> str:
     raw = str(value or "").strip().lower()
     normalized = _CHEST_ASSET_ALIASES.get(raw)
@@ -262,7 +408,7 @@ def _normalize_chest_asset(value, *, field_name: str) -> str:
 def _default_chest_image(asset: str, *, opened: bool) -> str:
     normalized = _normalize_chest_asset(asset, field_name="Reward Chest")
     state = "opened" if opened else "closed"
-    return _CHEST_IMAGE_PATHS[normalized][state]
+    return WALLET_CHEST_ASSETS[normalized][state]
 
 
 def _normalize_reward_chest_definition(
