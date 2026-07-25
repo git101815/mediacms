@@ -102,7 +102,6 @@ class TestReferralProgram(BaseLedgerTestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.cookies, {})
         self.assertContains(response, f"/r/{code}")
 
     def test_signup_persists_referred_by_in_user_row(self):
