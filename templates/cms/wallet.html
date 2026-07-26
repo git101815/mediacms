@@ -93,7 +93,7 @@
               alt=""
               aria-hidden="true"
             >
-            <form method="post" action="{{ bonus_vault.open_url }}" style="display:contents">
+            <form class="wallet-game-vault__form" method="post" action="{{ bonus_vault.open_url }}">
               {% csrf_token %}
               <button
                 type="submit"
@@ -135,7 +135,7 @@
             </div>
           </section>
 
-          <section class="wallet-game-card wallet-game-panel wallet-game-quests" data-wallet-module="quests">
+          <section class="wallet-game-card wallet-game-panel wallet-game-quests wallet-game-quests--count-{{ quest_board.active_count }}" data-wallet-module="quests">
             <div class="wallet-game-panel__head">
               <div><div class="wallet-game-card__title"><i class="material-icons wallet-game-card__title-accent">track_changes</i><span>Quests Board</span></div><p>Complete missions to earn CF tokens!</p></div>
               {% if quest_board.show_schedule %}
@@ -144,9 +144,7 @@
             </div>
             <div class="wallet-game-quests__grid">
               {% for quest in quest_board.slots %}
-                {% if quest.empty %}
-              <article class="wallet-game-quest wallet-game-quest--empty" aria-hidden="true" style="visibility:hidden"></article>
-                {% else %}
+                {% if not quest.empty %}
               <article class="wallet-game-quest{% if quest.claimed %} wallet-game-quest--claimed{% elif quest.complete %} wallet-game-quest--complete{% endif %}" data-wallet-quest="{{ quest.key }}">
                 <img src="{% static quest.icon_path %}" alt="">
                 <strong>{{ quest.title }}</strong>
