@@ -199,8 +199,8 @@ BONUS_VAULT_START_AT = "2026-07-25T00:00:00+03:00"
 # ---------------------------------------------------------------------------
 REWARD_CHEST_CONFIG_VERSION = 4
 REWARD_CHEST_TOTAL_CHANCE_BPS = 10_000
-REWARD_CHEST_MAX_DROPS = 4
-REWARD_CHEST_MAX_TOKENS_PER_DROP = 5_000
+REWARD_CHEST_MAX_DROPS = 5
+REWARD_CHEST_MAX_TOKENS_PER_DROP = 10_000
 REWARD_CHEST_MAX_EXPECTED_VALUE_TOKENS = 10_000
 _LEDGER_MAX_HUMAN_TOKENS = ((2 ** 63) - 1) // (10 ** PLATFORM_TOKEN_DECIMALS)
 
@@ -215,7 +215,7 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["small_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["small_chest"]["opened"],
         "drops": (
-            {"key": "common_15", "label": "15 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 15},
+            {"key": "common_25", "label": "25 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 25},
             {"key": "uncommon_50", "label": "50 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 50},
             {"key": "rare_100", "label": "100 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 100},
             {"key": "epic_250", "label": "250 tokens", "rarity": "epic", "chance_bps": 650, "amount": 250},
