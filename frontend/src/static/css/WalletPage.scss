@@ -2074,6 +2074,14 @@ $error-text: #ff9a9a;
   padding-inline: 12px;
 }
 
+.wallet-game-hero__actions .material-icons {
+  width: 20px;
+  flex: 0 0 20px;
+  margin: 0;
+  overflow: hidden;
+  text-align: center;
+}
+
 .wallet-game-hero__actions .wallet-game-button span {
   overflow: visible;
   text-overflow: clip;
@@ -2995,10 +3003,17 @@ $error-text: #ff9a9a;
   }
 
   .wallet-game-hero__actions {
-    grid-template-columns:
-      minmax(0, 1.05fr)
-      minmax(0, 0.8fr)
-      minmax(0, 1.3fr);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .wallet-game-hero__actions .wallet-game-button {
+    width: auto;
+    max-width: 100%;
+    flex: 0 0 auto;
   }
 }
 
@@ -3059,6 +3074,15 @@ $error-text: #ff9a9a;
 
   .wallet-game-adfree form {
     grid-column: auto;
+  }
+}
+
+@media (min-width: 1200px) {
+  .wallet-game__top-grid,
+  .wallet-game__bottom-grid {
+    grid-template-columns:
+      minmax(0, 2.25fr)
+      minmax(330px, 1fr);
   }
 }
 
