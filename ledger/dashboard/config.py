@@ -57,8 +57,8 @@ WALLET_ASSETS = {
 
 # Amount tiers are evaluated from the highest matching ``min_amount``.
 # Current split:
-#   1-199 tokens  -> few_coins.png
-#   200+ tokens   -> coin_pile.png
+#   1-50 tokens  -> few_coins.png
+#   50+ tokens   -> coin_pile.png
 DAILY_REWARD_ASSETS = {
     "coins": {
         "button_asset": "token_icon",
@@ -68,7 +68,7 @@ DAILY_REWARD_ASSETS = {
                 "image_asset": "daily_reward_coins_few",
             },
             {
-                "min_amount": 200,
+                "min_amount": 50,
                 "image_asset": "daily_reward_coins_pile",
             },
         ),
@@ -154,7 +154,7 @@ QUEST_BOARD_QUESTS = (
         "action_url_name": "account_email",
         "reward": {
             "kind": "fixed",
-            "amount": 50,
+            "amount": 100,
             "asset": "coins",
         },
     },
@@ -171,9 +171,9 @@ REFERRAL_PROGRAM_ENABLED = True
 REFERRAL_REWARD_TOKENS = 200
 REFERRAL_GOAL = 10
 REFERRAL_MAX_REWARDED_FRIENDS = 10
-REFERRAL_MIN_PURCHASE_TOKENS = 1
+REFERRAL_MIN_PURCHASE_TOKENS = 500
 REFERRAL_CODE_LENGTH = 12
-REFERRAL_MAX_REWARD_TOKENS = 100_000
+REFERRAL_MAX_REWARD_TOKENS = 2000
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +184,7 @@ REFERRAL_MAX_REWARD_TOKENS = 100_000
 # one by one.
 BONUS_VAULT_CONFIG_VERSION = 1
 BONUS_VAULT_ENABLED = True
-BONUS_VAULT_THRESHOLD_TOKENS = 10_000
+BONUS_VAULT_THRESHOLD_TOKENS = 5000
 BONUS_VAULT_CHEST_KEY = "big_chest"
 BONUS_VAULT_ELIGIBLE_TRANSACTION_KINDS = ("purchase",)
 BONUS_VAULT_SOURCE_TYPE = "bonus_vault"
@@ -199,10 +199,9 @@ BONUS_VAULT_START_AT = "2026-07-25T00:00:00+03:00"
 # ---------------------------------------------------------------------------
 REWARD_CHEST_CONFIG_VERSION = 4
 REWARD_CHEST_TOTAL_CHANCE_BPS = 10_000
-REWARD_CHEST_MAX_DROPS = 100
-REWARD_CHEST_MAX_TOKENS_PER_DROP = 100_000
-REWARD_CHEST_MAX_EXPECTED_VALUE_TOKENS = 20_000
-_REWARD_CHEST_ABSOLUTE_MAX_DROPS = 1_000
+REWARD_CHEST_MAX_DROPS = 4
+REWARD_CHEST_MAX_TOKENS_PER_DROP = 5_000
+REWARD_CHEST_MAX_EXPECTED_VALUE_TOKENS = 10_000
 _LEDGER_MAX_HUMAN_TOKENS = ((2 ** 63) - 1) // (10 ** PLATFORM_TOKEN_DECIMALS)
 
 # Each Reward Chest has a public name and two independent static images.
@@ -216,11 +215,11 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["small_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["small_chest"]["opened"],
         "drops": (
-            {"key": "common_100", "label": "100 tokens", "rarity": "common", "chance_bps": 5_500, "amount": 100},
-            {"key": "uncommon_250", "label": "250 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 250},
-            {"key": "rare_500", "label": "500 tokens", "rarity": "rare", "chance_bps": 1_200, "amount": 500},
-            {"key": "epic_1000", "label": "1,000 tokens", "rarity": "epic", "chance_bps": 280, "amount": 1_000},
-            {"key": "jackpot_5000", "label": "5,000 tokens", "rarity": "jackpot", "chance_bps": 20, "amount": 5_000},
+            {"key": "common_15", "label": "15 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 15},
+            {"key": "uncommon_50", "label": "50 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 50},
+            {"key": "rare_100", "label": "100 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 100},
+            {"key": "epic_250", "label": "250 tokens", "rarity": "epic", "chance_bps": 650, "amount": 250},
+            {"key": "jackpot_500", "label": "500 tokens", "rarity": "jackpot", "chance_bps": 350, "amount": 500},
         ),
     },
     "medium_chest": {
@@ -229,11 +228,11 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["medium_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["medium_chest"]["opened"],
         "drops": (
-            {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 5_000, "amount": 350},
-            {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 750},
-            {"key": "rare_1500", "label": "1,500 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 1_500},
-            {"key": "epic_3000", "label": "3,000 tokens", "rarity": "epic", "chance_bps": 450, "amount": 3_000},
-            {"key": "jackpot_10000", "label": "10,000 tokens", "rarity": "jackpot", "chance_bps": 50, "amount": 10_000},
+            {"key": "common_75", "label": "100 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 100},
+            {"key": "uncommon_150", "label": "250 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 250},
+            {"key": "rare_450", "label": "500 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 500},
+            {"key": "epic_750", "label": "1,000 tokens", "rarity": "epic", "chance_bps": 650, "amount": 1_000},
+            {"key": "jackpot_1500", "label": "2,500 tokens", "rarity": "jackpot", "chance_bps": 350, "amount": 2_500},
         ),
     },
     "big_chest": {
@@ -242,11 +241,11 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["big_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["big_chest"]["opened"],
         "drops": (
-            {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 5_000, "amount": 350},
+            {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 350},
             {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 750},
-            {"key": "rare_1500", "label": "1,500 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 1_500},
-            {"key": "epic_3000", "label": "3,000 tokens", "rarity": "epic", "chance_bps": 450, "amount": 3_000},
-            {"key": "jackpot_10000", "label": "10,000 tokens", "rarity": "jackpot", "chance_bps": 50, "amount": 10_000},
+            {"key": "rare_1000", "label": "1,500 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 1_500},
+            {"key": "epic_2500", "label": "3,000 tokens", "rarity": "epic", "chance_bps": 650, "amount": 3_000},
+            {"key": "jackpot_5000", "label": "10,000 tokens", "rarity": "jackpot", "chance_bps": 350, "amount": 10_000},
         ),
     },
 }
@@ -595,8 +594,6 @@ def _normalize_reward_chest_definition(
         raise ImproperlyConfigured(f"Reward Chest {key} must contain at least one drop")
     maximum_drops = (
         int(REWARD_CHEST_MAX_DROPS)
-        if enforce_economy_limits
-        else _REWARD_CHEST_ABSOLUTE_MAX_DROPS
     )
     if len(raw_drops) > maximum_drops:
         raise ImproperlyConfigured(f"Reward Chest {key} contains too many drops")
