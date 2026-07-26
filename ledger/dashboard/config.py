@@ -243,9 +243,9 @@ REWARD_CHESTS = {
         "drops": (
             {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 350},
             {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 750},
-            {"key": "rare_1000", "label": "1,500 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 1_500},
-            {"key": "epic_2500", "label": "3,000 tokens", "rarity": "epic", "chance_bps": 650, "amount": 3_000},
-            {"key": "jackpot_5000", "label": "10,000 tokens", "rarity": "jackpot", "chance_bps": 350, "amount": 10_000},
+            {"key": "rare_1500", "label": "1,500 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 1_500},
+            {"key": "epic_2500", "label": "2,500 tokens", "rarity": "epic", "chance_bps": 650, "amount": 2_500},
+            {"key": "jackpot_5000", "label": "5,000 tokens", "rarity": "jackpot", "chance_bps": 350, "amount": 5_000},
         ),
     },
 }
@@ -260,16 +260,15 @@ DAILY_REWARDS_ENABLED = True
 DAILY_REWARD_TIME_ZONE = None
 
 # Number of cards shown in the compact dashboard widget.
-DAILY_REWARD_WINDOW_SIZE = 5
+DAILY_REWARD_WINDOW_SIZE = 7
 
 # Hard guard against an accidental economy-breaking fixed reward.
-DAILY_REWARD_MAX_TOKENS_PER_CLAIM = 100_000
+DAILY_REWARD_MAX_TOKENS_PER_CLAIM = 10_000
 
 # Fixed reward:
 #   {"kind": "fixed", "amount": 100, "asset": "coins"}
 # Reward Chest:
 #   {"kind": "chest", "chest": "small_chest"}
-# Rows without ``kind`` remain backward-compatible and are treated as fixed.
 DAILY_REWARDS = (
     {"kind": "fixed", "amount": 50, "asset": "coins"},
     {"kind": "fixed", "amount": 75, "asset": "coins"},
@@ -303,9 +302,6 @@ DAILY_REWARDS = (
     {"kind": "chest", "chest": "big_chest"},
 )
 
-
-# Current config uses canonical names. Aliases are kept only so already granted
-# version 1-3 snapshots remain openable after this cleanup.
 _CHEST_ASSET_ALIASES = {
     "chest": "small_chest",
     "smallchest": "small_chest",
