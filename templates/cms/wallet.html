@@ -181,8 +181,15 @@
               <img src="{% static daily_rewards.assets.referral_art %}" alt="">
             </div>
             <div class="wallet-game-referral__stats">
-              <span>{{ referral.rewarded_count }} / {{ referral.goal }} friends rewarded</span>
-              <strong>{{ referral.earned_display }} <img src="{% static daily_rewards.assets.token_icon %}" alt=""></strong>
+              <span class="wallet-game-referral__count">
+                <i class="material-icons" aria-hidden="true">local_fire_department</i>
+                <span>{{ referral.rewarded_count }} / {{ referral.goal }} friends rewarded</span>
+              </span>
+              <strong class="wallet-game-referral__earned">
+                <span>{{ referral.earned_display }}</span>
+                <img src="{% static daily_rewards.assets.token_icon %}" alt="">
+                <small>earned</small>
+              </strong>
             </div>
             <div class="wallet-game-meter wallet-game-meter--small"><span style="width:{{ referral.progress_percent }}%"></span></div>
             <div class="wallet-game-referral__actions">
