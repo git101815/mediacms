@@ -901,7 +901,11 @@ def _build_wallet_action_state(*, wallet: TokenWallet, available_balance: int) -
             "can_deposit": True,
             "can_withdraw": False,
             "show_withdraw": is_advanced_user,
-            "hint": "Add funds before requesting a withdrawal.",
+            "hint": (
+                "Tokens you gained by selling videos will be withdrawable here."
+                if is_advanced_user
+                else ""
+            ),
         }
 
     return {
