@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from django.test import RequestFactory, TestCase
+from django.test import TestCase
 from django.urls import reverse
 
 from files.views import (
@@ -40,11 +40,11 @@ class TestRewardChestPreviewCatalog(TestCase):
         )
 
     def test_guest_wallet_context_contains_catalog(self):
-        request = RequestFactory().get("/wallet")
-        context = _build_guest_wallet_context(request)
+        response = self.client.get(reverse("wallet"))
 
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            context["reward_chest_catalog"],
+            response.context["reward_chest_catalog"],
             _build_reward_chest_preview_catalog(),
         )
 
