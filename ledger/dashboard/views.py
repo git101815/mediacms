@@ -32,7 +32,10 @@ def _build_chest_opening_payload(*, result: dict) -> dict:
     closed_image_path = str(result.get("closed_image_path") or "")
     opened_image_path = str(result.get("opened_image_path") or "")
     drop_key = str(result.get("drop_key") or "").strip()
-    grant = result.get("grant")
+    grant = (
+        result.get("grant")
+        or result.get("reward_chest_grant")
+    )
     chest_key = str(getattr(grant, "chest_key", "") or "").strip()
     rarity = str(result.get("rarity") or "reward").strip().lower()
 
