@@ -3334,6 +3334,11 @@ body.wallet-chest-opening-active {
   opacity: 0;
   transform: translate(-50%, -50%) scale(0.35);
   background:
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in srgb, var(--chest-glow) 72%, #fff) 0 3px,
+      transparent 4px
+    ),
     repeating-conic-gradient(
       from 8deg,
       color-mix(in srgb, var(--chest-glow) 72%, transparent) 0 7deg,
@@ -3543,7 +3548,7 @@ body.wallet-chest-opening-active {
 .wallet-chest-opening[data-state="revealed"]
   .wallet-chest-opening__drop {
   opacity: 1;
-  transform: translate(-50%, 0) scale(1);
+  transform: translateY(0) scale(1);
   transition:
     opacity 180ms ease-out,
     transform 620ms cubic-bezier(.16, 1.35, .3, 1);
@@ -3918,12 +3923,14 @@ body.wallet-chest-opening-active {
 }
 
 .wallet-chest-opening__drop {
-  top: 2.8rem;
+  top: 2.5rem;
+  left: 0;
   width: 100%;
   display: grid;
   justify-items: center;
   isolation: isolate;
-  transform: translate(-50%, 104px) scale(0.18);
+  transform: translateY(104px) scale(0.18);
+  transform-origin: 50% 0;
 }
 
 .wallet-chest-opening__drop > .wallet-chest-opening__drop-image {
