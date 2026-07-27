@@ -57,8 +57,8 @@ WALLET_ASSETS = {
 
 # Amount tiers are evaluated from the highest matching ``min_amount``.
 # Current split:
-#   1-50 tokens  -> few_coins.png
-#   50+ tokens   -> coin_pile.png
+#   1-25 tokens  -> few_coins.png
+#   25+ tokens   -> coin_pile.png
 DAILY_REWARD_ASSETS = {
     "coins": {
         "button_asset": "token_icon",
@@ -68,7 +68,7 @@ DAILY_REWARD_ASSETS = {
                 "image_asset": "daily_reward_coins_few",
             },
             {
-                "min_amount": 50,
+                "min_amount": 25,
                 "image_asset": "daily_reward_coins_pile",
             },
         ),
@@ -197,11 +197,11 @@ BONUS_VAULT_START_AT = "2026-07-25T00:00:00+03:00"
 # ---------------------------------------------------------------------------
 # Generic Reward Chests
 # ---------------------------------------------------------------------------
-REWARD_CHEST_CONFIG_VERSION = 4
+REWARD_CHEST_CONFIG_VERSION = 5
 REWARD_CHEST_TOTAL_CHANCE_BPS = 10_000
 REWARD_CHEST_MAX_DROPS = 5
 REWARD_CHEST_MAX_TOKENS_PER_DROP = 10_000
-REWARD_CHEST_MAX_EXPECTED_VALUE_TOKENS = 10_000
+REWARD_CHEST_MAX_EXPECTED_VALUE_TOKENS = 1_000
 _LEDGER_MAX_HUMAN_TOKENS = ((2 ** 63) - 1) // (10 ** PLATFORM_TOKEN_DECIMALS)
 
 # Each Reward Chest has a public name and two independent static images.
@@ -270,36 +270,43 @@ DAILY_REWARD_MAX_TOKENS_PER_CLAIM = 10_000
 # Reward Chest:
 #   {"kind": "chest", "chest": "small_chest"}
 DAILY_REWARDS = (
-    {"kind": "fixed", "amount": 50, "asset": "coins"},
-    {"kind": "fixed", "amount": 75, "asset": "coins"},
-    {"kind": "fixed", "amount": 100, "asset": "coins"},
-    {"kind": "fixed", "amount": 125, "asset": "coins"},
-    {"kind": "chest", "chest": "small_chest"},
-    {"kind": "fixed", "amount": 200, "asset": "coins"},
-    {"kind": "chest", "chest": "medium_chest"},
-    {"kind": "fixed", "amount": 75, "asset": "coins"},
-    {"kind": "fixed", "amount": 100, "asset": "coins"},
-    {"kind": "fixed", "amount": 100, "asset": "coins"},
-    {"kind": "fixed", "amount": 150, "asset": "coins"},
-    {"kind": "chest", "chest": "small_chest"},
-    {"kind": "fixed", "amount": 400, "asset": "coins"},
-    {"kind": "chest", "chest": "medium_chest"},
-    {"kind": "fixed", "amount": 100, "asset": "coins"},
-    {"kind": "fixed", "amount": 125, "asset": "coins"},
-    {"kind": "fixed", "amount": 150, "asset": "coins"},
-    {"kind": "fixed", "amount": 200, "asset": "coins"},
-    {"kind": "chest", "chest": "small_chest"},
-    {"kind": "fixed", "amount": 350, "asset": "coins"},
-    {"kind": "chest", "chest": "medium_chest"},
-    {"kind": "fixed", "amount": 150, "asset": "coins"},
-    {"kind": "fixed", "amount": 175, "asset": "coins"},
-    {"kind": "fixed", "amount": 200, "asset": "coins"},
-    {"kind": "chest", "chest": "small_chest"},
-    {"kind": "fixed", "amount": 300, "asset": "coins"},
-    {"kind": "fixed", "amount": 450, "asset": "coins"},
-    {"kind": "chest", "chest": "medium_chest"},
-    {"kind": "chest", "chest": "small_chest"},
-    {"kind": "chest", "chest": "big_chest"},
+    # Week 1 — 180 tokens
+    {"kind": "fixed", "amount": 5, "asset": "coins"},      # Day 1
+    {"kind": "fixed", "amount": 10, "asset": "coins"},     # Day 2
+    {"kind": "fixed", "amount": 15, "asset": "coins"},     # Day 3
+    {"kind": "fixed", "amount": 20, "asset": "coins"},     # Day 4
+    {"kind": "fixed", "amount": 25, "asset": "coins"},     # Day 5
+    {"kind": "fixed", "amount": 30, "asset": "coins"},     # Day 6
+    {"kind": "chest", "chest": "small_chest"},             # Day 7
+
+    # Week 2 — 290 tokens
+    {"kind": "fixed", "amount": 15, "asset": "coins"},     # Day 8
+    {"kind": "fixed", "amount": 20, "asset": "coins"},     # Day 9
+    {"kind": "fixed", "amount": 25, "asset": "coins"},     # Day 10
+    {"kind": "chest", "chest": "small_chest"},             # Day 11
+    {"kind": "fixed", "amount": 35, "asset": "coins"},     # Day 12
+    {"kind": "fixed", "amount": 45, "asset": "coins"},     # Day 13
+    {"kind": "chest", "chest": "small_chest"},             # Day 14
+
+    # Week 3 — 485 tokens
+    {"kind": "fixed", "amount": 15, "asset": "coins"},     # Day 15
+    {"kind": "fixed", "amount": 25, "asset": "coins"},     # Day 16
+    {"kind": "fixed", "amount": 30, "asset": "coins"},     # Day 17
+    {"kind": "fixed", "amount": 40, "asset": "coins"},     # Day 18
+    {"kind": "chest", "chest": "small_chest"},             # Day 19
+    {"kind": "fixed", "amount": 50, "asset": "coins"},     # Day 20
+    {"kind": "chest", "chest": "medium_chest"},            # Day 21
+
+    # Week 4 — 1555 tokens
+    {"kind": "fixed", "amount": 25, "asset": "coins"},     # Day 22
+    {"kind": "fixed", "amount": 35, "asset": "coins"},     # Day 23
+    {"kind": "fixed", "amount": 50, "asset": "coins"},     # Day 24
+    {"kind": "chest", "chest": "small_chest"},             # Day 25
+    {"kind": "fixed", "amount": 30, "asset": "coins"},     # Day 26
+    {"kind": "fixed", "amount": 40, "asset": "coins"},     # Day 27
+    {"kind": "chest", "chest": "medium_chest"},            # Day 28
+    {"kind": "fixed", "amount": 50, "asset": "coins"},     # Day 29
+    {"kind": "chest", "chest": "big_chest"},               # Day 30
 )
 
 _CHEST_ASSET_ALIASES = {
