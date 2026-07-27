@@ -721,6 +721,7 @@
     )
     : null;
   let chestOpeningTimers = [];
+  let chestOpeningRarity = 'reward';
 
   function clearChestOpeningTimers() {
     chestOpeningTimers.forEach(function (timerId) {
@@ -760,19 +761,18 @@
     chestOpeningOverlay.hidden = false;
     chestOpeningOverlay.setAttribute('aria-hidden', 'false');
     chestOpeningOverlay.setAttribute('data-state', 'closed');
+    chestOpeningRarity = String(
+      opening.rarity || 'reward'
+    ).toLowerCase();
     chestOpeningOverlay.setAttribute(
       'data-rarity',
-      String(opening.rarity || 'reward').toLowerCase()
+      'mystery'
     );
 
     setChestOpeningText(
       '[data-wallet-chest-opening-source]',
       opening.rarity_label ||
         String(opening.rarity || 'reward').toUpperCase()
-    );
-    setChestOpeningText(
-      '[data-wallet-chest-opening-title]',
-      opening.chest_label || 'Reward Chest'
     );
     setChestOpeningText(
       '[data-wallet-chest-opening-amount]',
@@ -834,6 +834,10 @@
     }
 
     chestOpeningTimers.push(window.setTimeout(function () {
+      chestOpeningOverlay.setAttribute(
+        'data-rarity',
+        chestOpeningRarity
+      );
       chestOpeningOverlay.setAttribute('data-state', 'opened');
     }, 620));
 
@@ -841,7 +845,7 @@
       chestOpeningOverlay.setAttribute('data-state', 'revealed');
       setChestOpeningText(
         '[data-wallet-chest-opening-hint]',
-        'Reward unlocked'
+        ''
       );
     }, 930));
 

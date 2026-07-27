@@ -3918,7 +3918,7 @@ body.wallet-chest-opening-active {
 }
 
 .wallet-chest-opening__drop {
-  top: 6px;
+  top: 2.8rem;
   width: 100%;
   display: grid;
   justify-items: center;
@@ -3937,7 +3937,7 @@ body.wallet-chest-opening-active {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  margin-top: 1px;
+  margin-top: 0.7rem;
 }
 
 .wallet-chest-opening__amount strong {
@@ -4089,4 +4089,52 @@ body.wallet-chest-opening-active {
     min-height: 40px;
     margin-top: 7px;
   }
+}
+
+/* chest-opening-surprise-v4 */
+.wallet-chest-opening[data-rarity="mystery"] {
+  --chest-glow: #8991a2;
+}
+
+.wallet-chest-opening__scene {
+  grid-template-rows:
+    auto
+    minmax(0, 1fr)
+    auto
+    auto;
+  transition:
+    border-color 240ms ease,
+    box-shadow 240ms ease,
+    background 240ms ease;
+}
+
+.wallet-chest-opening__title {
+  display: none;
+}
+
+.wallet-chest-opening__source {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-5px);
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease,
+    visibility 0s linear 220ms;
+}
+
+.wallet-chest-opening[data-state="opened"]
+  .wallet-chest-opening__source,
+.wallet-chest-opening[data-state="revealed"]
+  .wallet-chest-opening__source {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition-delay: 0s;
+}
+
+.wallet-chest-opening[data-state="revealed"]
+  .wallet-chest-opening__hint {
+  min-height: 0;
+  margin: 0;
+  opacity: 0;
 }
