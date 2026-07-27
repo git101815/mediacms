@@ -35,12 +35,13 @@ class TestPublicWalletPreview(TestCase):
             username="public_wallet_preview_user",
             password="test-password",
         )
-        TokenWallet.objects.create(
+        wallet = TokenWallet.objects.get(
             user=user,
             wallet_type=TokenWallet.TYPE_USER,
-            balance=7 * 1_000_000,
-            allow_negative=False,
         )
+        wallet.balance = 7 * 1_000_000
+        wallet.allow_negative = False
+        wallet.save(update_fields=["balance", "allow_negative"])
         self.client.force_login(user)
 
         response = self.client.get(reverse("wallet"))
