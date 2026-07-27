@@ -1883,6 +1883,7 @@ def _build_guest_wallet_context(request) -> dict:
     }
 
 
+@never_cache
 def wallet(request):
     if not request.user.is_authenticated:
         return render(

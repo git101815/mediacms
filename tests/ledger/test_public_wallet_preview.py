@@ -7,6 +7,14 @@ from ledger.models import TokenWallet
 
 @override_settings(LOGIN_URL="/accounts/login")
 class TestPublicWalletPreview(TestCase):
+    def assert_wallet_response_is_not_cacheable(self, response):
+        cache_control = response["Cache-Control"]
+        self.assertIn("no-store", cache_control)
+        self.assertIn("no-cache", cache_control)
+        self.assertIn("max-age=0", cache_control)
+        self.assertIn("must-revalidate", cache_control)
+        self.assertIn("private", cache_control)
+
     def test_anonymous_wallet_renders_preview_without_creating_wallet(self):
         before_count = TokenWallet.objects.count()
 
@@ -21,10 +29,7 @@ class TestPublicWalletPreview(TestCase):
         self.assertTrue(response.context["daily_rewards"]["preview"])
         self.assertTrue(response.context["daily_rewards"]["can_claim"])
         self.assertEqual(TokenWallet.objects.count(), before_count)
-        self.assertContains(
-            response,
-            'data-wallet-auth-required="true"',
-        )
+        self.assert_wallet_response_is_not_cacheable(response)
         self.assertIn(
             "/accounts/login?next=",
             response.context["wallet_login_url"],
@@ -50,6 +55,7 @@ class TestPublicWalletPreview(TestCase):
         self.assertFalse(response.context["wallet_auth_required"])
         self.assertEqual(response.context["available_balance_display"], "7")
         self.assertFalse(response.context["daily_rewards"]["preview"])
+        self.assert_wallet_response_is_not_cacheable(response)
 
     def test_wallet_mutations_still_require_login(self):
         protected_posts = (
