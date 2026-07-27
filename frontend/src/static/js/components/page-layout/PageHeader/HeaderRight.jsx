@@ -167,23 +167,16 @@ export function HeaderRight(props) {
                     </div>
 
                     <UploadMediaButton user={user} links={links} />
-                    <div
-                      className={
-                        'token-balance-wrap' +
-                        (user.is.anonymous ? ' token-balance-wrap--guest' : '')
-                      }
-                    >
+                    <div className="token-balance-wrap">
                       <div className="token-balance">
-                        {!user.is.anonymous ? (
-                          <a
-                            className="token-balance__add"
-                            href={walletUrl}
-                            title={translateString('Add tokens')}
-                            aria-label={translateString('Add tokens')}
-                          >
-                            <span aria-hidden="true">+</span>
-                          </a>
-                        ) : null}
+                        <a
+                          className="token-balance__add"
+                          href={walletUrl}
+                          title={translateString('Add tokens')}
+                          aria-label={translateString('Add tokens')}
+                        >
+                          <span aria-hidden="true">+</span>
+                        </a>
                         <a
                           className="token-balance__main"
                           href={walletUrl}
