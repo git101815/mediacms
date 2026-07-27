@@ -92,7 +92,15 @@
               src="{% static bonus_vault.image_path %}"
               alt=""
               aria-hidden="true"
+              data-reward-chest-click="{{ bonus_vault.chest_key }}"
             >
+            <button
+              type="button"
+              class="wallet-reward-chest-info wallet-reward-chest-info--vault"
+              data-reward-chest-trigger="{{ bonus_vault.chest_key }}"
+              data-wallet-guest-allowed
+              aria-label="Show {{ bonus_vault.chest_label }} possible drops"
+            >i</button>
             <form class="wallet-game-vault__form" method="post" action="{{ bonus_vault.open_url }}">
               {% csrf_token %}
               <button
@@ -115,6 +123,15 @@
               {% for reward in daily_rewards.window %}
               <article class="wallet-game-reward{% if reward.status == 'claimed' %} wallet-game-reward--claimed{% elif reward.status == 'current' %} wallet-game-reward--current{% endif %}"{% if reward.kind == 'chest' %} data-reward-chest="{{ reward.chest_key }}" data-box-state="{{ reward.box_state }}"{% endif %}>
                 {% if reward.kind == 'chest' %}<img src="{% static reward.image_path %}" alt="">{% elif reward.status == 'claimed' %}<i class="material-icons">done</i>{% else %}<img src="{% static reward.image_path %}" alt="">{% endif %}
+                {% if reward.kind == 'chest' %}
+                <button
+                  type="button"
+                  class="wallet-reward-chest-info wallet-reward-chest-info--card"
+                  data-reward-chest-trigger="{{ reward.chest_key }}"
+                  data-wallet-guest-allowed
+                  aria-label="Show {{ reward.amount_display }} possible drops"
+                >i</button>
+                {% endif %}
                 <strong>{{ reward.amount_display }}</strong><span>Day {{ reward.day }}</span>
               </article>
               {% endfor %}
@@ -219,9 +236,17 @@
               src="{% static daily_rewards.next_chest.image_path %}"
               alt=""
               data-reward-chest="{{ daily_rewards.next_chest.chest_key }}"
+              data-reward-chest-click="{{ daily_rewards.next_chest.chest_key }}"
               data-box-state="closed"
               data-days-until-unlock="{{ daily_rewards.next_chest.days_until_unlock }}"
             >
+            <button
+              type="button"
+              class="wallet-reward-chest-info wallet-reward-chest-info--streak"
+              data-reward-chest-trigger="{{ daily_rewards.next_chest.chest_key }}"
+              data-wallet-guest-allowed
+              aria-label="Show {{ daily_rewards.next_chest.amount_display }} possible drops"
+            >i</button>
             {% endif %}
           </section>
         </div>
@@ -681,10 +706,57 @@
       {% for reward in daily_rewards.all_rewards %}
       <article class="wallet-game-reward{% if reward.status == 'claimed' %} wallet-game-reward--claimed{% elif reward.status == 'current' %} wallet-game-reward--current{% endif %}"{% if reward.kind == 'chest' %} data-reward-chest="{{ reward.chest_key }}" data-box-state="{{ reward.box_state }}"{% endif %}>
         {% if reward.kind == 'chest' %}<img src="{% static reward.image_path %}" alt="">{% elif reward.status == 'claimed' %}<i class="material-icons">done</i>{% else %}<img src="{% static reward.image_path %}" alt="">{% endif %}
+                {% if reward.kind == 'chest' %}
+                <button
+                  type="button"
+                  class="wallet-reward-chest-info wallet-reward-chest-info--card"
+                  data-reward-chest-trigger="{{ reward.chest_key }}"
+                  data-wallet-guest-allowed
+                  aria-label="Show {{ reward.amount_display }} possible drops"
+                >i</button>
+                {% endif %}
         <strong>{{ reward.amount_display }}</strong><span>Day {{ reward.day }}</span>
       </article>
       {% endfor %}
     </div>
+  </div>
+</div>
+
+{{ reward_chest_catalog|json_script:"wallet-reward-chest-catalog" }}
+
+<div class="wallet-modal" data-wallet-modal="reward-chest-preview" hidden>
+  <div
+    class="wallet-modal__backdrop"
+    data-wallet-close="reward-chest-preview"
+    data-wallet-guest-allowed
+  ></div>
+  <div
+    class="wallet-modal__dialog wallet-reward-chest-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="wallet-reward-chest-modal-title"
+  >
+    <button
+      type="button"
+      class="wallet-modal__close"
+      data-wallet-close="reward-chest-preview"
+      data-wallet-guest-allowed
+      aria-label="Close"
+    >
+      <i class="material-icons" aria-hidden="true">close</i>
+    </button>
+
+    <h2
+      id="wallet-reward-chest-modal-title"
+      class="wallet-modal__title"
+      data-reward-chest-modal-title
+    >Reward Chest</h2>
+
+    <p class="wallet-reward-chest-modal__subtitle">Possible drops</p>
+    <ul
+      class="wallet-reward-chest-modal__drops"
+      data-reward-chest-modal-drops
+    ></ul>
   </div>
 </div>
 

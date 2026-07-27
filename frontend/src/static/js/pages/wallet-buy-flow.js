@@ -642,6 +642,64 @@
     syncLock();
   }
 
+
+  // reward-chest-preview-v2
+  const rewardChestCatalogNode = document.getElementById(
+    'wallet-reward-chest-catalog'
+  );
+  let rewardChestCatalog = new Map();
+
+  if (rewardChestCatalogNode) {
+    try {
+      const parsedCatalog = JSON.parse(
+        rewardChestCatalogNode.textContent || '[]'
+      );
+      rewardChestCatalog = new Map(
+        parsedCatalog
+          .filter(function (row) {
+            return row && row.key;
+          })
+          .map(function (row) {
+            return [row.key, row];
+          })
+      );
+    } catch (error) {
+      rewardChestCatalog = new Map();
+    }
+  }
+
+  function openRewardChestPreview(chestKey) {
+    const chest = rewardChestCatalog.get(chestKey);
+    const modal = getModal('reward-chest-preview');
+
+    if (!chest || !modal) {
+      return;
+    }
+
+    const title = modal.querySelector(
+      '[data-reward-chest-modal-title]'
+    );
+    const drops = modal.querySelector(
+      '[data-reward-chest-modal-drops]'
+    );
+
+    if (!title || !drops) {
+      return;
+    }
+
+    title.textContent = chest.label || 'Reward Chest';
+    drops.innerHTML = '';
+
+    (Array.isArray(chest.drop_labels) ? chest.drop_labels : [])
+      .forEach(function (dropLabel) {
+        const row = document.createElement('li');
+        row.textContent = dropLabel;
+        drops.appendChild(row);
+      });
+
+    openModal('reward-chest-preview');
+  }
+
   function getReferralUrl() {
     const module = document.querySelector('[data-wallet-module="referral"]');
     return module ? module.getAttribute('data-referral-url') || '' : '';
@@ -685,6 +743,40 @@
 
   document.addEventListener('click', function (event) {
     const referralCopy = event.target.closest('[data-wallet-referral-copy]');
+    const chestInfoButton = event.target.closest(
+      '[data-reward-chest-trigger]'
+    );
+    if (chestInfoButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      openRewardChestPreview(
+        chestInfoButton.getAttribute(
+          'data-reward-chest-trigger'
+        ) || ''
+      );
+      return;
+    }
+
+    const clickableChest = event.target.closest(
+      '.wallet-game-reward[data-reward-chest], ' +
+      '[data-reward-chest-click]'
+    );
+    if (clickableChest) {
+      const nestedControl = event.target.closest(
+        'a, button, input, select, textarea, label, form'
+      );
+
+      if (!nestedControl) {
+        event.preventDefault();
+        openRewardChestPreview(
+          clickableChest.getAttribute('data-reward-chest') ||
+          clickableChest.getAttribute('data-reward-chest-click') ||
+          ''
+        );
+        return;
+      }
+    }
+
     if (referralCopy) {
       event.preventDefault();
       copyReferralUrl(referralCopy);

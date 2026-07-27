@@ -3103,3 +3103,90 @@ $error-text: #ff9a9a;
     max-width: 68%;
   }
 }
+
+/* reward-chest-preview-v2 */
+.wallet-game-reward[data-reward-chest] {
+  position: relative;
+  cursor: pointer;
+}
+
+.wallet-game-vault,
+.wallet-game-streak {
+  position: relative;
+}
+
+.wallet-game-vault__art[data-reward-chest-click],
+.wallet-game-streak img[data-reward-chest-click] {
+  cursor: pointer;
+}
+
+.wallet-reward-chest-info {
+  position: absolute;
+  z-index: 4;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #54c8ff 0%, #1977ff 100%);
+  box-shadow:
+    0 5px 14px rgba(11, 72, 176, 0.38),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wallet-reward-chest-info:hover,
+.wallet-reward-chest-info:focus-visible {
+  filter: brightness(1.08);
+}
+
+.wallet-reward-chest-info--card {
+  top: 7px;
+  right: 7px;
+}
+
+.wallet-reward-chest-info--vault {
+  top: 14px;
+  right: 14px;
+}
+
+.wallet-reward-chest-info--streak {
+  top: 12px;
+  right: 12px;
+}
+
+.wallet-reward-chest-modal {
+  max-width: 430px;
+}
+
+.wallet-reward-chest-modal__subtitle {
+  margin: 8px 0 0;
+  color: #aeb7c7;
+  font-size: 13px;
+}
+
+.wallet-reward-chest-modal__drops {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wallet-reward-chest-modal__drops li {
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+}

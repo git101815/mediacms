@@ -1784,6 +1784,25 @@ def _build_guest_referral_context() -> dict:
     }
 
 
+def _build_reward_chest_preview_catalog() -> list[dict]:
+    catalog = []
+
+    for chest_key in wallet_config.REWARD_CHESTS:
+        chest = wallet_config.get_reward_chest_definition(chest_key)
+        catalog.append(
+            {
+                "key": chest.key,
+                "label": chest.label,
+                "drop_labels": [
+                    drop.label
+                    for drop in chest.drops
+                ],
+            }
+        )
+
+    return catalog
+
+
 def _build_guest_wallet_context(request) -> dict:
     active_tab = _normalize_wallet_tab(
         (request.GET.get("tab") or WALLET_TAB_ALL).strip()
@@ -1874,6 +1893,9 @@ def _build_guest_wallet_context(request) -> dict:
             user=request.user,
             claim_url=reverse("wallet_claim_daily_reward"),
             preview=True,
+        ),
+        "reward_chest_catalog": (
+            _build_reward_chest_preview_catalog()
         ),
         "bonus_vault": _build_guest_bonus_vault_context(
             open_url=reverse("wallet_open_bonus_vault"),
@@ -2026,6 +2048,9 @@ def wallet(request):
     context["daily_rewards"] = build_daily_rewards_context(
         user=request.user,
         claim_url=reverse("wallet_claim_daily_reward"),
+    )
+    context["reward_chest_catalog"] = (
+        _build_reward_chest_preview_catalog()
     )
     context["bonus_vault"] = build_bonus_vault_context(
         user=request.user,
