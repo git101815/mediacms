@@ -228,11 +228,11 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["medium_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["medium_chest"]["opened"],
         "drops": (
-            {"key": "common_75", "label": "100 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 100},
-            {"key": "uncommon_150", "label": "250 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 250},
-            {"key": "rare_450", "label": "500 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 500},
-            {"key": "epic_750", "label": "1,000 tokens", "rarity": "epic", "chance_bps": 650, "amount": 1_000},
-            {"key": "jackpot_1500", "label": "2,500 tokens", "rarity": "jackpot", "chance_bps": 350, "amount": 2_500},
+            {"key": "common_75", "label": "75 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 75},
+            {"key": "uncommon_150", "label": "150 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 150},
+            {"key": "rare_450", "label": "450 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 450},
+            {"key": "epic_750", "label": "750 tokens", "rarity": "epic", "chance_bps": 650, "amount": 750},
+            {"key": "jackpot_1500", "label": "1,500 tokens", "rarity": "jackpot", "chance_bps": 350, "amount": 1_500},
         ),
     },
     "big_chest": {
