@@ -85,6 +85,32 @@ WALLET_TOKEN_PACK_ASSETS = {
     "token_pkg_5000": "images/wallet/bundles/token_pkg_5000.png",
     "token_pkg_10000": "images/wallet/bundles/token_pkg_10000.png",
 }
+# Reward Chest reveal images are selected explicitly per drop.
+# Values reference WALLET_TOKEN_PACK_ASSETS keys. This is visual-only.
+REWARD_CHEST_DROP_IMAGE_ASSETS = {
+    "small_chest": {
+        "common_25": "token_pkg_500",
+        "uncommon_50": "token_pkg_500",
+        "rare_100": "token_pkg_500",
+        "epic_250": "token_pkg_500",
+        "jackpot_500": "token_pkg_500",
+    },
+    "medium_chest": {
+        "common_75": "token_pkg_500",
+        "uncommon_150": "token_pkg_500",
+        "rare_450": "token_pkg_500",
+        "epic_750": "token_pkg_1000",
+        "jackpot_1500": "token_pkg_2000",
+    },
+    "big_chest": {
+        "common_350": "token_pkg_500",
+        "uncommon_750": "token_pkg_1000",
+        "rare_1500": "token_pkg_2000",
+        "epic_2500": "token_pkg_2000",
+        "jackpot_5000": "token_pkg_5000",
+    },
+}
+
 WALLET_TOKEN_PACK_IMAGE_TEMPLATE = "images/wallet/bundles/{code}.png"
 
 WALLET_NETWORK_DISPLAY_LABELS = {
@@ -525,6 +551,45 @@ def get_wallet_token_pack_image_path(pack_code: str) -> str:
         except (KeyError, ValueError) as exc:
             raise ImproperlyConfigured("Invalid WALLET_TOKEN_PACK_IMAGE_TEMPLATE") from exc
     return _normalize_static_image_path(path, field_name=f"Token pack {code} image")
+
+
+def get_reward_chest_drop_image_path(
+    *,
+    chest_key: str,
+    drop_key: str,
+) -> str:
+    chest_key = _normalize_identifier(
+        chest_key,
+        field_name="Reward Chest drop image chest key",
+    )
+    drop_key = _normalize_identifier(
+        drop_key,
+        field_name="Reward Chest drop image drop key",
+    )
+    chest_mapping = REWARD_CHEST_DROP_IMAGE_ASSETS.get(chest_key)
+    if not isinstance(chest_mapping, dict):
+        raise ImproperlyConfigured(
+            f"No drop image mapping for Reward Chest {chest_key}"
+        )
+    asset_key = chest_mapping.get(drop_key)
+    if not asset_key:
+        raise ImproperlyConfigured(
+            f"No drop image configured for {chest_key}/{drop_key}"
+        )
+    asset_key = _normalize_identifier(
+        asset_key,
+        field_name=f"Reward Chest {chest_key}/{drop_key} image asset",
+    )
+    image_path = WALLET_TOKEN_PACK_ASSETS.get(asset_key)
+    if not image_path:
+        raise ImproperlyConfigured(
+            f"Unknown token pack asset {asset_key} for "
+            f"{chest_key}/{drop_key}"
+        )
+    return _normalize_static_image_path(
+        image_path,
+        field_name=f"Reward Chest {chest_key}/{drop_key} image",
+    )
 
 
 def _get_wallet_visual_groups(raw_groups, *, field_name: str, uppercase_keys: bool = False) -> dict[str, dict]:

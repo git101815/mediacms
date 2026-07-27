@@ -3801,3 +3801,292 @@ body.wallet-chest-opening-active {
     height: 156px;
   }
 }
+
+/* chest-opening-portrait-v3 */
+.wallet-chest-opening {
+  padding: 12px;
+}
+
+.wallet-chest-opening__backdrop {
+  background:
+    radial-gradient(
+      circle at 50% 44%,
+      color-mix(in srgb, var(--chest-glow) 18%, transparent),
+      rgba(4, 6, 12, 0.88) 48%,
+      rgba(2, 3, 7, 0.96) 100%
+    );
+  backdrop-filter: blur(8px);
+}
+
+.wallet-chest-opening__scene {
+  position: relative;
+  width: min(92vw, 360px);
+  height: min(640px, calc(100dvh - 24px));
+  min-height: 0;
+  padding: 20px 16px 16px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  justify-items: center;
+  border: 1px solid
+    color-mix(in srgb, var(--chest-glow) 48%, rgba(255, 255, 255, 0.16));
+  border-radius: 28px;
+  background:
+    radial-gradient(
+      circle at 50% 52%,
+      color-mix(in srgb, var(--chest-glow) 24%, transparent) 0,
+      transparent 43%
+    ),
+    radial-gradient(
+      circle at 50% -4%,
+      rgba(255, 255, 255, 0.10),
+      transparent 35%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(18, 19, 42, 0.97) 0%,
+      rgba(9, 10, 24, 0.98) 60%,
+      rgba(4, 6, 15, 0.99) 100%
+    );
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.60),
+    0 0 44px color-mix(in srgb, var(--chest-glow) 20%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+.wallet-chest-opening__scene::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.20;
+  background:
+    linear-gradient(
+      115deg,
+      transparent 0 34%,
+      rgba(255, 255, 255, 0.08) 45%,
+      transparent 56% 100%
+    ),
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.018) 0 1px,
+      transparent 1px 14px
+    );
+  content: "";
+  pointer-events: none;
+}
+
+.wallet-chest-opening__scene > * {
+  position: relative;
+  z-index: 1;
+}
+
+.wallet-chest-opening__source {
+  margin-top: 0;
+  color: var(--chest-glow);
+  font-size: 11px;
+  letter-spacing: 0.20em;
+  text-shadow: 0 0 14px
+    color-mix(in srgb, var(--chest-glow) 58%, transparent);
+}
+
+.wallet-chest-opening__title {
+  margin: 6px 0 0;
+  font-size: clamp(26px, 8vw, 34px);
+}
+
+.wallet-chest-opening__stage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 4px 0 0;
+}
+
+.wallet-chest-opening__rays,
+.wallet-chest-opening__flash {
+  top: 70%;
+}
+
+.wallet-chest-opening__rays {
+  width: min(76vw, 300px);
+  height: min(76vw, 300px);
+}
+
+.wallet-chest-opening__flash {
+  width: min(54vw, 210px);
+  height: min(54vw, 210px);
+}
+
+.wallet-chest-opening__drop {
+  top: 6px;
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  isolation: isolate;
+  transform: translate(-50%, 104px) scale(0.18);
+}
+
+.wallet-chest-opening__drop > .wallet-chest-opening__drop-image {
+  width: min(38vw, 142px);
+  height: min(28vw, 102px);
+  object-fit: contain;
+}
+
+.wallet-chest-opening__amount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 1px;
+}
+
+.wallet-chest-opening__amount strong {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #ffe05a;
+  font-family: 'Avenir-Heavy', 'Roboto', sans-serif;
+  font-size: clamp(30px, 9vw, 38px);
+  line-height: 1;
+  text-shadow:
+    0 3px 0 rgba(88, 43, 0, 0.82),
+    0 0 18px rgba(255, 201, 34, 0.48);
+}
+
+.wallet-chest-opening__amount > .wallet-chest-opening__token-icon {
+  width: clamp(25px, 7vw, 31px);
+  height: clamp(25px, 7vw, 31px);
+  object-fit: contain;
+  filter:
+    drop-shadow(0 3px 4px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 9px rgba(255, 194, 35, 0.28));
+}
+
+.wallet-chest-opening__chest {
+  bottom: 2px;
+  width: clamp(220px, 68vw, 258px);
+  height: clamp(204px, 63vw, 238px);
+}
+
+.wallet-chest-opening[data-state="opened"]
+  .wallet-chest-opening__chest-image--opened,
+.wallet-chest-opening[data-state="revealed"]
+  .wallet-chest-opening__chest-image--opened {
+  transform: scale(1.06);
+}
+
+.wallet-chest-opening[data-state="revealed"]
+  .wallet-chest-opening__chest {
+  transform: translateX(-50%) scale(0.98);
+}
+
+.wallet-chest-opening__hint {
+  min-height: 18px;
+  margin: 3px 0 0;
+  font-size: 12px;
+}
+
+.wallet-chest-opening__collect {
+  width: min(100%, 210px);
+  min-height: 46px;
+  margin-top: 12px;
+}
+
+@keyframes wallet-chest-open-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.74) translateY(14px);
+  }
+  64% {
+    opacity: 1;
+    transform: scale(1.11) translateY(-6px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.06) translateY(0);
+  }
+}
+
+@media (min-width: 600px) {
+  .wallet-chest-opening {
+    padding: 20px;
+  }
+
+  .wallet-chest-opening__scene {
+    width: min(420px, 92vw);
+    height: min(680px, calc(100dvh - 40px));
+    padding: 24px 22px 20px;
+    border-radius: 32px;
+  }
+
+  .wallet-chest-opening__drop > .wallet-chest-opening__drop-image {
+    width: 158px;
+    height: 112px;
+  }
+
+  .wallet-chest-opening__chest {
+    width: 292px;
+    height: 270px;
+  }
+
+  .wallet-chest-opening__rays {
+    width: 330px;
+    height: 330px;
+  }
+}
+
+@media (max-height: 590px) {
+  .wallet-chest-opening {
+    padding: 8px;
+  }
+
+  .wallet-chest-opening__scene {
+    height: calc(100dvh - 16px);
+    padding: 12px 14px 10px;
+    border-radius: 22px;
+  }
+
+  .wallet-chest-opening__source {
+    font-size: 9px;
+  }
+
+  .wallet-chest-opening__title {
+    margin-top: 3px;
+    font-size: 23px;
+  }
+
+  .wallet-chest-opening__drop {
+    top: 0;
+  }
+
+  .wallet-chest-opening__drop > .wallet-chest-opening__drop-image {
+    width: 104px;
+    height: 72px;
+  }
+
+  .wallet-chest-opening__amount strong {
+    font-size: 27px;
+  }
+
+  .wallet-chest-opening__chest {
+    width: 202px;
+    height: 188px;
+  }
+
+  .wallet-chest-opening__rays {
+    width: 230px;
+    height: 230px;
+  }
+
+  .wallet-chest-opening__hint {
+    margin-top: 0;
+    font-size: 11px;
+  }
+
+  .wallet-chest-opening__collect {
+    min-height: 40px;
+    margin-top: 7px;
+  }
+}

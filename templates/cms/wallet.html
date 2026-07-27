@@ -536,7 +536,7 @@
     <div
       class="wallet-chest-opening__source"
       data-wallet-chest-opening-source
-    >Reward Chest</div>
+    >REWARD</div>
 
     <h2
       id="wallet-chest-opening-title"
@@ -554,18 +554,23 @@
         aria-live="polite"
       >
         <img
+          class="wallet-chest-opening__drop-image"
           src=""
           alt=""
           data-wallet-chest-opening-drop-image
         >
-        <strong>
-          +<span data-wallet-chest-opening-amount>0</span>
-        </strong>
-        <span class="wallet-chest-opening__drop-unit">tokens</span>
-        <span
-          class="wallet-chest-opening__rarity"
-          data-wallet-chest-opening-rarity
-        >reward</span>
+        <div class="wallet-chest-opening__amount">
+          <strong>
+            +<span data-wallet-chest-opening-amount>0</span>
+          </strong>
+          <img
+            class="wallet-chest-opening__token-icon"
+            src=""
+            alt=""
+            aria-hidden="true"
+            data-wallet-chest-opening-token-icon
+          >
+        </div>
       </div>
 
       <button

@@ -14,15 +14,6 @@ from .quests import claim_quest_reward
 
 # interactive-chest-opening-v1
 
-_CHEST_DROP_BUNDLE_ASSETS = (
-    (500, "token_pkg_500"),
-    (1_000, "token_pkg_1000"),
-    (2_000, "token_pkg_2000"),
-    (5_000, "token_pkg_5000"),
-    (10_000, "token_pkg_10000"),
-)
-
-
 def _wants_wallet_json(request) -> bool:
     return (
         request.headers.get("x-requested-with") == "XMLHttpRequest"
@@ -36,30 +27,26 @@ def _wallet_error_text(exc) -> str:
     return str(exc)
 
 
-def _get_drop_bundle_image_path(amount_tokens: int) -> str:
-    amount_tokens = max(0, int(amount_tokens))
-    _pack_amount, asset_key = min(
-        _CHEST_DROP_BUNDLE_ASSETS,
-        key=lambda row: (
-            abs(row[0] - amount_tokens),
-            row[0],
-        ),
-    )
-    return config.WALLET_TOKEN_PACK_ASSETS[asset_key]
-
-
-def _build_chest_opening_payload(*, result: dict, source_label: str) -> dict:
+def _build_chest_opening_payload(*, result: dict) -> dict:
     amount_tokens = int(result.get("amount_tokens") or 0)
     closed_image_path = str(result.get("closed_image_path") or "")
     opened_image_path = str(result.get("opened_image_path") or "")
+    drop_key = str(result.get("drop_key") or "").strip()
+    grant = result.get("grant")
+    chest_key = str(getattr(grant, "chest_key", "") or "").strip()
+    rarity = str(result.get("rarity") or "reward").strip().lower()
 
-    if not closed_image_path or not opened_image_path:
+    if (
+        not closed_image_path
+        or not opened_image_path
+        or not chest_key
+        or not drop_key
+    ):
         raise ValidationError(
             "Reward Chest result is missing its visual assets"
         )
 
     return {
-        "source_label": str(source_label),
         "chest_label": str(
             result.get("chest_label")
             or result.get("chest_name")
@@ -67,15 +54,18 @@ def _build_chest_opening_payload(*, result: dict, source_label: str) -> dict:
         ),
         "amount_tokens": amount_tokens,
         "amount_display": f"{amount_tokens:,}",
-        "drop_label": str(
-            result.get("drop_label")
-            or f"{amount_tokens:,} tokens"
-        ),
-        "rarity": str(result.get("rarity") or "reward"),
+        "rarity": rarity,
+        "rarity_label": rarity.replace("_", " ").upper(),
         "closed_image_url": static(closed_image_path),
         "opened_image_url": static(opened_image_path),
         "drop_image_url": static(
-            _get_drop_bundle_image_path(amount_tokens)
+            config.get_reward_chest_drop_image_path(
+                chest_key=chest_key,
+                drop_key=drop_key,
+            )
+        ),
+        "token_icon_url": static(
+            config.get_wallet_asset_paths()["token_icon"]
         ),
     }
 
@@ -132,7 +122,6 @@ def wallet_open_bonus_vault(request):
                 "already_opened": not bool(result["opened"]),
                 "opening": _build_chest_opening_payload(
                     result=result,
-                    source_label="Bonus Vault",
                 ),
             }
         )
@@ -177,7 +166,6 @@ def wallet_claim_daily_reward(request):
                     ),
                     "opening": _build_chest_opening_payload(
                         result=result,
-                        source_label="Daily Reward",
                     ),
                 }
             )

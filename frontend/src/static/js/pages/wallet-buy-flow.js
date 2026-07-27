@@ -767,7 +767,8 @@
 
     setChestOpeningText(
       '[data-wallet-chest-opening-source]',
-      opening.source_label || 'Reward Chest'
+      opening.rarity_label ||
+        String(opening.rarity || 'reward').toUpperCase()
     );
     setChestOpeningText(
       '[data-wallet-chest-opening-title]',
@@ -776,10 +777,6 @@
     setChestOpeningText(
       '[data-wallet-chest-opening-amount]',
       opening.amount_display || String(opening.amount_tokens || 0)
-    );
-    setChestOpeningText(
-      '[data-wallet-chest-opening-rarity]',
-      opening.rarity || 'reward'
     );
     setChestOpeningText(
       '[data-wallet-chest-opening-hint]',
@@ -797,6 +794,10 @@
     setChestOpeningImage(
       '[data-wallet-chest-opening-drop-image]',
       opening.drop_image_url
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-token-icon]',
+      opening.token_icon_url
     );
 
     if (chestOpeningCollect) {
