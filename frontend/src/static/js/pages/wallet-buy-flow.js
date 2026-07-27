@@ -700,6 +700,261 @@
     openModal('reward-chest-preview');
   }
 
+
+  // interactive-chest-opening-v1
+  const chestOpeningOverlay = document.querySelector(
+    '[data-wallet-chest-opening]'
+  );
+  const chestOpeningTrigger = chestOpeningOverlay
+    ? chestOpeningOverlay.querySelector(
+      '[data-wallet-chest-opening-trigger]'
+    )
+    : null;
+  const chestOpeningCollect = chestOpeningOverlay
+    ? chestOpeningOverlay.querySelector(
+      '[data-wallet-chest-opening-collect]'
+    )
+    : null;
+  const chestOpeningBackdrop = chestOpeningOverlay
+    ? chestOpeningOverlay.querySelector(
+      '.wallet-chest-opening__backdrop'
+    )
+    : null;
+  let chestOpeningTimers = [];
+
+  function clearChestOpeningTimers() {
+    chestOpeningTimers.forEach(function (timerId) {
+      window.clearTimeout(timerId);
+    });
+    chestOpeningTimers = [];
+  }
+
+  function setChestOpeningText(selector, value) {
+    if (!chestOpeningOverlay) {
+      return;
+    }
+    const node = chestOpeningOverlay.querySelector(selector);
+    if (node) {
+      node.textContent = value;
+    }
+  }
+
+  function setChestOpeningImage(selector, value) {
+    if (!chestOpeningOverlay) {
+      return;
+    }
+    const node = chestOpeningOverlay.querySelector(selector);
+    if (node) {
+      node.src = value || '';
+    }
+  }
+
+  function showChestOpening(opening) {
+    if (!chestOpeningOverlay || !opening) {
+      window.location.reload();
+      return;
+    }
+
+    clearChestOpeningTimers();
+
+    chestOpeningOverlay.hidden = false;
+    chestOpeningOverlay.setAttribute('aria-hidden', 'false');
+    chestOpeningOverlay.setAttribute('data-state', 'closed');
+    chestOpeningOverlay.setAttribute(
+      'data-rarity',
+      String(opening.rarity || 'reward').toLowerCase()
+    );
+
+    setChestOpeningText(
+      '[data-wallet-chest-opening-source]',
+      opening.source_label || 'Reward Chest'
+    );
+    setChestOpeningText(
+      '[data-wallet-chest-opening-title]',
+      opening.chest_label || 'Reward Chest'
+    );
+    setChestOpeningText(
+      '[data-wallet-chest-opening-amount]',
+      opening.amount_display || String(opening.amount_tokens || 0)
+    );
+    setChestOpeningText(
+      '[data-wallet-chest-opening-rarity]',
+      opening.rarity || 'reward'
+    );
+    setChestOpeningText(
+      '[data-wallet-chest-opening-hint]',
+      'Tap the chest to open'
+    );
+
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-closed]',
+      opening.closed_image_url
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-opened]',
+      opening.opened_image_url
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-drop-image]',
+      opening.drop_image_url
+    );
+
+    if (chestOpeningCollect) {
+      chestOpeningCollect.hidden = true;
+    }
+    if (chestOpeningTrigger) {
+      chestOpeningTrigger.disabled = false;
+      chestOpeningTrigger.focus();
+    }
+
+    document.documentElement.classList.add(
+      'wallet-chest-opening-active'
+    );
+    document.body.classList.add(
+      'wallet-chest-opening-active'
+    );
+  }
+
+  function revealChestOpening() {
+    if (
+      !chestOpeningOverlay ||
+      chestOpeningOverlay.getAttribute('data-state') !== 'closed'
+    ) {
+      return;
+    }
+
+    chestOpeningOverlay.setAttribute('data-state', 'opening');
+    setChestOpeningText(
+      '[data-wallet-chest-opening-hint]',
+      'Opening...'
+    );
+    if (chestOpeningTrigger) {
+      chestOpeningTrigger.disabled = true;
+    }
+
+    chestOpeningTimers.push(window.setTimeout(function () {
+      chestOpeningOverlay.setAttribute('data-state', 'opened');
+    }, 620));
+
+    chestOpeningTimers.push(window.setTimeout(function () {
+      chestOpeningOverlay.setAttribute('data-state', 'revealed');
+      setChestOpeningText(
+        '[data-wallet-chest-opening-hint]',
+        'Reward unlocked'
+      );
+    }, 930));
+
+    chestOpeningTimers.push(window.setTimeout(function () {
+      if (chestOpeningCollect) {
+        chestOpeningCollect.hidden = false;
+        chestOpeningCollect.focus();
+      }
+    }, 1420));
+  }
+
+  function finishChestOpening() {
+    window.location.reload();
+  }
+
+  async function submitChestClaimForm(form) {
+    if (
+      !form ||
+      form.getAttribute('data-wallet-chest-submitting') === 'true'
+    ) {
+      return;
+    }
+
+    form.setAttribute('data-wallet-chest-submitting', 'true');
+    const submitButton = form.querySelector(
+      'button[type="submit"], input[type="submit"]'
+    );
+    if (submitButton) {
+      submitButton.disabled = true;
+    }
+
+    try {
+      const response = await window.fetch(form.action, {
+        method: 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        payload = null;
+      }
+
+      if (!response.ok || !payload || !payload.ok) {
+        throw new Error(
+          payload && payload.error
+            ? payload.error
+            : 'Could not open the Reward Chest.'
+        );
+      }
+
+      if (!payload.opening) {
+        window.location.reload();
+        return;
+      }
+
+      showChestOpening(payload.opening);
+    } catch (error) {
+      form.removeAttribute('data-wallet-chest-submitting');
+      if (submitButton) {
+        submitButton.disabled = false;
+      }
+      window.alert(
+        error && error.message
+          ? error.message
+          : 'Could not open the Reward Chest.'
+      );
+    }
+  }
+
+  document.addEventListener('submit', function (event) {
+    const form = event.target && event.target.closest
+      ? event.target.closest('[data-wallet-chest-claim-form]')
+      : null;
+
+    if (!form || requiresAuthentication) {
+      return;
+    }
+
+    event.preventDefault();
+    submitChestClaimForm(form);
+  });
+
+  if (chestOpeningTrigger) {
+    chestOpeningTrigger.addEventListener(
+      'click',
+      revealChestOpening
+    );
+  }
+
+  if (chestOpeningCollect) {
+    chestOpeningCollect.addEventListener(
+      'click',
+      finishChestOpening
+    );
+  }
+
+  if (chestOpeningBackdrop) {
+    chestOpeningBackdrop.addEventListener('click', function () {
+      if (
+        chestOpeningOverlay &&
+        chestOpeningOverlay.getAttribute('data-state') === 'revealed'
+      ) {
+        finishChestOpening();
+      }
+    });
+  }
+
   function getReferralUrl() {
     const module = document.querySelector('[data-wallet-module="referral"]');
     return module ? module.getAttribute('data-referral-url') || '' : '';

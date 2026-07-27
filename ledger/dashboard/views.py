@@ -1,12 +1,83 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.http import JsonResponse
+from django.templatetags.static import static
 from django.shortcuts import redirect
 from django.views.decorators.http import require_POST
 
+from . import config
 from .bonus_vault import open_bonus_vault
 from .daily_rewards import claim_daily_reward
 from .quests import claim_quest_reward
+
+
+# interactive-chest-opening-v1
+
+_CHEST_DROP_BUNDLE_ASSETS = (
+    (500, "token_pkg_500"),
+    (1_000, "token_pkg_1000"),
+    (2_000, "token_pkg_2000"),
+    (5_000, "token_pkg_5000"),
+    (10_000, "token_pkg_10000"),
+)
+
+
+def _wants_wallet_json(request) -> bool:
+    return (
+        request.headers.get("x-requested-with") == "XMLHttpRequest"
+        or "application/json" in request.headers.get("accept", "")
+    )
+
+
+def _wallet_error_text(exc) -> str:
+    if hasattr(exc, "messages") and exc.messages:
+        return str(exc.messages[0])
+    return str(exc)
+
+
+def _get_drop_bundle_image_path(amount_tokens: int) -> str:
+    amount_tokens = max(0, int(amount_tokens))
+    _pack_amount, asset_key = min(
+        _CHEST_DROP_BUNDLE_ASSETS,
+        key=lambda row: (
+            abs(row[0] - amount_tokens),
+            row[0],
+        ),
+    )
+    return config.WALLET_TOKEN_PACK_ASSETS[asset_key]
+
+
+def _build_chest_opening_payload(*, result: dict, source_label: str) -> dict:
+    amount_tokens = int(result.get("amount_tokens") or 0)
+    closed_image_path = str(result.get("closed_image_path") or "")
+    opened_image_path = str(result.get("opened_image_path") or "")
+
+    if not closed_image_path or not opened_image_path:
+        raise ValidationError(
+            "Reward Chest result is missing its visual assets"
+        )
+
+    return {
+        "source_label": str(source_label),
+        "chest_label": str(
+            result.get("chest_label")
+            or result.get("chest_name")
+            or "Reward Chest"
+        ),
+        "amount_tokens": amount_tokens,
+        "amount_display": f"{amount_tokens:,}",
+        "drop_label": str(
+            result.get("drop_label")
+            or f"{amount_tokens:,} tokens"
+        ),
+        "rarity": str(result.get("rarity") or "reward"),
+        "closed_image_url": static(closed_image_path),
+        "opened_image_url": static(opened_image_path),
+        "drop_image_url": static(
+            _get_drop_bundle_image_path(amount_tokens)
+        ),
+    }
 
 
 @login_required
@@ -40,14 +111,31 @@ def wallet_claim_quest(request, quest_key):
 @login_required
 @require_POST
 def wallet_open_bonus_vault(request):
+    wants_json = _wants_wallet_json(request)
+
     try:
         result = open_bonus_vault(user=request.user)
     except (PermissionDenied, ValidationError) as exc:
-        messages.error(
-            request,
-            exc.messages[0] if hasattr(exc, "messages") else str(exc),
-        )
+        error_text = _wallet_error_text(exc)
+        if wants_json:
+            return JsonResponse(
+                {"ok": False, "error": error_text},
+                status=400,
+            )
+        messages.error(request, error_text)
         return redirect("wallet")
+
+    if wants_json:
+        return JsonResponse(
+            {
+                "ok": True,
+                "already_opened": not bool(result["opened"]),
+                "opening": _build_chest_opening_payload(
+                    result=result,
+                    source_label="Bonus Vault",
+                ),
+            }
+        )
 
     if result["opened"]:
         messages.success(
@@ -65,14 +153,41 @@ def wallet_open_bonus_vault(request):
 @login_required
 @require_POST
 def wallet_claim_daily_reward(request):
+    wants_json = _wants_wallet_json(request)
+
     try:
         result = claim_daily_reward(user=request.user)
     except (PermissionDenied, ValidationError) as exc:
-        messages.error(
-            request,
-            exc.messages[0] if hasattr(exc, "messages") else str(exc),
-        )
+        error_text = _wallet_error_text(exc)
+        if wants_json:
+            return JsonResponse(
+                {"ok": False, "error": error_text},
+                status=400,
+            )
+        messages.error(request, error_text)
         return redirect("wallet")
+
+    if wants_json:
+        if result["reward_kind"] == "chest":
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "already_claimed": bool(
+                        result["already_claimed"]
+                    ),
+                    "opening": _build_chest_opening_payload(
+                        result=result,
+                        source_label="Daily Reward",
+                    ),
+                }
+            )
+        return JsonResponse(
+            {
+                "ok": True,
+                "kind": "fixed",
+                "reload": True,
+            }
+        )
 
     if result["claimed"] and result["reward_kind"] == "chest":
         messages.success(
@@ -82,5 +197,8 @@ def wallet_claim_daily_reward(request):
     elif result["claimed"]:
         messages.success(request, "Daily reward claimed.")
     else:
-        messages.info(request, "Today's daily reward was already claimed.")
+        messages.info(
+            request,
+            "Today's daily reward was already claimed.",
+        )
     return redirect("wallet")

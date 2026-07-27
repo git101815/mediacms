@@ -101,7 +101,7 @@
               data-wallet-guest-allowed
               aria-label="Show {{ bonus_vault.chest_label }} possible drops"
             >i</button>
-            <form class="wallet-game-vault__form" method="post" action="{{ bonus_vault.open_url }}">
+            <form class="wallet-game-vault__form" method="post" action="{{ bonus_vault.open_url }}" data-wallet-chest-claim-form data-wallet-chest-source="bonus-vault">
               {% csrf_token %}
               <button
                 type="submit"
@@ -141,7 +141,7 @@
               {% for reward in daily_rewards.window %}<i{% if reward.status == 'claimed' %} class="is-claimed"{% elif reward.status == 'current' %} class="is-current"{% endif %}></i>{% endfor %}
             </div>
             <div class="wallet-game-panel__footer">
-              <form method="post" action="{{ daily_rewards.claim_url }}" style="display:contents">
+              <form method="post" action="{{ daily_rewards.claim_url }}" style="display:contents"{% if daily_rewards.current_reward.kind == 'chest' %} data-wallet-chest-claim-form data-wallet-chest-source="daily-reward"{% endif %}>
                 {% csrf_token %}
                 <button type="submit" class="wallet-game-button wallet-game-button--primary" data-wallet-action="claim-daily"{% if not daily_rewards.can_claim %} disabled{% endif %}>
                   {% if daily_rewards.claimed_today %}Claimed{% else %}{{ daily_rewards.current_reward.claim_label }}{% endif %}
@@ -515,6 +515,93 @@
   </div>
 </div>
 
+
+
+<div
+  class="wallet-chest-opening"
+  data-wallet-chest-opening
+  data-state="closed"
+  data-rarity="reward"
+  hidden
+  aria-hidden="true"
+>
+  <div class="wallet-chest-opening__backdrop"></div>
+
+  <div
+    class="wallet-chest-opening__scene"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="wallet-chest-opening-title"
+  >
+    <div
+      class="wallet-chest-opening__source"
+      data-wallet-chest-opening-source
+    >Reward Chest</div>
+
+    <h2
+      id="wallet-chest-opening-title"
+      class="wallet-chest-opening__title"
+      data-wallet-chest-opening-title
+    >Reward Chest</h2>
+
+    <div class="wallet-chest-opening__stage">
+      <div class="wallet-chest-opening__rays" aria-hidden="true"></div>
+      <div class="wallet-chest-opening__flash" aria-hidden="true"></div>
+
+      <div
+        class="wallet-chest-opening__drop"
+        data-wallet-chest-opening-drop
+        aria-live="polite"
+      >
+        <img
+          src=""
+          alt=""
+          data-wallet-chest-opening-drop-image
+        >
+        <strong>
+          +<span data-wallet-chest-opening-amount>0</span>
+        </strong>
+        <span class="wallet-chest-opening__drop-unit">tokens</span>
+        <span
+          class="wallet-chest-opening__rarity"
+          data-wallet-chest-opening-rarity
+        >reward</span>
+      </div>
+
+      <button
+        type="button"
+        class="wallet-chest-opening__chest"
+        data-wallet-chest-opening-trigger
+        aria-label="Open Reward Chest"
+      >
+        <img
+          class="wallet-chest-opening__chest-image wallet-chest-opening__chest-image--closed"
+          src=""
+          alt=""
+          data-wallet-chest-opening-closed
+        >
+        <img
+          class="wallet-chest-opening__chest-image wallet-chest-opening__chest-image--opened"
+          src=""
+          alt=""
+          data-wallet-chest-opening-opened
+        >
+      </button>
+    </div>
+
+    <p
+      class="wallet-chest-opening__hint"
+      data-wallet-chest-opening-hint
+    >Tap the chest to open</p>
+
+    <button
+      type="button"
+      class="wallet-chest-opening__collect"
+      data-wallet-chest-opening-collect
+      hidden
+    >Collect</button>
+  </div>
+</div>
 
 <div class="wallet-modal" data-wallet-modal="deposit" hidden>
   <div class="wallet-modal__backdrop" data-wallet-close="deposit"></div>
