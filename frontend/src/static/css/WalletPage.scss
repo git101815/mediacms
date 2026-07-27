@@ -3660,3 +3660,144 @@ body.wallet-chest-opening-active {
     transition-duration: 1ms !important;
   }
 }
+
+/* interactive-chest-opening-final-layout-v2 */
+/*
+ * The original final state used overlapping absolute zones:
+ * the drop occupied roughly the top 180px while the 205px chest began
+ * around 127px. Keep the same stage footprint, but reserve distinct visual
+ * zones by reducing both assets and anchoring the effects behind the chest.
+ */
+.wallet-chest-opening__stage {
+  width: min(340px, 90vw);
+  height: 360px;
+  margin-top: 4px;
+}
+
+.wallet-chest-opening__rays {
+  top: 67%;
+  width: 270px;
+  height: 270px;
+}
+
+.wallet-chest-opening__flash {
+  top: 68%;
+  width: 190px;
+  height: 190px;
+}
+
+.wallet-chest-opening__drop {
+  top: 0;
+  width: 182px;
+  isolation: isolate;
+  transform: translate(-50%, 105px) scale(0.18);
+}
+
+.wallet-chest-opening__drop img {
+  width: 136px;
+  height: 94px;
+}
+
+.wallet-chest-opening__drop strong {
+  position: relative;
+  z-index: 2;
+  margin-top: 1px;
+  padding: 1px 7px 2px;
+  border-radius: 8px;
+  background: rgba(4, 7, 14, 0.68);
+  color: #ffe05a;
+  font-size: 31px;
+  text-shadow:
+    0 3px 0 rgba(88, 43, 0, 0.82),
+    0 0 16px rgba(255, 201, 34, 0.42);
+}
+
+.wallet-chest-opening__drop-unit {
+  position: relative;
+  z-index: 2;
+  margin-top: 2px;
+  padding: 1px 7px 2px;
+  border-radius: 6px;
+  background: rgba(4, 7, 14, 0.62);
+  font-size: 11px;
+}
+
+.wallet-chest-opening__rarity {
+  position: relative;
+  z-index: 2;
+  margin-top: 5px;
+}
+
+.wallet-chest-opening__chest {
+  bottom: 0;
+  width: 190px;
+  height: 176px;
+}
+
+.wallet-chest-opening[data-state="opened"]
+  .wallet-chest-opening__chest-image--opened,
+.wallet-chest-opening[data-state="revealed"]
+  .wallet-chest-opening__chest-image--opened {
+  transform: scale(1.03);
+}
+
+.wallet-chest-opening[data-state="revealed"]
+  .wallet-chest-opening__chest {
+  transform: translateX(-50%) scale(0.94);
+}
+
+.wallet-chest-opening__hint {
+  margin-top: 3px;
+}
+
+@keyframes wallet-chest-open-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.72) translateY(13px);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.08) translateY(-5px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.03) translateY(0);
+  }
+}
+
+@media (max-width: 520px) {
+  .wallet-chest-opening__stage {
+    width: min(300px, 92vw);
+    height: 326px;
+  }
+
+  .wallet-chest-opening__rays {
+    top: 68%;
+    width: 235px;
+    height: 235px;
+  }
+
+  .wallet-chest-opening__flash {
+    top: 69%;
+    width: 164px;
+    height: 164px;
+  }
+
+  .wallet-chest-opening__drop {
+    width: 160px;
+  }
+
+  .wallet-chest-opening__drop img {
+    width: 116px;
+    height: 80px;
+  }
+
+  .wallet-chest-opening__drop strong {
+    font-size: 27px;
+  }
+
+  .wallet-chest-opening__chest {
+    width: 168px;
+    height: 156px;
+  }
+}
