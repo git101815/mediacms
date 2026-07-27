@@ -465,6 +465,13 @@ a.user-menu-top-link {
     }
   }
 
+  .token-balance-wrap--guest {
+    .token-balance__main {
+      border-radius: 999px;
+      padding-left: 12px;
+    }
+  }
+
   .token-balance__amount {
     min-width: 52px;
     color: #fff;

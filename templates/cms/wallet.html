@@ -3,10 +3,10 @@
 {% block headtitle %}Wallet - {{ PORTAL_NAME }}{% endblock headtitle %}
 
 {% block innercontent %}
-<div class="wallet-ui wallet-ui--tokens wallet-ui--gamified" data-wallet-ui>
+<div class="wallet-ui wallet-ui--tokens wallet-ui--gamified" data-wallet-ui data-wallet-auth-required="{% if wallet_auth_required %}true{% else %}false{% endif %}" data-wallet-login-url="{{ wallet_login_url }}">
   <div class="wallet-ui__shell">
     <header class="wallet-ui__header">
-      <button type="button" class="wallet-ui__icon-btn" onclick="history.back()" aria-label="Back">
+      <button type="button" class="wallet-ui__icon-btn" onclick="history.back()" aria-label="Back" data-wallet-guest-allowed>
         <i class="material-icons" aria-hidden="true">arrow_back</i>
       </button>
       <div class="wallet-ui__header-copy">

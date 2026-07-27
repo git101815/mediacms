@@ -4,6 +4,62 @@
     return;
   }
 
+  // public-wallet-preview-v1
+  const requiresAuthentication =
+    root.getAttribute('data-wallet-auth-required') === 'true';
+  const walletLoginUrl =
+    root.getAttribute('data-wallet-login-url') || '';
+
+  if (requiresAuthentication && walletLoginUrl) {
+    const redirectGuestToLogin = function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+      }
+      window.location.assign(walletLoginUrl);
+    };
+
+    document.addEventListener('click', function (event) {
+      const eventTarget = event.target;
+      const interactive = eventTarget && eventTarget.closest
+        ? eventTarget.closest(
+          'button, a, input, select, textarea, label'
+        )
+        : null;
+
+      if (!interactive) {
+        return;
+      }
+      if (interactive.closest('[data-wallet-guest-allowed]')) {
+        return;
+      }
+      if (
+        !interactive.closest('[data-wallet-ui]') &&
+        !interactive.closest('.wallet-modal')
+      ) {
+        return;
+      }
+
+      redirectGuestToLogin(event);
+    }, true);
+
+    document.addEventListener('submit', function (event) {
+      const form = event.target;
+      if (
+        !form ||
+        !form.closest ||
+        (
+          !form.closest('[data-wallet-ui]') &&
+          !form.closest('.wallet-modal')
+        )
+      ) {
+        return;
+      }
+      redirectGuestToLogin(event);
+    }, true);
+  }
+
   // wallet-dashboard-view-switching-v2
   function inferDashboardViewFromUrl() {
     const url = new URL(window.location.href);
@@ -33,9 +89,15 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  setDashboardView(inferDashboardViewFromUrl(), false);
+  setDashboardView(
+    requiresAuthentication ? 'home' : inferDashboardViewFromUrl(),
+    false
+  );
   window.addEventListener('popstate', function () {
-    setDashboardView(inferDashboardViewFromUrl(), false);
+    setDashboardView(
+      requiresAuthentication ? 'home' : inferDashboardViewFromUrl(),
+      false
+    );
   });
 
   function getModal(name) {

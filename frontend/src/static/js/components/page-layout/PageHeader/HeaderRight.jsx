@@ -167,9 +167,14 @@ export function HeaderRight(props) {
                     </div>
 
                     <UploadMediaButton user={user} links={links} />
-                    {!user.is.anonymous ? (
-                      <div className="token-balance-wrap">
-                        <div className="token-balance">
+                    <div
+                      className={
+                        'token-balance-wrap' +
+                        (user.is.anonymous ? ' token-balance-wrap--guest' : '')
+                      }
+                    >
+                      <div className="token-balance">
+                        {!user.is.anonymous ? (
                           <a
                             className="token-balance__add"
                             href={walletUrl}
@@ -178,36 +183,36 @@ export function HeaderRight(props) {
                           >
                             <span aria-hidden="true">+</span>
                           </a>
-                          <a
-                            className="token-balance__main"
-                            href={walletUrl}
-                            title={translateString('Token balance')}
-                            aria-label={translateString('Token balance')}
-                          >
-                            <span className="token-balance__amount">
-                              {(function formatTokenBalance(rawBalance) {
-                                const normalized = Number(rawBalance || 0);
+                        ) : null}
+                        <a
+                          className="token-balance__main"
+                          href={walletUrl}
+                          title={translateString('Token balance')}
+                          aria-label={translateString('Token balance')}
+                        >
+                          <span className="token-balance__amount">
+                            {(function formatTokenBalance(rawBalance) {
+                              const normalized = Number(rawBalance || 0);
 
-                                if (!Number.isFinite(normalized)) {
-                                  return '0';
-                                }
+                              if (!Number.isFinite(normalized)) {
+                                return '0';
+                              }
 
-                                const wholeTokens = Math.trunc(
-                                  normalized / 1000000
-                                );
+                              const wholeTokens = Math.trunc(
+                                normalized / 1000000
+                              );
 
-                                return wholeTokens.toLocaleString(undefined, {
-                                  maximumFractionDigits: 0,
-                                });
-                              })(user.balance)}
-                            </span>
-                            <span className="token-balance__coin" aria-hidden="true">
-                              <img src={cfTokenIcon} alt="" />
-                            </span>
-                          </a>
-                        </div>
+                              return wholeTokens.toLocaleString(undefined, {
+                                maximumFractionDigits: 0,
+                              });
+                            })(user.balance)}
+                          </span>
+                          <span className="token-balance__coin" aria-hidden="true">
+                            <img src={cfTokenIcon} alt="" />
+                          </span>
+                        </a>
                       </div>
-                    ) : null}
+                    </div>
                     <div
                       className={
                         (user.is.anonymous ? 'user-options' : 'user-thumb') +

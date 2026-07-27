@@ -561,10 +561,21 @@ def _build_next_chest_row(
     return None
 
 
-def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
+def build_daily_rewards_context(
+    *,
+    user,
+    claim_url: str,
+    at=None,
+    preview: bool = False,
+) -> dict:
     definitions = config.get_daily_reward_definitions()
     reward_date = get_daily_reward_date(at)
-    state = DailyRewardState.objects.filter(user=user).first()
+    preview = bool(preview)
+    state = (
+        None
+        if preview
+        else DailyRewardState.objects.filter(user=user).first()
+    )
     display_streak, claimed_today, date_allows_claim = _get_display_streak(
         state, reward_date
     )
@@ -576,21 +587,29 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
         claimed_today=claimed_today,
     )
 
-    wallet = TokenWallet.objects.filter(
-        wallet_type=TokenWallet.TYPE_USER,
-        user=user,
-    ).first()
-    issuance_wallet = TokenWallet.objects.filter(
-        wallet_type=TokenWallet.TYPE_SYSTEM,
-        system_key=TokenWallet.SYSTEM_ISSUANCE,
-    ).first()
-    block_reason = _wallet_claim_block_reason(wallet)
-    issuance_block_reason = _wallet_claim_block_reason(issuance_wallet)
-    if not block_reason and issuance_block_reason:
-        block_reason = "Daily reward issuance is unavailable"
+    if preview:
+        wallet = None
+        issuance_wallet = None
+        block_reason = ""
+        eligible_user = True
+    else:
+        wallet = TokenWallet.objects.filter(
+            wallet_type=TokenWallet.TYPE_USER,
+            user=user,
+        ).first()
+        issuance_wallet = TokenWallet.objects.filter(
+            wallet_type=TokenWallet.TYPE_SYSTEM,
+            system_key=TokenWallet.SYSTEM_ISSUANCE,
+        ).first()
+        block_reason = _wallet_claim_block_reason(wallet)
+        issuance_block_reason = _wallet_claim_block_reason(issuance_wallet)
+        if not block_reason and issuance_block_reason:
+            block_reason = "Daily reward issuance is unavailable"
+        eligible_user = bool(getattr(user, "is_active", False))
+
     can_claim = bool(
         config.DAILY_REWARDS_ENABLED
-        and getattr(user, "is_active", False)
+        and eligible_user
         and date_allows_claim
         and not claimed_today
         and not block_reason
@@ -639,6 +658,7 @@ def build_daily_rewards_context(*, user, claim_url: str, at=None) -> dict:
 
     return {
         "enabled": bool(config.DAILY_REWARDS_ENABLED),
+        "preview": preview,
         "assets": config.get_wallet_asset_paths(),
         "claim_url": claim_url,
         "reward_date": reward_date,

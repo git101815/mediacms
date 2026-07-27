@@ -20,6 +20,9 @@ from django.core.exceptions import ImproperlyConfigured
 
 PLATFORM_TOKEN_DECIMALS = 6
 
+# Public wallet preview. This is display-only and never creates or credits a wallet.
+WALLET_GUEST_PREVIEW_BALANCE_TOKENS = 100
+
 # ---------------------------------------------------------------------------
 # Wallet visual assets
 # ---------------------------------------------------------------------------

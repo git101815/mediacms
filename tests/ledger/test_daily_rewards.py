@@ -98,6 +98,27 @@ class TestDailyRewards(BaseLedgerTestCase):
         self.assertEqual(result["streak_day"], 1)
         self.assertEqual(result["cycle_day"], 1)
 
+    def test_missing_day_resets_display_context_to_day_one(self):
+        reward_date = get_daily_reward_date(self.instant(day=24))
+        DailyRewardState.objects.create(
+            user=self.u1,
+            current_streak=29,
+            total_claims=29,
+            last_claim_date=reward_date - timedelta(days=2),
+        )
+
+        context = build_daily_rewards_context(
+            user=self.u1,
+            claim_url="/wallet/daily-reward/claim/",
+            at=self.instant(day=24),
+        )
+
+        self.assertEqual(context["streak"], 1)
+        self.assertEqual(context["cycle_day"], 1)
+        self.assertFalse(context["claimed_today"])
+        self.assertTrue(context["can_claim"])
+        self.assertEqual(context["current_reward"]["status"], "current")
+
     def test_cycle_wraps_after_last_configured_day(self):
         previous_date = get_daily_reward_date(self.instant(day=24))
         DailyRewardState.objects.create(
