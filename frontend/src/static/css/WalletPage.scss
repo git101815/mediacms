@@ -3190,3 +3190,45 @@ $error-text: #ff9a9a;
   font-size: 14px;
   font-weight: 700;
 }
+
+/* daily-reward-chest-info-corner-v2 */
+/*
+ * The information button is anchored to the card, not to the chest image.
+ * The chest stays horizontally centered and receives reserved space above it,
+ * so the button cannot overlap the artwork.
+ */
+.wallet-game-reward[data-reward-chest] {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto auto;
+  column-gap: 0;
+  row-gap: 5px;
+  justify-items: center;
+  padding-top: 22px;
+}
+
+.wallet-game-reward[data-reward-chest] > img {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: center;
+  margin: 0;
+}
+
+.wallet-game-reward[data-reward-chest]
+  > .wallet-reward-chest-info--card {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+}
+
+.wallet-game-reward[data-reward-chest] > strong {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.wallet-game-reward[data-reward-chest] > span {
+  grid-column: 1;
+  grid-row: 3;
+}
