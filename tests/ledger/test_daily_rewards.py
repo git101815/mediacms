@@ -69,7 +69,10 @@ class TestDailyRewards(BaseLedgerTestCase):
         )
         before = int(self.w1.balance)
 
-        with patch.object(config, "DAILY_REWARDS", chest_schedule):
+        with (
+            patch.object(config, "DAILY_REWARDS", chest_schedule),
+            patch.object(config, "DAILY_REWARD_WINDOW_SIZE", 1),
+        ):
             prepared = prepare_daily_reward_chest(
                 user=self.u1,
                 at=self.instant(),
