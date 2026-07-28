@@ -936,6 +936,229 @@ def _weekly_row(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinition) -
     }
 
 
+
+def _anonymous_preview_keys(
+    *,
+    cycle: QuestCycle,
+) -> tuple[str, ...]:
+    definitions = config.QUEST_BOARD_WEEKLY_QUESTS
+
+    if not isinstance(definitions, dict):
+        raise ImproperlyConfigured(
+            "QUEST_BOARD_WEEKLY_QUESTS must be a dictionary"
+        )
+
+    enabled_keys = []
+
+    for key, raw in definitions.items():
+        if not isinstance(raw, dict):
+            raise ImproperlyConfigured(
+                f"Weekly quest {key} must be a dictionary"
+            )
+
+        enabled = raw.get("enabled", True)
+
+        if not isinstance(enabled, bool):
+            raise ImproperlyConfigured(
+                f"Quest {key}.enabled must be True or False"
+            )
+
+        if enabled:
+            enabled_keys.append(str(key))
+
+    slot_count = int(config.QUEST_BOARD_SLOT_COUNT)
+
+    if slot_count < 1:
+        raise ImproperlyConfigured(
+            "QUEST_BOARD_SLOT_COUNT must be positive"
+        )
+
+    if not enabled_keys:
+        return ()
+
+    selection_salt = str(
+        config.QUEST_BOARD_WEEKLY_SELECTION_SALT or ""
+    ).strip()
+
+    if not selection_salt:
+        raise ImproperlyConfigured(
+            "QUEST_BOARD_WEEKLY_SELECTION_SALT cannot be empty"
+        )
+
+    seed_prefix = (
+        f"{selection_salt}:"
+        f"{cycle.key}:"
+        "anonymous-preview"
+    )
+
+    def rank(quest_key: str):
+        return hmac.new(
+            settings.SECRET_KEY.encode("utf-8"),
+            (
+                f"{seed_prefix}:"
+                f"quest:{quest_key}"
+            ).encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+
+    ordered = sorted(
+        enabled_keys,
+        key=lambda quest_key: (
+            rank(quest_key),
+            quest_key,
+        ),
+    )
+
+    return tuple(
+        ordered[:slot_count]
+    )
+
+
+def _weekly_preview_row(
+    *,
+    definition: WeeklyQuestDefinition,
+    login_url: str,
+) -> dict:
+    if definition.condition == "video_share":
+        target = definition.target
+        progress_text = definition.progress_pending_text
+
+    elif definition.condition.startswith("community_"):
+        target = definition.personal_target
+        progress_text = _format_progress_text(
+            definition=definition,
+            template=definition.progress_text,
+            values={
+                "personal_current": 0,
+                "personal_target": definition.personal_target,
+                "global_current": 0,
+                "global_target": definition.global_target,
+            },
+        )
+
+    else:
+        target = definition.target
+        progress_text = _format_progress_text(
+            definition=definition,
+            template=definition.progress_text,
+            values={
+                "current": 0,
+                "target": definition.target,
+            },
+        )
+
+    return {
+        "empty": False,
+        "key": definition.key,
+        "title": definition.title,
+        "description": definition.description,
+        "condition": definition.condition,
+        "icon_path": definition.icon_path,
+        "icon_material": definition.icon_material,
+        "reward_kind": "chest",
+        "reward_display": definition.chest_label,
+        "reward_image_path": definition.chest_image_path,
+        "current": 0,
+        "target": target,
+        "progress_text": progress_text,
+        "progress_percent": 0,
+        "complete": False,
+        "claimed": False,
+        "status": "in_progress",
+        "button_label": definition.action_label,
+        "can_claim": False,
+        "claim_url": login_url,
+        "action_url": login_url,
+        "share_action": "",
+    }
+
+
+def build_weekly_quest_preview_context(
+    *,
+    login_url: str,
+) -> dict | None:
+    if not _weekly_enabled():
+        return None
+
+    cycle = _cycle_for_datetime()
+
+    definitions = tuple(
+        _definition_from_config(key)
+        for key in _anonymous_preview_keys(
+            cycle=cycle,
+        )
+    )
+
+    rows = [
+        _weekly_preview_row(
+            definition=definition,
+            login_url=login_url,
+        )
+        for definition in definitions
+    ]
+
+    slot_count = int(
+        config.QUEST_BOARD_SLOT_COUNT
+    )
+
+    while len(rows) < slot_count:
+        rows.append(
+            {
+                "empty": True,
+                "slot": len(rows) + 1,
+            }
+        )
+
+    revision_material = [
+        "anonymous-preview",
+        cycle.key,
+        str(config.QUEST_BOARD_CONFIG_VERSION),
+        *[
+            definition.key
+            for definition in definitions
+        ],
+    ]
+
+    revision = hashlib.sha256(
+        "|".join(
+            revision_material
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+
+    return {
+        "enabled": True,
+        "config_version": int(
+            config.QUEST_BOARD_CONFIG_VERSION
+        ),
+        "slot_count": slot_count,
+        "active_count": len(definitions),
+        "completed_count": 0,
+        "claimed_count": 0,
+        "title": str(
+            config.QUEST_BOARD_WEEKLY_TITLE
+        ),
+        "subtitle": str(
+            config.QUEST_BOARD_WEEKLY_SUBTITLE
+        ),
+        "reset_prefix": str(
+            config.QUEST_BOARD_WEEKLY_RESET_PREFIX
+        ),
+        "reset_label": _countdown_label(cycle),
+        "show_schedule": True,
+        "slots": rows,
+        "cycle_key": cycle.key,
+        "ends_at_iso": cycle.ends_at.isoformat(),
+        "revision": revision,
+
+        # No status polling and no share-link creation
+        # while the visitor is anonymous.
+        "status_url": "",
+        "site_link_url": "",
+
+        "preview": True,
+    }
+
+
 def build_weekly_quest_board_context(*, user) -> dict:
     user = _require_user(user)
     cycle = _cycle_for_datetime()

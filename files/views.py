@@ -138,7 +138,10 @@ from ledger.dashboard.quests import (
     get_quest_definitions,
     get_quest_slot_count,
 )
-from ledger.dashboard.weekly_quests import build_weekly_quest_board_context
+from ledger.dashboard.weekly_quests import (
+    build_weekly_quest_board_context,
+    build_weekly_quest_preview_context,
+)
 from ledger.dashboard.referrals import (
     build_referral_context,
     get_referral_goal,
@@ -1705,8 +1708,20 @@ def _build_guest_bonus_vault_context(*, open_url: str) -> dict:
     }
 
 
-def _build_guest_quest_board_context() -> dict:
-    enabled = bool(wallet_config.QUEST_BOARD_ENABLED)
+def _build_guest_quest_board_context(
+    *,
+    login_url: str,
+) -> dict:
+    weekly_preview = build_weekly_quest_preview_context(
+        login_url=login_url,
+    )
+
+    if weekly_preview is not None:
+        return weekly_preview
+
+    enabled = bool(
+        wallet_config.QUEST_BOARD_ENABLED
+    )
     definitions = get_quest_definitions() if enabled else ()
     rows = []
 
@@ -1927,7 +1942,9 @@ def _build_guest_wallet_context(request) -> dict:
         "bonus_vault": _build_guest_bonus_vault_context(
             open_url=reverse("wallet_open_bonus_vault"),
         ),
-        "quest_board": _build_guest_quest_board_context(),
+        "quest_board": _build_guest_quest_board_context(
+            login_url=login_url,
+        ),
         "referral": _build_guest_referral_context(),
     }
 

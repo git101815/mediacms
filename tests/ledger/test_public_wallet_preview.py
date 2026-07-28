@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from ledger.dashboard import config
 from ledger.models import TokenWallet
 
 
@@ -28,6 +29,52 @@ class TestPublicWalletPreview(TestCase):
         self.assertEqual(response.context["daily_rewards"]["cycle_day"], 1)
         self.assertTrue(response.context["daily_rewards"]["preview"])
         self.assertTrue(response.context["daily_rewards"]["can_claim"])
+        quest_board = response.context["quest_board"]
+        active_quests = [
+            row
+            for row in quest_board["slots"]
+            if not row.get("empty")
+        ]
+        enabled_weekly_keys = {
+            key
+            for key, definition
+            in config.QUEST_BOARD_WEEKLY_QUESTS.items()
+            if definition.get("enabled", True)
+        }
+        active_keys = {
+            row["key"]
+            for row in active_quests
+        }
+
+        self.assertTrue(quest_board["preview"])
+        self.assertEqual(
+            quest_board["title"],
+            config.QUEST_BOARD_WEEKLY_TITLE,
+        )
+        self.assertEqual(
+            len(active_quests),
+            min(
+                config.QUEST_BOARD_SLOT_COUNT,
+                len(enabled_weekly_keys),
+            ),
+        )
+        self.assertTrue(active_quests)
+        self.assertTrue(
+            active_keys.issubset(
+                enabled_weekly_keys
+            )
+        )
+        self.assertNotIn(
+            "confirm_email",
+            active_keys,
+        )
+        self.assertTrue(
+            all(
+                row["action_url"]
+                == response.context["wallet_login_url"]
+                for row in active_quests
+            )
+        )
         self.assertEqual(TokenWallet.objects.count(), before_count)
         self.assert_wallet_response_is_not_cacheable(response)
         self.assertIn(
