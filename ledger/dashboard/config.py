@@ -315,7 +315,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "reward": {"kind": "chest", "chest": "small_chest"},
     },
     "community_likes": {
-        "enabled": True,
+        "enabled": False,
         "title": "Community Likes",
         "description": "Help the community reach 100 likes this week",
         "condition": "community_likes",
@@ -329,7 +329,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "reward": {"kind": "chest", "chest": "small_chest"},
     },
     "community_views": {
-        "enabled": True,
+        "enabled": False,
         "title": "Community Views",
         "description": "Help the community reach 100,000 views this week",
         "condition": "community_views",
@@ -343,7 +343,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "reward": {"kind": "chest", "chest": "small_chest"},
     },
     "community_comments": {
-        "enabled": True,
+        "enabled": False,
         "title": "Community Comments",
         "description": "Help the community post 20 comments this week",
         "condition": "community_comments",
@@ -357,7 +357,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "reward": {"kind": "chest", "chest": "small_chest"},
     },
     "community_spend": {
-        "enabled": True,
+        "enabled": False,
         "title": "Community Spend",
         "description": "Help the community spend 10,000 tokens this week",
         "condition": "community_spend",
