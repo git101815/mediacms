@@ -5,6 +5,92 @@ import { PageActions, MediaPageActions } from '../../utils/actions/';
 import ItemsInlineSlider from '../item-list/includes/itemLists/ItemsInlineSlider';
 import { CircleIconButton } from '../_shared/';
 
+function trackedShareDestination(platform, mediaUrl, mediaTitle) {
+  const encodedUrl = encodeURIComponent(mediaUrl);
+  const encodedTitle = encodeURIComponent(mediaTitle || '');
+  switch (platform) {
+    case 'fb':
+      return 'https://www.facebook.com/sharer.php?u=' + encodedUrl;
+    case 'tw':
+      return 'https://twitter.com/intent/tweet?url=' + encodedUrl;
+    case 'reddit':
+      return 'https://reddit.com/submit?url=' + encodedUrl + '&title=' + encodedTitle;
+    case 'tumblr':
+      return 'https://www.tumblr.com/widgets/share/tool?canonicalUrl=' + encodedUrl + '&title=' + encodedTitle;
+    case 'pinterest':
+      return 'https://pinterest.com/pin/create/link/?url=' + encodedUrl;
+    case 'vk':
+      return 'https://vk.com/share.php?url=' + encodedUrl + '&title=' + encodedTitle;
+    case 'linkedin':
+      return 'https://www.linkedin.com/shareArticle?mini=true&url=' + encodedUrl;
+    case 'mix':
+      return 'https://mix.com/add?url=' + encodedUrl;
+    case 'whatsapp':
+      return 'whatsapp://send?text=' + encodedUrl;
+    case 'telegram':
+      return 'https://t.me/share/url?url=' + encodedUrl + '&text=' + encodedTitle;
+    default:
+      return mediaUrl;
+  }
+}
+
+function openTrackedSocialShare(event, platform, fallbackUrl) {
+  event.preventDefault();
+  const mediaData = MediaPageStore.get('media-data') || {};
+  const mediaUrl = MediaPageStore.get('media-url');
+  const mediaTitle = mediaData.title || '';
+  const mediaToken = mediaData.friendly_token || '';
+  const popup = window.open('', '_blank');
+  if (popup) {
+    popup.opener = null;
+  }
+
+  function openDestination(destination) {
+    if (popup && !popup.closed) {
+      popup.location.href = destination;
+      return;
+    }
+    window.location.href = destination;
+  }
+
+  const questApi = window.MediaCMSWeeklyQuests;
+  if (!mediaToken || !questApi || !questApi.getFingerprint) {
+    openDestination(fallbackUrl);
+    return;
+  }
+
+  questApi.getFingerprint()
+    .then((fingerprint) => window.fetch('/api/weekly-quests/video-link', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-CSRFToken': document.cookie
+          .split('; ')
+          .find((row) => row.startsWith('csrftoken='))
+          ?.split('=')[1] || '',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: JSON.stringify({
+        media: mediaToken,
+        platform: platform,
+        fingerprint: fingerprint,
+      }),
+    }))
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error('Tracked share unavailable');
+      }
+      return response.json();
+    })
+    .then((payload) => {
+      const sharedUrl = payload && payload.url ? payload.url : mediaUrl;
+      openDestination(trackedShareDestination(platform, sharedUrl, mediaTitle));
+    })
+    .catch(() => openDestination(fallbackUrl));
+}
+
 function shareOptionsList() {
   const socialMedia = ShareOptionsContext._currentValue;
   const mediaUrl = MediaPageStore.get('media-url');
@@ -122,6 +208,7 @@ function ShareOptions() {
               target="_blank"
               data-action="share/whatsapp/share"
               rel="noreferrer"
+              onClick={(event) => openTrackedSocialShare(event, k, shareOptions[k].shareUrl)}
             >
               <span></span>
               <span>{shareOptions[k].title}</span>
@@ -142,7 +229,13 @@ function ShareOptions() {
       } else {
         compList.push(
           <div key={'share-' + k} className={'sh-option share-' + k}>
-            <a href={shareOptions[k].shareUrl} title="" target="_blank" rel="noreferrer">
+            <a
+              href={shareOptions[k].shareUrl}
+              title=""
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => openTrackedSocialShare(event, k, shareOptions[k].shareUrl)}
+            >
               <span></span>
               <span>{shareOptions[k].title}</span>
             </a>

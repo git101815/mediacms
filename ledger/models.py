@@ -1285,5 +1285,8 @@ class TreasuryMetric(models.Model):
 from .dashboard.models import (  # noqa: E402,F401
     DailyRewardClaim,
     DailyRewardState,
+    QuestOwnerIdentity,
+    QuestQualifiedVisit,
+    QuestShareCampaign,
     RewardChestGrant,
 )

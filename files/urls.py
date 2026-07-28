@@ -49,6 +49,36 @@ urlpatterns = [
         wallet_dashboard_views.wallet_claim_quest,
         name="wallet_claim_quest",
     ),
+    path(
+        "wallet/quests/<str:cycle_key>/<slug:quest_key>/open",
+        wallet_dashboard_views.wallet_open_weekly_quest,
+        name="wallet_open_weekly_quest",
+    ),
+    path(
+        "api/weekly-quests/site-link",
+        wallet_dashboard_views.weekly_quest_site_link,
+        name="weekly_quest_site_link",
+    ),
+    path(
+        "api/weekly-quests/video-link",
+        wallet_dashboard_views.weekly_quest_video_link,
+        name="weekly_quest_video_link",
+    ),
+    path(
+        "api/weekly-quests/navigation",
+        wallet_dashboard_views.weekly_quest_navigation,
+        name="weekly_quest_navigation",
+    ),
+    path(
+        "api/weekly-quests/status",
+        wallet_dashboard_views.weekly_quest_status,
+        name="weekly_quest_status",
+    ),
+    path(
+        "q/<uuid:public_id>",
+        wallet_dashboard_views.weekly_quest_redirect,
+        name="weekly_quest_redirect",
+    ),
     re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/$", views.wallet_deposit_session, name="wallet_deposit_session"),
     re_path(r"^wallet/deposits/(?P<public_id>[0-9a-f-]+)/status/$", views.wallet_deposit_session_status, name="wallet_deposit_session_status"),
     re_path(

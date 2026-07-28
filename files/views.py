@@ -137,6 +137,7 @@ from ledger.dashboard.quests import (
     get_quest_definitions,
     get_quest_slot_count,
 )
+from ledger.dashboard.weekly_quests import build_weekly_quest_board_context
 from ledger.dashboard.referrals import (
     build_referral_context,
     get_referral_goal,
@@ -2057,7 +2058,7 @@ def wallet(request):
         wallet=wallet_obj,
         open_url=reverse("wallet_open_bonus_vault"),
     )
-    context["quest_board"] = build_quest_board_context(
+    context["quest_board"] = build_weekly_quest_board_context(
         user=request.user,
     )
     context["referral"] = referral_context

@@ -162,16 +162,16 @@ WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS = {
 # ---------------------------------------------------------------------------
 # Quest Board
 # ---------------------------------------------------------------------------
-# The board always keeps this many visual slots. Only definitions present in
-# QUEST_BOARD_QUESTS are active; remaining slots are intentionally empty.
-QUEST_BOARD_CONFIG_VERSION = 1
+# The existing one-time quests remain available until claimed. When one is
+# still active it occupies one of the four existing cards; no second board or
+# alternate layout is rendered.
+QUEST_BOARD_CONFIG_VERSION = 2
 QUEST_BOARD_ENABLED = True
 QUEST_BOARD_SLOT_COUNT = 4
 QUEST_BOARD_RESET_LABEL = "One-time"
 QUEST_BOARD_MAX_REWARD_TOKENS = 100_000
 
-# Supported condition types are implemented in ledger/dashboard/quests.py.
-# Reward amounts are HUMAN token amounts and are converted to ledger units.
+# One-time starter quests.
 QUEST_BOARD_QUESTS = (
     {
         "key": "confirm_email",
@@ -188,6 +188,139 @@ QUEST_BOARD_QUESTS = (
         },
     },
 )
+
+# Weekly quest configuration. Titles, targets, rewards, platforms and complete
+# four-card rotations are configured here. The implementation does not define
+# additional commercial/spending quests outside this mapping.
+QUEST_BOARD_WEEKLY_ENABLED = True
+QUEST_BOARD_WEEKLY_START_AT = "2026-07-28T00:00:00+03:00"
+QUEST_BOARD_VISITOR_COOKIE_SECONDS = 180 * 24 * 60 * 60
+QUEST_BOARD_ATTRIBUTION_COOKIE_SECONDS = 8 * 24 * 60 * 60
+QUEST_BOARD_MIN_SECOND_PAGE_DELAY_SECONDS = 2
+QUEST_BOARD_UNFURL_WINDOW_SECONDS = 24 * 60 * 60
+QUEST_BOARD_EXCLUDED_PAGE_PREFIXES = (
+    "/api/",
+    "/static/",
+    "/media/",
+    "/uploads/",
+    "/accounts/",
+    "/wallet",
+    "/not_the_admin_panel/",
+)
+
+QUEST_BOARD_WEEKLY_QUESTS = {
+    "share_site": {
+        "title": "Share the Site",
+        "description": "Bring 10 unique visitors who open a second page",
+        "condition": "site_visitors",
+        "icon_asset": "quest_invite_friend",
+        "action_label": "Share Site",
+        "action_url": "",
+        "landing_path": "/",
+        "target": 10,
+        "reward": {"kind": "chest", "chest": "small_chest"},
+    },
+    "share_video_x": {
+        "title": "Share a Video on X",
+        "description": "Get one verified visit from X",
+        "condition": "video_share",
+        "platform": "tw",
+        "icon_asset": "quest_watch_previews",
+        "action_label": "Choose Video",
+        "action_url": "/latest",
+        "target": 1,
+        "reward": {"kind": "chest", "chest": "small_chest"},
+    },
+    "share_video_reddit": {
+        "title": "Share a Video on Reddit",
+        "description": "Get one verified visit from Reddit",
+        "condition": "video_share",
+        "platform": "reddit",
+        "icon_asset": "quest_watch_previews",
+        "action_label": "Choose Video",
+        "action_url": "/latest",
+        "target": 1,
+        "reward": {"kind": "chest", "chest": "small_chest"},
+    },
+    "share_video_telegram": {
+        "title": "Share a Video on Telegram",
+        "description": "Get one verified visit from Telegram",
+        "condition": "video_share",
+        "platform": "telegram",
+        "icon_asset": "quest_watch_previews",
+        "action_label": "Choose Video",
+        "action_url": "/latest",
+        "target": 1,
+        "reward": {"kind": "chest", "chest": "small_chest"},
+    },
+    "share_video_vk": {
+        "title": "Share a Video on VK",
+        "description": "Get one verified visit from VK",
+        "condition": "video_share",
+        "platform": "vk",
+        "icon_asset": "quest_watch_previews",
+        "action_label": "Choose Video",
+        "action_url": "/latest",
+        "target": 1,
+        "reward": {"kind": "chest", "chest": "small_chest"},
+    },
+    "community_drop": {
+        "title": "Community Drop",
+        "description": "Help shared links bring 1,000 unique visitors this week",
+        "condition": "community_drop",
+        "icon_asset": "quest_daily_login",
+        "action_label": "Share Content",
+        "action_url": "/latest",
+        "target": 1,
+        "personal_target": 1,
+        "global_target": 1_000,
+        "reward": {"kind": "chest", "chest": "small_chest"},
+    },
+}
+
+# Each row is one complete four-card week. A still-unclaimed one-time starter
+# quest temporarily occupies the first card, so the first three weekly entries
+# remain visible until that starter reward is claimed.
+QUEST_BOARD_WEEKLY_ROTATIONS = (
+    (
+        "share_site",
+        "share_video_x",
+        "community_drop",
+        "share_video_reddit",
+    ),
+    (
+        "share_site",
+        "share_video_telegram",
+        "community_drop",
+        "share_video_vk",
+    ),
+)
+
+QUEST_BOARD_SOCIAL_HOSTS = {
+    "fb": ("facebook.com", "l.facebook.com", "lm.facebook.com"),
+    "tw": ("x.com", "twitter.com", "t.co"),
+    "reddit": ("reddit.com", "redd.it"),
+    "tumblr": ("tumblr.com",),
+    "pinterest": ("pinterest.com", "pin.it"),
+    "vk": ("vk.com",),
+    "linkedin": ("linkedin.com", "lnkd.in"),
+    "mix": ("mix.com",),
+    "whatsapp": ("whatsapp.com",),
+    "telegram": ("t.me", "telegram.org"),
+}
+
+QUEST_BOARD_UNFURL_USER_AGENTS = {
+    "fb": ("facebookexternalhit", "facebot"),
+    "tw": ("twitterbot",),
+    "reddit": ("redditbot",),
+    "tumblr": ("tumblr",),
+    "pinterest": ("pinterestbot",),
+    "vk": ("vkshare", "vkbot"),
+    "linkedin": ("linkedinbot",),
+    "mix": ("mixbot",),
+    "whatsapp": ("whatsapp",),
+    "telegram": ("telegrambot",),
+}
 
 
 # ---------------------------------------------------------------------------

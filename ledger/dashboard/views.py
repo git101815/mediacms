@@ -1,15 +1,28 @@
+import json
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import JsonResponse
 from django.templatetags.static import static
 from django.shortcuts import redirect
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from . import config
 from .bonus_vault import open_bonus_vault
 from .daily_rewards import claim_daily_reward
 from .quests import claim_quest_reward
+from .weekly_quests import (
+    ATTRIBUTION_COOKIE_NAME,
+    build_share_redirect_response,
+    build_weekly_quest_status,
+    create_site_share_link,
+    create_video_share_link,
+    open_weekly_quest_reward,
+    record_navigation,
+    set_visitor_cookie,
+)
 
 
 # interactive-chest-opening-v1
@@ -99,6 +112,124 @@ def wallet_claim_quest(request, quest_key):
     else:
         messages.info(request, "This quest reward was already claimed.")
     return redirect("wallet")
+
+@login_required
+@require_POST
+def wallet_open_weekly_quest(request, cycle_key, quest_key):
+    wants_json = _wants_wallet_json(request)
+    try:
+        result = open_weekly_quest_reward(
+            user=request.user,
+            cycle_key=cycle_key,
+            quest_key=quest_key,
+        )
+    except (PermissionDenied, ValidationError) as exc:
+        error_text = _wallet_error_text(exc)
+        if wants_json:
+            return JsonResponse({"ok": False, "error": error_text}, status=400)
+        messages.error(request, error_text)
+        return redirect("wallet")
+
+    if wants_json:
+        return JsonResponse(
+            {
+                "ok": True,
+                "already_opened": not bool(result["opened"]),
+                "opening": _build_chest_opening_payload(result=result),
+            }
+        )
+    messages.success(
+        request,
+        f"Weekly quest chest opened: {result['amount_tokens']:,} tokens.",
+    )
+    return redirect("wallet")
+
+
+@login_required
+@require_POST
+def weekly_quest_site_link(request):
+    try:
+        payload = json.loads(request.body or b"{}")
+        result = create_site_share_link(
+            request=request,
+            user=request.user,
+            fingerprint=payload.get("fingerprint"),
+        )
+    except (json.JSONDecodeError, PermissionDenied, ValidationError) as exc:
+        return JsonResponse({"ok": False, "error": _wallet_error_text(exc)}, status=400)
+    response = JsonResponse({"ok": True, "url": result["url"]})
+    return set_visitor_cookie(
+        response,
+        request=request,
+        token=result["visitor_token"],
+    )
+
+
+@login_required
+@require_POST
+def weekly_quest_video_link(request):
+    try:
+        payload = json.loads(request.body or b"{}")
+        result = create_video_share_link(
+            request=request,
+            user=request.user,
+            fingerprint=payload.get("fingerprint"),
+            media_token=payload.get("media"),
+            platform=payload.get("platform"),
+        )
+    except (json.JSONDecodeError, PermissionDenied, ValidationError) as exc:
+        return JsonResponse({"ok": False, "error": _wallet_error_text(exc)}, status=400)
+    response = JsonResponse(
+        {
+            "ok": True,
+            "url": result["url"],
+            "tracked": bool(result.get("tracked")),
+        }
+    )
+    if result.get("visitor_token"):
+        set_visitor_cookie(
+            response,
+            request=request,
+            token=result["visitor_token"],
+        )
+    return response
+
+
+@csrf_exempt
+@require_POST
+def weekly_quest_navigation(request):
+    try:
+        payload = json.loads(request.body or b"{}")
+        result = record_navigation(
+            request=request,
+            fingerprint=payload.get("fingerprint"),
+            page=payload.get("page"),
+        )
+    except (json.JSONDecodeError, ValidationError) as exc:
+        return JsonResponse({"ok": False, "error": _wallet_error_text(exc)}, status=400)
+    response = JsonResponse(
+        {
+            "ok": True,
+            "qualified": bool(result.get("qualified")),
+        }
+    )
+    set_visitor_cookie(
+        response,
+        request=request,
+        token=result["visitor_token"],
+    )
+    if result.get("clear_attribution"):
+        response.delete_cookie(ATTRIBUTION_COOKIE_NAME, samesite="Lax")
+    return response
+
+
+def weekly_quest_redirect(request, public_id):
+    return build_share_redirect_response(request=request, public_id=public_id)
+
+
+@login_required
+def weekly_quest_status(request):
+    return JsonResponse(build_weekly_quest_status(user=request.user))
 
 
 @login_required

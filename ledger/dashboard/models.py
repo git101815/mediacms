@@ -178,3 +178,137 @@ class DailyRewardClaim(models.Model):
 
     def __str__(self):
         return f"Daily reward {self.reward_date} for user {self.user_id}"
+
+class QuestOwnerIdentity(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="quest_owner_identities",
+    )
+    cycle_key = models.CharField(max_length=10, db_index=True)
+    network_hash = models.CharField(max_length=64)
+    fingerprint_hash = models.CharField(max_length=64)
+    visitor_hash = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["user", "cycle_key"],
+                name="quest_owner_cycle_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "user",
+                    "cycle_key",
+                    "network_hash",
+                    "fingerprint_hash",
+                    "visitor_hash",
+                ],
+                name="quest_owner_identity_unique",
+            ),
+        ]
+
+
+class QuestShareCampaign(models.Model):
+    TYPE_SITE = "site"
+    TYPE_VIDEO = "video"
+    TYPE_CHOICES = (
+        (TYPE_SITE, "Site"),
+        (TYPE_VIDEO, "Video"),
+    )
+
+    public_id = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        db_index=True,
+    )
+    campaign_key = models.CharField(max_length=64, unique=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="quest_share_campaigns",
+    )
+    cycle_key = models.CharField(max_length=10, db_index=True)
+    quest_key = models.CharField(max_length=64, db_index=True)
+    campaign_type = models.CharField(
+        max_length=16,
+        choices=TYPE_CHOICES,
+        db_index=True,
+    )
+    expected_platform = models.CharField(max_length=32, blank=True, default="")
+    media = models.ForeignKey(
+        "files.Media",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="quest_share_campaigns",
+    )
+    target_path = models.CharField(max_length=500)
+    preview_seen_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["owner", "cycle_key", "quest_key"],
+                name="quest_campaign_owner_idx",
+            ),
+        ]
+
+
+class QuestQualifiedVisit(models.Model):
+    TYPE_SITE_SECOND_PAGE = "site_second_page"
+    TYPE_VIDEO_PLATFORM = "video_platform"
+    TYPE_CHOICES = (
+        (TYPE_SITE_SECOND_PAGE, "Site second page"),
+        (TYPE_VIDEO_PLATFORM, "Video platform"),
+    )
+
+    campaign = models.ForeignKey(
+        QuestShareCampaign,
+        on_delete=models.CASCADE,
+        related_name="qualified_visits",
+    )
+    cycle_key = models.CharField(max_length=10, db_index=True)
+    visitor_hash = models.CharField(max_length=64)
+    network_hash = models.CharField(max_length=64)
+    fingerprint_hash = models.CharField(max_length=64)
+    landing_page = models.CharField(max_length=500)
+    second_page = models.CharField(max_length=500, blank=True, default="")
+    referer_host = models.CharField(max_length=255, blank=True, default="")
+    qualification_type = models.CharField(
+        max_length=32,
+        choices=TYPE_CHOICES,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["cycle_key", "qualification_type"],
+                name="quest_visit_cycle_type_idx",
+            ),
+            models.Index(
+                fields=["campaign", "created_at"],
+                name="quest_visit_campaign_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cycle_key", "visitor_hash"],
+                name="quest_visit_cycle_visitor_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["cycle_key", "network_hash"],
+                name="quest_visit_cycle_network_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["cycle_key", "fingerprint_hash"],
+                name="quest_visit_cycle_fp_unique",
+            ),
+        ]
