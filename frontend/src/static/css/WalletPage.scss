@@ -3821,16 +3821,6 @@ body.wallet-chest-opening-active {
     color-mix(in srgb, var(--chest-glow) 48%, rgba(255, 255, 255, 0.16));
   border-radius: 28px;
   background:
-    radial-gradient(
-      circle at 50% 52%,
-      color-mix(in srgb, var(--chest-glow) 24%, transparent) 0,
-      transparent 43%
-    ),
-    radial-gradient(
-      circle at 50% -4%,
-      rgba(255, 255, 255, 0.10),
-      transparent 35%
-    ),
     linear-gradient(
       180deg,
       rgba(18, 19, 42, 0.97) 0%,
