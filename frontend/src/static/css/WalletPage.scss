@@ -3829,7 +3829,7 @@ body.wallet-chest-opening-active {
   height: min(640px, calc(100dvh - 24px));
   min-height: 0;
   padding: 20px 16px 16px;
-  overflow: hidden;
+  overflow: clip;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   align-items: center;
@@ -3871,11 +3871,6 @@ body.wallet-chest-opening-active {
       transparent 0 34%,
       rgba(255, 255, 255, 0.08) 45%,
       transparent 56% 100%
-    ),
-    repeating-linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.018) 0 1px,
-      transparent 1px 14px
     );
   content: "";
   pointer-events: none;

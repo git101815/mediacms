@@ -805,7 +805,6 @@
     }
     if (chestOpeningTrigger) {
       chestOpeningTrigger.disabled = false;
-      chestOpeningTrigger.focus();
     }
 
     document.documentElement.classList.add(
@@ -852,7 +851,6 @@
     chestOpeningTimers.push(window.setTimeout(function () {
       if (chestOpeningCollect) {
         chestOpeningCollect.hidden = false;
-        chestOpeningCollect.focus();
       }
     }, 1420));
   }
