@@ -87,27 +87,30 @@ WALLET_TOKEN_PACK_ASSETS = {
 }
 # Reward Chest reveal images are selected explicitly per drop.
 # Values reference WALLET_TOKEN_PACK_ASSETS keys. This is visual-only.
+#
+# The opening animation and the "Possible drops" modal both consume this
+# mapping, so each rarity intentionally receives distinct artwork.
 REWARD_CHEST_DROP_IMAGE_ASSETS = {
     "small_chest": {
         "common_25": "token_pkg_500",
-        "uncommon_50": "token_pkg_500",
-        "rare_100": "token_pkg_500",
-        "epic_250": "token_pkg_500",
-        "jackpot_500": "token_pkg_500",
+        "uncommon_50": "token_pkg_1000",
+        "rare_100": "token_pkg_2000",
+        "epic_250": "token_pkg_5000",
+        "jackpot_500": "token_pkg_10000",
     },
     "medium_chest": {
         "common_75": "token_pkg_500",
-        "uncommon_150": "token_pkg_500",
-        "rare_450": "token_pkg_500",
-        "epic_750": "token_pkg_1000",
-        "jackpot_1500": "token_pkg_2000",
+        "uncommon_150": "token_pkg_1000",
+        "rare_450": "token_pkg_2000",
+        "epic_750": "token_pkg_5000",
+        "jackpot_1500": "token_pkg_10000",
     },
     "big_chest": {
         "common_350": "token_pkg_500",
         "uncommon_750": "token_pkg_1000",
         "rare_1500": "token_pkg_2000",
-        "epic_2500": "token_pkg_2000",
-        "jackpot_5000": "token_pkg_5000",
+        "epic_2500": "token_pkg_5000",
+        "jackpot_5000": "token_pkg_10000",
     },
 }
 

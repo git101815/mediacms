@@ -65,6 +65,14 @@ class TestRewardChestPreviewCatalog(TestCase):
                     )
                 )
 
+            self.assertEqual(
+                len({
+                    preview_drop["image_url"]
+                    for preview_drop in row["drops"]
+                }),
+                len(row["drops"]),
+            )
+
         huge = next(
             row for row in catalog
             if row["key"] == "big_chest"
