@@ -697,8 +697,27 @@
     title.textContent = chest.label || 'Reward Chest';
     drops.innerHTML = '';
 
+    const rarityRanks = {
+      common: 1,
+      uncommon: 2,
+      rare: 3,
+      epic: 4,
+      legendary: 5,
+    };
     const previewDrops = Array.isArray(chest.drops)
-      ? chest.drops
+      ? chest.drops.slice().sort(function (left, right) {
+        const leftRarity = normalizeRewardPreviewRarity(
+          left && left.rarity
+        );
+        const rightRarity = normalizeRewardPreviewRarity(
+          right && right.rarity
+        );
+
+        return (
+          (rarityRanks[rightRarity] || 0) -
+          (rarityRanks[leftRarity] || 0)
+        );
+      })
       : [];
 
     previewDrops.forEach(function (drop, index) {
