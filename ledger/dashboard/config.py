@@ -54,6 +54,11 @@ WALLET_ASSETS = {
     "quest_watch_previews": "images/wallet/dashboard/quest-watch.png",
     "quest_invite_friend": "images/wallet/dashboard/quest-invite.png",
     "quest_remove_ads": "images/wallet/dashboard/quest-adfree.png",
+    "quest_share_x": "images/social-media-icons/x.svg",
+    "quest_share_reddit": "images/social-media-icons/reddit.svg",
+    "quest_share_telegram": "images/social-media-icons/telegram.svg",
+    "quest_share_vk": "images/social-media-icons/vk.svg",
+    "quest_share_whatsapp": "images/social-media-icons/whatsapp.svg",
     "referral_art": "images/wallet/dashboard/referral-coins.png",
     "remove_ads_art": "images/wallet/dashboard/remove-ads.png",
 }
@@ -176,7 +181,7 @@ WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS = {
 # The existing one-time quests remain available until claimed. When one is
 # still active it occupies one of the four existing cards; no second board or
 # alternate layout is rendered.
-QUEST_BOARD_CONFIG_VERSION = 4
+QUEST_BOARD_CONFIG_VERSION = 5
 QUEST_BOARD_ENABLED = True
 QUEST_BOARD_SLOT_COUNT = 4
 QUEST_BOARD_RESET_LABEL = "One-time"
@@ -250,7 +255,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "description": "Get one verified visit from X",
         "condition": "video_share",
         "platform": "tw",
-        "icon_asset": "quest_watch_previews",
+        "icon_asset": "quest_share_x",
         "action_label": "Choose Video",
         "action_url": "/latest",
         "target": 1,
@@ -264,7 +269,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "description": "Get one verified visit from Reddit",
         "condition": "video_share",
         "platform": "reddit",
-        "icon_asset": "quest_watch_previews",
+        "icon_asset": "quest_share_reddit",
         "action_label": "Choose Video",
         "action_url": "/latest",
         "target": 1,
@@ -278,7 +283,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "description": "Get one verified visit from Telegram",
         "condition": "video_share",
         "platform": "telegram",
-        "icon_asset": "quest_watch_previews",
+        "icon_asset": "quest_share_telegram",
         "action_label": "Choose Video",
         "action_url": "/latest",
         "target": 1,
@@ -292,7 +297,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "description": "Get one verified visit from VK",
         "condition": "video_share",
         "platform": "vk",
-        "icon_asset": "quest_watch_previews",
+        "icon_asset": "quest_share_vk",
         "action_label": "Choose Video",
         "action_url": "/latest",
         "target": 1,
@@ -306,7 +311,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "description": "Get one verified visit from WhatsApp",
         "condition": "video_share",
         "platform": "whatsapp",
-        "icon_asset": "quest_watch_previews",
+        "icon_asset": "quest_share_whatsapp",
         "action_label": "Choose Video",
         "action_url": "/latest",
         "target": 1,

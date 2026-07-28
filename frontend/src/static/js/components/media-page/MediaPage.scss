@@ -1052,6 +1052,7 @@
                   border-radius: 50%;
                   background-position: center;
                   background-repeat: no-repeat;
+                  background-size: contain;
                 }
 
                 > *:last-child {
@@ -1138,7 +1139,7 @@
               button {
                 > *:first-child {
                   background-color: rgb(0, 136, 204);
-                  background-position: 11px;
+                  background-position: center;
                   background-image: url('../../../images/social-media-icons/telegram.svg');
                 }
               }
