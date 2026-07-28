@@ -5,6 +5,14 @@ import { PageActions, MediaPageActions } from '../../utils/actions/';
 import ItemsInlineSlider from '../item-list/includes/itemLists/ItemsInlineSlider';
 import { CircleIconButton } from '../_shared/';
 
+const SOCIAL_ICON_PATHS = Object.freeze({
+  tw: '/static/images/social-media-icons/x.svg',
+  whatsapp: '/static/images/social-media-icons/whatsapp.svg',
+  telegram: '/static/images/social-media-icons/telegram.svg',
+  reddit: '/static/images/social-media-icons/reddit.svg',
+  vk: '/static/images/social-media-icons/vk.svg',
+});
+
 function trackedShareDestination(platform, mediaUrl, mediaTitle) {
   const encodedUrl = encodeURIComponent(mediaUrl);
   const encodedTitle = encodeURIComponent(mediaTitle || '');
@@ -148,7 +156,7 @@ function ShareOptions() {
               rel="noreferrer"
               onClick={(event) => openTrackedSocialShare(event, k, shareOptions[k].shareUrl)}
             >
-              <span></span>
+              <span className="share-social-icon" aria-hidden="true"><img src={SOCIAL_ICON_PATHS[k]} alt="" /></span>
               <span>{shareOptions[k].title}</span>
             </a>
           </div>
@@ -174,7 +182,7 @@ function ShareOptions() {
               rel="noreferrer"
               onClick={(event) => openTrackedSocialShare(event, k, shareOptions[k].shareUrl)}
             >
-              <span></span>
+              <span className="share-social-icon" aria-hidden="true"><img src={SOCIAL_ICON_PATHS[k]} alt="" /></span>
               <span>{shareOptions[k].title}</span>
             </a>
           </div>

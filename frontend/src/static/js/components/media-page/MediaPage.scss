@@ -1055,6 +1055,21 @@
                   background-size: contain;
                 }
 
+                > .share-social-icon {
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  border-radius: 0;
+                  background: none !important;
+
+                  img {
+                    display: block;
+                    width: 60px;
+                    height: 60px;
+                    object-fit: contain;
+                  }
+                }
+
                 > *:last-child {
                   font-size: 13px;
                   line-height: 18px;
