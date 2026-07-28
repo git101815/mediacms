@@ -1805,6 +1805,11 @@ def _build_reward_chest_preview_catalog() -> list[dict]:
                     "label": drop.label,
                     "rarity": display_rarity,
                     "rarity_label": display_rarity.upper(),
+                    "rarity_image_url": static(
+                        wallet_config.get_reward_chest_rarity_image_path(
+                            drop.rarity
+                        )
+                    ),
                     "image_url": static(
                         wallet_config.get_reward_chest_drop_image_path(
                             chest_key=chest.key,

@@ -673,86 +673,7 @@
     return rarity === 'jackpot' ? 'legendary' : rarity;
   }
 
-  function renderRewardRarityBadge(value) {
-    const rarity = normalizeRewardPreviewRarity(value);
-    const shapes = {
-      common:
-        '<path class="wallet-rarity-badge__frame" ' +
-          'd="M44 7 77 44 44 81 11 44Z"/>' +
-        '<path class="wallet-rarity-badge__frame-inner" ' +
-          'd="M44 18 67 44 44 70 21 44Z"/>' +
-        '<path class="wallet-rarity-badge__gem" ' +
-          'd="M44 28 57 44 44 60 31 44Z"/>',
-      uncommon:
-        '<path class="wallet-rarity-badge__frame" ' +
-          'd="M44 5 75 21 72 62 44 82 16 62 13 21Z"/>' +
-        '<path class="wallet-rarity-badge__frame-inner" ' +
-          'd="M44 17 64 28 62 57 44 70 26 57 24 28Z"/>' +
-        '<path class="wallet-rarity-badge__wing" ' +
-          'd="M13 25 24 30 24 57 16 62Z"/>' +
-        '<path class="wallet-rarity-badge__wing" ' +
-          'd="M75 25 64 30 64 57 72 62Z"/>' +
-        '<path class="wallet-rarity-badge__gem" ' +
-          'd="M44 28 57 44 44 60 31 44Z"/>',
-      rare:
-        '<path class="wallet-rarity-badge__frame" ' +
-          'd="M44 3 54 16 71 11 76 28 85 44 76 60 ' +
-          '71 77 54 72 44 85 34 72 17 77 12 60 ' +
-          '3 44 12 28 17 11 34 16Z"/>' +
-        '<path class="wallet-rarity-badge__frame-inner" ' +
-          'd="M44 15 56 25 72 28 67 44 72 60 ' +
-          '56 63 44 73 32 63 16 60 21 44 ' +
-          '16 28 32 25Z"/>' +
-        '<path class="wallet-rarity-badge__gem" ' +
-          'd="M44 25 59 44 44 63 29 44Z"/>' +
-        '<path class="wallet-rarity-badge__facet" ' +
-          'd="M44 25 44 63 29 44Z"/>',
-      epic:
-        '<path class="wallet-rarity-badge__frame" ' +
-          'd="M44 2 51 14 63 5 66 20 81 16 74 31 ' +
-          '87 44 74 57 81 72 66 68 63 83 51 74 ' +
-          '44 87 37 74 25 83 22 68 7 72 14 57 ' +
-          '1 44 14 31 7 16 22 20 25 5 37 14Z"/>' +
-        '<path class="wallet-rarity-badge__frame-inner" ' +
-          'd="M44 15 56 24 70 25 65 39 73 51 ' +
-          '58 56 52 70 40 63 27 69 25 54 ' +
-          '11 47 22 36 19 22 34 23Z"/>' +
-        '<path class="wallet-rarity-badge__gem" ' +
-          'd="M44 23 60 44 44 65 28 44Z"/>' +
-        '<path class="wallet-rarity-badge__satellite" ' +
-          'd="M20 25 26 31 20 37 14 31Z"/>' +
-        '<path class="wallet-rarity-badge__satellite" ' +
-          'd="M68 25 74 31 68 37 62 31Z"/>' +
-        '<path class="wallet-rarity-badge__satellite" ' +
-          'd="M20 51 26 57 20 63 14 57Z"/>' +
-        '<path class="wallet-rarity-badge__satellite" ' +
-          'd="M68 51 74 57 68 63 62 57Z"/>',
-      legendary:
-        '<path class="wallet-rarity-badge__laurel" ' +
-          'd="M18 37C4 48 8 69 25 79L29 70C18 63 16 49 24 43Z"/>' +
-        '<path class="wallet-rarity-badge__laurel" ' +
-          'd="M70 37C84 48 80 69 63 79L59 70C70 63 72 49 64 43Z"/>' +
-        '<path class="wallet-rarity-badge__crown" ' +
-          'd="M23 25 29 9 39 20 44 5 49 20 59 9 ' +
-          '65 25 59 32 29 32Z"/>' +
-        '<path class="wallet-rarity-badge__frame" ' +
-          'd="M44 18 70 31 65 62 44 82 23 62 18 31Z"/>' +
-        '<path class="wallet-rarity-badge__frame-inner" ' +
-          'd="M44 28 60 36 57 57 44 69 31 57 28 36Z"/>' +
-        '<path class="wallet-rarity-badge__gem ' +
-          'wallet-rarity-badge__gem--large" ' +
-          'd="M44 29 60 47 44 66 28 47Z"/>' +
-        '<path class="wallet-rarity-badge__keystone" ' +
-          'd="M44 72 51 80 44 87 37 80Z"/>',
-    };
 
-    return (
-      '<svg class="wallet-reward-chest-modal__badge" ' +
-        'viewBox="0 0 88 88" aria-hidden="true">' +
-        (shapes[rarity] || shapes.common) +
-      '</svg>'
-    );
-  }
 
   function openRewardChestPreview(chestKey) {
     const chest = rewardChestCatalog.get(chestKey);
@@ -798,7 +719,9 @@
 
       row.innerHTML =
         '<span class="wallet-reward-chest-modal__badge-wrap">' +
-          renderRewardRarityBadge(rarity) +
+          '<img class="wallet-reward-chest-modal__badge" src="' +
+            escapeHtml(drop.rarity_image_url || '') +
+            '" alt="">' +
         '</span>' +
         '<span class="wallet-reward-chest-modal__drop-copy">' +
           '<span class="wallet-reward-chest-modal__rarity">' +
@@ -922,6 +845,10 @@
     setChestOpeningImage(
       '[data-wallet-chest-opening-drop-image]',
       opening.drop_image_url
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-rarity-image]',
+      opening.rarity_image_url
     );
     setChestOpeningImage(
       '[data-wallet-chest-opening-token-icon]',

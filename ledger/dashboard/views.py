@@ -76,6 +76,11 @@ def _build_chest_opening_payload(*, result: dict) -> dict:
             if rarity == "jackpot"
             else rarity.replace("_", " ").upper()
         ),
+        "rarity_image_url": static(
+            config.get_reward_chest_rarity_image_path(
+                rarity
+            )
+        ),
         "closed_image_url": static(closed_image_path),
         "opened_image_url": static(opened_image_path),
         "drop_image_url": static(

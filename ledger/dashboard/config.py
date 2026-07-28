@@ -114,6 +114,14 @@ REWARD_CHEST_DROP_IMAGE_ASSETS = {
     },
 }
 
+REWARD_CHEST_RARITY_IMAGE_ASSETS = {
+    "common": "images/wallet/dashboard/chests/common.png",
+    "uncommon": "images/wallet/dashboard/chests/uncommon.png",
+    "rare": "images/wallet/dashboard/chests/rare.png",
+    "epic": "images/wallet/dashboard/chests/epic.png",
+    "legendary": "images/wallet/dashboard/chests/legendary.png",
+}
+
 WALLET_TOKEN_PACK_IMAGE_TEMPLATE = "images/wallet/bundles/{code}.png"
 
 WALLET_NETWORK_DISPLAY_LABELS = {
@@ -780,6 +788,32 @@ def get_reward_chest_drop_image_path(
     return _normalize_static_image_path(
         image_path,
         field_name=f"Reward Chest {chest_key}/{drop_key} image",
+    )
+
+
+def get_reward_chest_rarity_image_path(rarity: str) -> str:
+    normalized = _normalize_identifier(
+        rarity,
+        field_name="Reward Chest rarity image",
+    )
+    display_rarity = (
+        "legendary"
+        if normalized == "jackpot"
+        else normalized
+    )
+    image_path = REWARD_CHEST_RARITY_IMAGE_ASSETS.get(
+        display_rarity
+    )
+    if not image_path:
+        raise ImproperlyConfigured(
+            "No rarity image configured for Reward Chest "
+            f"rarity {display_rarity}"
+        )
+    return _normalize_static_image_path(
+        image_path,
+        field_name=(
+            f"Reward Chest {display_rarity} rarity image"
+        ),
     )
 
 

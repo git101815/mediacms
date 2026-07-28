@@ -42,6 +42,7 @@ class TestRewardChestPreviewCatalog(TestCase):
                         "label",
                         "rarity",
                         "rarity_label",
+                        "rarity_image_url",
                         "image_url",
                     },
                 )
