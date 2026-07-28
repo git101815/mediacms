@@ -7,6 +7,7 @@ from ledger.dashboard import config
 from ledger.dashboard.bonus_vault import (
     build_bonus_vault_context,
     open_bonus_vault,
+    prepare_bonus_vault,
 )
 from ledger.dashboard.models import RewardChestGrant
 from ledger.models import (
@@ -164,25 +165,70 @@ class TestBonusVault(BaseLedgerTestCase):
             2,
         )
 
-    def test_open_endpoint_requires_post_and_opens_ready_vault(self):
+    def test_ajax_vault_is_not_credited_until_chest_click(self):
         self._record_purchase(config.BONUS_VAULT_THRESHOLD_TOKENS)
         self.client.force_login(self.u1)
         url = reverse("wallet_open_bonus_vault")
+        headers = {
+            "HTTP_X_REQUESTED_WITH": "XMLHttpRequest",
+            "HTTP_ACCEPT": "application/json",
+        }
 
         self.assertEqual(self.client.get(url).status_code, 405)
+        self.w1.refresh_from_db()
+        balance_before = int(self.w1.balance)
+
+        prepared_response = self.client.post(url, **headers)
+        self.assertEqual(prepared_response.status_code, 200)
+        prepared_payload = prepared_response.json()
+        self.assertTrue(prepared_payload["opening"]["pending"])
+        grant_public_id = prepared_payload["opening"]["grant_public_id"]
+
+        grant = RewardChestGrant.objects.get(public_id=grant_public_id)
+        self.assertEqual(grant.status, RewardChestGrant.STATUS_PENDING)
+        self.w1.refresh_from_db()
+        self.assertEqual(self.w1.balance, balance_before)
+
+        repeated_response = self.client.post(url, **headers)
+        self.assertEqual(
+            repeated_response.json()["opening"]["grant_public_id"],
+            grant_public_id,
+        )
+        self.w1.refresh_from_db()
+        self.assertEqual(self.w1.balance, balance_before)
 
         with patch(
             "ledger.dashboard.reward_chests.secrets.randbelow",
             return_value=0,
         ):
-            response = self.client.post(url)
+            opened_response = self.client.post(
+                url,
+                data={
+                    "confirm_open": "1",
+                    "grant_public_id": grant_public_id,
+                },
+                **headers,
+            )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(opened_response.status_code, 200)
+        self.assertFalse(opened_response.json()["opening"]["pending"])
+
+        grant.refresh_from_db()
+        self.w1.refresh_from_db()
+        self.assertEqual(grant.status, RewardChestGrant.STATUS_OPENED)
+        self.assertGreater(self.w1.balance, balance_before)
+
+    def test_prepare_bonus_vault_does_not_open_grant(self):
+        self._record_purchase(config.BONUS_VAULT_THRESHOLD_TOKENS)
+        self.w1.refresh_from_db()
+        balance_before = int(self.w1.balance)
+
+        prepared = prepare_bonus_vault(user=self.u1)
+
+        prepared["grant"].refresh_from_db()
+        self.w1.refresh_from_db()
         self.assertEqual(
-            RewardChestGrant.objects.filter(
-                user=self.u1,
-                source_type=config.BONUS_VAULT_SOURCE_TYPE,
-                status=RewardChestGrant.STATUS_OPENED,
-            ).count(),
-            1,
+            prepared["grant"].status,
+            RewardChestGrant.STATUS_PENDING,
         )
+        self.assertEqual(self.w1.balance, balance_before)

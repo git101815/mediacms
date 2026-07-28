@@ -10,8 +10,13 @@ from ledger.dashboard.daily_rewards import (
     build_daily_rewards_context,
     claim_daily_reward,
     get_daily_reward_date,
+    prepare_daily_reward_chest,
 )
-from ledger.dashboard.models import DailyRewardClaim, DailyRewardState
+from ledger.dashboard.models import (
+    DailyRewardClaim,
+    DailyRewardState,
+    RewardChestGrant,
+)
 from ledger.models import (
     LEDGER_RISK_STATUS_BLOCKED,
     LEDGER_RISK_STATUS_REVIEW,
@@ -57,6 +62,52 @@ class TestDailyRewards(BaseLedgerTestCase):
             1,
         )
         self.assertEqual(claim.config_snapshot["amount_units"], expected)
+
+    def test_daily_chest_waits_for_click_confirmation(self):
+        chest_schedule = (
+            {"kind": "chest", "chest": "small_chest"},
+        )
+        before = int(self.w1.balance)
+
+        with patch.object(config, "DAILY_REWARDS", chest_schedule):
+            prepared = prepare_daily_reward_chest(
+                user=self.u1,
+                at=self.instant(),
+            )
+
+            prepared["grant"].refresh_from_db()
+            self.w1.refresh_from_db()
+            self.assertEqual(
+                prepared["grant"].status,
+                RewardChestGrant.STATUS_PENDING,
+            )
+            self.assertEqual(self.w1.balance, before)
+            self.assertFalse(
+                DailyRewardClaim.objects.filter(user=self.u1).exists()
+            )
+
+            with patch(
+                "ledger.dashboard.reward_chests.secrets.randbelow",
+                return_value=0,
+            ):
+                result = claim_daily_reward(
+                    user=self.u1,
+                    at=self.instant(),
+                    grant_public_id=str(prepared["grant"].public_id),
+                )
+
+        self.assertTrue(result["claimed"])
+        prepared["grant"].refresh_from_db()
+        self.w1.refresh_from_db()
+        self.assertEqual(
+            prepared["grant"].status,
+            RewardChestGrant.STATUS_OPENED,
+        )
+        self.assertGreater(self.w1.balance, before)
+        self.assertEqual(
+            DailyRewardClaim.objects.filter(user=self.u1).count(),
+            1,
+        )
 
     def test_second_claim_same_day_is_idempotent(self):
         first = claim_daily_reward(user=self.u1, at=self.instant())

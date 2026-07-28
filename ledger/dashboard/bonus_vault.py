@@ -258,8 +258,22 @@ def build_bonus_vault_context(*, user, wallet: TokenWallet, open_url: str) -> di
     }
 
 
+def _pending_bonus_vault_result(grant: RewardChestGrant) -> dict:
+    definition = config.reward_chest_definition_from_snapshot(
+        grant.config_snapshot
+    )
+    return {
+        "prepared": True,
+        "grant": grant,
+        "chest_name": definition.label,
+        "closed_image_path": definition.closed_image,
+        "opened_image_path": definition.opened_image,
+        "box_state": "closed",
+    }
+
+
 @transaction.atomic
-def open_bonus_vault(*, user) -> dict:
+def prepare_bonus_vault(*, user) -> dict:
     user = _require_eligible_user(user)
     if not config.BONUS_VAULT_ENABLED:
         raise ValidationError("The Bonus Vault is disabled")
@@ -314,10 +328,37 @@ def open_bonus_vault(*, user) -> dict:
             },
         )
 
-    result = open_reward_chest(
-        user=locked_user,
-        grant=pending_grant,
-    )
+    return _pending_bonus_vault_result(pending_grant)
+
+
+@transaction.atomic
+def open_bonus_vault(*, user, grant_public_id=None) -> dict:
+    user = _require_eligible_user(user)
+    if not config.BONUS_VAULT_ENABLED:
+        raise ValidationError("The Bonus Vault is disabled")
+
+    if grant_public_id not in (None, ""):
+        user_model = get_user_model()
+        locked_user = user_model.objects.select_for_update().get(pk=user.pk)
+        pending_grant = (
+            RewardChestGrant.objects.select_for_update()
+            .filter(
+                public_id=grant_public_id,
+                user=locked_user,
+                source_type=_get_source_type(),
+            )
+            .first()
+        )
+        if pending_grant is None:
+            raise ValidationError(
+                "The prepared Bonus Vault chest was not found"
+            )
+    else:
+        prepared = prepare_bonus_vault(user=user)
+        locked_user = user
+        pending_grant = prepared["grant"]
+
+    result = open_reward_chest(user=locked_user, grant=pending_grant)
     metadata = (
         pending_grant.metadata
         if isinstance(pending_grant.metadata, dict)

@@ -996,17 +996,72 @@ def build_weekly_quest_status(*, user) -> dict:
     }
 
 
-def open_weekly_quest_reward(*, user, cycle_key: str, quest_key: str) -> dict:
+@transaction.atomic
+def prepare_weekly_quest_reward(
+    *,
+    user,
+    cycle_key: str,
+    quest_key: str,
+) -> dict:
     user = _require_user(user)
     cycle = _cycle_from_key(cycle_key)
     definition = next(
-        (row for row in get_weekly_definitions(user=user, cycle=cycle) if row.key == quest_key),
+        (
+            row
+            for row in get_weekly_definitions(user=user, cycle=cycle)
+            if row.key == quest_key
+        ),
         None,
     )
     if definition is None:
         raise ValidationError("Quest is not active in this cycle")
-    progress = _quest_progress(user=user, cycle=cycle, definition=definition)
+
+    progress = _quest_progress(
+        user=user,
+        cycle=cycle,
+        definition=definition,
+    )
     if not progress["complete"]:
         raise ValidationError("Quest requirements are not complete")
-    grant = _ensure_reward_grant(user=user, cycle=cycle, definition=definition)
+
+    grant = _ensure_reward_grant(
+        user=user,
+        cycle=cycle,
+        definition=definition,
+    )
+    snapshot = config.reward_chest_definition_from_snapshot(
+        grant.config_snapshot
+    )
+    return {
+        "prepared": True,
+        "grant": grant,
+        "chest_name": snapshot.label,
+        "closed_image_path": snapshot.closed_image,
+        "opened_image_path": snapshot.opened_image,
+        "box_state": "closed",
+    }
+
+
+def open_weekly_quest_reward(
+    *,
+    user,
+    cycle_key: str,
+    quest_key: str,
+    grant_public_id=None,
+) -> dict:
+    prepared = prepare_weekly_quest_reward(
+        user=user,
+        cycle_key=cycle_key,
+        quest_key=quest_key,
+    )
+    grant = prepared["grant"]
+
+    if (
+        grant_public_id not in (None, "")
+        and str(grant.public_id) != str(grant_public_id)
+    ):
+        raise ValidationError(
+            "The prepared weekly quest chest does not match"
+        )
+
     return open_reward_chest(user=user, grant=grant)

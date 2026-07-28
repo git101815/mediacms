@@ -10,8 +10,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from . import config
-from .bonus_vault import open_bonus_vault
-from .daily_rewards import claim_daily_reward
+from .bonus_vault import open_bonus_vault, prepare_bonus_vault
+from .daily_rewards import claim_daily_reward, prepare_daily_reward_chest
 from .quests import claim_quest_reward
 from .weekly_quests import (
     ATTRIBUTION_COOKIE_NAME,
@@ -20,6 +20,7 @@ from .weekly_quests import (
     create_site_share_link,
     create_video_share_link,
     open_weekly_quest_reward,
+    prepare_weekly_quest_reward,
     record_navigation,
     set_visitor_cookie,
 )
@@ -63,6 +64,8 @@ def _build_chest_opening_payload(*, result: dict) -> dict:
         )
 
     return {
+        "pending": False,
+        "grant_public_id": str(grant.public_id),
         "chest_label": str(
             result.get("chest_label")
             or result.get("chest_name")
@@ -93,6 +96,38 @@ def _build_chest_opening_payload(*, result: dict) -> dict:
             config.get_wallet_asset_paths()["token_icon"]
         ),
     }
+
+
+def _build_pending_chest_opening_payload(*, result: dict) -> dict:
+    grant = result.get("grant") or result.get("reward_chest_grant")
+    if grant is None:
+        raise ValidationError(
+            "Reward Chest preparation is missing its grant"
+        )
+
+    definition = config.reward_chest_definition_from_snapshot(
+        grant.config_snapshot
+    )
+    return {
+        "pending": True,
+        "grant_public_id": str(grant.public_id),
+        "chest_label": definition.label,
+        "closed_image_url": static(definition.closed_image),
+        "opened_image_url": static(definition.opened_image),
+    }
+
+
+def _is_chest_open_confirmation(request) -> bool:
+    return str(request.POST.get("confirm_open") or "").strip() == "1"
+
+
+def _confirmation_grant_public_id(request) -> str:
+    value = str(request.POST.get("grant_public_id") or "").strip()
+    if not value:
+        raise ValidationError(
+            "The prepared Reward Chest identifier is missing"
+        )
+    return value
 
 
 @login_required
@@ -126,12 +161,28 @@ def wallet_claim_quest(request, quest_key):
 @require_POST
 def wallet_open_weekly_quest(request, cycle_key, quest_key):
     wants_json = _wants_wallet_json(request)
+    confirming = wants_json and _is_chest_open_confirmation(request)
+    prepared = None
+
     try:
-        result = open_weekly_quest_reward(
-            user=request.user,
-            cycle_key=cycle_key,
-            quest_key=quest_key,
-        )
+        if wants_json and not confirming:
+            prepared = prepare_weekly_quest_reward(
+                user=request.user,
+                cycle_key=cycle_key,
+                quest_key=quest_key,
+            )
+            result = None
+        else:
+            result = open_weekly_quest_reward(
+                user=request.user,
+                cycle_key=cycle_key,
+                quest_key=quest_key,
+                grant_public_id=(
+                    _confirmation_grant_public_id(request)
+                    if confirming
+                    else None
+                ),
+            )
     except (PermissionDenied, ValidationError) as exc:
         error_text = _wallet_error_text(exc)
         if wants_json:
@@ -140,6 +191,16 @@ def wallet_open_weekly_quest(request, cycle_key, quest_key):
         return redirect("wallet")
 
     if wants_json:
+        if prepared is not None:
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "prepared": True,
+                    "opening": _build_pending_chest_opening_payload(
+                        result=prepared
+                    ),
+                }
+            )
         return JsonResponse(
             {
                 "ok": True,
@@ -147,6 +208,7 @@ def wallet_open_weekly_quest(request, cycle_key, quest_key):
                 "opening": _build_chest_opening_payload(result=result),
             }
         )
+
     messages.success(
         request,
         f"Weekly quest chest opened: {result['amount_tokens']:,} tokens.",
@@ -245,9 +307,22 @@ def weekly_quest_status(request):
 @require_POST
 def wallet_open_bonus_vault(request):
     wants_json = _wants_wallet_json(request)
+    confirming = wants_json and _is_chest_open_confirmation(request)
+    prepared = None
 
     try:
-        result = open_bonus_vault(user=request.user)
+        if wants_json and not confirming:
+            prepared = prepare_bonus_vault(user=request.user)
+            result = None
+        else:
+            result = open_bonus_vault(
+                user=request.user,
+                grant_public_id=(
+                    _confirmation_grant_public_id(request)
+                    if confirming
+                    else None
+                ),
+            )
     except (PermissionDenied, ValidationError) as exc:
         error_text = _wallet_error_text(exc)
         if wants_json:
@@ -259,13 +334,21 @@ def wallet_open_bonus_vault(request):
         return redirect("wallet")
 
     if wants_json:
+        if prepared is not None:
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "prepared": True,
+                    "opening": _build_pending_chest_opening_payload(
+                        result=prepared
+                    ),
+                }
+            )
         return JsonResponse(
             {
                 "ok": True,
                 "already_opened": not bool(result["opened"]),
-                "opening": _build_chest_opening_payload(
-                    result=result,
-                ),
+                "opening": _build_chest_opening_payload(result=result),
             }
         )
 
@@ -286,9 +369,22 @@ def wallet_open_bonus_vault(request):
 @require_POST
 def wallet_claim_daily_reward(request):
     wants_json = _wants_wallet_json(request)
+    confirming = wants_json and _is_chest_open_confirmation(request)
+    prepared = None
 
     try:
-        result = claim_daily_reward(user=request.user)
+        if wants_json and not confirming:
+            prepared = prepare_daily_reward_chest(user=request.user)
+            result = None
+        else:
+            result = claim_daily_reward(
+                user=request.user,
+                grant_public_id=(
+                    _confirmation_grant_public_id(request)
+                    if confirming
+                    else None
+                ),
+            )
     except (PermissionDenied, ValidationError) as exc:
         error_text = _wallet_error_text(exc)
         if wants_json:
@@ -300,25 +396,25 @@ def wallet_claim_daily_reward(request):
         return redirect("wallet")
 
     if wants_json:
+        if prepared is not None:
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "prepared": True,
+                    "opening": _build_pending_chest_opening_payload(
+                        result=prepared
+                    ),
+                }
+            )
         if result["reward_kind"] == "chest":
             return JsonResponse(
                 {
                     "ok": True,
-                    "already_claimed": bool(
-                        result["already_claimed"]
-                    ),
-                    "opening": _build_chest_opening_payload(
-                        result=result,
-                    ),
+                    "already_claimed": bool(result["already_claimed"]),
+                    "opening": _build_chest_opening_payload(result=result),
                 }
             )
-        return JsonResponse(
-            {
-                "ok": True,
-                "kind": "fixed",
-                "reload": True,
-            }
-        )
+        return JsonResponse({"ok": True, "kind": "fixed", "reload": True})
 
     if result["claimed"] and result["reward_kind"] == "chest":
         messages.success(

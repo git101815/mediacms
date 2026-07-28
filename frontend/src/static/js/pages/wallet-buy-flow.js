@@ -752,7 +752,7 @@
   }
 
 
-  // interactive-chest-opening-v1
+  // interactive-chest-opening-v2
   const chestOpeningOverlay = document.querySelector(
     '[data-wallet-chest-opening]'
   );
@@ -773,6 +773,7 @@
     : null;
   let chestOpeningTimers = [];
   let chestOpeningRarity = 'reward';
+  let chestOpeningPending = null;
 
   function clearChestOpeningTimers() {
     chestOpeningTimers.forEach(function (timerId) {
@@ -801,24 +802,34 @@
     }
   }
 
-  function showChestOpening(opening) {
-    if (!chestOpeningOverlay || !opening) {
-      window.location.reload();
-      return;
-    }
+  function resetChestOpeningOutcome() {
+    chestOpeningRarity = 'reward';
+    setChestOpeningText(
+      '[data-wallet-chest-opening-source]',
+      ''
+    );
+    setChestOpeningText(
+      '[data-wallet-chest-opening-amount]',
+      '0'
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-drop-image]',
+      ''
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-rarity-image]',
+      ''
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-token-icon]',
+      ''
+    );
+  }
 
-    clearChestOpeningTimers();
-
-    chestOpeningOverlay.hidden = false;
-    chestOpeningOverlay.setAttribute('aria-hidden', 'false');
-    chestOpeningOverlay.setAttribute('data-state', 'closed');
+  function applyChestOpeningResult(opening) {
     chestOpeningRarity = String(
       opening.rarity || 'reward'
     ).toLowerCase();
-    chestOpeningOverlay.setAttribute(
-      'data-rarity',
-      'mystery'
-    );
 
     setChestOpeningText(
       '[data-wallet-chest-opening-source]',
@@ -827,13 +838,9 @@
     );
     setChestOpeningText(
       '[data-wallet-chest-opening-amount]',
-      opening.amount_display || String(opening.amount_tokens || 0)
+      opening.amount_display ||
+        String(opening.amount_tokens || 0)
     );
-    setChestOpeningText(
-      '[data-wallet-chest-opening-hint]',
-      'Tap the chest to open'
-    );
-
     setChestOpeningImage(
       '[data-wallet-chest-opening-closed]',
       opening.closed_image_url
@@ -854,6 +861,44 @@
       '[data-wallet-chest-opening-token-icon]',
       opening.token_icon_url
     );
+  }
+
+  function showChestOpening(opening, form) {
+    if (
+      !chestOpeningOverlay ||
+      !opening ||
+      opening.pending !== true ||
+      !opening.grant_public_id ||
+      !form
+    ) {
+      window.location.reload();
+      return;
+    }
+
+    clearChestOpeningTimers();
+    chestOpeningPending = {
+      form: form,
+      grantPublicId: String(opening.grant_public_id),
+    };
+
+    chestOpeningOverlay.hidden = false;
+    chestOpeningOverlay.setAttribute('aria-hidden', 'false');
+    chestOpeningOverlay.setAttribute('data-state', 'closed');
+    chestOpeningOverlay.setAttribute('data-rarity', 'mystery');
+
+    resetChestOpeningOutcome();
+    setChestOpeningText(
+      '[data-wallet-chest-opening-hint]',
+      'Tap the chest to open'
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-closed]',
+      opening.closed_image_url
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-opened]',
+      opening.opened_image_url
+    );
 
     if (chestOpeningCollect) {
       chestOpeningCollect.classList.remove(
@@ -873,13 +918,46 @@
     );
   }
 
-  function revealChestOpening() {
+  function scheduleChestOpeningReveal(elapsedMs) {
+    const openedDelay = Math.max(0, 620 - elapsedMs);
+
+    chestOpeningTimers.push(window.setTimeout(function () {
+      chestOpeningOverlay.setAttribute(
+        'data-rarity',
+        chestOpeningRarity
+      );
+      chestOpeningOverlay.setAttribute('data-state', 'opened');
+    }, openedDelay));
+
+    chestOpeningTimers.push(window.setTimeout(function () {
+      chestOpeningOverlay.setAttribute('data-state', 'revealed');
+      setChestOpeningText(
+        '[data-wallet-chest-opening-hint]',
+        ''
+      );
+    }, openedDelay + 310));
+
+    chestOpeningTimers.push(window.setTimeout(function () {
+      if (chestOpeningCollect) {
+        chestOpeningCollect.classList.add(
+          'wallet-chest-opening__collect--visible'
+        );
+        chestOpeningCollect.setAttribute('aria-hidden', 'false');
+      }
+    }, openedDelay + 800));
+  }
+
+  async function confirmChestOpening() {
     if (
       !chestOpeningOverlay ||
+      !chestOpeningPending ||
       chestOpeningOverlay.getAttribute('data-state') !== 'closed'
     ) {
       return;
     }
+
+    const pending = chestOpeningPending;
+    const startedAt = Date.now();
 
     chestOpeningOverlay.setAttribute('data-state', 'opening');
     setChestOpeningText(
@@ -890,30 +968,58 @@
       chestOpeningTrigger.disabled = true;
     }
 
-    chestOpeningTimers.push(window.setTimeout(function () {
-      chestOpeningOverlay.setAttribute(
-        'data-rarity',
-        chestOpeningRarity
-      );
-      chestOpeningOverlay.setAttribute('data-state', 'opened');
-    }, 620));
+    try {
+      const formData = new FormData(pending.form);
+      formData.set('confirm_open', '1');
+      formData.set('grant_public_id', pending.grantPublicId);
 
-    chestOpeningTimers.push(window.setTimeout(function () {
-      chestOpeningOverlay.setAttribute('data-state', 'revealed');
+      const response = await window.fetch(pending.form.action, {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        payload = null;
+      }
+
+      if (!response.ok || !payload || !payload.ok) {
+        throw new Error(
+          payload && payload.error
+            ? payload.error
+            : 'Could not open the Reward Chest.'
+        );
+      }
+      if (!payload.opening || payload.opening.pending === true) {
+        throw new Error('The Reward Chest result is missing.');
+      }
+
+      applyChestOpeningResult(payload.opening);
+      chestOpeningPending = null;
+      scheduleChestOpeningReveal(Date.now() - startedAt);
+    } catch (error) {
+      chestOpeningOverlay.setAttribute('data-state', 'closed');
+      chestOpeningOverlay.setAttribute('data-rarity', 'mystery');
       setChestOpeningText(
         '[data-wallet-chest-opening-hint]',
-        ''
+        'Tap the chest to try again'
       );
-    }, 930));
-
-    chestOpeningTimers.push(window.setTimeout(function () {
-      if (chestOpeningCollect) {
-        chestOpeningCollect.classList.add(
-          'wallet-chest-opening__collect--visible'
-        );
-        chestOpeningCollect.setAttribute('aria-hidden', 'false');
+      if (chestOpeningTrigger) {
+        chestOpeningTrigger.disabled = false;
       }
-    }, 1420));
+      window.alert(
+        error && error.message
+          ? error.message
+          : 'Could not open the Reward Chest.'
+      );
+    }
   }
 
   function finishChestOpening() {
@@ -958,16 +1064,19 @@
         throw new Error(
           payload && payload.error
             ? payload.error
-            : 'Could not open the Reward Chest.'
+            : 'Could not prepare the Reward Chest.'
         );
       }
 
-      if (!payload.opening) {
+      if (payload.reload) {
         window.location.reload();
         return;
       }
+      if (!payload.opening || payload.opening.pending !== true) {
+        throw new Error('Could not prepare the Reward Chest.');
+      }
 
-      showChestOpening(payload.opening);
+      showChestOpening(payload.opening, form);
     } catch (error) {
       form.removeAttribute('data-wallet-chest-submitting');
       if (submitButton) {
@@ -976,7 +1085,7 @@
       window.alert(
         error && error.message
           ? error.message
-          : 'Could not open the Reward Chest.'
+          : 'Could not prepare the Reward Chest.'
       );
     }
   }
@@ -997,7 +1106,7 @@
   if (chestOpeningTrigger) {
     chestOpeningTrigger.addEventListener(
       'click',
-      revealChestOpening
+      confirmChestOpening
     );
   }
 

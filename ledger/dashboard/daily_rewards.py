@@ -22,7 +22,11 @@ from ledger.models import (
 )
 
 from . import config
-from .models import DailyRewardClaim, DailyRewardState
+from .models import (
+    DailyRewardClaim,
+    DailyRewardState,
+    RewardChestGrant,
+)
 from .reward_chests import grant_reward_chest, open_reward_chest
 
 
@@ -280,22 +284,124 @@ def _claim_fixed_reward(
     return txn, metadata, None, result
 
 
-def _claim_chest_reward(
-    *, user, reward_date, streak_day, cycle_day, reward
-):
-    source_ref = f"user:{user.pk}:date:{reward_date.isoformat()}"
+def _daily_chest_source_ref(*, user_id: int, reward_date) -> str:
+    return f"user:{int(user_id)}:date:{reward_date.isoformat()}"
+
+
+@transaction.atomic
+def prepare_daily_reward_chest(*, user, at=None) -> dict:
+    user = _require_eligible_user(user)
+    if not config.DAILY_REWARDS_ENABLED:
+        raise ValidationError("Daily rewards are disabled")
+
+    definitions = config.get_daily_reward_definitions()
+    reward_date = get_daily_reward_date(at)
+
+    user_model = get_user_model()
+    locked_user = user_model.objects.select_for_update().get(pk=user.pk)
+    state, _created = DailyRewardState.objects.get_or_create(user=locked_user)
+    state = DailyRewardState.objects.select_for_update().get(pk=state.pk)
+
+    if DailyRewardClaim.objects.filter(
+        user=locked_user,
+        reward_date=reward_date,
+    ).exists():
+        raise ValidationError("Today's daily reward was already claimed")
+
+    streak_day = _calculate_claim_streak(state, reward_date)
+    cycle_day = _get_cycle_day(streak_day, len(definitions))
+    reward = definitions[cycle_day - 1]
+    if reward.kind != "chest":
+        raise ValidationError("Today's daily reward is not a chest")
+
+    user_wallet = TokenWallet.objects.filter(
+        wallet_type=TokenWallet.TYPE_USER,
+        user=locked_user,
+    ).first()
+    issuance_wallet = TokenWallet.objects.filter(
+        wallet_type=TokenWallet.TYPE_SYSTEM,
+        system_key=TokenWallet.SYSTEM_ISSUANCE,
+    ).first()
+    block_reason = _wallet_claim_block_reason(user_wallet)
+    issuance_block_reason = _wallet_claim_block_reason(issuance_wallet)
+    if block_reason:
+        raise ValidationError(block_reason)
+    if issuance_block_reason:
+        raise ValidationError("Daily reward issuance is unavailable")
+
     grant = grant_reward_chest(
-        user=user,
+        user=locked_user,
         chest_key=reward.chest_key,
         source_type="daily_reward",
-        source_ref=source_ref,
+        source_ref=_daily_chest_source_ref(
+            user_id=locked_user.pk,
+            reward_date=reward_date,
+        ),
         metadata={
             "reward_date": reward_date.isoformat(),
             "streak_day": int(streak_day),
             "cycle_day": int(cycle_day),
-            "daily_reward_config_version": int(config.DAILY_REWARD_CONFIG_VERSION),
+            "daily_reward_config_version": int(
+                config.DAILY_REWARD_CONFIG_VERSION
+            ),
         },
+        expires_at=get_next_daily_reward_reset(at),
     )
+    return {
+        "prepared": True,
+        "grant": grant,
+        "reward_kind": "chest",
+        "chest_label": reward.chest_label,
+        "closed_image_path": reward.chest_closed_image,
+        "opened_image_path": reward.chest_opened_image,
+        "box_state": "closed",
+        "streak_day": streak_day,
+        "cycle_day": cycle_day,
+        "reward_date": reward_date,
+    }
+
+
+def _claim_chest_reward(
+    *,
+    user,
+    reward_date,
+    streak_day,
+    cycle_day,
+    reward,
+    prepared_grant=None,
+):
+    source_ref = _daily_chest_source_ref(
+        user_id=user.pk,
+        reward_date=reward_date,
+    )
+    if prepared_grant is None:
+        grant = grant_reward_chest(
+            user=user,
+            chest_key=reward.chest_key,
+            source_type="daily_reward",
+            source_ref=source_ref,
+            metadata={
+                "reward_date": reward_date.isoformat(),
+                "streak_day": int(streak_day),
+                "cycle_day": int(cycle_day),
+                "daily_reward_config_version": int(
+                    config.DAILY_REWARD_CONFIG_VERSION
+                ),
+            },
+        )
+    else:
+        grant = prepared_grant
+        if grant.user_id != user.pk:
+            raise PermissionDenied(
+                "Cannot open another user's daily chest"
+            )
+        if (
+            grant.source_type != "daily_reward"
+            or grant.source_ref != source_ref
+            or grant.chest_key != reward.chest_key
+        ):
+            raise ValidationError("The prepared daily chest does not match")
+
     opened = open_reward_chest(user=user, grant=grant)
     snapshot = {
         "source": "wallet_daily_rewards",
@@ -380,7 +486,12 @@ def _existing_claim_result(existing_claim: DailyRewardClaim, reward_date) -> dic
 
 
 @transaction.atomic
-def claim_daily_reward(*, user, at=None) -> dict:
+def claim_daily_reward(
+    *,
+    user,
+    at=None,
+    grant_public_id=None,
+) -> dict:
     user = _require_eligible_user(user)
     if not config.DAILY_REWARDS_ENABLED:
         raise ValidationError("Daily rewards are disabled")
@@ -402,11 +513,36 @@ def claim_daily_reward(*, user, at=None) -> dict:
         .first()
     )
     if existing_claim is not None:
+        if (
+            grant_public_id not in (None, "")
+            and (
+                existing_claim.reward_chest_grant is None
+                or str(existing_claim.reward_chest_grant.public_id)
+                != str(grant_public_id)
+            )
+        ):
+            raise ValidationError(
+                "The prepared daily chest does not match the existing claim"
+            )
         return _existing_claim_result(existing_claim, reward_date)
 
     streak_day = _calculate_claim_streak(state, reward_date)
     cycle_day = _get_cycle_day(streak_day, len(definitions))
     reward = definitions[cycle_day - 1]
+
+    prepared_grant = None
+    if grant_public_id not in (None, ""):
+        if reward.kind != "chest":
+            raise ValidationError(
+                "A fixed daily reward cannot confirm a chest"
+            )
+        prepared_grant = (
+            RewardChestGrant.objects.select_for_update()
+            .filter(public_id=grant_public_id, user=locked_user)
+            .first()
+        )
+        if prepared_grant is None:
+            raise ValidationError("The prepared daily chest was not found")
 
     if reward.kind == "fixed":
         txn, claim_snapshot, chest_grant, reward_result = _claim_fixed_reward(
@@ -423,6 +559,7 @@ def claim_daily_reward(*, user, at=None) -> dict:
             streak_day=streak_day,
             cycle_day=cycle_day,
             reward=reward,
+            prepared_grant=prepared_grant,
         )
     else:
         raise ValidationError("Unsupported daily reward kind")
