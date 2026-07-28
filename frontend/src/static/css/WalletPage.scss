@@ -3228,36 +3228,43 @@ $error-text: #ff9a9a;
   right: 12px;
 }
 
+/* reward-chest-preview-mockup-v4 */
 .wallet-reward-chest-modal {
   position: relative;
-  width: min(94vw, 470px);
-  max-width: 470px;
-  padding: 24px 20px 20px;
-  overflow: hidden;
-  border: 1px solid rgba(151, 128, 255, 0.34);
-  border-radius: 28px;
+  width: min(95vw, 560px);
+  max-width: 560px;
+  max-height: calc(100dvh - 24px);
+  padding: 26px 22px 22px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid rgba(105, 120, 143, 0.48);
+  border-radius: 30px;
   background:
     linear-gradient(
       180deg,
-      rgba(31, 30, 51, 0.99),
-      rgba(9, 10, 20, 0.99)
+      rgba(13, 21, 30, 0.995) 0%,
+      rgba(7, 13, 21, 0.995) 100%
     );
   box-shadow:
-    0 28px 80px rgba(0, 0, 0, 0.68),
-    0 0 46px rgba(98, 73, 211, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    0 30px 90px rgba(0, 0, 0, 0.72),
+    0 0 42px rgba(43, 111, 189, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  scrollbar-width: thin;
+  scrollbar-color:
+    rgba(134, 151, 179, 0.42)
+    rgba(255, 255, 255, 0.025);
 }
 
 .wallet-reward-chest-modal::before {
   position: absolute;
   inset: 0;
-  opacity: 0.32;
+  opacity: 0.24;
   background:
     linear-gradient(
-      115deg,
-      transparent 0 30%,
-      rgba(255, 255, 255, 0.055) 43%,
-      transparent 56% 100%
+      118deg,
+      transparent 0 32%,
+      rgba(255, 255, 255, 0.05) 44%,
+      transparent 57% 100%
     );
   content: "";
   pointer-events: none;
@@ -3270,51 +3277,46 @@ $error-text: #ff9a9a;
 
 .wallet-reward-chest-modal .wallet-modal__title {
   margin: 0;
-  padding: 0 42px;
+  padding: 0 46px;
   color: #fff;
   font-family: 'Avenir-Heavy', 'Roboto', sans-serif;
-  font-size: clamp(25px, 7vw, 31px);
-  line-height: 1.08;
+  font-size: clamp(27px, 7vw, 36px);
+  line-height: 1.06;
   text-align: center;
   text-shadow:
-    0 4px 18px rgba(0, 0, 0, 0.48),
-    0 0 24px rgba(133, 105, 255, 0.16);
+    0 4px 18px rgba(0, 0, 0, 0.54),
+    0 0 22px rgba(127, 161, 203, 0.10);
 }
 
 .wallet-reward-chest-modal__subtitle {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 11px 0 0;
-  color: #aeb7c7;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.17em;
+  margin: 14px 0 0;
+  color: #aeb8c8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.wallet-reward-chest-modal__subtitle::before,
 .wallet-reward-chest-modal__subtitle::after {
   height: 1px;
   flex: 1 1 auto;
   background:
     linear-gradient(
       90deg,
-      transparent,
-      rgba(255, 255, 255, 0.18)
+      rgba(255, 255, 255, 0.16),
+      transparent
     );
   content: "";
-}
-
-.wallet-reward-chest-modal__subtitle::after {
-  transform: scaleX(-1);
 }
 
 .wallet-reward-chest-modal__drops {
   position: relative;
   display: grid;
-  gap: 9px;
-  margin: 17px 0 0;
+  gap: 10px;
+  margin: 18px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -3322,53 +3324,58 @@ $error-text: #ff9a9a;
 .wallet-reward-chest-modal__drops::before {
   position: absolute;
   z-index: 0;
-  top: 28px;
-  bottom: 28px;
-  left: 24px;
+  top: 44px;
+  bottom: 44px;
+  left: 38px;
   width: 2px;
   background:
     linear-gradient(
       180deg,
-      #65b7ff,
-      #4ee07f 25%,
-      #8f72ff 50%,
-      #eb54ff 75%,
-      #ffd24a
+      #c6cbd5 0%,
+      #53ed42 25%,
+      #2383ff 50%,
+      #df2bff 75%,
+      #ffc928 100%
     );
-  box-shadow: 0 0 12px rgba(143, 114, 255, 0.36);
+  box-shadow:
+    0 0 7px rgba(51, 147, 255, 0.48),
+    0 0 14px rgba(156, 61, 255, 0.20);
   content: "";
 }
 
 .wallet-reward-chest-modal__drop {
-  --drop-color: #65b7ff;
-  --drop-soft: rgba(101, 183, 255, 0.12);
+  --rarity-light: #f0f3f8;
+  --rarity-color: #aeb7c7;
+  --rarity-deep: #596575;
+  --rarity-soft: rgba(176, 185, 199, 0.10);
+
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) 42px;
-  min-height: 66px;
+  grid-template-columns: 76px minmax(0, 1fr) 112px;
+  min-height: 96px;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
   padding: 8px 12px 8px 0;
   overflow: hidden;
   border: 1px solid
     color-mix(
       in srgb,
-      var(--drop-color) 30%,
-      rgba(255, 255, 255, 0.07)
+      var(--rarity-color) 54%,
+      rgba(255, 255, 255, 0.08)
     );
-  border-left: 3px solid var(--drop-color);
-  border-radius: 14px;
+  border-radius: 18px;
   background:
     linear-gradient(
       100deg,
-      var(--drop-soft),
+      var(--rarity-soft) 0%,
       rgba(255, 255, 255, 0.025) 48%,
-      rgba(255, 255, 255, 0.01)
+      rgba(255, 255, 255, 0.008) 100%
     );
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.045),
-    0 7px 18px rgba(0, 0, 0, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 8px 20px rgba(0, 0, 0, 0.19);
+  color: #fff;
   animation:
     wallet-reward-drop-enter 300ms
     cubic-bezier(.2, .8, .2, 1)
@@ -3376,131 +3383,289 @@ $error-text: #ff9a9a;
     both;
 }
 
+.wallet-reward-chest-modal__drop::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 60%;
+  height: 1px;
+  opacity: 0.76;
+  background:
+    linear-gradient(
+      90deg,
+      var(--rarity-light),
+      transparent
+    );
+  content: "";
+}
+
+.wallet-reward-chest-modal__drop::after {
+  position: absolute;
+  inset: 0;
+  opacity: 0.16;
+  background:
+    linear-gradient(
+      112deg,
+      transparent 0 52%,
+      var(--rarity-soft) 67%,
+      transparent 82%
+    );
+  content: "";
+  pointer-events: none;
+}
+
 .wallet-reward-chest-modal__drop[data-rarity="uncommon"] {
-  --drop-color: #4ee07f;
-  --drop-soft: rgba(78, 224, 127, 0.12);
+  --rarity-light: #a5ff78;
+  --rarity-color: #53ed42;
+  --rarity-deep: #168f19;
+  --rarity-soft: rgba(83, 237, 66, 0.13);
 }
 
 .wallet-reward-chest-modal__drop[data-rarity="rare"] {
-  --drop-color: #8f72ff;
-  --drop-soft: rgba(143, 114, 255, 0.14);
+  --rarity-light: #72c7ff;
+  --rarity-color: #2383ff;
+  --rarity-deep: #1647c8;
+  --rarity-soft: rgba(35, 131, 255, 0.15);
 }
 
 .wallet-reward-chest-modal__drop[data-rarity="epic"] {
-  --drop-color: #eb54ff;
-  --drop-soft: rgba(235, 84, 255, 0.14);
+  --rarity-light: #f678ff;
+  --rarity-color: #df2bff;
+  --rarity-deep: #8e00c5;
+  --rarity-soft: rgba(223, 43, 255, 0.15);
 }
 
-.wallet-reward-chest-modal__drop[data-rarity="jackpot"] {
-  --drop-color: #ffd24a;
-  --drop-soft: rgba(255, 210, 74, 0.16);
-  min-height: 72px;
+.wallet-reward-chest-modal__drop[data-rarity="legendary"] {
+  --rarity-light: #fff183;
+  --rarity-color: #ffc928;
+  --rarity-deep: #ed8f00;
+  --rarity-soft: rgba(255, 201, 40, 0.17);
+  min-height: 104px;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 0 18px rgba(255, 210, 74, 0.09);
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 28px rgba(255, 165, 0, 0.10),
+    0 0 22px rgba(255, 201, 40, 0.07);
 }
 
-.wallet-reward-chest-modal__sigil {
+.wallet-reward-chest-modal__badge-wrap {
+  position: relative;
+  z-index: 2;
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 76px;
+  height: 82px;
   place-items: center;
   justify-self: center;
-  border: 1px solid
-    color-mix(in srgb, var(--drop-color) 64%, #fff);
-  border-radius: 50%;
-  background:
+  color: var(--rarity-color);
+  filter:
+    drop-shadow(
+      0 0 8px
+      color-mix(
+        in srgb,
+        var(--rarity-color) 54%,
+        transparent
+      )
+    );
+}
+
+.wallet-reward-chest-modal__badge {
+  display: block;
+  width: 72px;
+  height: 72px;
+  overflow: visible;
+}
+
+.wallet-rarity-badge__frame {
+  fill:
     color-mix(
       in srgb,
-      var(--drop-color) 18%,
-      rgba(5, 7, 16, 0.92)
+      var(--rarity-deep) 46%,
+      rgba(8, 13, 23, 0.98)
     );
-  box-shadow:
+  stroke: var(--rarity-light);
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+}
+
+.wallet-rarity-badge__frame-inner {
+  fill: none;
+  stroke: var(--rarity-color);
+  stroke-width: 2.1;
+  stroke-linejoin: round;
+}
+
+.wallet-rarity-badge__wing {
+  fill:
+    color-mix(
+      in srgb,
+      var(--rarity-color) 32%,
+      rgba(7, 12, 20, 0.96)
+    );
+  stroke: var(--rarity-color);
+  stroke-width: 1.4;
+}
+
+.wallet-rarity-badge__gem,
+.wallet-rarity-badge__satellite,
+.wallet-rarity-badge__keystone {
+  fill: var(--rarity-color);
+  stroke: var(--rarity-light);
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+}
+
+.wallet-rarity-badge__gem {
+  filter:
+    drop-shadow(
+      0 0 5px
+      color-mix(
+        in srgb,
+        var(--rarity-color) 78%,
+        transparent
+      )
+    );
+}
+
+.wallet-rarity-badge__gem--large {
+  stroke-width: 2.2;
+}
+
+.wallet-rarity-badge__facet {
+  fill: var(--rarity-light);
+  opacity: 0.34;
+}
+
+.wallet-rarity-badge__crown {
+  fill: var(--rarity-color);
+  stroke: var(--rarity-light);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
+.wallet-rarity-badge__laurel {
+  fill: var(--rarity-color);
+  stroke: var(--rarity-light);
+  stroke-width: 1.1;
+  opacity: 0.92;
+}
+
+.wallet-reward-chest-modal__drop-copy {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.wallet-reward-chest-modal__rarity {
+  color: var(--rarity-color);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.10em;
+  line-height: 1;
+}
+
+.wallet-reward-chest-modal__value {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.wallet-reward-chest-modal__amount {
+  color: #fff;
+  font-family: 'Avenir-Heavy', 'Roboto', sans-serif;
+  font-size: clamp(23px, 5vw, 30px);
+  line-height: 1;
+  white-space: nowrap;
+  text-shadow:
+    0 3px 12px rgba(0, 0, 0, 0.52),
     0 0 14px
       color-mix(
         in srgb,
-        var(--drop-color) 24%,
-        transparent
-      ),
-    inset 0 0 0 3px rgba(0, 0, 0, 0.18);
-}
-
-.wallet-reward-chest-modal__sigil i {
-  width: 10px;
-  height: 10px;
-  border: 2px solid var(--drop-color);
-  transform: rotate(45deg);
-  box-shadow:
-    0 0 8px
-      color-mix(
-        in srgb,
-        var(--drop-color) 68%,
+        var(--rarity-color) 16%,
         transparent
       );
 }
 
-.wallet-reward-chest-modal__drop[data-rarity="jackpot"]
-  .wallet-reward-chest-modal__sigil i {
-  width: 13px;
-  height: 13px;
-  background: rgba(255, 210, 74, 0.18);
-}
-
-.wallet-reward-chest-modal__drop-copy {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: auto 1fr;
-  grid-template-areas:
-    "rarity rarity"
-    "amount unit";
-  align-items: end;
-  column-gap: 7px;
-}
-
-.wallet-reward-chest-modal__rarity {
-  grid-area: rarity;
-  color: var(--drop-color);
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.17em;
-  line-height: 1;
-}
-
-.wallet-reward-chest-modal__amount {
-  grid-area: amount;
-  color: #fff;
-  font-family: 'Avenir-Heavy', 'Roboto', sans-serif;
-  font-size: clamp(18px, 5.5vw, 23px);
-  line-height: 1.05;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.44);
-}
-
 .wallet-reward-chest-modal__unit {
-  grid-area: unit;
-  align-self: center;
-  color: #aeb7c7;
+  color: #b6c0cf;
   font-size: 9px;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.10em;
 }
 
-.wallet-reward-chest-modal__coin {
+.wallet-reward-chest-modal__art-frame {
+  position: relative;
+  z-index: 2;
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 106px;
+  height: 82px;
   place-items: center;
   justify-self: end;
-  border: 2px solid #ffcc42;
-  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--rarity-color) 52%,
+      rgba(255, 255, 255, 0.10)
+    );
+  border-radius: 16px;
   background:
-    linear-gradient(145deg, #ffe879, #f7a813);
+    linear-gradient(
+      145deg,
+      color-mix(
+        in srgb,
+        var(--rarity-color) 17%,
+        rgba(13, 20, 31, 0.98)
+      ),
+      rgba(5, 9, 16, 0.99)
+    );
   box-shadow:
-    inset 0 0 0 2px rgba(128, 66, 0, 0.24),
-    0 4px 10px rgba(255, 170, 22, 0.18);
-  color: #7a3d00;
-  font-family: 'Avenir-Heavy', 'Roboto', sans-serif;
-  font-size: 9px;
-  font-weight: 900;
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 15px
+      color-mix(
+        in srgb,
+        var(--rarity-color) 14%,
+        transparent
+      );
+}
+
+.wallet-reward-chest-modal__art-frame::after {
+  position: absolute;
+  inset: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 11px;
+  content: "";
+  pointer-events: none;
+}
+
+.wallet-reward-chest-modal__art {
+  position: relative;
+  z-index: 1;
+  width: 96px;
+  height: 72px;
+  object-fit: contain;
+  filter:
+    drop-shadow(0 8px 9px rgba(0, 0, 0, 0.40))
+    drop-shadow(
+      0 0 7px
+      color-mix(
+        in srgb,
+        var(--rarity-color) 22%,
+        transparent
+      )
+    );
+}
+
+.wallet-reward-chest-modal__drop[data-rarity="legendary"]
+  .wallet-reward-chest-modal__badge {
+  width: 80px;
+  height: 80px;
+}
+
+.wallet-reward-chest-modal__drop[data-rarity="legendary"]
+  .wallet-reward-chest-modal__art-frame {
+  border-color: rgba(255, 201, 40, 0.68);
 }
 
 @keyframes wallet-reward-drop-enter {
@@ -3508,16 +3673,17 @@ $error-text: #ff9a9a;
     opacity: 0;
     transform: translateY(7px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 520px) {
   .wallet-reward-chest-modal {
-    width: calc(100vw - 16px);
-    padding: 21px 13px 14px;
+    width: calc(100vw - 14px);
+    padding: 22px 12px 14px;
     border-radius: 24px;
   }
 
@@ -3525,27 +3691,90 @@ $error-text: #ff9a9a;
     gap: 7px;
   }
 
+  .wallet-reward-chest-modal__drops::before {
+    top: 34px;
+    bottom: 34px;
+    left: 27px;
+  }
+
   .wallet-reward-chest-modal__drop {
-    grid-template-columns: 42px minmax(0, 1fr) 36px;
-    min-height: 61px;
-    gap: 8px;
-    padding-right: 9px;
+    grid-template-columns: 54px minmax(0, 1fr) 74px;
+    min-height: 76px;
+    gap: 7px;
+    padding-right: 7px;
+    border-radius: 14px;
+  }
+
+  .wallet-reward-chest-modal__drop[data-rarity="legendary"] {
+    min-height: 82px;
+  }
+
+  .wallet-reward-chest-modal__badge-wrap {
+    width: 54px;
+    height: 62px;
+  }
+
+  .wallet-reward-chest-modal__badge {
+    width: 52px;
+    height: 52px;
+  }
+
+  .wallet-reward-chest-modal__drop[data-rarity="legendary"]
+    .wallet-reward-chest-modal__badge {
+    width: 58px;
+    height: 58px;
+  }
+
+  .wallet-reward-chest-modal__rarity {
+    font-size: 9px;
+  }
+
+  .wallet-reward-chest-modal__amount {
+    font-size: clamp(18px, 6vw, 23px);
+  }
+
+  .wallet-reward-chest-modal__unit {
+    font-size: 7px;
+  }
+
+  .wallet-reward-chest-modal__art-frame {
+    width: 70px;
+    height: 60px;
     border-radius: 12px;
   }
 
-  .wallet-reward-chest-modal__drops::before {
-    left: 21px;
+  .wallet-reward-chest-modal__art {
+    width: 64px;
+    height: 54px;
+  }
+}
+
+@media (max-width: 350px) {
+  .wallet-reward-chest-modal__drop {
+    grid-template-columns: 46px minmax(0, 1fr) 62px;
   }
 
-  .wallet-reward-chest-modal__sigil {
-    width: 30px;
-    height: 30px;
+  .wallet-reward-chest-modal__badge-wrap {
+    width: 46px;
   }
 
-  .wallet-reward-chest-modal__coin {
-    width: 29px;
-    height: 29px;
-    font-size: 8px;
+  .wallet-reward-chest-modal__badge {
+    width: 46px;
+    height: 46px;
+  }
+
+  .wallet-reward-chest-modal__art-frame {
+    width: 59px;
+    height: 52px;
+  }
+
+  .wallet-reward-chest-modal__art {
+    width: 55px;
+    height: 48px;
+  }
+
+  .wallet-reward-chest-modal__unit {
+    display: none;
   }
 }
 

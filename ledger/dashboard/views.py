@@ -71,7 +71,11 @@ def _build_chest_opening_payload(*, result: dict) -> dict:
         "amount_tokens": amount_tokens,
         "amount_display": f"{amount_tokens:,}",
         "rarity": rarity,
-        "rarity_label": rarity.replace("_", " ").upper(),
+        "rarity_label": (
+            "LEGENDARY"
+            if rarity == "jackpot"
+            else rarity.replace("_", " ").upper()
+        ),
         "closed_image_url": static(closed_image_path),
         "opened_image_url": static(opened_image_path),
         "drop_image_url": static(

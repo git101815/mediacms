@@ -15,6 +15,7 @@ from django.core.mail import EmailMessage
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render, resolve_url
+from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
 from urllib.parse import urlencode, urlparse
@@ -1790,14 +1791,34 @@ def _build_reward_chest_preview_catalog() -> list[dict]:
 
     for chest_key in wallet_config.REWARD_CHESTS:
         chest = wallet_config.get_reward_chest_definition(chest_key)
+        drops = []
+
+        for drop in chest.drops:
+            display_rarity = (
+                "legendary"
+                if drop.rarity == "jackpot"
+                else drop.rarity
+            )
+            drops.append(
+                {
+                    "key": drop.key,
+                    "label": drop.label,
+                    "rarity": display_rarity,
+                    "rarity_label": display_rarity.upper(),
+                    "image_url": static(
+                        wallet_config.get_reward_chest_drop_image_path(
+                            chest_key=chest.key,
+                            drop_key=drop.key,
+                        )
+                    ),
+                }
+            )
+
         catalog.append(
             {
                 "key": chest.key,
                 "label": chest.label,
-                "drop_labels": [
-                    drop.label
-                    for drop in chest.drops
-                ],
+                "drops": drops,
             }
         )
 
