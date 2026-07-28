@@ -801,11 +801,13 @@
     );
 
     if (chestOpeningCollect) {
-      chestOpeningCollect.hidden = true;
+      chestOpeningCollect.classList.remove(
+        'wallet-chest-opening__collect--visible'
+      );
+      chestOpeningCollect.setAttribute('aria-hidden', 'true');
     }
     if (chestOpeningTrigger) {
       chestOpeningTrigger.disabled = false;
-      chestOpeningTrigger.focus();
     }
 
     document.documentElement.classList.add(
@@ -851,8 +853,10 @@
 
     chestOpeningTimers.push(window.setTimeout(function () {
       if (chestOpeningCollect) {
-        chestOpeningCollect.hidden = false;
-        chestOpeningCollect.focus();
+        chestOpeningCollect.classList.add(
+          'wallet-chest-opening__collect--visible'
+        );
+        chestOpeningCollect.setAttribute('aria-hidden', 'false');
       }
     }, 1420));
   }
