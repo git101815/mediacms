@@ -3335,11 +3335,6 @@ body.wallet-chest-opening-active {
   opacity: 0;
   transform: translate(-50%, -50%) scale(0.35);
   background:
-    radial-gradient(
-      circle at 50% 50%,
-      color-mix(in srgb, var(--chest-glow) 72%, #fff) 0 3px,
-      transparent 4px
-    ),
     repeating-conic-gradient(
       from 8deg,
       color-mix(in srgb, var(--chest-glow) 72%, transparent) 0 7deg,
@@ -3505,12 +3500,6 @@ body.wallet-chest-opening-active {
   animation: wallet-chest-shake 620ms cubic-bezier(.36, .07, .19, .97);
 }
 
-.wallet-chest-opening[data-state="opening"]
-  .wallet-chest-opening__flash {
-  visibility: visible;
-  animation: wallet-chest-charge 620ms ease-out both;
-}
-
 .wallet-chest-opening[data-state="opened"]
   .wallet-chest-opening__chest-image--closed,
 .wallet-chest-opening[data-state="revealed"]
@@ -3585,20 +3574,6 @@ body.wallet-chest-opening-active {
   }
   82% {
     transform: translateX(calc(-50% - 2px)) rotate(-1deg) scale(1.04);
-  }
-}
-
-@keyframes wallet-chest-charge {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.1);
-  }
-  75% {
-    opacity: 0.22;
-  }
-  100% {
-    opacity: 0.48;
-    transform: translate(-50%, -50%) scale(0.72);
   }
 }
 
