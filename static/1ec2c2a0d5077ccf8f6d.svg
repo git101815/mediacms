@@ -1,0 +1,52 @@
+var _defs, _circle, _path, _path2, _path3;
+function _extends() {
+  return _extends = Object.assign ? Object.assign.bind() : function (n) {
+    for (var e = 1; e < arguments.length; e++) {
+      var t = arguments[e];
+      for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]);
+    }
+    return n;
+  }, _extends.apply(null, arguments);
+}
+import * as React from "react";
+function SvgTelegram(props) {
+  return /*#__PURE__*/React.createElement("svg", _extends({
+    xmlns: "http://www.w3.org/2000/svg",
+    width: 960,
+    height: 960
+  }, props), _defs || (_defs = /*#__PURE__*/React.createElement("defs", null, /*#__PURE__*/React.createElement("linearGradient", {
+    id: "telegram_svg__a",
+    x1: 0,
+    y1: 0,
+    x2: 0,
+    y2: 1
+  }, /*#__PURE__*/React.createElement("stop", {
+    offset: "0%",
+    stopColor: "#38B0E3"
+  }), /*#__PURE__*/React.createElement("stop", {
+    offset: "100%",
+    stopColor: "#1D93D2"
+  })))), _circle || (_circle = /*#__PURE__*/React.createElement("circle", {
+    cx: 480,
+    cy: 480,
+    r: 480,
+    fill: "url(#telegram_svg__a)"
+  })), _path || (_path = /*#__PURE__*/React.createElement("path", {
+    d: "M715 280l-2-4-6-4h-12l-8 2-306 112-159 62-14 7-7 6-2 4v7l7 8 121 40 5-1 190-120 77-47 16-8 3 3-13 17-80 78-123 111-1 6 116 79 52 38 22 18 13 4 12-2 9-8 5-11 39-160 42-188 4-24z",
+    fill: "#FFF"
+  })), _path2 || (_path2 = /*#__PURE__*/React.createElement("path", {
+    d: "M616 346l-8 2-42 25-229 144-9 4 53 149 5 9 6 6-3-5v-14l11-107 80 55-77-52-3-3 1-6 75-67 87-81 39-39 12-14z",
+    fill: "#C8DAEA",
+    stroke: "#C8DAEA",
+    strokeWidth: 2,
+    strokeLinejoin: "round"
+  })), _path3 || (_path3 = /*#__PURE__*/React.createElement("path", {
+    d: "M400 559l-11 111 1 12-1 1-2-2 8 6 11-4 10-8 25-25 40-35-79-53z",
+    fill: "#A9C6D8",
+    stroke: "#A9C6D8",
+    strokeWidth: 2,
+    strokeLinejoin: "round"
+  })));
+}
+export default "data:image/svg+xml;base64,ZXhwb3J0IGRlZmF1bHQgImRhdGE6aW1hZ2Uvc3ZnK3htbDtiYXNlNjQsWlhod2IzSjBJR1JsWm1GMWJIUWdYMTkzWldKd1lXTnJYM0IxWW14cFkxOXdZWFJvWDE4Z0t5QWlMaTl6ZEdGMGFXTXZhVzFoWjJWekwzTnZZMmxoYkMxdFpXUnBZUzFwWTI5dWN5OTBaV3hsWjNKaGJTNXpkbWNpT3c9PSI=";
+export { SvgTelegram as ReactComponent };
