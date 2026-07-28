@@ -2,6 +2,16 @@
 {% load static %}
 {% block headtitle %}Wallet - {{ PORTAL_NAME }}{% endblock headtitle %}
 
+{% block externallinks %}
+{{ block.super }}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link
+  href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@40,500,1,0&display=swap"
+  rel="stylesheet"
+>
+{% endblock externallinks %}
+
 {% block innercontent %}
 <div class="wallet-ui wallet-ui--tokens wallet-ui--gamified" data-wallet-ui data-wallet-auth-required="{% if wallet_auth_required %}true{% else %}false{% endif %}" data-wallet-login-url="{{ wallet_login_url }}">
   <div class="wallet-ui__shell">
@@ -170,7 +180,14 @@
               {% for quest in quest_board.slots %}
                 {% if not quest.empty %}
               <article class="wallet-game-quest{% if quest.claimed %} wallet-game-quest--claimed{% elif quest.complete %} wallet-game-quest--complete{% endif %}" data-wallet-quest="{{ quest.key }}">
+                {% if quest.icon_material %}
+                <i
+                  class="material-symbols-rounded wallet-game-quest__material-icon"
+                  aria-hidden="true"
+                >{{ quest.icon_material }}</i>
+                {% else %}
                 <img src="{% static quest.icon_path %}" alt="">
+                {% endif %}
                 <strong title="{{ quest.title }}">{{ quest.title }}</strong>
                 <span title="{{ quest.description }}">{{ quest.description }}</span>
                 <div class="wallet-game-quest__meter{% if not quest.complete %} wallet-game-quest__meter--amber{% endif %}"><i style="width:{{ quest.progress_percent }}%"></i></div>

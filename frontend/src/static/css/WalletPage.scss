@@ -2479,6 +2479,35 @@ $error-text: #ff9a9a;
   object-fit: contain;
 }
 
+.wallet-game-quest__material-icon {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  color: #f4f5f8;
+  font-family: "Material Symbols Rounded";
+  font-size: 40px;
+  font-style: normal;
+  font-weight: normal;
+  font-feature-settings: "liga";
+  font-variation-settings:
+    "FILL" 1,
+    "wght" 500,
+    "GRAD" 0,
+    "opsz" 40;
+  letter-spacing: normal;
+  line-height: 1;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
 .wallet-game-quest > strong {
   display: -webkit-box;
   width: 100%;

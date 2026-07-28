@@ -55,6 +55,7 @@ class WeeklyQuestDefinition:
     description: str
     condition: str
     icon_path: str
+    icon_material: str
     action_label: str
     action_url: str
     target: int
@@ -216,10 +217,30 @@ def _definition_from_config(key: str) -> WeeklyQuestDefinition:
 
     assets = config.get_wallet_asset_paths()
     icon_asset = str(raw.get("icon_asset") or "").strip()
-    if icon_asset not in assets:
+    icon_material = str(raw.get("icon_material") or "").strip()
+
+    if icon_asset and icon_material:
         raise ImproperlyConfigured(
-            f"Quest {key} references unknown wallet asset: {icon_asset}"
+            f"Quest {key} must define either icon_asset or icon_material, not both"
         )
+
+    if not icon_asset and not icon_material:
+        raise ImproperlyConfigured(
+            f"Quest {key} must define icon_asset or icon_material"
+        )
+
+    if icon_material:
+        if not re.fullmatch(r"[a-z0-9_]{1,64}", icon_material):
+            raise ImproperlyConfigured(
+                f"Quest {key}.icon_material is invalid"
+            )
+        icon_path = ""
+    else:
+        if icon_asset not in assets:
+            raise ImproperlyConfigured(
+                f"Quest {key} references unknown wallet asset: {icon_asset}"
+            )
+        icon_path = assets[icon_asset]
 
     reward = raw.get("reward") or {}
     if not isinstance(reward, dict) or reward.get("kind") != "chest":
@@ -264,7 +285,8 @@ def _definition_from_config(key: str) -> WeeklyQuestDefinition:
         title=str(raw.get("title") or key).strip(),
         description=str(raw.get("description") or "").strip(),
         condition=condition,
-        icon_path=assets[icon_asset],
+        icon_path=icon_path,
+        icon_material=icon_material,
         action_label=str(raw.get("action_label") or "Go").strip(),
         action_url=str(raw.get("action_url") or "").strip(),
         target=target,
@@ -892,6 +914,7 @@ def _weekly_row(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinition) -
         "description": definition.description,
         "condition": definition.condition,
         "icon_path": definition.icon_path,
+        "icon_material": definition.icon_material,
         "reward_kind": "chest",
         "reward_display": definition.chest_label,
         "reward_image_path": definition.chest_image_path,

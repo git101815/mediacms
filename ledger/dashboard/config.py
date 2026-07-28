@@ -181,7 +181,7 @@ WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS = {
 # The existing one-time quests remain available until claimed. When one is
 # still active it occupies one of the four existing cards; no second board or
 # alternate layout is rendered.
-QUEST_BOARD_CONFIG_VERSION = 5
+QUEST_BOARD_CONFIG_VERSION = 6
 QUEST_BOARD_ENABLED = True
 QUEST_BOARD_SLOT_COUNT = 4
 QUEST_BOARD_RESET_LABEL = "One-time"
@@ -241,7 +241,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "title": "Share the Site",
         "description": "Bring 10 unique visitors who open a second page",
         "condition": "site_visitors",
-        "icon_asset": "quest_invite_friend",
+        "icon_material": "web_traffic",
         "action_label": "Share Site",
         "action_url": "",
         "landing_path": "/",
