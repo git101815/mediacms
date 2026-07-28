@@ -72,6 +72,10 @@ class TestDailyRewards(BaseLedgerTestCase):
         with (
             patch.object(config, "DAILY_REWARDS", chest_schedule),
             patch.object(config, "DAILY_REWARD_WINDOW_SIZE", 1),
+            patch(
+                "ledger.dashboard.reward_chests.timezone.now",
+                return_value=self.instant(),
+            ),
         ):
             prepared = prepare_daily_reward_chest(
                 user=self.u1,
