@@ -9,22 +9,12 @@ function trackedShareDestination(platform, mediaUrl, mediaTitle) {
   const encodedUrl = encodeURIComponent(mediaUrl);
   const encodedTitle = encodeURIComponent(mediaTitle || '');
   switch (platform) {
-    case 'fb':
-      return 'https://www.facebook.com/sharer.php?u=' + encodedUrl;
     case 'tw':
       return 'https://twitter.com/intent/tweet?url=' + encodedUrl;
     case 'reddit':
       return 'https://reddit.com/submit?url=' + encodedUrl + '&title=' + encodedTitle;
-    case 'tumblr':
-      return 'https://www.tumblr.com/widgets/share/tool?canonicalUrl=' + encodedUrl + '&title=' + encodedTitle;
-    case 'pinterest':
-      return 'https://pinterest.com/pin/create/link/?url=' + encodedUrl;
     case 'vk':
       return 'https://vk.com/share.php?url=' + encodedUrl + '&title=' + encodedTitle;
-    case 'linkedin':
-      return 'https://www.linkedin.com/shareArticle?mini=true&url=' + encodedUrl;
-    case 'mix':
-      return 'https://mix.com/add?url=' + encodedUrl;
     case 'whatsapp':
       return 'whatsapp://send?text=' + encodedUrl;
     case 'telegram':
@@ -95,9 +85,7 @@ function shareOptionsList() {
   const socialMedia = ShareOptionsContext._currentValue;
   const mediaUrl = MediaPageStore.get('media-url');
   const mediaTitle = MediaPageStore.get('media-data').title;
-
   const ret = {};
-
   let i = 0;
 
   while (i < socialMedia.length) {
@@ -108,76 +96,26 @@ function shareOptionsList() {
         }
         break;
       case 'email':
-        ret[socialMedia[i]] = {
-          title: 'Email',
-          shareUrl: 'mailto:?body=' + mediaUrl,
-        };
-        break;
-      case 'fb':
-        ret[socialMedia[i]] = {
-          title: 'Facebook',
-          shareUrl: 'https://www.facebook.com/sharer.php?u=' + mediaUrl,
-        };
+        ret[socialMedia[i]] = { title: 'Email', shareUrl: 'mailto:?body=' + mediaUrl };
         break;
       case 'tw':
-        ret[socialMedia[i]] = {
-          title: 'Twitter',
-          shareUrl: 'https://twitter.com/intent/tweet?url=' + mediaUrl,
-        };
+        ret[socialMedia[i]] = { title: 'X', shareUrl: 'https://twitter.com/intent/tweet?url=' + mediaUrl };
         break;
       case 'reddit':
-        ret[socialMedia[i]] = {
-          title: 'reddit',
-          shareUrl: 'https://reddit.com/submit?url=' + mediaUrl + '&title=' + mediaTitle,
-        };
-        break;
-      case 'tumblr':
-        ret[socialMedia[i]] = {
-          title: 'Tumblr',
-          shareUrl: 'https://www.tumblr.com/widgets/share/tool?canonicalUrl=' + mediaUrl + '&title=' + mediaTitle,
-        };
-        break;
-      case 'pinterest':
-        ret[socialMedia[i]] = {
-          title: 'Pinterest',
-          shareUrl: 'http://pinterest.com/pin/create/link/?url=' + mediaUrl,
-        };
+        ret[socialMedia[i]] = { title: 'Reddit', shareUrl: 'https://reddit.com/submit?url=' + mediaUrl + '&title=' + mediaTitle };
         break;
       case 'vk':
-        ret[socialMedia[i]] = {
-          title: 'ВКонтакте',
-          shareUrl: 'http://vk.com/share.php?url=' + mediaUrl + '&title=' + mediaTitle,
-        };
-        break;
-      case 'linkedin':
-        ret[socialMedia[i]] = {
-          title: 'LinkedIn',
-          shareUrl: 'https://www.linkedin.com/shareArticle?mini=true&url=' + mediaUrl,
-        };
-        break;
-      case 'mix':
-        ret[socialMedia[i]] = {
-          title: 'Mix',
-          shareUrl: 'https://mix.com/add?url=' + mediaUrl,
-        };
+        ret[socialMedia[i]] = { title: 'ВКонтакте', shareUrl: 'https://vk.com/share.php?url=' + mediaUrl + '&title=' + mediaTitle };
         break;
       case 'whatsapp':
-        ret[socialMedia[i]] = {
-          title: 'WhatsApp',
-          shareUrl: 'whatsapp://send?text=' + mediaUrl,
-        };
+        ret[socialMedia[i]] = { title: 'WhatsApp', shareUrl: 'whatsapp://send?text=' + mediaUrl };
         break;
       case 'telegram':
-        ret[socialMedia[i]] = {
-          title: 'Telegram',
-          shareUrl: 'https://t.me/share/url?url=' + mediaUrl + '&text=' + mediaTitle,
-        };
+        ret[socialMedia[i]] = { title: 'Telegram', shareUrl: 'https://t.me/share/url?url=' + mediaUrl + '&text=' + mediaTitle };
         break;
     }
-
     i += 1;
   }
-
   return ret;
 }
 

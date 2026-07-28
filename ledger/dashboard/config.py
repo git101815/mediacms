@@ -165,7 +165,7 @@ WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS = {
 # The existing one-time quests remain available until claimed. When one is
 # still active it occupies one of the four existing cards; no second board or
 # alternate layout is rendered.
-QUEST_BOARD_CONFIG_VERSION = 3
+QUEST_BOARD_CONFIG_VERSION = 4
 QUEST_BOARD_ENABLED = True
 QUEST_BOARD_SLOT_COUNT = 4
 QUEST_BOARD_RESET_LABEL = "One-time"
@@ -189,11 +189,12 @@ QUEST_BOARD_QUESTS = (
     },
 )
 
-# Weekly quest configuration. Every visible string and every economic value for
-# weekly quests belongs here. Set ``enabled`` to False to hide one definition
-# even when its key is present in the selected rotation.
+# Weekly quest configuration. Every visible string, target and reward belongs
+# here. All enabled definitions form the assignment pool. Each user receives a
+# stable pseudo-random selection for the current ISO week.
 QUEST_BOARD_WEEKLY_ENABLED = True
 QUEST_BOARD_WEEKLY_START_AT = "2026-07-28T00:00:00+03:00"
+QUEST_BOARD_WEEKLY_SELECTION_SALT = "weekly-quest-selection-v1"
 QUEST_BOARD_VISITOR_COOKIE_SECONDS = 180 * 24 * 60 * 60
 QUEST_BOARD_ATTRIBUTION_COOKIE_SECONDS = 8 * 24 * 60 * 60
 QUEST_BOARD_MIN_SECOND_PAGE_DELAY_SECONDS = 2
@@ -208,7 +209,9 @@ QUEST_BOARD_EXCLUDED_PAGE_PREFIXES = (
     "/not_the_admin_panel/",
 )
 
-# Quest Board interface labels.
+# Only posted purchase debits from user wallets count as tokens spent.
+QUEST_BOARD_COMMUNITY_SPEND_TRANSACTION_KINDS = ("purchase",)
+
 QUEST_BOARD_WEEKLY_TITLE = "Quests Board"
 QUEST_BOARD_WEEKLY_SUBTITLE = "Complete missions to earn CF tokens!"
 QUEST_BOARD_WEEKLY_RESET_PREFIX = "Resets in"
@@ -228,10 +231,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "landing_path": "/",
         "target": 10,
         "progress_text": "{current} / {target}",
-        "reward": {
-            "kind": "chest",
-            "chest": "small_chest",
-        },
+        "reward": {"kind": "chest", "chest": "small_chest"},
     },
     "share_video_x": {
         "enabled": True,
@@ -245,10 +245,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "target": 1,
         "progress_pending_text": "Waiting for a verified visit",
         "progress_complete_text": "Verified",
-        "reward": {
-            "kind": "chest",
-            "chest": "small_chest",
-        },
+        "reward": {"kind": "chest", "chest": "small_chest"},
     },
     "share_video_reddit": {
         "enabled": True,
@@ -262,10 +259,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "target": 1,
         "progress_pending_text": "Waiting for a verified visit",
         "progress_complete_text": "Verified",
-        "reward": {
-            "kind": "chest",
-            "chest": "small_chest",
-        },
+        "reward": {"kind": "chest", "chest": "small_chest"},
     },
     "share_video_telegram": {
         "enabled": True,
@@ -279,10 +273,7 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "target": 1,
         "progress_pending_text": "Waiting for a verified visit",
         "progress_complete_text": "Verified",
-        "reward": {
-            "kind": "chest",
-            "chest": "small_chest",
-        },
+        "reward": {"kind": "chest", "chest": "small_chest"},
     },
     "share_video_vk": {
         "enabled": True,
@@ -296,73 +287,92 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "target": 1,
         "progress_pending_text": "Waiting for a verified visit",
         "progress_complete_text": "Verified",
-        "reward": {
-            "kind": "chest",
-            "chest": "small_chest",
-        },
+        "reward": {"kind": "chest", "chest": "small_chest"},
     },
-    "community_drop": {
+    "share_video_whatsapp": {
         "enabled": True,
-        "title": "Community Drop",
-        "description": "Help shared links bring 1,000 unique visitors this week",
-        "condition": "community_drop",
-        "icon_asset": "quest_daily_login",
-        "action_label": "Share Content",
+        "title": "Share a Video on WhatsApp",
+        "description": "Get one verified visit from WhatsApp",
+        "condition": "video_share",
+        "platform": "whatsapp",
+        "icon_asset": "quest_watch_previews",
+        "action_label": "Choose Video",
+        "action_url": "/latest",
+        "target": 1,
+        "progress_pending_text": "Waiting for a verified visit",
+        "progress_complete_text": "Verified",
+        "reward": {"kind": "chest", "chest": "small_chest"},
+    },
+    "community_likes": {
+        "enabled": True,
+        "title": "Community Likes",
+        "description": "Help the community reach 100 likes this week",
+        "condition": "community_likes",
+        "icon_asset": "quest_invite_friend",
+        "action_label": "Like a Video",
         "action_url": "/latest",
         "target": 1,
         "personal_target": 1,
-        "global_target": 1_000,
-        "progress_text": (
-            "You {personal_current} / {personal_target}"
-            " · Community {global_current} / {global_target}"
-        ),
-        "reward": {
-            "kind": "chest",
-            "chest": "small_chest",
-        },
+        "global_target": 100,
+        "progress_text": "You {personal_current:,} · Community {global_current:,} / {global_target:,} likes",
+        "reward": {"kind": "chest", "chest": "small_chest"},
+    },
+    "community_views": {
+        "enabled": True,
+        "title": "Community Views",
+        "description": "Help the community reach 100,000 views this week",
+        "condition": "community_views",
+        "icon_asset": "quest_watch_previews",
+        "action_label": "Watch Videos",
+        "action_url": "/latest",
+        "target": 1,
+        "personal_target": 1,
+        "global_target": 100_000,
+        "progress_text": "You {personal_current:,} · Community {global_current:,} / {global_target:,} views",
+        "reward": {"kind": "chest", "chest": "small_chest"},
+    },
+    "community_comments": {
+        "enabled": True,
+        "title": "Community Comments",
+        "description": "Help the community post 20 comments this week",
+        "condition": "community_comments",
+        "icon_asset": "quest_confirm_email",
+        "action_label": "Post a Comment",
+        "action_url": "/latest",
+        "target": 1,
+        "personal_target": 1,
+        "global_target": 20,
+        "progress_text": "You {personal_current:,} · Community {global_current:,} / {global_target:,} comments",
+        "reward": {"kind": "chest", "chest": "small_chest"},
+    },
+    "community_spend": {
+        "enabled": True,
+        "title": "Community Spend",
+        "description": "Help the community spend 10,000 tokens this week",
+        "condition": "community_spend",
+        "icon_asset": "daily_reward_coins_pile",
+        "action_label": "Browse Content",
+        "action_url": "/latest",
+        "target": 1,
+        "personal_target": 1,
+        "global_target": 10_000,
+        "progress_text": "You {personal_current:,} · Community {global_current:,} / {global_target:,} tokens",
+        "reward": {"kind": "chest", "chest": "small_chest"},
     },
 }
 
-# Each row describes one complete four-slot week. Disabled definitions leave an
-# empty slot instead of silently replacing the configured quest.
-QUEST_BOARD_WEEKLY_ROTATIONS = (
-    (
-        "share_site",
-        "share_video_x",
-        "community_drop",
-        "share_video_reddit",
-    ),
-    (
-        "share_site",
-        "share_video_telegram",
-        "community_drop",
-        "share_video_vk",
-    ),
-)
-
-
 QUEST_BOARD_SOCIAL_HOSTS = {
-    "fb": ("facebook.com", "l.facebook.com", "lm.facebook.com"),
     "tw": ("x.com", "twitter.com", "t.co"),
     "reddit": ("reddit.com", "redd.it"),
-    "tumblr": ("tumblr.com",),
-    "pinterest": ("pinterest.com", "pin.it"),
     "vk": ("vk.com",),
-    "linkedin": ("linkedin.com", "lnkd.in"),
-    "mix": ("mix.com",),
-    "whatsapp": ("whatsapp.com",),
+    "whatsapp": ("whatsapp.com", "wa.me"),
     "telegram": ("t.me", "telegram.org"),
 }
 
 QUEST_BOARD_UNFURL_USER_AGENTS = {
-    "fb": ("facebookexternalhit", "facebot"),
     "tw": ("twitterbot",),
     "reddit": ("redditbot",),
-    "tumblr": ("tumblr",),
-    "pinterest": ("pinterestbot",),
     "vk": ("vkshare", "vkbot"),
-    "linkedin": ("linkedinbot",),
-    "mix": ("mixbot",),
     "whatsapp": ("whatsapp",),
     "telegram": ("telegrambot",),
 }

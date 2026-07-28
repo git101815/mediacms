@@ -14,11 +14,13 @@ from django.conf import settings
 from django.core import signing
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.urls import reverse
 from django.utils import timezone
 
-from files.models import Media
+from actions.models import MediaAction
+from files.models import Comment, Media
+from ledger.models import LedgerEntry, LedgerTransaction, TokenWallet
 
 from . import config
 from .models import (
@@ -118,18 +120,11 @@ def _cycle_for_datetime(at=None) -> QuestCycle:
     )
     ends_at = starts_at + timedelta(days=7)
     iso = starts_at.isocalendar()
-    rotations = config.QUEST_BOARD_WEEKLY_ROTATIONS
-    if not isinstance(rotations, (list, tuple)) or not rotations:
-        raise ImproperlyConfigured(
-            "QUEST_BOARD_WEEKLY_ROTATIONS must contain at least one rotation"
-        )
-    epoch = date(2020, 1, 6)
-    week_number = (starts_at.date() - epoch).days // 7
     return QuestCycle(
         key=f"{iso.year}-W{iso.week:02d}",
         starts_at=starts_at,
         ends_at=ends_at,
-        rotation_index=week_number % len(rotations),
+        rotation_index=0,
     )
 
 
@@ -153,37 +148,43 @@ def _cycle_from_key(cycle_key: str) -> QuestCycle:
     return _cycle_for_datetime(starts_at + timedelta(hours=12))
 
 
-def _active_keys(cycle: QuestCycle) -> tuple[str, ...]:
-    rotations = config.QUEST_BOARD_WEEKLY_ROTATIONS
-    keys = tuple(rotations[cycle.rotation_index])
-    slot_count = int(config.QUEST_BOARD_SLOT_COUNT)
-    if len(keys) != slot_count:
-        raise ImproperlyConfigured(
-            "Every QUEST_BOARD_WEEKLY_ROTATIONS row must fill exactly "
-            f"{slot_count} slots"
-        )
-    if len(set(keys)) != len(keys):
-        raise ImproperlyConfigured("A quest rotation cannot contain duplicates")
-
+def _active_keys(*, cycle: QuestCycle, user) -> tuple[str, ...]:
+    user = _require_user(user)
     definitions = config.QUEST_BOARD_WEEKLY_QUESTS
     if not isinstance(definitions, dict):
-        raise ImproperlyConfigured(
-            "QUEST_BOARD_WEEKLY_QUESTS must be a dictionary"
-        )
+        raise ImproperlyConfigured("QUEST_BOARD_WEEKLY_QUESTS must be a dictionary")
 
-    active = []
-    for key in keys:
-        raw = definitions.get(key)
+    enabled_keys = []
+    for key, raw in definitions.items():
         if not isinstance(raw, dict):
-            raise ImproperlyConfigured(f"Unknown weekly quest: {key}")
+            raise ImproperlyConfigured(f"Weekly quest {key} must be a dictionary")
         enabled = raw.get("enabled", True)
         if not isinstance(enabled, bool):
-            raise ImproperlyConfigured(
-                f"Quest {key}.enabled must be True or False"
-            )
+            raise ImproperlyConfigured(f"Quest {key}.enabled must be True or False")
         if enabled:
-            active.append(key)
-    return tuple(active)
+            enabled_keys.append(str(key))
+
+    slot_count = int(config.QUEST_BOARD_SLOT_COUNT)
+    if slot_count < 1:
+        raise ImproperlyConfigured("QUEST_BOARD_SLOT_COUNT must be positive")
+    if not enabled_keys:
+        return ()
+
+    selection_salt = str(config.QUEST_BOARD_WEEKLY_SELECTION_SALT or "").strip()
+    if not selection_salt:
+        raise ImproperlyConfigured("QUEST_BOARD_WEEKLY_SELECTION_SALT cannot be empty")
+
+    seed_prefix = f"{selection_salt}:{cycle.key}:user:{int(user.pk)}"
+
+    def rank(quest_key: str):
+        return hmac.new(
+            settings.SECRET_KEY.encode("utf-8"),
+            f"{seed_prefix}:quest:{quest_key}".encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+
+    ordered = sorted(enabled_keys, key=lambda key: (rank(key), key))
+    return tuple(ordered[:slot_count])
 
 
 def _definition_from_config(key: str) -> WeeklyQuestDefinition:
@@ -201,7 +202,14 @@ def _definition_from_config(key: str) -> WeeklyQuestDefinition:
         raise ImproperlyConfigured(f"Quest {key} is disabled")
 
     condition = str(raw.get("condition") or "").strip()
-    if condition not in {"site_visitors", "video_share", "community_drop"}:
+    if condition not in {
+        "site_visitors",
+        "video_share",
+        "community_likes",
+        "community_views",
+        "community_comments",
+        "community_spend",
+    }:
         raise ImproperlyConfigured(
             f"Quest {key} uses unsupported condition: {condition}"
         )
@@ -226,7 +234,7 @@ def _definition_from_config(key: str) -> WeeklyQuestDefinition:
     global_target = _positive_int(
         raw.get("global_target", 0),
         name=f"{key}.global_target",
-        allow_zero=condition != "community_drop",
+        allow_zero=not condition.startswith("community_"),
     )
 
     platform = str(raw.get("platform") or "").strip().lower()
@@ -273,9 +281,16 @@ def _definition_from_config(key: str) -> WeeklyQuestDefinition:
     )
 
 
-def get_weekly_definitions(cycle: QuestCycle | None = None) -> tuple[WeeklyQuestDefinition, ...]:
+def get_weekly_definitions(
+    *,
+    user,
+    cycle: QuestCycle | None = None,
+) -> tuple[WeeklyQuestDefinition, ...]:
     cycle = cycle or _cycle_for_datetime()
-    return tuple(_definition_from_config(key) for key in _active_keys(cycle))
+    return tuple(
+        _definition_from_config(key)
+        for key in _active_keys(cycle=cycle, user=user)
+    )
 
 
 def _fingerprint_hash(raw: str) -> str:
@@ -369,7 +384,7 @@ def create_site_share_link(*, request, user, fingerprint: str) -> dict:
     if timezone.now() < _quest_board_start_at():
         raise ValidationError("Weekly quests have not started")
     definition = next(
-        (row for row in get_weekly_definitions(cycle) if row.condition == "site_visitors"),
+        (row for row in get_weekly_definitions(user=user, cycle=cycle) if row.condition == "site_visitors"),
         None,
     )
     if definition is None:
@@ -416,7 +431,7 @@ def create_video_share_link(
     definition = next(
         (
             row
-            for row in get_weekly_definitions(cycle)
+            for row in get_weekly_definitions(user=user, cycle=cycle)
             if row.condition == "video_share" and row.platform == platform
         ),
         None,
@@ -584,7 +599,7 @@ def _owner_identity_matches(
 
 def _definition_for_campaign(campaign: QuestShareCampaign) -> WeeklyQuestDefinition:
     cycle = _cycle_from_key(campaign.cycle_key)
-    for definition in get_weekly_definitions(cycle):
+    for definition in get_weekly_definitions(user=campaign.owner, cycle=cycle):
         if definition.key == campaign.quest_key:
             return definition
     raise ValidationError("The campaign quest is not active")
@@ -604,11 +619,91 @@ def _format_progress_text(
         ) from exc
 
 
-def _quest_progress(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinition) -> dict:
-    own_visits = QuestQualifiedVisit.objects.filter(
-        cycle_key=cycle.key,
-        campaign__owner=user,
+def _metric_window(cycle: QuestCycle) -> tuple[datetime, datetime]:
+    return max(cycle.starts_at, _quest_board_start_at()), cycle.ends_at
+
+
+def _community_spend_kinds() -> tuple[str, ...]:
+    raw = config.QUEST_BOARD_COMMUNITY_SPEND_TRANSACTION_KINDS
+    if isinstance(raw, str) or not isinstance(raw, (list, tuple, set, frozenset)):
+        raise ImproperlyConfigured(
+            "QUEST_BOARD_COMMUNITY_SPEND_TRANSACTION_KINDS must be a collection"
+        )
+    kinds = tuple(dict.fromkeys(str(value or "").strip().lower() for value in raw))
+    if not kinds or any(not value for value in kinds):
+        raise ImproperlyConfigured(
+            "QUEST_BOARD_COMMUNITY_SPEND_TRANSACTION_KINDS cannot be empty"
+        )
+    return kinds
+
+
+def _spent_token_totals(*, user, cycle: QuestCycle) -> tuple[int, int]:
+    starts_at, ends_at = _metric_window(cycle)
+    filters = {
+        "wallet__wallet_type": TokenWallet.TYPE_USER,
+        "txn__kind__in": _community_spend_kinds(),
+        "txn__status": LedgerTransaction.STATUS_POSTED,
+        "delta__lt": 0,
+        "created_at__gte": starts_at,
+        "created_at__lt": ends_at,
+    }
+    global_signed = LedgerEntry.objects.filter(**filters).aggregate(total=Sum("delta")).get("total")
+    personal_signed = LedgerEntry.objects.filter(wallet__user=user, **filters).aggregate(total=Sum("delta")).get("total")
+    scale = 10 ** int(config.PLATFORM_TOKEN_DECIMALS)
+    personal_tokens = max(0, -int(personal_signed or 0)) // scale
+    global_tokens = max(0, -int(global_signed or 0)) // scale
+    return personal_tokens, global_tokens
+
+
+def _community_metric_values(*, user, cycle: QuestCycle, condition: str) -> tuple[int, int]:
+    starts_at, ends_at = _metric_window(cycle)
+    if condition in {"community_likes", "community_views"}:
+        action = "like" if condition == "community_likes" else "watch"
+        queryset = MediaAction.objects.filter(
+            action=action,
+            action_date__gte=starts_at,
+            action_date__lt=ends_at,
+        )
+        return queryset.filter(user=user).count(), queryset.count()
+    if condition == "community_comments":
+        queryset = Comment.objects.filter(add_date__gte=starts_at, add_date__lt=ends_at)
+        return queryset.filter(user=user).count(), queryset.count()
+    if condition == "community_spend":
+        return _spent_token_totals(user=user, cycle=cycle)
+    raise ImproperlyConfigured(f"Unsupported community quest condition: {condition}")
+
+
+def _community_progress(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinition) -> dict:
+    personal, global_current = _community_metric_values(
+        user=user,
+        cycle=cycle,
+        condition=definition.condition,
     )
+    personal_display = min(personal, definition.personal_target)
+    global_display = min(global_current, definition.global_target)
+    personal_percent = min(100, personal * 100 // definition.personal_target)
+    global_percent = min(100, global_current * 100 // definition.global_target)
+    complete = personal >= definition.personal_target and global_current >= definition.global_target
+    return {
+        "current": personal_display,
+        "target": definition.personal_target,
+        "complete": complete,
+        "progress_percent": min(personal_percent, global_percent),
+        "progress_text": _format_progress_text(
+            definition=definition,
+            template=definition.progress_text,
+            values={
+                "personal_current": personal,
+                "personal_target": definition.personal_target,
+                "global_current": global_display,
+                "global_target": definition.global_target,
+            },
+        ),
+    }
+
+
+def _quest_progress(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinition) -> dict:
+    own_visits = QuestQualifiedVisit.objects.filter(cycle_key=cycle.key, campaign__owner=user)
     if definition.condition == "site_visitors":
         current = own_visits.filter(
             campaign__quest_key=definition.key,
@@ -624,13 +719,9 @@ def _quest_progress(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinitio
             "progress_text": _format_progress_text(
                 definition=definition,
                 template=definition.progress_text,
-                values={
-                    "current": displayed_current,
-                    "target": definition.target,
-                },
+                values={"current": displayed_current, "target": definition.target},
             ),
         }
-
     if definition.condition == "video_share":
         current = int(
             own_visits.filter(
@@ -644,39 +735,11 @@ def _quest_progress(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinitio
             "target": definition.target,
             "complete": complete,
             "progress_percent": 100 if complete else 0,
-            "progress_text": (
-                definition.progress_complete_text
-                if complete
-                else definition.progress_pending_text
-            ),
+            "progress_text": definition.progress_complete_text if complete else definition.progress_pending_text,
         }
-
-    personal = own_visits.count()
-    global_current = QuestQualifiedVisit.objects.filter(cycle_key=cycle.key).count()
-    displayed_personal = min(personal, definition.personal_target)
-    displayed_global = min(global_current, definition.global_target)
-    personal_percent = min(100, personal * 100 // definition.personal_target)
-    global_percent = min(100, global_current * 100 // definition.global_target)
-    complete = (
-        personal >= definition.personal_target
-        and global_current >= definition.global_target
-    )
-    return {
-        "current": displayed_personal,
-        "target": definition.personal_target,
-        "complete": complete,
-        "progress_percent": min(personal_percent, global_percent),
-        "progress_text": _format_progress_text(
-            definition=definition,
-            template=definition.progress_text,
-            values={
-                "personal_current": displayed_personal,
-                "personal_target": definition.personal_target,
-                "global_current": displayed_global,
-                "global_target": definition.global_target,
-            },
-        ),
-    }
+    if definition.condition.startswith("community_"):
+        return _community_progress(user=user, cycle=cycle, definition=definition)
+    raise ImproperlyConfigured(f"Unsupported weekly quest condition: {definition.condition}")
 
 
 def _grant_source_ref(*, user_id: int, cycle_key: str, quest_key: str) -> str:
@@ -863,7 +926,7 @@ def build_weekly_quest_board_context(*, user) -> dict:
     ][:1]
     weekly_rows = [
         _weekly_row(user=user, cycle=cycle, definition=definition)
-        for definition in get_weekly_definitions(cycle)
+        for definition in get_weekly_definitions(user=user, cycle=cycle)
     ]
     slot_count = int(config.QUEST_BOARD_SLOT_COUNT)
     rows = starter_rows + weekly_rows[: max(0, slot_count - len(starter_rows))]
@@ -914,7 +977,7 @@ def open_weekly_quest_reward(*, user, cycle_key: str, quest_key: str) -> dict:
     user = _require_user(user)
     cycle = _cycle_from_key(cycle_key)
     definition = next(
-        (row for row in get_weekly_definitions(cycle) if row.key == quest_key),
+        (row for row in get_weekly_definitions(user=user, cycle=cycle) if row.key == quest_key),
         None,
     )
     if definition is None:
