@@ -1,3 +1,5 @@
+const GUEST_WALLET_PREVIEW_BALANCE_UNITS = 100 * 1000000;
+
 let MEMBER = null;
 
 export function init(user, features) {
@@ -5,7 +7,7 @@ export function init(user, features) {
     name: null,
     username: null,
     thumbnail: null,
-    balance: 0,
+    balance: GUEST_WALLET_PREVIEW_BALANCE_UNITS,
     is: {
       admin: false,
       anonymous: true,

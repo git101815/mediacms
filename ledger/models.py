@@ -1132,7 +1132,6 @@ class TokenPack(models.Model):
     name = models.CharField(max_length=64)
     description = models.CharField(max_length=128, blank=True, default="")
     badge_text = models.CharField(max_length=24, blank=True, default="")
-    image = models.ImageField(upload_to="wallet/token_packs/", blank=True, default="")
     token_amount = models.BigIntegerField()
     gross_stable_amount = models.BigIntegerField()
     is_active = models.BooleanField(default=True, db_index=True)
@@ -1280,3 +1279,14 @@ class TreasuryMetric(models.Model):
 
     def __str__(self):
         return self.label
+
+# Dashboard models are kept in ledger/dashboard while remaining part of the
+# ledger Django app.
+from .dashboard.models import (  # noqa: E402,F401
+    DailyRewardClaim,
+    DailyRewardState,
+    QuestOwnerIdentity,
+    QuestQualifiedVisit,
+    QuestShareCampaign,
+    RewardChestGrant,
+)

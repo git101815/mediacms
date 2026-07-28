@@ -14,7 +14,8 @@ from django.contrib.postgres.search import SearchQuery
 from django.core.mail import EmailMessage
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import get_object_or_404, redirect, render, resolve_url
+from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
 from urllib.parse import urlencode, urlparse
@@ -128,6 +129,24 @@ from ledger.services import (
     get_ad_free_lifetime_price_tokens,
     purchase_ad_free_lifetime,
     _convert_platform_token_units_to_canonical_stable_units,
+)
+from ledger.dashboard import config as wallet_config
+from ledger.dashboard.bonus_vault import build_bonus_vault_context
+from ledger.dashboard.daily_rewards import build_daily_rewards_context
+from ledger.dashboard.quests import (
+    build_quest_board_context,
+    get_quest_definitions,
+    get_quest_slot_count,
+)
+from ledger.dashboard.weekly_quests import (
+    build_weekly_quest_board_context,
+    build_weekly_quest_preview_context,
+)
+from ledger.dashboard.referrals import (
+    build_referral_context,
+    get_referral_goal,
+    get_referral_reward_cap,
+    get_referral_reward_tokens,
 )
 from ledger.fiat import (
     get_fiat_currency_symbol,
@@ -388,17 +407,15 @@ def add_subtitle(request):
     context = {"media": media, "form": form, "subtitles": subtitles}
     return render(request, "cms/add_subtitle.html", context)
 
-PLATFORM_TOKEN_DECIMALS = 6
-PLATFORM_TOKEN_UI_DECIMALS = 2
+PLATFORM_TOKEN_DECIMALS = wallet_config.PLATFORM_TOKEN_DECIMALS
 
 def _format_platform_token_amount(value: int, *, signed: bool = False) -> str:
     value = int(value)
-    scaled = Decimal(abs(value)) / (Decimal(10) ** PLATFORM_TOKEN_DECIMALS)
-    text = format(scaled.quantize(Decimal("0.01")), "f")
+    whole_tokens = abs(value) // (10 ** PLATFORM_TOKEN_DECIMALS)
     prefix = ""
-    if signed:
-        prefix = "+" if value >= 0 else "-"
-    return f"{prefix}{text}"
+    if signed and whole_tokens:
+        prefix = "+" if value > 0 else "-"
+    return f"{prefix}{whole_tokens}"
 
 def _format_canonical_stable_amount(value: int) -> str:
     scaled = Decimal(int(value)) / (Decimal(10) ** 6)
@@ -439,13 +456,9 @@ def _build_wallet_token_pack_rows() -> list[dict]:
     queryset = TokenPack.objects.filter(is_active=True).order_by("sort_order", "id")[:5]
 
     for pack in queryset:
-        base_stable_amount = _convert_platform_token_units_to_canonical_stable_units(pack.token_amount)
-        image_url = ""
-        if pack.image:
-            try:
-                image_url = pack.image.url
-            except ValueError:
-                image_url = ""
+        base_stable_amount = _convert_platform_token_units_to_canonical_stable_units(
+            pack.token_amount
+        )
 
         rows.append(
             {
@@ -457,29 +470,15 @@ def _build_wallet_token_pack_rows() -> list[dict]:
                 "token_amount_display": _format_pack_token_amount(pack.token_amount),
                 "gross_stable_amount": int(base_stable_amount),
                 "price_display": _format_canonical_stable_amount(base_stable_amount),
-                "image_url": image_url,
+                "image_path": wallet_config.get_wallet_token_pack_image_path(pack.code),
             }
         )
 
     return rows
 
-NETWORK_DISPLAY_LABELS = {
-    "ethereum": "Ethereum",
-    "arbitrum": "Arbitrum One",
-    "base": "Base",
-    "bsc": "BNB Chain",
-}
+NETWORK_DISPLAY_LABELS = wallet_config.WALLET_NETWORK_DISPLAY_LABELS
+ROUTE_ONCHAIN_DECIMALS = wallet_config.WALLET_ROUTE_ONCHAIN_DECIMALS
 
-ROUTE_ONCHAIN_DECIMALS = {
-    ("ethereum", "USDT"): 6,
-    ("ethereum", "USDC"): 6,
-    ("arbitrum", "USDT"): 6,
-    ("arbitrum", "USDC"): 6,
-    ("base", "USDT"): 6,
-    ("base", "USDC"): 6,
-    ("bsc", "USDT"): 18,
-    ("bsc", "USDC"): 18,
-}
 
 
 def _get_network_display_label(chain: str) -> str:
@@ -503,89 +502,11 @@ def _format_route_amount(value, *, chain: str, asset_code: str) -> str:
     text = format(scaled.quantize(Decimal("0.01")), "f")
     return text
 
-WALLET_PAYMENT_GROUPS = {
-    "paypal_us": {
-        "label": "PayPal (US only)",
-        "icon_label": "PayPal",
-        "icon_path": "images/wallet/paypal.svg",
-        "order": 20,
-    },
-    "revolut_eu": {
-        "label": "Revolut (EU only)",
-        "icon_label": "Revolut",
-        "icon_path": "images/wallet/revolut.svg",
-        "order": 30,
-    },
-    "transak_card": {
-        "label": "Card / Apple Pay / Google Pay (Transak)",
-        "icon_label": "Transak",
-        "icon_path": "images/wallet/google_apple_card.svg",
-        "order": 35,
-    },
-    "dfx_bank": {
-        "label": "Bank transfer (DFX)",
-        "icon_label": "SEPA",
-        "icon_path": "images/wallet/sepa.svg",
-        "order": 40,
-    },
-    "mtpelerin_eur": {
-        "label": "Bank transfer (Mt Pelerin · EUR)",
-        "icon_label": "BANK",
-        "icon_path": "images/wallet/bank.svg",
-        "order": 50,
-    },
-    "mtpelerin_usd": {
-        "label": "Bank transfer (Mt Pelerin · USD)",
-        "icon_label": "SWIFT",
-        "icon_path": "images/wallet/bank.svg",
-        "order": 51,
-    },
-    "crypto": {
-        "label": "Crypto",
-        "icon_label": "Crypto",
-        "icon_path": "images/wallet/crypto.svg",
-        "order": 10,
-    },
-}
-WALLET_CRYPTO_ASSET_GROUPS = {
-    "USDC": {
-        "label": "USDC",
-        "icon_path": "images/wallet/usdc.svg",
-        "order": 10,
-    },
-    "USDT": {
-        "label": "USDT",
-        "icon_path": "images/wallet/usdt.svg",
-        "order": 20,
-    },
-}
-WALLET_CRYPTO_NETWORK_GROUPS = {
-    "ethereum": {
-        "label": "Ethereum",
-        "icon_path": "images/wallet/eth.svg",
-        "order": 10,
-    },
-    "arbitrum": {
-        "label": "Arbitrum One",
-        "icon_path": "images/wallet/arb.svg",
-        "order": 20,
-    },
-    "base": {
-        "label": "Base",
-        "icon_path": "images/wallet/base.svg",
-        "order": 30,
-    },
-    "bsc": {
-        "label": "BNB Chain",
-        "icon_path": "images/wallet/bnb.svg",
-        "order": 40,
-    },
-}
-PAYGATE_PROVIDER_PAYMENT_GROUPS = {
-    "paypal": "paypal_us",
-    "revolut": "revolut_eu",
-    "transak": "transak_card",
-}
+WALLET_PAYMENT_GROUPS = wallet_config.get_wallet_payment_groups()
+WALLET_CRYPTO_ASSET_GROUPS = wallet_config.get_wallet_crypto_asset_groups()
+WALLET_CRYPTO_NETWORK_GROUPS = wallet_config.get_wallet_crypto_network_groups()
+PAYGATE_PROVIDER_PAYMENT_GROUPS = wallet_config.WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS
+
 
 
 def _get_wallet_payment_price_bps(group_key: str) -> int:
@@ -994,7 +915,11 @@ def _build_wallet_action_state(*, wallet: TokenWallet, available_balance: int) -
             "can_deposit": True,
             "can_withdraw": False,
             "show_withdraw": is_advanced_user,
-            "hint": "Add funds before requesting a withdrawal.",
+            "hint": (
+                "Tokens you gained by selling videos will be withdrawable here."
+                if is_advanced_user
+                else ""
+            ),
         }
 
     return {
@@ -1019,7 +944,7 @@ def _build_wallet_request_rows(wallet: TokenWallet, *, active_status: str = WALL
         wallet_requests = wallet_requests.filter(status=active_status)
 
     rows = []
-    for wallet_request in wallet_requests[:10]:
+    for wallet_request in wallet_requests[:WALLET_PAGE_SIZE]:
         rows.append(
             {
                 "created_at": wallet_request.created_at,
@@ -1082,10 +1007,56 @@ def _build_recent_deposit_session_rows(wallet, *, active_status: str = WALLET_ST
             }
         )
 
-        if len(rows) >= 5:
+        if len(rows) >= WALLET_PAGE_SIZE:
             break
 
     return rows
+
+
+def _build_wallet_activity_rows(
+    *,
+    deposit_rows: list[dict],
+    request_rows: list[dict],
+    transaction_rows: list[dict],
+    limit: int = WALLET_PAGE_SIZE,
+) -> list[dict]:
+    # Merge heterogeneous wallet activity using time as the primary key.
+    # Status is deliberately not part of the ordering.
+    merged_rows = []
+    sources = (
+        ("deposit", deposit_rows),
+        ("request", request_rows),
+        ("transaction", transaction_rows),
+    )
+    source_rank = {
+        "transaction": 3,
+        "request": 2,
+        "deposit": 1,
+    }
+
+    for activity_type, source_rows in sources:
+        for source_position, source_row in enumerate(source_rows):
+            row = dict(source_row)
+            row["activity_type"] = activity_type
+            row["_activity_source_rank"] = source_rank[activity_type]
+            row["_activity_source_position"] = source_position
+            merged_rows.append(row)
+
+    merged_rows.sort(
+        key=lambda row: (
+            row["created_at"],
+            row["_activity_source_rank"],
+            -row["_activity_source_position"],
+        ),
+        reverse=True,
+    )
+
+    visible_rows = merged_rows[:max(1, int(limit))]
+    for row in visible_rows:
+        row.pop("_activity_source_rank", None)
+        row.pop("_activity_source_position", None)
+    return visible_rows
+
 
 def _build_deposit_session_payload(session: DepositSession) -> dict:
     metadata = session.metadata or {}
@@ -1668,14 +1639,344 @@ def wallet_deposit_session_status(request, public_id):
     )
     return JsonResponse(_build_deposit_session_payload(session))
 
-@login_required
+# public-wallet-preview-v1
+def _build_wallet_login_url(request) -> str:
+    login_url = resolve_url(settings.LOGIN_URL)
+    separator = "&" if "?" in login_url else "?"
+    return f"{login_url}{separator}{urlencode({'next': request.get_full_path()})}"
+
+
+def _get_guest_wallet_balance_units() -> int:
+    amount_tokens = wallet_config.WALLET_GUEST_PREVIEW_BALANCE_TOKENS
+    if (
+        isinstance(amount_tokens, bool)
+        or not isinstance(amount_tokens, int)
+        or amount_tokens < 0
+    ):
+        raise ImproperlyConfigured(
+            "WALLET_GUEST_PREVIEW_BALANCE_TOKENS must be a non-negative integer"
+        )
+    return int(amount_tokens) * (10 ** PLATFORM_TOKEN_DECIMALS)
+
+
+def _build_guest_bonus_vault_context(*, open_url: str) -> dict:
+    chest = wallet_config.get_reward_chest_definition(
+        wallet_config.BONUS_VAULT_CHEST_KEY
+    )
+    threshold_tokens = wallet_config.BONUS_VAULT_THRESHOLD_TOKENS
+    if (
+        isinstance(threshold_tokens, bool)
+        or not isinstance(threshold_tokens, int)
+        or threshold_tokens <= 0
+    ):
+        raise ImproperlyConfigured(
+            "BONUS_VAULT_THRESHOLD_TOKENS must be a positive integer"
+        )
+
+    threshold_units = threshold_tokens * (10 ** PLATFORM_TOKEN_DECIMALS)
+    return {
+        "enabled": bool(wallet_config.BONUS_VAULT_ENABLED),
+        "config_version": int(wallet_config.BONUS_VAULT_CONFIG_VERSION),
+        "chest_key": chest.key,
+        "chest_label": chest.label,
+        "image_path": chest.closed_image,
+        "opened_image_path": chest.opened_image,
+        "reward_min_tokens": chest.min_amount_tokens,
+        "reward_max_tokens": chest.max_amount_tokens,
+        "reward_range_display": (
+            f"{chest.min_amount_tokens:,}–{chest.max_amount_tokens:,}"
+        ),
+        "threshold_tokens": threshold_tokens,
+        "threshold_units": threshold_units,
+        "threshold_display": f"{threshold_tokens:,}",
+        "total_eligible_spend_units": 0,
+        "total_eligible_spend_tokens": 0,
+        "progress_units": 0,
+        "progress_tokens": 0,
+        "progress_percent": 0,
+        "remaining_units": threshold_units,
+        "remaining_tokens": threshold_tokens,
+        "remaining_display": f"{threshold_tokens:,}",
+        "pending_count": 0,
+        "ungranted_count": 0,
+        "ready_count": 0,
+        "can_open": bool(wallet_config.BONUS_VAULT_ENABLED),
+        "block_reason": "",
+        "button_label": "Log in to unlock",
+        "open_url": open_url,
+        "preview": True,
+    }
+
+
+def _build_guest_quest_board_context(
+    *,
+    login_url: str,
+) -> dict:
+    weekly_preview = build_weekly_quest_preview_context(
+        login_url=login_url,
+    )
+
+    if weekly_preview is not None:
+        return weekly_preview
+
+    enabled = bool(
+        wallet_config.QUEST_BOARD_ENABLED
+    )
+    definitions = get_quest_definitions() if enabled else ()
+    rows = []
+
+    for definition in definitions:
+        rows.append(
+            {
+                "empty": False,
+                "key": definition.key,
+                "title": definition.title,
+                "description": definition.description,
+                "condition": definition.condition,
+                "icon_path": definition.icon_path,
+                "reward_kind": definition.reward_kind,
+                "reward_asset": definition.reward_asset,
+                "reward_tokens": definition.reward_tokens,
+                "reward_display": f"{definition.reward_tokens:,}",
+                "current": 0,
+                "target": 1,
+                "progress_percent": 0,
+                "complete": False,
+                "claimed": False,
+                "status": "in_progress",
+                "button_label": definition.action_label,
+                "can_claim": False,
+                "claim_url": reverse(
+                    "wallet_claim_quest",
+                    kwargs={"quest_key": definition.key},
+                ),
+                "action_url": reverse(definition.action_url_name),
+            }
+        )
+
+    slot_count = get_quest_slot_count()
+    while len(rows) < slot_count:
+        rows.append({"empty": True, "slot": len(rows) + 1})
+
+    reset_label = str(wallet_config.QUEST_BOARD_RESET_LABEL or "").strip()
+    normalized_schedule = " ".join(
+        reset_label.replace("_", " ").replace("-", " ").split()
+    ).lower()
+
+    return {
+        "enabled": enabled,
+        "config_version": int(wallet_config.QUEST_BOARD_CONFIG_VERSION),
+        "slot_count": slot_count,
+        "active_count": len(definitions),
+        "completed_count": 0,
+        "claimed_count": 0,
+        "reset_label": reset_label,
+        "show_schedule": bool(
+            reset_label
+            and normalized_schedule not in {"one time", "once"}
+        ),
+        "slots": rows,
+        "preview": True,
+    }
+
+
+def _build_guest_referral_context() -> dict:
+    goal = get_referral_goal()
+    reward_tokens = get_referral_reward_tokens()
+    return {
+        "enabled": bool(wallet_config.REFERRAL_PROGRAM_ENABLED),
+        "code": "",
+        "share_url": "",
+        "joined_count": 0,
+        "rewarded_count": 0,
+        "pending_count": 0,
+        "goal": goal,
+        "progress_percent": 0,
+        "earned_units": 0,
+        "earned_display": "0",
+        "reward_per_friend_tokens": reward_tokens,
+        "reward_per_friend_display": f"{reward_tokens:,}",
+        "max_rewarded_friends": get_referral_reward_cap(),
+        "preview": True,
+    }
+
+
+def _build_reward_chest_preview_catalog() -> list[dict]:
+    catalog = []
+
+    for chest_key in wallet_config.REWARD_CHESTS:
+        chest = wallet_config.get_reward_chest_definition(chest_key)
+        drops = []
+
+        for drop in chest.drops:
+            display_rarity = (
+                "legendary"
+                if drop.rarity == "jackpot"
+                else drop.rarity
+            )
+            drops.append(
+                {
+                    "key": drop.key,
+                    "label": drop.label,
+                    "rarity": display_rarity,
+                    "rarity_label": display_rarity.upper(),
+                    "rarity_image_url": static(
+                        wallet_config.get_reward_chest_rarity_image_path(
+                            drop.rarity
+                        )
+                    ),
+                    "image_url": static(
+                        wallet_config.get_reward_chest_drop_image_path(
+                            chest_key=chest.key,
+                            drop_key=drop.key,
+                        )
+                    ),
+                }
+            )
+
+        catalog.append(
+            {
+                "key": chest.key,
+                "label": chest.label,
+                "drops": drops,
+            }
+        )
+
+    return catalog
+
+
+def _build_guest_wallet_context(request) -> dict:
+    active_tab = _normalize_wallet_tab(
+        (request.GET.get("tab") or WALLET_TAB_ALL).strip()
+    )
+    active_status = _normalize_wallet_status(
+        (request.GET.get("status") or WALLET_STATUS_ALL).strip(),
+        active_tab=active_tab,
+    )
+    try:
+        page_number = max(int(request.GET.get("page", "1")), 1)
+    except (TypeError, ValueError):
+        page_number = 1
+
+    balance_units = _get_guest_wallet_balance_units()
+    balance_display = _format_platform_token_amount(balance_units)
+    login_url = _build_wallet_login_url(request)
+    page_obj = Paginator([], WALLET_PAGE_SIZE).get_page(page_number)
+    ad_free_price_tokens = get_ad_free_lifetime_price_tokens()
+
+    wallet_actions = {
+        "can_deposit": True,
+        "can_withdraw": True,
+        "show_withdraw": True,
+        "hint": "Log in to buy, earn, and use tokens.",
+    }
+
+    return {
+        "wallet": None,
+        "wallet_banner": None,
+        "can_view_risk_reason": False,
+        "total_balance_display": balance_display,
+        "available_balance_display": balance_display,
+        "available_balance_units": balance_units,
+        "held_balance_display": "0",
+        "wallet_status_display": "Preview",
+        "active_tab": active_tab,
+        "active_status": active_status,
+        "wallet_open_modal": "",
+        "wallet_actions": wallet_actions,
+        "recent_request_rows": [],
+        "tab_items": _build_wallet_tab_items(
+            active_tab=active_tab,
+            active_status=active_status,
+        ),
+        "status_items": _build_wallet_status_items(
+            active_tab=active_tab,
+            active_status=active_status,
+        ),
+        "status_select_options": [
+            {"key": key, "label": label}
+            for key, label in _get_wallet_status_labels_for_tab(
+                active_tab=active_tab
+            ).items()
+        ],
+        "transaction_rows": [],
+        "page_obj": page_obj,
+        "empty_state_title": "Log in to view activity",
+        "empty_state_text": (
+            "Your personal wallet activity is available after login."
+        ),
+        "active_holds": [],
+        "velocity_rows": [],
+        "wallet_base_url": reverse("wallet"),
+        "wallet_filters_querystring": _build_wallet_querystring(
+            tab=active_tab,
+            status=active_status,
+        ),
+        "wallet_deposit_request_url": reverse("wallet_deposit_request"),
+        "wallet_withdrawal_request_url": reverse(
+            "wallet_withdrawal_request"
+        ),
+        "deposit_options": [],
+        "recent_deposit_session_rows": [],
+        "activity_rows": [],
+        "token_pack_rows": [],
+        "wallet_auth_required": True,
+        "wallet_login_url": login_url,
+        "ad_free": {
+            "active": False,
+            "price_tokens": ad_free_price_tokens,
+            "price_display": _format_platform_token_amount(
+                ad_free_price_tokens
+            ),
+            "purchase_url": reverse("wallet_purchase_ad_free"),
+            "can_purchase": True,
+        },
+        "daily_rewards": build_daily_rewards_context(
+            user=request.user,
+            claim_url=reverse("wallet_claim_daily_reward"),
+            preview=True,
+        ),
+        "reward_chest_catalog": (
+            _build_reward_chest_preview_catalog()
+        ),
+        "bonus_vault": _build_guest_bonus_vault_context(
+            open_url=reverse("wallet_open_bonus_vault"),
+        ),
+        "quest_board": _build_guest_quest_board_context(
+            login_url=login_url,
+        ),
+        "referral": _build_guest_referral_context(),
+    }
+
+
+@never_cache
 def wallet(request):
+    if not request.user.is_authenticated:
+        return render(
+            request,
+            "cms/wallet.html",
+            _build_guest_wallet_context(request),
+        )
+
     wallet_obj, _ = TokenWallet.objects.get_or_create(
         user=request.user,
         defaults={
             "wallet_type": TokenWallet.TYPE_USER,
             "allow_negative": False,
         },
+    )
+
+    referral_context = build_referral_context(
+        user=request.user,
+        request=request,
+    )
+    wallet_obj.refresh_from_db(
+        fields=[
+            "balance",
+            "held_balance",
+            "risk_status",
+            "review_required",
+        ],
     )
 
     active_tab = _normalize_wallet_tab((request.GET.get("tab") or WALLET_TAB_ALL).strip())
@@ -1718,6 +2019,15 @@ def wallet(request):
         active_status=active_status,
         page_number=page_number,
     )
+    recent_deposit_session_rows = _build_recent_deposit_session_rows(
+        wallet_obj,
+        active_status=active_status,
+    )
+    activity_rows = _build_wallet_activity_rows(
+        deposit_rows=recent_deposit_session_rows,
+        request_rows=recent_request_rows,
+        transaction_rows=transaction_rows,
+    )
     empty_state_title, empty_state_text = _get_wallet_empty_state_message(
         tab=active_tab,
         status=active_status,
@@ -1731,6 +2041,8 @@ def wallet(request):
 
     context = {
         "wallet": wallet_obj,
+        "wallet_auth_required": False,
+        "wallet_login_url": "",
         "wallet_banner": wallet_banner,
         "can_view_risk_reason": can_view_risk_reason,
         "total_balance_display": _format_platform_token_amount(wallet_obj.balance),
@@ -1760,7 +2072,8 @@ def wallet(request):
         "wallet_deposit_request_url": reverse("wallet_deposit_request"),
         "wallet_withdrawal_request_url": reverse("wallet_withdrawal_request"),
         "deposit_options": deposit_options,
-        "recent_deposit_session_rows": _build_recent_deposit_session_rows(wallet_obj,active_status=active_status),
+        "recent_deposit_session_rows": recent_deposit_session_rows,
+        "activity_rows": activity_rows,
         "token_pack_rows": token_pack_rows,
     }
     ad_free_price_tokens = get_ad_free_lifetime_price_tokens()
@@ -1776,6 +2089,22 @@ def wallet(request):
                 and available_balance >= ad_free_price_tokens
         ),
     }
+    context["daily_rewards"] = build_daily_rewards_context(
+        user=request.user,
+        claim_url=reverse("wallet_claim_daily_reward"),
+    )
+    context["reward_chest_catalog"] = (
+        _build_reward_chest_preview_catalog()
+    )
+    context["bonus_vault"] = build_bonus_vault_context(
+        user=request.user,
+        wallet=wallet_obj,
+        open_url=reverse("wallet_open_bonus_vault"),
+    )
+    context["quest_board"] = build_weekly_quest_board_context(
+        user=request.user,
+    )
+    context["referral"] = referral_context
     return render(request, "cms/wallet.html", context)
 
 @login_required

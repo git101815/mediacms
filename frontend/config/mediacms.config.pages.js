@@ -70,7 +70,7 @@ const PAGES = {
   base: {
     id: 'base',
     title: 'Layout base',
-    renderer: templates.renderBase(),
+    renderer: "import './static/js/pages/weekly-quests';\n" + templates.renderBase(),
   },
   index: { id: 'home', title: 'Home', component: 'HomePage' },
   search: { id: 'search', title: 'Search results', component: 'SearchPage' },

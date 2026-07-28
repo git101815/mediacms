@@ -20,6 +20,7 @@ from .models import (
     TokenPack,
     TreasuryMetric,
 )
+from .dashboard.models import DailyRewardClaim, DailyRewardState, RewardChestGrant
 from .services import (
     PLATFORM_TOKENS_PER_STABLECOIN,
     complete_wallet_withdrawal_request,
@@ -612,7 +613,6 @@ class TokenPackAdminForm(forms.ModelForm):
             "name",
             "description",
             "badge_text",
-            "image",
             "token_amount_human",
             "gross_stable_amount_human",
             "is_active",
@@ -665,7 +665,6 @@ class TokenPackAdmin(admin.ModelAdmin):
         "token_amount_display",
         "gross_stable_amount_display",
         "badge_text",
-        "image",
         "is_active",
         "sort_order",
         "updated_at",
@@ -680,7 +679,6 @@ class TokenPackAdmin(admin.ModelAdmin):
         "badge_text",
         "token_amount_human",
         "gross_stable_amount_human",
-        "image",
         "is_active",
         "sort_order",
         "created_at",
@@ -859,3 +857,108 @@ class TreasuryMetricAdmin(ReadOnlyAdmin):
         return _format_admin_human_amount(int(stable_amount))
 
     stable_equivalent.short_description = "Stable equivalent"
+
+
+@admin.register(DailyRewardState)
+class DailyRewardStateAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "user",
+        "current_streak",
+        "total_claims",
+        "last_claim_date",
+        "updated_at",
+    )
+    search_fields = ("user__username", "user__email")
+    readonly_fields = (
+        "user",
+        "current_streak",
+        "total_claims",
+        "last_claim_date",
+        "created_at",
+        "updated_at",
+    )
+
+
+@admin.register(DailyRewardClaim)
+class DailyRewardClaimAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "user",
+        "reward_date",
+        "streak_day",
+        "cycle_day",
+        "amount",
+        "ledger_txn",
+        "reward_chest_grant",
+        "config_version",
+        "claimed_at",
+    )
+    list_filter = ("reward_date", "cycle_day", "config_version")
+    search_fields = (
+        "user__username",
+        "user__email",
+        "ledger_txn__external_id",
+        "reward_chest_grant__public_id",
+    )
+    readonly_fields = (
+        "user",
+        "reward_date",
+        "streak_day",
+        "cycle_day",
+        "amount",
+        "ledger_txn",
+        "reward_chest_grant",
+        "config_version",
+        "config_snapshot",
+        "claimed_at",
+    )
+
+
+@admin.register(RewardChestGrant)
+class RewardChestGrantAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "public_id",
+        "user",
+        "chest_key",
+        "source_type",
+        "status",
+        "drop_key",
+        "rarity",
+        "amount",
+        "ledger_txn",
+        "granted_at",
+        "opened_at",
+    )
+    list_filter = ("status", "chest_key", "source_type", "rarity")
+    search_fields = (
+        "public_id",
+        "user__username",
+        "user__email",
+        "source_ref",
+        "drop_key",
+        "ledger_txn__external_id",
+    )
+    readonly_fields = (
+        "public_id",
+        "user",
+        "chest_key",
+        "source_type",
+        "source_ref",
+        "status",
+        "config_version",
+        "config_snapshot",
+        "metadata",
+        "roll",
+        "drop_key",
+        "drop_label",
+        "rarity",
+        "chance_bps",
+        "amount",
+        "ledger_txn",
+        "expires_at",
+        "granted_at",
+        "opened_at",
+        "revoked_at",
+    )

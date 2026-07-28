@@ -10,7 +10,7 @@ from ledger.models import DepositSession
 from .base import BaseLedgerTestCase
 
 
-class TestDfxSessionViews(BaseLedgerTestCase):
+class TestDfxSessionViewsFunctional(BaseLedgerTestCase):
     def _create_dfx_session(self, *, provider_key="dfx"):
         session = DepositSession.objects.create(
             user=self.u1,
@@ -22,7 +22,9 @@ class TestDfxSessionViews(BaseLedgerTestCase):
             ),
             route_key=self.default_deposit_option_key(),
             display_label="Bank transfer (DFX) · Ethereum · USDT",
-            deposit_address="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            deposit_address=(
+                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ),
             address_derivation_ref="m/44'/60'/0'/0/18",
             derivation_index=18,
             derivation_path="m/44'/60'/0'/0/18",
@@ -64,11 +66,15 @@ class TestDfxSessionViews(BaseLedgerTestCase):
         mocked_open,
     ):
         session = self._create_dfx_session()
-        dfx_option_key = f"dfx:{self.default_deposit_option_key()}"
+        dfx_option_key = (
+            f"dfx:{self.default_deposit_option_key()}"
+        )
         mocked_options.return_value = [
             {
                 "key": dfx_option_key,
-                "deposit_route_key": self.default_deposit_option_key(),
+                "deposit_route_key": (
+                    self.default_deposit_option_key()
+                ),
                 "payment_method_type": "provider",
                 "payment_method_key": "dfx:bank",
                 "payment_method_label": "Bank transfer (DFX)",
@@ -78,8 +84,8 @@ class TestDfxSessionViews(BaseLedgerTestCase):
             }
         ]
         mocked_open.return_value = session
-
         self.client.force_login(self.u1)
+
         response = self.client.post(
             reverse("wallet_deposit_request"),
             {
@@ -96,10 +102,17 @@ class TestDfxSessionViews(BaseLedgerTestCase):
                 kwargs={"public_id": session.public_id},
             ),
         )
-        mocked_open.assert_called_once()
+        mocked_open.assert_called_once_with(
+            actor=self.u1,
+            wallet=self.w1,
+            option_key=self.default_deposit_option_key(),
+            token_pack=self.default_token_pack,
+            payment_price_bps=0,
+            payment_price_fixed_canonical=0,
+        )
 
     @patch("files.views.prepare_dfx_browser_launch")
-    def test_launch_page_is_standalone_private_and_csp_protected(
+    def test_launch_page_is_private_and_csp_protected(
         self,
         mocked_prepare,
     ):
@@ -124,8 +137,8 @@ class TestDfxSessionViews(BaseLedgerTestCase):
                 kwargs={"public_id": session.public_id},
             ),
         }
-
         self.client.force_login(self.u1)
+
         response = self.client.get(
             reverse(
                 "wallet_dfx_launch",
@@ -138,54 +151,63 @@ class TestDfxSessionViews(BaseLedgerTestCase):
         self.assertIn("no-store", cache_control)
         self.assertIn("private", cache_control)
         self.assertIn("max-age=0", cache_control)
-        self.assertEqual(response["Referrer-Policy"], "no-referrer")
+        self.assertEqual(
+            response["Referrer-Policy"],
+            "no-referrer",
+        )
         self.assertEqual(response["X-Frame-Options"], "DENY")
+
         csp = response["Content-Security-Policy"]
-        self.assertIn("connect-src https://api.dfx.swiss", csp)
+        self.assertIn(
+            "connect-src https://api.dfx.swiss",
+            csp,
+        )
         self.assertIn("frame-ancestors 'none'", csp)
         self.assertIn("img-src 'none'", csp)
         self.assertIn("frame-src 'none'", csp)
         self.assertIn("script-src 'nonce-", csp)
 
         self.assertEqual(
-            json.loads(response.context["dfx_auth_payload_json"]),
+            json.loads(
+                response.context["dfx_auth_payload_json"]
+            ),
             mocked_prepare.return_value["auth_payload"],
         )
         self.assertEqual(
-            json.loads(response.context["dfx_checkout_params_json"]),
+            json.loads(
+                response.context["dfx_checkout_params_json"]
+            ),
             mocked_prepare.return_value["checkout_params"],
         )
 
         body = response.content.decode("utf-8")
-        self.assertNotIn(
-            "widget/v1.0",
-            body,
-        )
-        self.assertNotIn(
-            "dfx-services",
-            body,
-        )
+        self.assertNotIn("widget/v1.0", body)
+        self.assertNotIn("dfx-services", body)
 
     def test_launch_page_is_owner_only(self):
         session = self._create_dfx_session()
         self.client.force_login(self.u2)
+
         response = self.client.get(
             reverse(
                 "wallet_dfx_launch",
                 kwargs={"public_id": session.public_id},
             )
         )
+
         self.assertEqual(response.status_code, 404)
 
     def test_return_redirects_to_deposit_session(self):
         session = self._create_dfx_session()
         self.client.force_login(self.u1)
+
         response = self.client.get(
             reverse(
                 "wallet_dfx_return",
                 kwargs={"public_id": session.public_id},
             )
         )
+
         self.assertRedirects(
             response,
             reverse(
@@ -195,12 +217,16 @@ class TestDfxSessionViews(BaseLedgerTestCase):
         )
 
     def test_non_dfx_session_cannot_open_launch_page(self):
-        session = self._create_dfx_session(provider_key="paygate")
+        session = self._create_dfx_session(
+            provider_key="paygate"
+        )
         self.client.force_login(self.u1)
+
         response = self.client.get(
             reverse(
                 "wallet_dfx_launch",
                 kwargs={"public_id": session.public_id},
             )
         )
+
         self.assertEqual(response.status_code, 404)

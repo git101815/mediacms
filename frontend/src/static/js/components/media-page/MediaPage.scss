@@ -1052,6 +1052,22 @@
                   border-radius: 50%;
                   background-position: center;
                   background-repeat: no-repeat;
+                  background-size: contain;
+                }
+
+                > .share-social-icon {
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  border-radius: 0;
+                  background: none !important;
+
+                  img {
+                    display: block;
+                    width: 60px;
+                    height: 60px;
+                    object-fit: contain;
+                  }
                 }
 
                 > *:last-child {
@@ -1084,22 +1100,12 @@
               }
             }
 
-            .share-fb {
-              a,
-              button {
-                > *:first-child {
-                  background-color: rgb(59, 89, 152);
-                  background-image: url('../../../images/social-media-icons/fb-logo.png');
-                }
-              }
-            }
-
             .share-tw {
               a,
               button {
                 > *:first-child {
                   background-color: rgb(29, 161, 242);
-                  background-image: url('../../../images/social-media-icons/twitter-logo.png');
+                  background-image: url('../../../images/social-media-icons/x.svg');
                 }
               }
             }
@@ -1109,27 +1115,7 @@
               button {
                 > *:first-child {
                   background-color: rgb(255, 69, 0);
-                  background-image: url('../../../images/social-media-icons/reddit-logo.png');
-                }
-              }
-            }
-
-            .share-tumblr {
-              a,
-              button {
-                > *:first-child {
-                  background-color: rgb(53, 70, 92);
-                  background-image: url('../../../images/social-media-icons/tumblr-logo.png');
-                }
-              }
-            }
-
-            .share-pinterest {
-              a,
-              button {
-                > *:first-child {
-                  background-color: rgb(189, 8, 28);
-                  background-image: url('../../../images/social-media-icons/pinterest-logo.png');
+                  background-image: url('../../../images/social-media-icons/reddit.svg');
                 }
               }
             }
@@ -1139,27 +1125,7 @@
               button {
                 > *:first-child {
                   background-color: rgb(70, 128, 194);
-                  background-image: url('../../../images/social-media-icons/vk-logo.png');
-                }
-              }
-            }
-
-            .share-linkedin {
-              a,
-              button {
-                > *:first-child {
-                  background-color: rgb(0, 119, 181);
-                  background-image: url('../../../images/social-media-icons/linkedin-logo.png');
-                }
-              }
-            }
-
-            .share-mix {
-              a,
-              button {
-                > *:first-child {
-                  background-color: rgb(255, 130, 38);
-                  background-image: url('../../../images/social-media-icons/mix-logo.png');
+                  background-image: url('../../../images/social-media-icons/vk.svg');
                 }
               }
             }
@@ -1178,7 +1144,7 @@
               button {
                 > *:first-child {
                   background-color: rgb(37, 211, 102);
-                  background-image: url('../../../images/social-media-icons/whatsapp-logo.png');
+                  background-image: url('../../../images/social-media-icons/whatsapp.svg');
                 }
               }
             }
@@ -1188,8 +1154,8 @@
               button {
                 > *:first-child {
                   background-color: rgb(0, 136, 204);
-                  background-position: 11px;
-                  background-image: url('../../../images/social-media-icons/telegram-logo.png');
+                  background-position: center;
+                  background-image: url('../../../images/social-media-icons/telegram.svg');
                 }
               }
             }

@@ -68,6 +68,9 @@ export default class VideoViewer extends React.PureComponent {
       displayPlayer: false,
     };
 
+    this.premiumEndCtaTimer = null;
+    this.premiumEndCtaElement = null;
+
     this.videoSources = [];
 
     filterVideoEncoding(this.props.data.encoding_status);
@@ -191,6 +194,8 @@ export default class VideoViewer extends React.PureComponent {
 
     this.playerInstance = null;
 
+    this.premiumEndCtaDuration = 5000;
+
     this.onPlayerInit = this.onPlayerInit.bind(this);
 
     this.onClickNext = this.onClickNext.bind(this);
@@ -199,6 +204,10 @@ export default class VideoViewer extends React.PureComponent {
 
     this.onVideoEnd = this.onVideoEnd.bind(this);
     this.onVideoRestart = this.onVideoRestart.bind(this);
+    this.completeVideoEnd = this.completeVideoEnd.bind(this);
+    this.onPremiumEndCtaClick = this.onPremiumEndCtaClick.bind(this);
+    this.onPremiumEndCtaTimeout = this.onPremiumEndCtaTimeout.bind(this);
+    this.hidePremiumEndCta = this.hidePremiumEndCta.bind(this);
   }
 
   componentDidMount() {
@@ -353,6 +362,7 @@ export default class VideoViewer extends React.PureComponent {
   }
 
   componentWillUnmount() {
+    this.hidePremiumEndCta();
     this.unsetRecommendedMedia();
   }
 
@@ -466,26 +476,233 @@ export default class VideoViewer extends React.PureComponent {
   }
 
   onVideoRestart() {
+    this.hidePremiumEndCta();
+
     if (null !== this.recommendedMedia) {
       this.recommendedMedia.updateDisplayType('inline');
 
       if (this.props.inEmbed) {
         this.playerInstance.player.one('pause', this.recommendedMedia.init);
       }
+    }
 
-      this.playerInstance.player.one('ended', this.onVideoEnd);
+    this.playerInstance.player.one('ended', this.onVideoEnd);
+  }
+
+  isPremiumPlaybackMode() {
+    try {
+      return new URL(window.location.href).searchParams.get('playback') === 'premium';
+    } catch (error) {
+      return false;
     }
   }
 
+  shouldShowPremiumEndCta() {
+    const premium = this.props.data.premium || {};
+
+    return !!premium.enabled && !this.isPremiumPlaybackMode();
+  }
+
+  clearPremiumEndCtaTimer() {
+    if (null !== this.premiumEndCtaTimer) {
+      window.clearTimeout(this.premiumEndCtaTimer);
+      this.premiumEndCtaTimer = null;
+    }
+  }
+
+  hidePremiumEndCta() {
+    this.clearPremiumEndCtaTimer();
+
+    if (this.premiumEndCtaElement) {
+      this.premiumEndCtaElement.removeEventListener('click', this.onPremiumEndCtaClick);
+
+      if (this.premiumEndCtaElement.parentNode) {
+        this.premiumEndCtaElement.parentNode.removeChild(this.premiumEndCtaElement);
+      }
+
+      this.premiumEndCtaElement = null;
+    }
+  }
+
+  showPremiumEndCta() {
+    if (!this.playerInstance || this.premiumEndCtaElement) {
+      return;
+    }
+
+    const premium = this.props.data.premium || {};
+    const hasUnlock = !!premium.viewer_has_unlock;
+    const cta = document.createElement('button');
+    const content = document.createElement('span');
+    const thumb = document.createElement('span');
+    const thumbImage = document.createElement('span');
+    const thumbOverlay = document.createElement('span');
+    const thumbBadge = document.createElement('span');
+    const thumbBadgeIcon = document.createElement('span');
+    const thumbBadgeText = document.createElement('span');
+    const copy = document.createElement('span');
+    const eyebrow = document.createElement('span');
+    const title = document.createElement('span');
+    const subtitle = document.createElement('span');
+    const action = document.createElement('span');
+    const actionText = document.createElement('span');
+    const actionPrice = document.createElement('span');
+    const actionIcon = document.createElement('span');
+    const progress = document.createElement('span');
+
+    const mediaTitle = this.props.data.title || 'Untitled video';
+    const thumbSource =
+      this.props.data.poster ||
+      this.props.data.poster_url ||
+      this.props.data.thumbnail ||
+      this.props.data.thumbnail_url ||
+      this.props.data.thumb ||
+      this.props.data.thumb_url ||
+      '';
+    const thumbUrl = thumbSource ? formatInnerLink(thumbSource, this.props.siteUrl) : '';
+
+    cta.setAttribute('type', 'button');
+    cta.setAttribute('class', 'premium-end-cta');
+    cta.setAttribute(
+      'aria-label',
+      hasUnlock ? 'Watch the full video' : 'Unlock the full video'
+    );
+
+    content.setAttribute('class', 'premium-end-cta__content');
+    thumb.setAttribute('class', 'premium-end-cta__thumb');
+    thumbImage.setAttribute('class', 'premium-end-cta__thumb-image');
+    thumbOverlay.setAttribute('class', 'premium-end-cta__thumb-overlay');
+    thumbBadge.setAttribute('class', 'premium-end-cta__thumb-lock');
+    thumbBadgeIcon.setAttribute('class', 'material-icons premium-end-cta__thumb-lock-icon');
+    thumbBadgeText.setAttribute('class', 'premium-end-cta__thumb-lock-text');
+    copy.setAttribute('class', 'premium-end-cta__copy');
+    eyebrow.setAttribute('class', 'premium-end-cta__eyebrow');
+    title.setAttribute('class', 'premium-end-cta__title');
+    subtitle.setAttribute('class', 'premium-end-cta__subtitle');
+    action.setAttribute('class', 'premium-end-cta__action');
+    actionText.setAttribute('class', 'premium-end-cta__action-text');
+    actionPrice.setAttribute('class', 'premium-end-cta__price');
+    actionIcon.setAttribute('class', 'material-icons premium-end-cta__action-icon');
+    progress.setAttribute('class', 'premium-end-cta__progress');
+
+    if (thumbUrl) {
+      thumbImage.style.backgroundImage = 'url(' + JSON.stringify(thumbUrl).slice(1, -1) + ')';
+    } else {
+      thumb.classList.add('premium-end-cta__thumb--no-image');
+    }
+
+    thumbBadgeIcon.textContent = hasUnlock ? 'lock_open' : 'lock';
+    thumbBadgeText.textContent = hasUnlock ? 'Unlocked' : (premium.price_display || '—') + ' tokens';
+
+    eyebrow.textContent = hasUnlock ? 'FULL VIDEO UNLOCKED' : 'PREMIUM VIDEO';
+    title.textContent = mediaTitle;
+    subtitle.textContent = hasUnlock
+      ? 'The full video is available now. Resume with the premium version.'
+      : 'Preview finished. Unlock the full video and continue instantly.';
+    actionText.textContent = hasUnlock ? 'Watch full video' : 'Unlock full video';
+    actionPrice.textContent = (premium.price_display || '—') + ' tokens';
+    actionIcon.textContent = 'arrow_forward';
+
+    thumbBadge.appendChild(thumbBadgeIcon);
+    thumbBadge.appendChild(thumbBadgeText);
+    thumb.appendChild(thumbImage);
+    thumb.appendChild(thumbOverlay);
+    thumb.appendChild(thumbBadge);
+
+    copy.appendChild(eyebrow);
+    copy.appendChild(title);
+    copy.appendChild(subtitle);
+
+    action.appendChild(actionText);
+    if (!hasUnlock) {
+      action.appendChild(actionPrice);
+    }
+    action.appendChild(actionIcon);
+
+    content.appendChild(thumb);
+    content.appendChild(copy);
+    content.appendChild(action);
+    cta.appendChild(content);
+    cta.appendChild(progress);
+    cta.addEventListener('click', this.onPremiumEndCtaClick);
+
+    this.playerInstance.player.el_.appendChild(cta);
+    this.premiumEndCtaElement = cta;
+    this.premiumEndCtaTimer = window.setTimeout(
+      this.onPremiumEndCtaTimeout,
+      this.premiumEndCtaDuration
+    );
+
+    this.playerInstance.player.one('playing', this.onVideoRestart);
+  }
+
+  onPremiumEndCtaClick(event) {
+    event.preventDefault();
+
+    const premium = this.props.data.premium || {};
+
+    if (this.props.inEmbed) {
+      this.playerInstance.player.off('playing', this.onVideoRestart);
+      this.hidePremiumEndCta();
+
+      const targetUrl = new URL(this.props.data.url, window.location.href);
+      if (premium.viewer_has_unlock) {
+        targetUrl.searchParams.set('playback', 'premium');
+      }
+
+      window.open(targetUrl.toString(), '_blank', 'noopener,noreferrer');
+      this.completeVideoEnd();
+      return;
+    }
+
+    if (premium.viewer_has_unlock) {
+      this.playerInstance.player.off('playing', this.onVideoRestart);
+      this.hidePremiumEndCta();
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('playback', 'premium');
+      window.location.href = url.pathname + url.search + url.hash;
+      return;
+    }
+
+    // Keep the CTA behind the modal so closing the modal returns to the same choice.
+    this.clearPremiumEndCtaTimer();
+    window.dispatchEvent(
+      new CustomEvent('mediacms:open-premium-modal', {
+        detail: { source: 'video_end' },
+      })
+    );
+  }
+
+  onPremiumEndCtaTimeout() {
+    this.premiumEndCtaTimer = null;
+
+    if (this.playerInstance) {
+      this.playerInstance.player.off('playing', this.onVideoRestart);
+    }
+
+    this.hidePremiumEndCta();
+    this.completeVideoEnd();
+  }
+
   onVideoEnd() {
+    if (this.shouldShowPremiumEndCta()) {
+      this.showPremiumEndCta();
+      return;
+    }
+
+    this.completeVideoEnd();
+  }
+
+  completeVideoEnd() {
     if (null !== this.recommendedMedia) {
       if (!this.props.inEmbed) {
         this.initRecommendedMedia();
       }
 
       this.recommendedMedia.updateDisplayType('full');
-      this.playerInstance.player.one('playing', this.onVideoRestart);
     }
+
+    this.playerInstance.player.one('playing', this.onVideoRestart);
 
     const playlistId = this.props.inEmbed ? null : MediaPageStore.get('playlist-id');
 

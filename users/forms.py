@@ -28,8 +28,14 @@ class SignupForm(forms.Form):
     name = forms.CharField(max_length=100, label="Name")
 
     def signup(self, request, user):
+        from ledger.dashboard.referrals import assign_referrer_from_signup
+
         user.name = self.cleaned_data["name"]
         user.save()
+        assign_referrer_from_signup(
+            request=request,
+            user=user,
+        )
 
 
 class UserForm(forms.ModelForm):

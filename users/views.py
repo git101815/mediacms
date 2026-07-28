@@ -1,8 +1,10 @@
+from allauth.account.views import SignupView
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.mail import EmailMessage
 from django.http import Http404, HttpResponseRedirect
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.urls import reverse
 from drf_yasg import openapi as openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import generics, permissions, status
@@ -31,6 +33,31 @@ INTERNAL_SERVICE_USERNAMES = {
     "deposit-service",
     "sweeper-service",
 }
+
+
+class ReferralSignupView(SignupView):
+    template_name = "account/signup.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        from ledger.dashboard.referrals import get_referrer_by_code
+
+        self.referrer = get_referrer_by_code(
+            kwargs.get("referral_code"),
+        )
+        if self.referrer is None:
+            return redirect("account_signup")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["referral_signup_url"] = reverse(
+            "account_referral_signup",
+            kwargs={
+                "referral_code": self.referrer.referral_code,
+            },
+        )
+        context["referral_inviter"] = self.referrer
+        return context
 
 
 def _normalize_username(value: str) -> str:

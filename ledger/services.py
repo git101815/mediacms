@@ -1379,7 +1379,6 @@ def _build_token_pack_snapshot(
         "payment_price_bps": normalized_bps,
         "payment_price_fixed_canonical": fixed_fee_stable_amount,
         "legacy_gross_stable_amount": int(token_pack.gross_stable_amount),
-        "image_url": token_pack.image.url if token_pack.image else "",
     }
 
 def _get_max_used_evm_derivation_index() -> int:

@@ -5,13 +5,95 @@ import { PageActions, MediaPageActions } from '../../utils/actions/';
 import ItemsInlineSlider from '../item-list/includes/itemLists/ItemsInlineSlider';
 import { CircleIconButton } from '../_shared/';
 
+const SOCIAL_ICON_PATHS = Object.freeze({
+  tw: '/static/images/social-media-icons/x.svg',
+  whatsapp: '/static/images/social-media-icons/whatsapp.svg',
+  telegram: '/static/images/social-media-icons/telegram.svg',
+  reddit: '/static/images/social-media-icons/reddit.svg',
+  vk: '/static/images/social-media-icons/vk.svg',
+});
+
+function trackedShareDestination(platform, mediaUrl, mediaTitle) {
+  const encodedUrl = encodeURIComponent(mediaUrl);
+  const encodedTitle = encodeURIComponent(mediaTitle || '');
+  switch (platform) {
+    case 'tw':
+      return 'https://twitter.com/intent/tweet?url=' + encodedUrl;
+    case 'reddit':
+      return 'https://reddit.com/submit?url=' + encodedUrl + '&title=' + encodedTitle;
+    case 'vk':
+      return 'https://vk.com/share.php?url=' + encodedUrl + '&title=' + encodedTitle;
+    case 'whatsapp':
+      return 'whatsapp://send?text=' + encodedUrl;
+    case 'telegram':
+      return 'https://t.me/share/url?url=' + encodedUrl + '&text=' + encodedTitle;
+    default:
+      return mediaUrl;
+  }
+}
+
+function openTrackedSocialShare(event, platform, fallbackUrl) {
+  event.preventDefault();
+  const mediaData = MediaPageStore.get('media-data') || {};
+  const mediaUrl = MediaPageStore.get('media-url');
+  const mediaTitle = mediaData.title || '';
+  const mediaToken = mediaData.friendly_token || '';
+  const popup = window.open('', '_blank');
+  if (popup) {
+    popup.opener = null;
+  }
+
+  function openDestination(destination) {
+    if (popup && !popup.closed) {
+      popup.location.href = destination;
+      return;
+    }
+    window.location.href = destination;
+  }
+
+  const questApi = window.MediaCMSWeeklyQuests;
+  if (!mediaToken || !questApi || !questApi.getFingerprint) {
+    openDestination(fallbackUrl);
+    return;
+  }
+
+  questApi.getFingerprint()
+    .then((fingerprint) => window.fetch('/api/weekly-quests/video-link', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-CSRFToken': document.cookie
+          .split('; ')
+          .find((row) => row.startsWith('csrftoken='))
+          ?.split('=')[1] || '',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: JSON.stringify({
+        media: mediaToken,
+        platform: platform,
+        fingerprint: fingerprint,
+      }),
+    }))
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error('Tracked share unavailable');
+      }
+      return response.json();
+    })
+    .then((payload) => {
+      const sharedUrl = payload && payload.url ? payload.url : mediaUrl;
+      openDestination(trackedShareDestination(platform, sharedUrl, mediaTitle));
+    })
+    .catch(() => openDestination(fallbackUrl));
+}
+
 function shareOptionsList() {
   const socialMedia = ShareOptionsContext._currentValue;
   const mediaUrl = MediaPageStore.get('media-url');
   const mediaTitle = MediaPageStore.get('media-data').title;
-
   const ret = {};
-
   let i = 0;
 
   while (i < socialMedia.length) {
@@ -22,76 +104,26 @@ function shareOptionsList() {
         }
         break;
       case 'email':
-        ret[socialMedia[i]] = {
-          title: 'Email',
-          shareUrl: 'mailto:?body=' + mediaUrl,
-        };
-        break;
-      case 'fb':
-        ret[socialMedia[i]] = {
-          title: 'Facebook',
-          shareUrl: 'https://www.facebook.com/sharer.php?u=' + mediaUrl,
-        };
+        ret[socialMedia[i]] = { title: 'Email', shareUrl: 'mailto:?body=' + mediaUrl };
         break;
       case 'tw':
-        ret[socialMedia[i]] = {
-          title: 'Twitter',
-          shareUrl: 'https://twitter.com/intent/tweet?url=' + mediaUrl,
-        };
+        ret[socialMedia[i]] = { title: 'X', shareUrl: 'https://twitter.com/intent/tweet?url=' + mediaUrl };
         break;
       case 'reddit':
-        ret[socialMedia[i]] = {
-          title: 'reddit',
-          shareUrl: 'https://reddit.com/submit?url=' + mediaUrl + '&title=' + mediaTitle,
-        };
-        break;
-      case 'tumblr':
-        ret[socialMedia[i]] = {
-          title: 'Tumblr',
-          shareUrl: 'https://www.tumblr.com/widgets/share/tool?canonicalUrl=' + mediaUrl + '&title=' + mediaTitle,
-        };
-        break;
-      case 'pinterest':
-        ret[socialMedia[i]] = {
-          title: 'Pinterest',
-          shareUrl: 'http://pinterest.com/pin/create/link/?url=' + mediaUrl,
-        };
+        ret[socialMedia[i]] = { title: 'Reddit', shareUrl: 'https://reddit.com/submit?url=' + mediaUrl + '&title=' + mediaTitle };
         break;
       case 'vk':
-        ret[socialMedia[i]] = {
-          title: 'ВКонтакте',
-          shareUrl: 'http://vk.com/share.php?url=' + mediaUrl + '&title=' + mediaTitle,
-        };
-        break;
-      case 'linkedin':
-        ret[socialMedia[i]] = {
-          title: 'LinkedIn',
-          shareUrl: 'https://www.linkedin.com/shareArticle?mini=true&url=' + mediaUrl,
-        };
-        break;
-      case 'mix':
-        ret[socialMedia[i]] = {
-          title: 'Mix',
-          shareUrl: 'https://mix.com/add?url=' + mediaUrl,
-        };
+        ret[socialMedia[i]] = { title: 'ВКонтакте', shareUrl: 'https://vk.com/share.php?url=' + mediaUrl + '&title=' + mediaTitle };
         break;
       case 'whatsapp':
-        ret[socialMedia[i]] = {
-          title: 'WhatsApp',
-          shareUrl: 'whatsapp://send?text=' + mediaUrl,
-        };
+        ret[socialMedia[i]] = { title: 'WhatsApp', shareUrl: 'whatsapp://send?text=' + mediaUrl };
         break;
       case 'telegram':
-        ret[socialMedia[i]] = {
-          title: 'Telegram',
-          shareUrl: 'https://t.me/share/url?url=' + mediaUrl + '&text=' + mediaTitle,
-        };
+        ret[socialMedia[i]] = { title: 'Telegram', shareUrl: 'https://t.me/share/url?url=' + mediaUrl + '&text=' + mediaTitle };
         break;
     }
-
     i += 1;
   }
-
   return ret;
 }
 
@@ -122,8 +154,9 @@ function ShareOptions() {
               target="_blank"
               data-action="share/whatsapp/share"
               rel="noreferrer"
+              onClick={(event) => openTrackedSocialShare(event, k, shareOptions[k].shareUrl)}
             >
-              <span></span>
+              <span className="share-social-icon" aria-hidden="true"><img src={SOCIAL_ICON_PATHS[k]} alt="" /></span>
               <span>{shareOptions[k].title}</span>
             </a>
           </div>
@@ -142,8 +175,14 @@ function ShareOptions() {
       } else {
         compList.push(
           <div key={'share-' + k} className={'sh-option share-' + k}>
-            <a href={shareOptions[k].shareUrl} title="" target="_blank" rel="noreferrer">
-              <span></span>
+            <a
+              href={shareOptions[k].shareUrl}
+              title=""
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => openTrackedSocialShare(event, k, shareOptions[k].shareUrl)}
+            >
+              <span className="share-social-icon" aria-hidden="true"><img src={SOCIAL_ICON_PATHS[k]} alt="" /></span>
               <span>{shareOptions[k].title}</span>
             </a>
           </div>

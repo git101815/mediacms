@@ -4,6 +4,102 @@
     return;
   }
 
+  // public-wallet-preview-v1
+  const requiresAuthentication =
+    root.getAttribute('data-wallet-auth-required') === 'true';
+  const walletLoginUrl =
+    root.getAttribute('data-wallet-login-url') || '';
+
+  if (requiresAuthentication && walletLoginUrl) {
+    const redirectGuestToLogin = function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+      }
+      window.location.assign(walletLoginUrl);
+    };
+
+    document.addEventListener('click', function (event) {
+      const eventTarget = event.target;
+      const interactive = eventTarget && eventTarget.closest
+        ? eventTarget.closest(
+          'button, a, input, select, textarea, label'
+        )
+        : null;
+
+      if (!interactive) {
+        return;
+      }
+      if (interactive.closest('[data-wallet-guest-allowed]')) {
+        return;
+      }
+      if (
+        !interactive.closest('[data-wallet-ui]') &&
+        !interactive.closest('.wallet-modal')
+      ) {
+        return;
+      }
+
+      redirectGuestToLogin(event);
+    }, true);
+
+    document.addEventListener('submit', function (event) {
+      const form = event.target;
+      if (
+        !form ||
+        !form.closest ||
+        (
+          !form.closest('[data-wallet-ui]') &&
+          !form.closest('.wallet-modal')
+        )
+      ) {
+        return;
+      }
+      redirectGuestToLogin(event);
+    }, true);
+  }
+
+  // wallet-dashboard-view-switching-v2
+  function inferDashboardViewFromUrl() {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('view') === 'activity') {
+      return 'activity';
+    }
+    if (url.searchParams.has('tab') || url.searchParams.has('status') || url.searchParams.has('page')) {
+      return 'activity';
+    }
+    return 'home';
+  }
+
+  function setDashboardView(value, updateHistory) {
+    const view = value === 'activity' ? 'activity' : 'home';
+    document.querySelectorAll('[data-wallet-dashboard-view]').forEach(function (node) {
+      node.hidden = node.getAttribute('data-wallet-dashboard-view') !== view;
+    });
+    if (updateHistory) {
+      const url = new URL(window.location.href);
+      if (view === 'activity') {
+        url.searchParams.set('view', 'activity');
+      } else {
+        ['view', 'tab', 'status', 'page'].forEach(function (key) { url.searchParams.delete(key); });
+      }
+      window.history.pushState({ walletDashboardView: view }, '', url);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  setDashboardView(
+    requiresAuthentication ? 'home' : inferDashboardViewFromUrl(),
+    false
+  );
+  window.addEventListener('popstate', function () {
+    setDashboardView(
+      requiresAuthentication ? 'home' : inferDashboardViewFromUrl(),
+      false
+    );
+  });
+
   function getModal(name) {
     return document.querySelector('.wallet-modal[data-wallet-modal="' + name + '"]');
   }
@@ -546,7 +642,630 @@
     syncLock();
   }
 
+
+  // reward-chest-preview-v2
+  const rewardChestCatalogNode = document.getElementById(
+    'wallet-reward-chest-catalog'
+  );
+  let rewardChestCatalog = new Map();
+
+  if (rewardChestCatalogNode) {
+    try {
+      const parsedCatalog = JSON.parse(
+        rewardChestCatalogNode.textContent || '[]'
+      );
+      rewardChestCatalog = new Map(
+        parsedCatalog
+          .filter(function (row) {
+            return row && row.key;
+          })
+          .map(function (row) {
+            return [row.key, row];
+          })
+      );
+    } catch (error) {
+      rewardChestCatalog = new Map();
+    }
+  }
+
+  function normalizeRewardPreviewRarity(value) {
+    const rarity = String(value || 'common').toLowerCase();
+    return rarity === 'jackpot' ? 'legendary' : rarity;
+  }
+
+
+
+  function openRewardChestPreview(chestKey) {
+    const chest = rewardChestCatalog.get(chestKey);
+    const modal = getModal('reward-chest-preview');
+
+    if (!chest || !modal) {
+      return;
+    }
+
+    const title = modal.querySelector(
+      '[data-reward-chest-modal-title]'
+    );
+    const drops = modal.querySelector(
+      '[data-reward-chest-modal-drops]'
+    );
+
+    if (!title || !drops) {
+      return;
+    }
+
+    title.textContent = chest.label || 'Reward Chest';
+    drops.innerHTML = '';
+
+    const rarityRanks = {
+      common: 1,
+      uncommon: 2,
+      rare: 3,
+      epic: 4,
+      legendary: 5,
+    };
+    const previewDrops = Array.isArray(chest.drops)
+      ? chest.drops.slice().sort(function (left, right) {
+        const leftRarity = normalizeRewardPreviewRarity(
+          left && left.rarity
+        );
+        const rightRarity = normalizeRewardPreviewRarity(
+          right && right.rarity
+        );
+
+        return (
+          (rarityRanks[rightRarity] || 0) -
+          (rarityRanks[leftRarity] || 0)
+        );
+      })
+      : [];
+
+    previewDrops.forEach(function (drop, index) {
+      const rarity = normalizeRewardPreviewRarity(
+        drop.rarity
+      );
+      const fullLabel = String(drop.label || '');
+      const amountLabel = fullLabel.replace(
+        /\s+tokens?$/i,
+        ''
+      );
+
+      const row = document.createElement('li');
+      row.className = 'wallet-reward-chest-modal__drop';
+      row.setAttribute('data-rarity', rarity);
+      row.setAttribute('aria-label', fullLabel);
+      row.style.setProperty('--drop-order', String(index));
+
+      row.innerHTML =
+        '<span class="wallet-reward-chest-modal__badge-wrap">' +
+          '<img class="wallet-reward-chest-modal__badge" src="' +
+            escapeHtml(drop.rarity_image_url || '') +
+            '" alt="">' +
+        '</span>' +
+        '<span class="wallet-reward-chest-modal__drop-copy">' +
+          '<span class="wallet-reward-chest-modal__rarity">' +
+            escapeHtml(
+              drop.rarity_label ||
+              rarity.toUpperCase()
+            ) +
+          '</span>' +
+          '<span class="wallet-reward-chest-modal__value">' +
+            '<strong class="wallet-reward-chest-modal__amount">' +
+              escapeHtml(amountLabel) +
+            '</strong>' +
+            '<span class="wallet-reward-chest-modal__unit">' +
+              'TOKENS' +
+            '</span>' +
+          '</span>' +
+        '</span>' +
+        '<span class="wallet-reward-chest-modal__art-frame">' +
+          '<img class="wallet-reward-chest-modal__art" src="' +
+            escapeHtml(drop.image_url || '') +
+            '" alt="">' +
+        '</span>';
+
+      drops.appendChild(row);
+    });
+
+    openModal('reward-chest-preview');
+  }
+
+
+  // interactive-chest-opening-v2
+  const chestOpeningOverlay = document.querySelector(
+    '[data-wallet-chest-opening]'
+  );
+  const chestOpeningTrigger = chestOpeningOverlay
+    ? chestOpeningOverlay.querySelector(
+      '[data-wallet-chest-opening-trigger]'
+    )
+    : null;
+  const chestOpeningCollect = chestOpeningOverlay
+    ? chestOpeningOverlay.querySelector(
+      '[data-wallet-chest-opening-collect]'
+    )
+    : null;
+  const chestOpeningBackdrop = chestOpeningOverlay
+    ? chestOpeningOverlay.querySelector(
+      '.wallet-chest-opening__backdrop'
+    )
+    : null;
+  let chestOpeningTimers = [];
+  let chestOpeningRarity = 'reward';
+  let chestOpeningPending = null;
+
+  function clearChestOpeningTimers() {
+    chestOpeningTimers.forEach(function (timerId) {
+      window.clearTimeout(timerId);
+    });
+    chestOpeningTimers = [];
+  }
+
+  function setChestOpeningText(selector, value) {
+    if (!chestOpeningOverlay) {
+      return;
+    }
+    const node = chestOpeningOverlay.querySelector(selector);
+    if (node) {
+      node.textContent = value;
+    }
+  }
+
+  function setChestOpeningImage(selector, value) {
+    if (!chestOpeningOverlay) {
+      return;
+    }
+    const node = chestOpeningOverlay.querySelector(selector);
+    if (node) {
+      node.src = value || '';
+    }
+  }
+
+  function resetChestOpeningOutcome() {
+    chestOpeningRarity = 'reward';
+    setChestOpeningText(
+      '[data-wallet-chest-opening-source]',
+      ''
+    );
+    setChestOpeningText(
+      '[data-wallet-chest-opening-amount]',
+      '0'
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-drop-image]',
+      ''
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-rarity-image]',
+      ''
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-token-icon]',
+      ''
+    );
+  }
+
+  function applyChestOpeningResult(opening) {
+    chestOpeningRarity = String(
+      opening.rarity || 'reward'
+    ).toLowerCase();
+
+    setChestOpeningText(
+      '[data-wallet-chest-opening-source]',
+      opening.rarity_label ||
+        String(opening.rarity || 'reward').toUpperCase()
+    );
+    setChestOpeningText(
+      '[data-wallet-chest-opening-amount]',
+      opening.amount_display ||
+        String(opening.amount_tokens || 0)
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-closed]',
+      opening.closed_image_url
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-opened]',
+      opening.opened_image_url
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-drop-image]',
+      opening.drop_image_url
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-rarity-image]',
+      opening.rarity_image_url
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-token-icon]',
+      opening.token_icon_url
+    );
+  }
+
+  function showChestOpening(opening, form) {
+    if (
+      !chestOpeningOverlay ||
+      !opening ||
+      opening.pending !== true ||
+      !opening.grant_public_id ||
+      !form
+    ) {
+      window.location.reload();
+      return;
+    }
+
+    clearChestOpeningTimers();
+    chestOpeningPending = {
+      form: form,
+      grantPublicId: String(opening.grant_public_id),
+    };
+
+    chestOpeningOverlay.hidden = false;
+    chestOpeningOverlay.setAttribute('aria-hidden', 'false');
+    chestOpeningOverlay.setAttribute('data-state', 'closed');
+    chestOpeningOverlay.setAttribute('data-rarity', 'mystery');
+
+    resetChestOpeningOutcome();
+    setChestOpeningText(
+      '[data-wallet-chest-opening-hint]',
+      'Tap the chest to open'
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-closed]',
+      opening.closed_image_url
+    );
+    setChestOpeningImage(
+      '[data-wallet-chest-opening-opened]',
+      opening.opened_image_url
+    );
+
+    if (chestOpeningCollect) {
+      chestOpeningCollect.classList.remove(
+        'wallet-chest-opening__collect--visible'
+      );
+      chestOpeningCollect.setAttribute('aria-hidden', 'true');
+    }
+    if (chestOpeningTrigger) {
+      chestOpeningTrigger.disabled = false;
+    }
+
+    document.documentElement.classList.add(
+      'wallet-chest-opening-active'
+    );
+    document.body.classList.add(
+      'wallet-chest-opening-active'
+    );
+  }
+
+  function scheduleChestOpeningReveal(elapsedMs) {
+    const openedDelay = Math.max(0, 620 - elapsedMs);
+
+    chestOpeningTimers.push(window.setTimeout(function () {
+      chestOpeningOverlay.setAttribute(
+        'data-rarity',
+        chestOpeningRarity
+      );
+      chestOpeningOverlay.setAttribute('data-state', 'opened');
+    }, openedDelay));
+
+    chestOpeningTimers.push(window.setTimeout(function () {
+      chestOpeningOverlay.setAttribute('data-state', 'revealed');
+      setChestOpeningText(
+        '[data-wallet-chest-opening-hint]',
+        ''
+      );
+    }, openedDelay + 310));
+
+    chestOpeningTimers.push(window.setTimeout(function () {
+      if (chestOpeningCollect) {
+        chestOpeningCollect.classList.add(
+          'wallet-chest-opening__collect--visible'
+        );
+        chestOpeningCollect.setAttribute('aria-hidden', 'false');
+      }
+    }, openedDelay + 800));
+  }
+
+  async function confirmChestOpening() {
+    if (
+      !chestOpeningOverlay ||
+      !chestOpeningPending ||
+      chestOpeningOverlay.getAttribute('data-state') !== 'closed'
+    ) {
+      return;
+    }
+
+    const pending = chestOpeningPending;
+    const startedAt = Date.now();
+
+    chestOpeningOverlay.setAttribute('data-state', 'opening');
+    setChestOpeningText(
+      '[data-wallet-chest-opening-hint]',
+      'Opening...'
+    );
+    if (chestOpeningTrigger) {
+      chestOpeningTrigger.disabled = true;
+    }
+
+    try {
+      const formData = new FormData(pending.form);
+      formData.set('confirm_open', '1');
+      formData.set('grant_public_id', pending.grantPublicId);
+
+      const response = await window.fetch(pending.form.action, {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        payload = null;
+      }
+
+      if (!response.ok || !payload || !payload.ok) {
+        throw new Error(
+          payload && payload.error
+            ? payload.error
+            : 'Could not open the Reward Chest.'
+        );
+      }
+      if (!payload.opening || payload.opening.pending === true) {
+        throw new Error('The Reward Chest result is missing.');
+      }
+
+      applyChestOpeningResult(payload.opening);
+      chestOpeningPending = null;
+      scheduleChestOpeningReveal(Date.now() - startedAt);
+    } catch (error) {
+      chestOpeningOverlay.setAttribute('data-state', 'closed');
+      chestOpeningOverlay.setAttribute('data-rarity', 'mystery');
+      setChestOpeningText(
+        '[data-wallet-chest-opening-hint]',
+        'Tap the chest to try again'
+      );
+      if (chestOpeningTrigger) {
+        chestOpeningTrigger.disabled = false;
+      }
+      window.alert(
+        error && error.message
+          ? error.message
+          : 'Could not open the Reward Chest.'
+      );
+    }
+  }
+
+  function finishChestOpening() {
+    window.location.reload();
+  }
+
+  async function submitChestClaimForm(form) {
+    if (
+      !form ||
+      form.getAttribute('data-wallet-chest-submitting') === 'true'
+    ) {
+      return;
+    }
+
+    form.setAttribute('data-wallet-chest-submitting', 'true');
+    const submitButton = form.querySelector(
+      'button[type="submit"], input[type="submit"]'
+    );
+    if (submitButton) {
+      submitButton.disabled = true;
+    }
+
+    try {
+      const response = await window.fetch(form.action, {
+        method: 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        payload = null;
+      }
+
+      if (!response.ok || !payload || !payload.ok) {
+        throw new Error(
+          payload && payload.error
+            ? payload.error
+            : 'Could not prepare the Reward Chest.'
+        );
+      }
+
+      if (payload.reload) {
+        window.location.reload();
+        return;
+      }
+      if (!payload.opening || payload.opening.pending !== true) {
+        throw new Error('Could not prepare the Reward Chest.');
+      }
+
+      showChestOpening(payload.opening, form);
+    } catch (error) {
+      form.removeAttribute('data-wallet-chest-submitting');
+      if (submitButton) {
+        submitButton.disabled = false;
+      }
+      window.alert(
+        error && error.message
+          ? error.message
+          : 'Could not prepare the Reward Chest.'
+      );
+    }
+  }
+
+  document.addEventListener('submit', function (event) {
+    const form = event.target && event.target.closest
+      ? event.target.closest('[data-wallet-chest-claim-form]')
+      : null;
+
+    if (!form || requiresAuthentication) {
+      return;
+    }
+
+    event.preventDefault();
+    submitChestClaimForm(form);
+  });
+
+  if (chestOpeningTrigger) {
+    chestOpeningTrigger.addEventListener(
+      'click',
+      confirmChestOpening
+    );
+  }
+
+  if (chestOpeningCollect) {
+    chestOpeningCollect.addEventListener(
+      'click',
+      finishChestOpening
+    );
+  }
+
+  if (chestOpeningBackdrop) {
+    chestOpeningBackdrop.addEventListener('click', function () {
+      if (
+        chestOpeningOverlay &&
+        chestOpeningOverlay.getAttribute('data-state') === 'revealed'
+      ) {
+        finishChestOpening();
+      }
+    });
+  }
+
+  function getReferralUrl() {
+    const module = document.querySelector('[data-wallet-module="referral"]');
+    return module ? module.getAttribute('data-referral-url') || '' : '';
+  }
+
+  function flashReferralLabel(button, text) {
+    const label = button.querySelector('[data-wallet-referral-label]');
+    if (!label) {
+      return;
+    }
+    const original = label.textContent;
+    label.textContent = text;
+    window.setTimeout(function () {
+      label.textContent = original;
+    }, 1600);
+  }
+
+  function copyReferralUrl(button) {
+    const url = getReferralUrl();
+    if (!url) {
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () {
+        flashReferralLabel(button, 'Copied');
+      });
+      return;
+    }
+
+    const input = document.createElement('textarea');
+    input.value = url;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    document.body.removeChild(input);
+    flashReferralLabel(button, 'Copied');
+  }
+
   document.addEventListener('click', function (event) {
+    const referralCopy = event.target.closest('[data-wallet-referral-copy]');
+    const chestInfoButton = event.target.closest(
+      '[data-reward-chest-trigger]'
+    );
+    if (chestInfoButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      openRewardChestPreview(
+        chestInfoButton.getAttribute(
+          'data-reward-chest-trigger'
+        ) || ''
+      );
+      return;
+    }
+
+    const clickableChest = event.target.closest(
+      '.wallet-game-reward[data-reward-chest], ' +
+      '[data-reward-chest-click]'
+    );
+    if (clickableChest) {
+      const nestedControl = event.target.closest(
+        'a, button, input, select, textarea, label, form'
+      );
+
+      if (!nestedControl) {
+        event.preventDefault();
+        openRewardChestPreview(
+          clickableChest.getAttribute('data-reward-chest') ||
+          clickableChest.getAttribute('data-reward-chest-click') ||
+          ''
+        );
+        return;
+      }
+    }
+
+    if (referralCopy) {
+      event.preventDefault();
+      copyReferralUrl(referralCopy);
+      return;
+    }
+
+    const referralShare = event.target.closest('[data-wallet-referral-share]');
+    if (referralShare) {
+      event.preventDefault();
+      const url = getReferralUrl();
+      if (!url) {
+        return;
+      }
+      if (navigator.share) {
+        navigator.share({
+          title: 'Join me',
+          text: 'Join using my referral link.',
+          url: url,
+        }).catch(function () {});
+      } else {
+        copyReferralUrl(referralShare);
+      }
+      return;
+    }
+
+    const dashboardViewButton = event.target.closest('[data-wallet-dashboard-open]');
+    if (dashboardViewButton) {
+      event.preventDefault();
+      setDashboardView(dashboardViewButton.getAttribute('data-wallet-dashboard-open') || 'home', true);
+      return;
+    }
+
+    const scrollButton = event.target.closest('[data-wallet-scroll-to]');
+    if (scrollButton) {
+      event.preventDefault();
+      const target = document.getElementById(scrollButton.getAttribute('data-wallet-scroll-to'));
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
+    }
+
     const openButton = event.target.closest('[data-wallet-open]');
     if (openButton) {
       event.preventDefault();
