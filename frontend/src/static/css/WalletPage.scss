@@ -4348,7 +4348,7 @@ body.wallet-chest-opening-active {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows:
-    6%
+    12%
     minmax(0, 1fr)
     3%
     9%;
@@ -4443,8 +4443,8 @@ body.wallet-chest-opening-active {
 
 .wallet-chest-opening__rarity-image {
   display: block;
-  width: clamp(34px, 10cqw, 44px);
-  height: clamp(34px, 10cqw, 44px);
+  width: clamp(54px, 16cqw, 68px);
+  height: clamp(54px, 16cqw, 68px);
   flex: 0 0 auto;
   object-fit: contain;
   filter:
@@ -4487,7 +4487,7 @@ body.wallet-chest-opening-active {
 .wallet-chest-opening__drop {
   position: absolute;
   z-index: 5;
-  top: 3cqw;
+  top: 6cqw;
   left: 0;
   width: 100%;
   display: grid;
