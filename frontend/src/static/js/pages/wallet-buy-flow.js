@@ -690,10 +690,43 @@
     title.textContent = chest.label || 'Reward Chest';
     drops.innerHTML = '';
 
+    const previewTiers = [
+      { key: 'common', label: 'COMMON' },
+      { key: 'uncommon', label: 'UNCOMMON' },
+      { key: 'rare', label: 'RARE' },
+      { key: 'epic', label: 'EPIC' },
+      { key: 'jackpot', label: 'JACKPOT' },
+    ];
+
     (Array.isArray(chest.drop_labels) ? chest.drop_labels : [])
-      .forEach(function (dropLabel) {
+      .forEach(function (dropLabel, index) {
+        const tier = previewTiers[
+          Math.min(index, previewTiers.length - 1)
+        ];
+        const fullLabel = String(dropLabel || '');
+        const amountLabel = fullLabel.replace(/\s+tokens?$/i, '');
+
         const row = document.createElement('li');
-        row.textContent = dropLabel;
+        row.className = 'wallet-reward-chest-modal__drop';
+        row.setAttribute('data-rarity', tier.key);
+        row.setAttribute('aria-label', fullLabel);
+        row.style.setProperty('--drop-order', String(index));
+
+        row.innerHTML =
+          '<span class="wallet-reward-chest-modal__sigil" ' +
+            'aria-hidden="true"><i></i></span>' +
+          '<span class="wallet-reward-chest-modal__drop-copy">' +
+            '<span class="wallet-reward-chest-modal__rarity">' +
+              escapeHtml(tier.label) +
+            '</span>' +
+            '<strong class="wallet-reward-chest-modal__amount">' +
+              escapeHtml(amountLabel) +
+            '</strong>' +
+            '<span class="wallet-reward-chest-modal__unit">TOKENS</span>' +
+          '</span>' +
+          '<span class="wallet-reward-chest-modal__coin" ' +
+            'aria-hidden="true">CF</span>';
+
         drops.appendChild(row);
       });
 
