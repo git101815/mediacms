@@ -161,9 +161,9 @@
             data-wallet-quest-ends-at="{{ quest_board.ends_at_iso }}"
           >
             <div class="wallet-game-panel__head">
-              <div><div class="wallet-game-card__title"><i class="material-icons wallet-game-card__title-accent">track_changes</i><span>Quests Board</span></div><p>Complete missions to earn CF tokens!</p></div>
+              <div><div class="wallet-game-card__title"><i class="material-icons wallet-game-card__title-accent">track_changes</i><span>{{ quest_board.title }}</span></div><p>{{ quest_board.subtitle }}</p></div>
               {% if quest_board.show_schedule %}
-              <div class="wallet-game-quests__reset"><span>Resets in</span><strong data-wallet-quest-countdown>{{ quest_board.reset_label }}</strong></div>
+              <div class="wallet-game-quests__reset"><span>{{ quest_board.reset_prefix }}</span><strong data-wallet-quest-countdown>{{ quest_board.reset_label }}</strong></div>
               {% endif %}
             </div>
             <div class="wallet-game-quests__grid">
@@ -171,17 +171,17 @@
                 {% if not quest.empty %}
               <article class="wallet-game-quest{% if quest.claimed %} wallet-game-quest--claimed{% elif quest.complete %} wallet-game-quest--complete{% endif %}" data-wallet-quest="{{ quest.key }}">
                 <img src="{% static quest.icon_path %}" alt="">
-                <strong>{{ quest.title }}</strong>
-                <span>{{ quest.description }}</span>
+                <strong title="{{ quest.title }}">{{ quest.title }}</strong>
+                <span title="{{ quest.description }}">{{ quest.description }}</span>
                 <div class="wallet-game-quest__meter{% if not quest.complete %} wallet-game-quest__meter--amber{% endif %}"><i style="width:{{ quest.progress_percent }}%"></i></div>
-                <div class="wallet-game-quest__progress">{% if quest.progress_text %}{{ quest.progress_text }}{% else %}{{ quest.current }} / {{ quest.target }}{% endif %}</div>
+                <div class="wallet-game-quest__progress" title="{% if quest.progress_text %}{{ quest.progress_text }}{% else %}{{ quest.current }} / {{ quest.target }}{% endif %}">{% if quest.progress_text %}{{ quest.progress_text }}{% else %}{{ quest.current }} / {{ quest.target }}{% endif %}</div>
                 <div class="wallet-game-quest__reward">{% if quest.reward_kind == "chest" %}{{ quest.reward_display }} <img src="{% static quest.reward_image_path %}" alt="">{% else %}+{{ quest.reward_display }} <img src="{% static daily_rewards.assets.token_icon %}" alt="">{% endif %}</div>
                 {% if quest.claimed %}
-                <button type="button" class="wallet-game-quest__button--claimed" disabled>Claimed</button>
+                <button type="button" class="wallet-game-quest__button--claimed" disabled>{{ quest.button_label }}</button>
                 {% elif quest.can_claim %}
                 <form method="post" action="{{ quest.claim_url }}" style="display:contents"{% if quest.reward_kind == "chest" %} data-wallet-chest-claim-form data-wallet-chest-source="weekly-quest"{% endif %}>
                   {% csrf_token %}
-                  <button type="submit" data-wallet-action="claim-quest">{% if quest.reward_kind == "chest" %}Open Chest{% else %}Claim{% endif %}</button>
+                  <button type="submit" data-wallet-action="claim-quest">{{ quest.button_label }}</button>
                 </form>
                 {% elif quest.share_action == "site" %}
                 <button type="button" data-wallet-action="share-site" data-wallet-weekly-share-site="{{ quest_board.site_link_url }}">{{ quest.button_label }}</button>

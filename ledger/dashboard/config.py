@@ -165,7 +165,7 @@ WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS = {
 # The existing one-time quests remain available until claimed. When one is
 # still active it occupies one of the four existing cards; no second board or
 # alternate layout is rendered.
-QUEST_BOARD_CONFIG_VERSION = 2
+QUEST_BOARD_CONFIG_VERSION = 3
 QUEST_BOARD_ENABLED = True
 QUEST_BOARD_SLOT_COUNT = 4
 QUEST_BOARD_RESET_LABEL = "One-time"
@@ -189,9 +189,9 @@ QUEST_BOARD_QUESTS = (
     },
 )
 
-# Weekly quest configuration. Titles, targets, rewards, platforms and complete
-# four-card rotations are configured here. The implementation does not define
-# additional commercial/spending quests outside this mapping.
+# Weekly quest configuration. Every visible string and every economic value for
+# weekly quests belongs here. Set ``enabled`` to False to hide one definition
+# even when its key is present in the selected rotation.
 QUEST_BOARD_WEEKLY_ENABLED = True
 QUEST_BOARD_WEEKLY_START_AT = "2026-07-28T00:00:00+03:00"
 QUEST_BOARD_VISITOR_COOKIE_SECONDS = 180 * 24 * 60 * 60
@@ -208,8 +208,17 @@ QUEST_BOARD_EXCLUDED_PAGE_PREFIXES = (
     "/not_the_admin_panel/",
 )
 
+# Quest Board interface labels.
+QUEST_BOARD_WEEKLY_TITLE = "Quests Board"
+QUEST_BOARD_WEEKLY_SUBTITLE = "Complete missions to earn CF tokens!"
+QUEST_BOARD_WEEKLY_RESET_PREFIX = "Resets in"
+QUEST_BOARD_WEEKLY_CLAIMED_LABEL = "Claimed"
+QUEST_BOARD_WEEKLY_OPEN_CHEST_LABEL = "Open Chest"
+QUEST_BOARD_WEEKLY_CLAIM_LABEL = "Claim"
+
 QUEST_BOARD_WEEKLY_QUESTS = {
     "share_site": {
+        "enabled": True,
         "title": "Share the Site",
         "description": "Bring 10 unique visitors who open a second page",
         "condition": "site_visitors",
@@ -218,9 +227,14 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "action_url": "",
         "landing_path": "/",
         "target": 10,
-        "reward": {"kind": "chest", "chest": "small_chest"},
+        "progress_text": "{current} / {target}",
+        "reward": {
+            "kind": "chest",
+            "chest": "small_chest",
+        },
     },
     "share_video_x": {
+        "enabled": True,
         "title": "Share a Video on X",
         "description": "Get one verified visit from X",
         "condition": "video_share",
@@ -229,9 +243,15 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "action_label": "Choose Video",
         "action_url": "/latest",
         "target": 1,
-        "reward": {"kind": "chest", "chest": "small_chest"},
+        "progress_pending_text": "Waiting for a verified visit",
+        "progress_complete_text": "Verified",
+        "reward": {
+            "kind": "chest",
+            "chest": "small_chest",
+        },
     },
     "share_video_reddit": {
+        "enabled": True,
         "title": "Share a Video on Reddit",
         "description": "Get one verified visit from Reddit",
         "condition": "video_share",
@@ -240,9 +260,15 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "action_label": "Choose Video",
         "action_url": "/latest",
         "target": 1,
-        "reward": {"kind": "chest", "chest": "small_chest"},
+        "progress_pending_text": "Waiting for a verified visit",
+        "progress_complete_text": "Verified",
+        "reward": {
+            "kind": "chest",
+            "chest": "small_chest",
+        },
     },
     "share_video_telegram": {
+        "enabled": True,
         "title": "Share a Video on Telegram",
         "description": "Get one verified visit from Telegram",
         "condition": "video_share",
@@ -251,9 +277,15 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "action_label": "Choose Video",
         "action_url": "/latest",
         "target": 1,
-        "reward": {"kind": "chest", "chest": "small_chest"},
+        "progress_pending_text": "Waiting for a verified visit",
+        "progress_complete_text": "Verified",
+        "reward": {
+            "kind": "chest",
+            "chest": "small_chest",
+        },
     },
     "share_video_vk": {
+        "enabled": True,
         "title": "Share a Video on VK",
         "description": "Get one verified visit from VK",
         "condition": "video_share",
@@ -262,9 +294,15 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "action_label": "Choose Video",
         "action_url": "/latest",
         "target": 1,
-        "reward": {"kind": "chest", "chest": "small_chest"},
+        "progress_pending_text": "Waiting for a verified visit",
+        "progress_complete_text": "Verified",
+        "reward": {
+            "kind": "chest",
+            "chest": "small_chest",
+        },
     },
     "community_drop": {
+        "enabled": True,
         "title": "Community Drop",
         "description": "Help shared links bring 1,000 unique visitors this week",
         "condition": "community_drop",
@@ -274,13 +312,19 @@ QUEST_BOARD_WEEKLY_QUESTS = {
         "target": 1,
         "personal_target": 1,
         "global_target": 1_000,
-        "reward": {"kind": "chest", "chest": "small_chest"},
+        "progress_text": (
+            "You {personal_current} / {personal_target}"
+            " · Community {global_current} / {global_target}"
+        ),
+        "reward": {
+            "kind": "chest",
+            "chest": "small_chest",
+        },
     },
 }
 
-# Each row is one complete four-card week. A still-unclaimed one-time starter
-# quest temporarily occupies the first card, so the first three weekly entries
-# remain visible until that starter reward is claimed.
+# Each row describes one complete four-slot week. Disabled definitions leave an
+# empty slot instead of silently replacing the configured quest.
 QUEST_BOARD_WEEKLY_ROTATIONS = (
     (
         "share_site",
@@ -295,6 +339,7 @@ QUEST_BOARD_WEEKLY_ROTATIONS = (
         "share_video_vk",
     ),
 )
+
 
 QUEST_BOARD_SOCIAL_HOSTS = {
     "fb": ("facebook.com", "l.facebook.com", "lm.facebook.com"),

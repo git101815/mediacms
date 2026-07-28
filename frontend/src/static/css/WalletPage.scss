@@ -2388,6 +2388,14 @@ $error-text: #ff9a9a;
 }
 
 /* Quest board */
+.wallet-game-quests {
+  padding: 16px 16px 12px;
+}
+
+.wallet-game-quests .wallet-game-panel__head {
+  margin-bottom: 10px;
+}
+
 .wallet-game-quests__reset {
   color: #aab0bc;
   font-size: 10px;
@@ -2396,7 +2404,7 @@ $error-text: #ff9a9a;
 
 .wallet-game-quests__reset strong {
   display: block;
-  margin-top: 3px;
+  margin-top: 2px;
   color: #fff;
   font-size: 12px;
 }
@@ -2411,11 +2419,21 @@ $error-text: #ff9a9a;
   align-items: stretch;
 }
 
+.wallet-game-quests--count-2 .wallet-game-quests__grid,
+.wallet-game-quests--count-3 .wallet-game-quests__grid,
 .wallet-game-quests--count-4 .wallet-game-quests__grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 @media (min-width: 1100px) {
+  .wallet-game-quests--count-2 .wallet-game-quests__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wallet-game-quests--count-3 .wallet-game-quests__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .wallet-game-quests--count-4 .wallet-game-quests__grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -2432,7 +2450,7 @@ $error-text: #ff9a9a;
   height: 100%;
   flex-direction: column;
   align-items: center;
-  padding: 7px;
+  padding: 8px 7px 7px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.065);
   border-radius: 11px;
@@ -2448,17 +2466,18 @@ $error-text: #ff9a9a;
 }
 
 .wallet-game-quest > img {
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  margin-bottom: 2px;
   object-fit: contain;
 }
 
 .wallet-game-quest > strong {
   display: -webkit-box;
   width: 100%;
-  height: 32px;
-  min-height: 32px;
+  height: 30px;
+  min-height: 30px;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -2473,6 +2492,7 @@ $error-text: #ff9a9a;
   width: 100%;
   height: 24px;
   min-height: 24px;
+  margin-top: 2px;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -2485,7 +2505,7 @@ $error-text: #ff9a9a;
 .wallet-game-quest__meter {
   width: 100%;
   height: 4px;
-  margin-top: 4px;
+  margin-top: 5px;
   overflow: hidden;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);

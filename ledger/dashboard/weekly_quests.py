@@ -63,8 +63,9 @@ class WeeklyQuestDefinition:
     personal_target: int
     global_target: int
     landing_path: str
-
-
+    progress_text: str
+    progress_pending_text: str
+    progress_complete_text: str
 
 
 def _weekly_enabled() -> bool:
@@ -163,7 +164,26 @@ def _active_keys(cycle: QuestCycle) -> tuple[str, ...]:
         )
     if len(set(keys)) != len(keys):
         raise ImproperlyConfigured("A quest rotation cannot contain duplicates")
-    return keys
+
+    definitions = config.QUEST_BOARD_WEEKLY_QUESTS
+    if not isinstance(definitions, dict):
+        raise ImproperlyConfigured(
+            "QUEST_BOARD_WEEKLY_QUESTS must be a dictionary"
+        )
+
+    active = []
+    for key in keys:
+        raw = definitions.get(key)
+        if not isinstance(raw, dict):
+            raise ImproperlyConfigured(f"Unknown weekly quest: {key}")
+        enabled = raw.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ImproperlyConfigured(
+                f"Quest {key}.enabled must be True or False"
+            )
+        if enabled:
+            active.append(key)
+    return tuple(active)
 
 
 def _definition_from_config(key: str) -> WeeklyQuestDefinition:
@@ -173,6 +193,12 @@ def _definition_from_config(key: str) -> WeeklyQuestDefinition:
     raw = definitions.get(key)
     if not isinstance(raw, dict):
         raise ImproperlyConfigured(f"Unknown weekly quest: {key}")
+
+    enabled = raw.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ImproperlyConfigured(f"Quest {key}.enabled must be True or False")
+    if not enabled:
+        raise ImproperlyConfigured(f"Quest {key} is disabled")
 
     condition = str(raw.get("condition") or "").strip()
     if condition not in {"site_visitors", "video_share", "community_drop"}:
@@ -188,7 +214,7 @@ def _definition_from_config(key: str) -> WeeklyQuestDefinition:
         )
 
     reward = raw.get("reward") or {}
-    if reward.get("kind") != "chest":
+    if not isinstance(reward, dict) or reward.get("kind") != "chest":
         raise ImproperlyConfigured(f"Quest {key} must use a chest reward")
     chest = config.get_reward_chest_definition(str(reward.get("chest") or ""))
 
@@ -209,6 +235,22 @@ def _definition_from_config(key: str) -> WeeklyQuestDefinition:
             f"Quest {key} references unknown social platform: {platform}"
         )
 
+    progress_text = str(raw.get("progress_text") or "").strip()
+    progress_pending_text = str(raw.get("progress_pending_text") or "").strip()
+    progress_complete_text = str(raw.get("progress_complete_text") or "").strip()
+
+    if condition == "video_share":
+        if not progress_pending_text:
+            raise ImproperlyConfigured(
+                f"Quest {key}.progress_pending_text cannot be empty"
+            )
+        if not progress_complete_text:
+            raise ImproperlyConfigured(
+                f"Quest {key}.progress_complete_text cannot be empty"
+            )
+    elif not progress_text:
+        raise ImproperlyConfigured(f"Quest {key}.progress_text cannot be empty")
+
     return WeeklyQuestDefinition(
         key=key,
         title=str(raw.get("title") or key).strip(),
@@ -225,6 +267,9 @@ def _definition_from_config(key: str) -> WeeklyQuestDefinition:
         personal_target=personal_target,
         global_target=global_target,
         landing_path=str(raw.get("landing_path") or "/").strip() or "/",
+        progress_text=progress_text,
+        progress_pending_text=progress_pending_text,
+        progress_complete_text=progress_complete_text,
     )
 
 
@@ -545,6 +590,20 @@ def _definition_for_campaign(campaign: QuestShareCampaign) -> WeeklyQuestDefinit
     raise ValidationError("The campaign quest is not active")
 
 
+def _format_progress_text(
+    *,
+    definition: WeeklyQuestDefinition,
+    template: str,
+    values: dict,
+) -> str:
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ImproperlyConfigured(
+            f"Quest {definition.key} has an invalid progress text template"
+        ) from exc
+
+
 def _quest_progress(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinition) -> dict:
     own_visits = QuestQualifiedVisit.objects.filter(
         cycle_key=cycle.key,
@@ -555,13 +614,21 @@ def _quest_progress(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinitio
             campaign__quest_key=definition.key,
             qualification_type=QuestQualifiedVisit.TYPE_SITE_SECOND_PAGE,
         ).count()
+        displayed_current = min(current, definition.target)
         complete = current >= definition.target
         return {
-            "current": min(current, definition.target),
+            "current": displayed_current,
             "target": definition.target,
             "complete": complete,
             "progress_percent": min(100, current * 100 // definition.target),
-            "progress_text": f"{min(current, definition.target)} / {definition.target}",
+            "progress_text": _format_progress_text(
+                definition=definition,
+                template=definition.progress_text,
+                values={
+                    "current": displayed_current,
+                    "target": definition.target,
+                },
+            ),
         }
 
     if definition.condition == "video_share":
@@ -571,16 +638,23 @@ def _quest_progress(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinitio
                 qualification_type=QuestQualifiedVisit.TYPE_VIDEO_PLATFORM,
             ).exists()
         )
+        complete = bool(current)
         return {
             "current": current,
-            "target": 1,
-            "complete": bool(current),
-            "progress_percent": 100 if current else 0,
-            "progress_text": "Verified" if current else "Waiting for a verified visit",
+            "target": definition.target,
+            "complete": complete,
+            "progress_percent": 100 if complete else 0,
+            "progress_text": (
+                definition.progress_complete_text
+                if complete
+                else definition.progress_pending_text
+            ),
         }
 
     personal = own_visits.count()
     global_current = QuestQualifiedVisit.objects.filter(cycle_key=cycle.key).count()
+    displayed_personal = min(personal, definition.personal_target)
+    displayed_global = min(global_current, definition.global_target)
     personal_percent = min(100, personal * 100 // definition.personal_target)
     global_percent = min(100, global_current * 100 // definition.global_target)
     complete = (
@@ -588,13 +662,19 @@ def _quest_progress(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinitio
         and global_current >= definition.global_target
     )
     return {
-        "current": min(personal, definition.personal_target),
+        "current": displayed_personal,
         "target": definition.personal_target,
         "complete": complete,
         "progress_percent": min(personal_percent, global_percent),
-        "progress_text": (
-            f"You {min(personal, definition.personal_target)} / {definition.personal_target}"
-            f" · Community {min(global_current, definition.global_target)} / {definition.global_target}"
+        "progress_text": _format_progress_text(
+            definition=definition,
+            template=definition.progress_text,
+            values={
+                "personal_current": displayed_personal,
+                "personal_target": definition.personal_target,
+                "global_current": displayed_global,
+                "global_target": definition.global_target,
+            },
         ),
     }
 
@@ -734,6 +814,14 @@ def _weekly_row(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinition) -
         grant = _ensure_reward_grant(user=user, cycle=cycle, definition=definition)
     claimed = bool(grant and grant.status == RewardChestGrant.STATUS_OPENED)
     can_claim = bool(grant and grant.status == RewardChestGrant.STATUS_PENDING)
+
+    if claimed:
+        button_label = str(config.QUEST_BOARD_WEEKLY_CLAIMED_LABEL)
+    elif can_claim:
+        button_label = str(config.QUEST_BOARD_WEEKLY_OPEN_CHEST_LABEL)
+    else:
+        button_label = definition.action_label
+
     return {
         "empty": False,
         "key": definition.key,
@@ -751,7 +839,7 @@ def _weekly_row(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinition) -
         "complete": progress["complete"],
         "claimed": claimed,
         "status": "claimed" if claimed else "complete" if progress["complete"] else "in_progress",
-        "button_label": definition.action_label,
+        "button_label": button_label,
         "can_claim": can_claim,
         "claim_url": reverse(
             "wallet_open_weekly_quest",
@@ -799,6 +887,9 @@ def build_weekly_quest_board_context(*, user) -> dict:
         "active_count": sum(1 for row in rows if not row.get("empty")),
         "completed_count": sum(1 for row in rows if row.get("complete")),
         "claimed_count": sum(1 for row in rows if row.get("claimed")),
+        "title": str(config.QUEST_BOARD_WEEKLY_TITLE),
+        "subtitle": str(config.QUEST_BOARD_WEEKLY_SUBTITLE),
+        "reset_prefix": str(config.QUEST_BOARD_WEEKLY_RESET_PREFIX),
         "reset_label": _countdown_label(cycle),
         "show_schedule": True,
         "slots": rows,
