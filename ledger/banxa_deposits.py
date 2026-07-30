@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 
+from ledger.fiat import fiat_amount_to_canonical_stable_units
 from ledger.models import (
     DepositSession,
     LEDGER_METADATA_VERSION,
@@ -20,12 +22,14 @@ from ledger.providers.banxa import (
     build_banxa_checkout_url,
     format_banxa_coin_amount,
     get_banxa_fiat_currency,
+    get_banxa_min_fiat_amount,
     get_banxa_network,
     get_banxa_payment_ttl_seconds,
     get_banxa_public_base_url,
     get_banxa_settlement_route_preferences,
 )
 from ledger.services import (
+    _build_token_pack_snapshot,
     list_available_deposit_options,
     open_user_deposit_session,
 )
@@ -55,6 +59,42 @@ def _absolute_banxa_return_url(session_public_id) -> str:
         kwargs={"public_id": session_public_id},
     )
     return f"{get_banxa_public_base_url()}{path}"
+
+
+def _banxa_minimum_canonical_amount() -> int:
+    return fiat_amount_to_canonical_stable_units(
+        get_banxa_min_fiat_amount(),
+        currency=get_banxa_fiat_currency(),
+    )
+
+
+def _validate_banxa_purchase_minimum(
+    *,
+    token_pack: TokenPack,
+    payment_price_bps=0,
+    payment_price_fixed_canonical=0,
+) -> None:
+    with transaction.atomic():
+        snapshot = _build_token_pack_snapshot(
+            token_pack=token_pack,
+            payment_price_bps=payment_price_bps,
+            payment_price_fixed_canonical=(
+                payment_price_fixed_canonical
+            ),
+        )
+
+    if int(snapshot["gross_stable_amount"]) < (
+        _banxa_minimum_canonical_amount()
+    ):
+        minimum = format(
+            get_banxa_min_fiat_amount(),
+            "f",
+        )
+        raise ValidationError(
+            "Selected token pack is below Banxa's "
+            f"{minimum} {get_banxa_fiat_currency()} "
+            "minimum purchase amount"
+        )
 
 
 def _ordered_banxa_settlement_routes() -> list[dict]:
@@ -163,6 +203,10 @@ def get_banxa_deposit_options() -> list[dict]:
 
     try:
         fiat_currency = get_banxa_fiat_currency()
+        minimum_fiat_amount = get_banxa_min_fiat_amount()
+        minimum_canonical_amount = (
+            _banxa_minimum_canonical_amount()
+        )
         settlement_routes = _ordered_banxa_settlement_routes()
     except Exception:
         return []
@@ -202,6 +246,14 @@ def get_banxa_deposit_options() -> list[dict]:
             "payment_requires_route_selection": False,
             "payment_open_new_tab": True,
             "payment_price_mode": "fixed",
+            "min_amount": max(
+                int(chosen["min_amount"]),
+                int(minimum_canonical_amount),
+            ),
+            "banxa_min_fiat_amount": format(
+                minimum_fiat_amount,
+                "f",
+            ),
             "banxa_checkout_fiat_currency": fiat_currency,
             "banxa_settlement_asset_code": asset_code,
             "banxa_settlement_network": (
@@ -226,6 +278,13 @@ def open_banxa_deposit_session(
         )
 
     _find_banxa_route(option_key)
+    _validate_banxa_purchase_minimum(
+        token_pack=token_pack,
+        payment_price_bps=payment_price_bps,
+        payment_price_fixed_canonical=(
+            payment_price_fixed_canonical
+        ),
+    )
 
     session = open_user_deposit_session(
         actor=actor,
@@ -271,8 +330,8 @@ def open_banxa_deposit_session(
         "checkout_url": _banxa_launch_url(
             session.public_id
         ),
-        "checkout_currency": "USD",
-        "checkout_amount": target_asset_amount,
+        "checkout_currency": get_banxa_fiat_currency(),
+        "checkout_amount": "",
         "target_asset_amount": target_asset_amount,
         "checkout_fiat_currency": (
             get_banxa_fiat_currency()
@@ -287,8 +346,8 @@ def open_banxa_deposit_session(
                 "banxa_public_checkout"
             ),
             "metadata_version": LEDGER_METADATA_VERSION,
-            "checkout_currency": "USD",
-            "checkout_amount": target_asset_amount,
+            "checkout_currency": get_banxa_fiat_currency(),
+            "checkout_amount": "",
             "banxa_target_asset_amount": (
                 target_asset_amount
             ),
@@ -377,8 +436,8 @@ def prepare_banxa_browser_launch(
             "checkout_url": _banxa_launch_url(
                 session.public_id
             ),
-            "checkout_currency": "USD",
-            "checkout_amount": target_asset_amount,
+            "checkout_currency": get_banxa_fiat_currency(),
+            "checkout_amount": "",
             "target_asset_amount": target_asset_amount,
             "checkout_fiat_currency": (
                 get_banxa_fiat_currency()
@@ -392,8 +451,8 @@ def prepare_banxa_browser_launch(
         session=session,
         provider=provider,
         extra_metadata={
-            "checkout_currency": "USD",
-            "checkout_amount": target_asset_amount,
+            "checkout_currency": get_banxa_fiat_currency(),
+            "checkout_amount": "",
             "banxa_target_asset_amount": (
                 target_asset_amount
             ),

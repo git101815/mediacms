@@ -19,6 +19,7 @@ BANXA_REQUIRED_SETTLEMENT_ASSET_CODE = "USDC"
 
 BANXA_DEFAULT_CHECKOUT_BASE_URL = "https://checkout.banxa.com"
 BANXA_DEFAULT_FIAT_CURRENCY = "EUR"
+BANXA_DEFAULT_MIN_FIAT_AMOUNT = Decimal("10")
 BANXA_DEFAULT_PAYMENT_TTL_SECONDS = 7 * 24 * 60 * 60
 BANXA_DEFAULT_SETTLEMENT_ROUTE_PREFERENCES = ("base:USDC",)
 
@@ -139,6 +140,25 @@ def get_banxa_fiat_currency() -> str:
     return currency
 
 
+def get_banxa_min_fiat_amount() -> Decimal:
+    raw_value = _setting_str(
+        "BANXA_MIN_FIAT_AMOUNT",
+        format(BANXA_DEFAULT_MIN_FIAT_AMOUNT, "f"),
+    )
+    try:
+        amount = Decimal(raw_value)
+    except Exception as exc:
+        raise ImproperlyConfigured(
+            "BANXA_MIN_FIAT_AMOUNT must be a decimal number"
+        ) from exc
+
+    if not amount.is_finite() or amount <= 0:
+        raise ImproperlyConfigured(
+            "BANXA_MIN_FIAT_AMOUNT must be greater than zero"
+        )
+    return amount
+
+
 def get_banxa_payment_ttl_seconds() -> int:
     return _setting_int(
         "BANXA_PAYMENT_TTL_SECONDS",
@@ -246,6 +266,7 @@ def banxa_enabled() -> bool:
         get_banxa_checkout_base_url()
         get_banxa_public_base_url()
         get_banxa_fiat_currency()
+        get_banxa_min_fiat_amount()
         get_banxa_payment_ttl_seconds()
         get_banxa_settlement_route_preferences()
     except ImproperlyConfigured:
@@ -264,6 +285,7 @@ __all__ = [
     "format_banxa_coin_amount",
     "get_banxa_checkout_base_url",
     "get_banxa_fiat_currency",
+    "get_banxa_min_fiat_amount",
     "get_banxa_network",
     "get_banxa_payment_ttl_seconds",
     "get_banxa_public_base_url",
