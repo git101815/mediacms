@@ -143,10 +143,21 @@ MTPERELIN_CACHE_SECONDS = 300
 MTPERELIN_QUOTE_CACHE_SECONDS = 60
 MTPERELIN_QUOTE_MAX_AGE_SECONDS = 30 * 60
 
+BANXA_ENABLED = "true"
+BANXA_CHECKOUT_BASE_URL = "https://checkout.banxa.com"
+BANXA_PUBLIC_BASE_URL = FRONTEND_HOST
+BANXA_FIAT_CURRENCY = "EUR"
+BANXA_MIN_FIAT_AMOUNT = "10"
+BANXA_SETTLEMENT_ROUTE_PREFERENCES = (
+    "base:USDC",
+)
+BANXA_PAYMENT_TTL_SECONDS = 7 * 24 * 60 * 60
+
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "paypal_us": 600,
     "revolut_eu": 500,
     "transak_card": 600,
+    "banxa_card": 600,
     "dfx_bank": 500,
     "mtpelerin_eur": 500,
     "mtpelerin_usd": 500,
@@ -156,6 +167,7 @@ WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
     "paypal_us": 1.3,
     "revolut_eu": 1.6,
     "transak_card": 1.3,
+    "banxa_card": 1.3,
     "dfx_bank": 1.8,
     "mtpelerin_eur": 2,
     "mtpelerin_usd": 1.5,

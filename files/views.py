@@ -156,6 +156,7 @@ from ledger.providers.malum import MALUM_CHAIN, MALUM_PROVIDER_KEY
 from ledger.providers.paygate import PAYGATE_CHAIN, PAYGATE_PROVIDER_KEY
 from ledger.providers.dfx import DFX_PROVIDER_KEY
 from ledger.providers.mtpelerin import MTPERELIN_PROVIDER_KEY
+from ledger.providers.banxa import BANXA_PROVIDER_KEY
 from ledger.provider_deposits import (
     get_malum_deposit_option,
     open_malum_deposit_session,
@@ -173,6 +174,11 @@ from ledger.mtpelerin_deposits import (
     get_mtpelerin_deposit_options,
     open_mtpelerin_deposit_session,
     prepare_mtpelerin_browser_launch,
+)
+from ledger.banxa_deposits import (
+    get_banxa_deposit_options,
+    open_banxa_deposit_session,
+    prepare_banxa_browser_launch,
 )
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
@@ -254,6 +260,7 @@ PROVIDER_CHECKOUT_KEYS = {
     PAYGATE_PROVIDER_KEY,
     DFX_PROVIDER_KEY,
     MTPERELIN_PROVIDER_KEY,
+    BANXA_PROVIDER_KEY,
 }
 PROVIDER_CHECKOUT_CHAINS = {MALUM_CHAIN, PAYGATE_CHAIN}
 
@@ -543,7 +550,9 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
     provider_id = str(decorated.get("paygate_provider_id") or "").strip().lower()
     payment_method_type = str(decorated.get("payment_method_type") or "").strip().lower()
 
-    if provider_key == DFX_PROVIDER_KEY:
+    if provider_key == BANXA_PROVIDER_KEY:
+        group_key = "banxa_card"
+    elif provider_key == DFX_PROVIDER_KEY:
         group_key = "dfx_bank"
     elif provider_key == MTPERELIN_PROVIDER_KEY:
         mtp_currency = str(decorated.get("payment_currency") or "").strip().lower()
@@ -653,6 +662,16 @@ def _build_wallet_deposit_options() -> list[dict]:
                 **mtpelerin_option,
                 "min_amount_display": _format_canonical_stable_amount(
                     mtpelerin_option["min_amount"]
+                ),
+            }
+        )
+
+    for banxa_option in get_banxa_deposit_options():
+        options.append(
+            {
+                **banxa_option,
+                "min_amount_display": _format_canonical_stable_amount(
+                    banxa_option["min_amount"]
                 ),
             }
         )
@@ -1353,6 +1372,22 @@ def wallet_deposit_request(request):
             return redirect("wallet_deposit_session", public_id=session.public_id)
 
         if selected_option.get("payment_method_type") == "provider" and selected_option.get(
+                "provider_key") == BANXA_PROVIDER_KEY:
+            session = open_banxa_deposit_session(
+                actor=request.user,
+                wallet=wallet_obj,
+                option_key=selected_option.get("deposit_route_key") or "",
+                token_pack=token_pack,
+                payment_price_bps=payment_price_bps,
+                payment_price_fixed_canonical=payment_price_fixed_canonical,
+            )
+            provider = (session.metadata or {}).get("payment_provider") or {}
+            checkout_url = (provider.get("checkout_url") or "").strip()
+            if checkout_url and session.status == DepositSession.STATUS_AWAITING_PAYMENT:
+                return redirect(checkout_url)
+            return redirect("wallet_deposit_session", public_id=session.public_id)
+
+        if selected_option.get("payment_method_type") == "provider" and selected_option.get(
                 "provider_key") == MTPERELIN_PROVIDER_KEY:
             session = open_mtpelerin_deposit_session(
                 actor=request.user,
@@ -1555,6 +1590,51 @@ def wallet_mtpelerin_launch(request, public_id):
     response["Pragma"] = "no-cache"
     response["Expires"] = "0"
     response["Referrer-Policy"] = "origin"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@never_cache
+@login_required
+def wallet_banxa_launch(request, public_id):
+    session = get_object_or_404(
+        DepositSession,
+        public_id=public_id,
+        user=request.user,
+    )
+    provider = (session.metadata or {}).get("payment_provider") or {}
+    if provider.get("key") != BANXA_PROVIDER_KEY:
+        raise Http404
+
+    try:
+        launch = prepare_banxa_browser_launch(
+            session=session,
+            actor=request.user,
+        )
+        checkout_url = str(launch.get("checkout_url") or "").strip()
+        parsed_checkout_url = urlparse(checkout_url)
+        if (
+            parsed_checkout_url.scheme != "https"
+            or not parsed_checkout_url.netloc
+        ):
+            raise ImproperlyConfigured(
+                "Banxa checkout URL must use HTTPS"
+            )
+    except (DjangoValidationError, ImproperlyConfigured) as exc:
+        messages.error(
+            request,
+            _extract_wallet_form_error(exc),
+        )
+        return redirect(
+            "wallet_deposit_session",
+            public_id=session.public_id,
+        )
+
+    response = HttpResponseRedirect(checkout_url)
+    response["Cache-Control"] = "no-store, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    response["Referrer-Policy"] = "no-referrer"
     response["X-Content-Type-Options"] = "nosniff"
     return response
 

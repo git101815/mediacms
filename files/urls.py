@@ -106,6 +106,11 @@ urlpatterns = [
         views.wallet_mtpelerin_launch,
         name="wallet_mtpelerin_launch",
     ),
+    path(
+        "wallet/deposits/<uuid:public_id>/banxa-launch",
+        views.wallet_banxa_launch,
+        name="wallet_banxa_launch",
+    ),
     path("api/payments/malum/webhook", malum_webhooks.malum_webhook, name="malum_webhook"),
     path("api/payments/paygate/callback", paygate_webhooks.paygate_callback, name="paygate_callback"),
     re_path(r"^wallet$", views.wallet, name="wallet"),
