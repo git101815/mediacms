@@ -72,7 +72,7 @@ PAYGATE_API_BASE_URL = "https://api.paygate.to"
 PAYGATE_CHECKOUT_BASE_URL = "https://checkout.celebfakes.ru"
 PAYGATE_PUBLIC_BASE_URL = "https://celebfakes.ru"
 PAYGATE_USDC_POLYGON_WALLET = os.getenv("PAYGATE_USDC_POLYGON_WALLET", "").strip()
-PAYGATE_PROVIDER_IDS = ("paypal", "revolut", "transak")
+PAYGATE_PROVIDER_IDS = ("paypal", "revolut") #transak
 PAYGATE_PROVIDER_LABELS = {
     "paypal": "PayPal (US only)",
     "revolut": "Revolut (EU only)",
