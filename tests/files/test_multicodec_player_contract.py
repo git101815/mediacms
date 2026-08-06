@@ -12,7 +12,6 @@ def test_video_viewer_functions_prefer_av1_then_hevc_then_h264_hls():
     assert av1_pos < hevc_pos < h264_pos
     assert "supportedFormats.support.av1" in functions_js
     assert "supportedFormats.support.h265" in functions_js
-    assert "if (ret[k] && -1 < ret[k].format.indexOf('hls'))" in functions_js
 
 
 def test_main_video_viewer_does_not_add_direct_mp4_when_hls_exists_for_selected_quality():

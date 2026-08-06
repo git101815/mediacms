@@ -9,6 +9,9 @@ import './VideoPlayer.scss';
 import 'videojs-contrib-ads/dist/videojs-contrib-ads.css';
 import 'videojs-ima/dist/videojs.ima.css';
 
+const VALID_HLS_RESOLUTIONS = [144, 240, 360, 480, 720, 1080, 1440, 2160];
+const HLS_QUALITY_RETRY_LIMIT = 50;
+
 export function formatInnerLink(url, baseUrl) {
   let link = urlParse(url, {});
 
@@ -17,6 +20,220 @@ export function formatInnerLink(url, baseUrl) {
   }
 
   return link.toString();
+}
+
+function hlsSourceForQuality(info, quality) {
+  const item = info && info[quality];
+
+  if (!item || !Array.isArray(item.format) || !Array.isArray(item.url)) {
+    return null;
+  }
+
+  const hlsIndex = item.format.indexOf('hls');
+
+  if (-1 === hlsIndex || !item.url[hlsIndex]) {
+    return null;
+  }
+
+  return {
+    playlist: item.url[hlsIndex],
+    master: item.hlsMaster || ('Auto' === quality ? item.url[hlsIndex] : null),
+  };
+}
+
+function nonHlsSourcesForQuality(info, quality) {
+  const item = info && info[quality];
+
+  if (!item || !Array.isArray(item.format) || !Array.isArray(item.url)) {
+    return [];
+  }
+
+  const sources = [];
+  const seen = {};
+
+  for (let index = 0; index < item.format.length; index += 1) {
+    const url = item.url[index];
+
+    if ('hls' !== item.format[index] && url && !seen[url]) {
+      sources.push({ src: url });
+      seen[url] = true;
+    }
+  }
+
+  return sources;
+}
+
+function qualityFromSources(sources, info) {
+  if (!Array.isArray(sources) || !info || 'object' !== typeof info) {
+    return null;
+  }
+
+  const sourceUrls = sources
+    .map((source) => (source && source.src ? source.src : null))
+    .filter((source) => null !== source);
+
+  const qualities = Object.keys(info);
+
+  for (let qualityIndex = 0; qualityIndex < qualities.length; qualityIndex += 1) {
+    const quality = qualities[qualityIndex];
+    const item = info[quality];
+
+    if (!item || !Array.isArray(item.url)) {
+      continue;
+    }
+
+    for (let urlIndex = 0; urlIndex < item.url.length; urlIndex += 1) {
+      if (-1 !== sourceUrls.indexOf(item.url[urlIndex])) {
+        return quality;
+      }
+    }
+  }
+
+  return null;
+}
+
+function initialVideoQuality(sources, info, requestedQuality) {
+  const sourceQuality = qualityFromSources(sources, info);
+
+  if (null !== sourceQuality) {
+    return sourceQuality;
+  }
+
+  if (
+    null !== requestedQuality &&
+    void 0 !== requestedQuality &&
+    info &&
+    void 0 !== info[requestedQuality]
+  ) {
+    return requestedQuality;
+  }
+
+  if (info && void 0 !== info.Auto) {
+    return 'Auto';
+  }
+
+  const qualities = info && 'object' === typeof info ? Object.keys(info) : [];
+
+  return qualities.length ? qualities[0] : 'Auto';
+}
+
+function normalizedHlsVideoInfo(info) {
+  const normalized = {};
+  const qualities = info && 'object' === typeof info ? Object.keys(info) : [];
+
+  for (let qualityIndex = 0; qualityIndex < qualities.length; qualityIndex += 1) {
+    const quality = qualities[qualityIndex];
+    const item = info[quality] || {};
+
+    normalized[quality] = Object.assign({}, item, {
+      format: Array.isArray(item.format) ? item.format.slice() : [],
+      url: Array.isArray(item.url) ? item.url.slice() : [],
+    });
+
+    const hlsIndex = normalized[quality].format.indexOf('hls');
+
+    if (-1 !== hlsIndex && normalized[quality].hlsMaster) {
+      normalized[quality].url[hlsIndex] = normalized[quality].hlsMaster;
+    }
+  }
+
+  return normalized;
+}
+
+function videoJsHlsController(videoJsPlayer) {
+  if (!videoJsPlayer) {
+    return null;
+  }
+
+  let tech = videoJsPlayer.tech_ || null;
+
+  if (!tech && 'function' === typeof videoJsPlayer.tech) {
+    try {
+      tech = videoJsPlayer.tech({ IWillNotUseThisInPlugins: true });
+    } catch (error) {
+      tech = null;
+    }
+  }
+
+  return tech ? tech.vhs || tech.hls || null : null;
+}
+
+function sameSourceUrl(left, right) {
+  return !!left && !!right && String(left).split('#')[0] === String(right).split('#')[0];
+}
+
+function representationResolution(representation) {
+  const width = parseInt(representation && representation.width, 10);
+  const height = parseInt(representation && representation.height, 10);
+
+  if (-1 !== VALID_HLS_RESOLUTIONS.indexOf(height)) {
+    return height;
+  }
+
+  if (-1 !== VALID_HLS_RESOLUTIONS.indexOf(width)) {
+    return width;
+  }
+
+  return null;
+}
+
+function applyHlsQuality(videoJsPlayer, quality) {
+  const controller = videoJsHlsController(videoJsPlayer);
+
+  if (!controller || 'function' !== typeof controller.representations) {
+    return false;
+  }
+
+  const representations = controller.representations();
+
+  if (!representations || !representations.length) {
+    return false;
+  }
+
+  if ('Auto' === quality) {
+    for (let index = 0; index < representations.length; index += 1) {
+      if ('function' === typeof representations[index].enabled) {
+        representations[index].enabled(true);
+      }
+    }
+
+    return true;
+  }
+
+  const targetResolution = parseInt(quality, 10);
+
+  if (isNaN(targetResolution)) {
+    return false;
+  }
+
+  const matchingRepresentations = representations.filter(
+    (representation) => representationResolution(representation) === targetResolution
+  );
+
+  if (!matchingRepresentations.length) {
+    return false;
+  }
+
+  // Enable the requested representation first. VHS must never temporarily see
+  // every representation disabled while the quality is being changed.
+  for (let index = 0; index < matchingRepresentations.length; index += 1) {
+    if ('function' === typeof matchingRepresentations[index].enabled) {
+      matchingRepresentations[index].enabled(true);
+    }
+  }
+
+  for (let index = 0; index < representations.length; index += 1) {
+    const representation = representations[index];
+
+    if (
+      -1 === matchingRepresentations.indexOf(representation) &&
+      'function' === typeof representation.enabled
+    ) {
+      representation.enabled(false);
+    }
+  }
+
+  return true;
 }
 
 export function VideoPlayerError(props) {
@@ -40,11 +257,25 @@ export function VideoPlayer(props) {
   const videoElemRef = useRef(null);
 
   let player = null;
+  let hlsQualityApplyToken = 0;
+  let hlsQualityRetryTimer = null;
+
+  const selectedInitialQuality = initialVideoQuality(
+    props.sources,
+    props.info,
+    props.videoQuality
+  );
+  const videoInfo = normalizedHlsVideoInfo(props.info);
+  const initialHlsSource = hlsSourceForQuality(videoInfo, selectedInitialQuality);
+  const videoSources =
+    initialHlsSource && initialHlsSource.master
+      ? [{ src: initialHlsSource.master }]
+      : props.sources;
 
   const playerStates = {
     playerVolume: props.playerVolume,
     playerSoundMuted: props.playerSoundMuted,
-    videoQuality: props.videoQuality,
+    videoQuality: selectedInitialQuality,
     videoPlaybackSpeed: props.videoPlaybackSpeed,
     inTheaterMode: props.inTheaterMode,
   };
@@ -55,6 +286,152 @@ export function VideoPlayer(props) {
   playerStates.videoQuality = null !== playerStates.videoQuality ? playerStates.videoQuality : 'Auto';
   playerStates.videoPlaybackSpeed = null !== playerStates.videoPlaybackSpeed ? playerStates.videoPlaybackSpeed : !1;
   playerStates.inTheaterMode = null !== playerStates.inTheaterMode ? playerStates.inTheaterMode : !1;
+
+  function clearHlsQualityRetry() {
+    if (null !== hlsQualityRetryTimer) {
+      window.clearTimeout(hlsQualityRetryTimer);
+      hlsQualityRetryTimer = null;
+    }
+  }
+
+  function fallbackToEncodedQuality(videoJsPlayer, quality, token) {
+    const sources = nonHlsSourcesForQuality(videoInfo, quality);
+
+    if (token !== hlsQualityApplyToken || !sources.length) {
+      return false;
+    }
+
+    const currentTime = videoJsPlayer.currentTime();
+    const playbackRate = videoJsPlayer.playbackRate();
+    const wasPlaying = !videoJsPlayer.paused();
+    let restored = false;
+
+    function restorePlayback() {
+      if (restored || token !== hlsQualityApplyToken) {
+        return;
+      }
+
+      restored = true;
+
+      if (!isNaN(currentTime)) {
+        videoJsPlayer.currentTime(currentTime);
+      }
+
+      videoJsPlayer.playbackRate(playbackRate);
+
+      if (wasPlaying) {
+        videoJsPlayer.play();
+      }
+    }
+
+    videoJsPlayer.one('loadedmetadata', restorePlayback);
+    videoJsPlayer.one('loadeddata', restorePlayback);
+    videoJsPlayer.src(sources);
+
+    if ('function' === typeof videoJsPlayer.techCall_) {
+      videoJsPlayer.techCall_('reset');
+    }
+
+    return true;
+  }
+
+  function applySelectedHlsQuality(quality) {
+    const videoJsPlayer = player && player.player ? player.player : null;
+    const hlsSource = hlsSourceForQuality(videoInfo, quality);
+    const token = hlsQualityApplyToken + 1;
+
+    hlsQualityApplyToken = token;
+    clearHlsQualityRetry();
+
+    if (!videoJsPlayer || !hlsSource || !hlsSource.master) {
+      return;
+    }
+
+    let attempts = 0;
+    let started = false;
+
+    function apply() {
+      if (token !== hlsQualityApplyToken) {
+        return false;
+      }
+
+      return applyHlsQuality(videoJsPlayer, quality);
+    }
+
+    function retry() {
+      if (token !== hlsQualityApplyToken) {
+        return;
+      }
+
+      attempts += 1;
+
+      if (apply()) {
+        hlsQualityRetryTimer = null;
+        return;
+      }
+
+      if (attempts < HLS_QUALITY_RETRY_LIMIT) {
+        hlsQualityRetryTimer = window.setTimeout(retry, 100);
+        return;
+      }
+
+      hlsQualityRetryTimer = null;
+
+      if ('Auto' !== quality) {
+        fallbackToEncodedQuality(videoJsPlayer, quality, token);
+      }
+    }
+
+    function startRetry() {
+      if (started || token !== hlsQualityApplyToken) {
+        return;
+      }
+
+      if (!sameSourceUrl(videoJsPlayer.currentSrc(), hlsSource.master)) {
+        return;
+      }
+
+      started = true;
+      retry();
+    }
+
+    videoJsPlayer.one('loadedmetadata', startRetry);
+    videoJsPlayer.one('loadeddata', startRetry);
+
+    if (videoElemRef.current && 1 <= videoElemRef.current.readyState) {
+      hlsQualityRetryTimer = window.setTimeout(startRetry, 0);
+    }
+  }
+
+  function installHlsQualityHandler() {
+    const videoJsPlayer = player && player.player ? player.player : null;
+    const plugin =
+      videoJsPlayer && 'function' === typeof videoJsPlayer.mediaCmsVjsPlugin
+        ? videoJsPlayer.mediaCmsVjsPlugin()
+        : null;
+
+    if (!plugin || 'function' !== typeof plugin.changeVideoResolution) {
+      return;
+    }
+
+    const originalChangeVideoResolution = plugin.changeVideoResolution.bind(plugin);
+
+    plugin.changeVideoResolution = function () {
+      const hlsSource = hlsSourceForQuality(videoInfo, this.state.theSelectedQuality);
+
+      // The quality menu already selected another representation from the same
+      // codec master. Keep the current source and let VHS switch representation.
+      if (
+        hlsSource &&
+        hlsSource.master &&
+        sameSourceUrl(videoJsPlayer.currentSrc(), hlsSource.master)
+      ) {
+        return;
+      }
+
+      originalChangeVideoResolution();
+    };
+  }
 
   function onClickNext() {
     if (void 0 !== props.onClickNextCallback) {
@@ -79,6 +456,7 @@ export function VideoPlayer(props) {
 
     if (playerStates.videoQuality !== newState.quality) {
       playerStates.videoQuality = newState.quality;
+      applySelectedHlsQuality(newState.quality);
     }
 
     if (playerStates.videoPlaybackSpeed !== newState.playbackSpeed) {
@@ -145,7 +523,7 @@ export function VideoPlayer(props) {
       videoElemRef.current,
       {
         enabledTouchControls: true,
-        sources: props.sources,
+        sources: videoSources,
         poster: props.poster,
         autoplay: props.enableAutoplay,
         bigPlayButton: true,
@@ -163,15 +541,18 @@ export function VideoPlayer(props) {
         volume: playerStates.playerVolume,
         soundMuted: playerStates.playerSoundMuted,
         theaterMode: playerStates.inTheaterMode,
-        theSelectedQuality: void 0, // @note: Allow auto resolution selection by sources order.
+        theSelectedQuality: playerStates.videoQuality,
         theSelectedPlaybackSpeed: playerStates.videoPlaybackSpeed || 1,
       },
-      props.info,
+      videoInfo,
       [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2],
       onPlayerStateUpdate,
       onClickNext,
       onClickPrevious
     );
+
+    installHlsQualityHandler();
+    applySelectedHlsQuality(playerStates.videoQuality);
 
     if (void 0 !== props.onPlayerInitCallback) {
       props.onPlayerInitCallback(player, videoElemRef.current);
@@ -179,9 +560,13 @@ export function VideoPlayer(props) {
   }
 
   function unsetPlayer() {
+    hlsQualityApplyToken += 1;
+    clearHlsQualityRetry();
+
     if (null === player) {
       return;
     }
+
     videojs(videoElemRef.current).dispose();
     player = null;
   }
