@@ -19,171 +19,6 @@ export function formatInnerLink(url, baseUrl) {
   return link.toString();
 }
 
-function hlsSourceForQuality(info, quality) {
-  const item = info && info[quality];
-
-  if (!item || !Array.isArray(item.format) || !Array.isArray(item.url)) {
-    return null;
-  }
-
-  const hlsIndex = item.format.indexOf('hls');
-
-  return -1 === hlsIndex || !item.url[hlsIndex] ? null : item.url[hlsIndex];
-}
-
-function qualityFromSources(sources, info) {
-  if (!Array.isArray(sources) || !info || 'object' !== typeof info) {
-    return null;
-  }
-
-  const sourceUrls = sources
-    .map((source) => (source && source.src ? source.src : null))
-    .filter((source) => null !== source);
-
-  const qualities = Object.keys(info);
-
-  for (let qualityIndex = 0; qualityIndex < qualities.length; qualityIndex += 1) {
-    const quality = qualities[qualityIndex];
-    const item = info[quality];
-
-    if (!item || !Array.isArray(item.url)) {
-      continue;
-    }
-
-    for (let urlIndex = 0; urlIndex < item.url.length; urlIndex += 1) {
-      if (-1 !== sourceUrls.indexOf(item.url[urlIndex])) {
-        return quality;
-      }
-    }
-  }
-
-  return null;
-}
-
-function initialVideoQuality(sources, info, requestedQuality) {
-  const sourceQuality = qualityFromSources(sources, info);
-
-  if (null !== sourceQuality) {
-    return sourceQuality;
-  }
-
-  if (
-    null !== requestedQuality &&
-    void 0 !== requestedQuality &&
-    info &&
-    void 0 !== info[requestedQuality]
-  ) {
-    return requestedQuality;
-  }
-
-  if (info && void 0 !== info.Auto) {
-    return 'Auto';
-  }
-
-  const qualities = info && 'object' === typeof info ? Object.keys(info) : [];
-
-  return qualities.length ? qualities[0] : 'Auto';
-}
-
-function normalizedHlsVideoInfo(info) {
-  const normalized = {};
-  const qualities = info && 'object' === typeof info ? Object.keys(info) : [];
-
-  for (let qualityIndex = 0; qualityIndex < qualities.length; qualityIndex += 1) {
-    const quality = qualities[qualityIndex];
-    const item = info[quality] || {};
-
-    normalized[quality] = Object.assign({}, item, {
-      format: Array.isArray(item.format) ? item.format.slice() : [],
-      url: Array.isArray(item.url) ? item.url.slice() : [],
-    });
-  }
-
-  const fallbackMasterUrl = hlsSourceForQuality(normalized, 'Auto');
-  const hasExplicitMasters = qualities.some(
-    (quality) => !!normalized[quality].hlsMaster
-  );
-
-  for (let qualityIndex = 0; qualityIndex < qualities.length; qualityIndex += 1) {
-    const item = normalized[qualities[qualityIndex]];
-    const masterUrl =
-      item.hlsMaster || (!hasExplicitMasters ? fallbackMasterUrl : null);
-
-    if (!masterUrl) {
-      continue;
-    }
-
-    for (let formatIndex = 0; formatIndex < item.format.length; formatIndex += 1) {
-      if ('hls' === item.format[formatIndex]) {
-        item.url[formatIndex] = masterUrl;
-      }
-    }
-  }
-
-  return normalized;
-}
-
-function videoJsHlsController(videoJsPlayer) {
-  if (!videoJsPlayer) {
-    return null;
-  }
-
-  let tech = videoJsPlayer.tech_ || null;
-
-  if (!tech && 'function' === typeof videoJsPlayer.tech) {
-    try {
-      tech = videoJsPlayer.tech({ IWillNotUseThisInPlugins: true });
-    } catch (error) {
-      tech = null;
-    }
-  }
-
-  return tech ? tech.vhs || tech.hls || null : null;
-}
-
-function applyHlsQuality(videoJsPlayer, quality) {
-  const controller = videoJsHlsController(videoJsPlayer);
-
-  if (!controller || 'function' !== typeof controller.representations) {
-    return false;
-  }
-
-  const representations = controller.representations();
-
-  if (!representations || !representations.length) {
-    return false;
-  }
-
-  const automatic = 'Auto' === quality;
-  const targetHeight = parseInt(quality, 10);
-
-  if (!automatic && isNaN(targetHeight)) {
-    return false;
-  }
-
-  const matchingRepresentations = automatic
-    ? representations
-    : representations.filter(
-        (representation) => parseInt(representation.height, 10) === targetHeight
-      );
-
-  if (!automatic && !matchingRepresentations.length) {
-    return false;
-  }
-
-  for (let index = 0; index < representations.length; index += 1) {
-    const representation = representations[index];
-
-    if ('function' === typeof representation.enabled) {
-      representation.enabled(
-        automatic || -1 !== matchingRepresentations.indexOf(representation)
-      );
-    }
-  }
-
-  return true;
-}
-
 export function VideoPlayerError(props) {
   return (
     <div className="error-container">
@@ -205,21 +40,11 @@ export function VideoPlayer(props) {
   const videoElemRef = useRef(null);
 
   let player = null;
-  let hlsQualityApplyToken = 0;
-
-  const selectedInitialQuality = initialVideoQuality(
-    props.sources,
-    props.info,
-    props.videoQuality
-  );
-  const videoInfo = normalizedHlsVideoInfo(props.info);
-  const initialHlsSource = hlsSourceForQuality(videoInfo, selectedInitialQuality);
-  const videoSources = initialHlsSource ? [{ src: initialHlsSource }] : props.sources;
 
   const playerStates = {
     playerVolume: props.playerVolume,
     playerSoundMuted: props.playerSoundMuted,
-    videoQuality: selectedInitialQuality,
+    videoQuality: props.videoQuality,
     videoPlaybackSpeed: props.videoPlaybackSpeed,
     inTheaterMode: props.inTheaterMode,
   };
@@ -230,51 +55,6 @@ export function VideoPlayer(props) {
   playerStates.videoQuality = null !== playerStates.videoQuality ? playerStates.videoQuality : 'Auto';
   playerStates.videoPlaybackSpeed = null !== playerStates.videoPlaybackSpeed ? playerStates.videoPlaybackSpeed : !1;
   playerStates.inTheaterMode = null !== playerStates.inTheaterMode ? playerStates.inTheaterMode : !1;
-
-  function applySelectedHlsQuality(quality) {
-    const videoJsPlayer = player && player.player ? player.player : null;
-    const token = hlsQualityApplyToken + 1;
-
-    hlsQualityApplyToken = token;
-
-    if (!videoJsPlayer) {
-      return;
-    }
-
-    let attempts = 0;
-    let retryTimer = null;
-
-    function apply() {
-      if (token !== hlsQualityApplyToken) {
-        return false;
-      }
-
-      return applyHlsQuality(videoJsPlayer, quality);
-    }
-
-    function retry() {
-      if (token !== hlsQualityApplyToken) {
-        return;
-      }
-
-      attempts += 1;
-
-      if (!apply() && attempts < 30) {
-        retryTimer = window.setTimeout(retry, 100);
-      }
-    }
-
-    videoJsPlayer.one('loadedmetadata', apply);
-    videoJsPlayer.one('loadeddata', apply);
-
-    retryTimer = window.setTimeout(retry, 0);
-
-    videoJsPlayer.one('dispose', function () {
-      if (retryTimer) {
-        window.clearTimeout(retryTimer);
-      }
-    });
-  }
 
   function onClickNext() {
     if (void 0 !== props.onClickNextCallback) {
@@ -299,7 +79,6 @@ export function VideoPlayer(props) {
 
     if (playerStates.videoQuality !== newState.quality) {
       playerStates.videoQuality = newState.quality;
-      applySelectedHlsQuality(newState.quality);
     }
 
     if (playerStates.videoPlaybackSpeed !== newState.playbackSpeed) {
@@ -366,7 +145,7 @@ export function VideoPlayer(props) {
       videoElemRef.current,
       {
         enabledTouchControls: true,
-        sources: videoSources,
+        sources: props.sources,
         poster: props.poster,
         autoplay: props.enableAutoplay,
         bigPlayButton: true,
@@ -384,17 +163,15 @@ export function VideoPlayer(props) {
         volume: playerStates.playerVolume,
         soundMuted: playerStates.playerSoundMuted,
         theaterMode: playerStates.inTheaterMode,
-        theSelectedQuality: playerStates.videoQuality,
+        theSelectedQuality: void 0, // @note: Allow auto resolution selection by sources order.
         theSelectedPlaybackSpeed: playerStates.videoPlaybackSpeed || 1,
       },
-      videoInfo,
+      props.info,
       [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2],
       onPlayerStateUpdate,
       onClickNext,
       onClickPrevious
     );
-
-    applySelectedHlsQuality(playerStates.videoQuality);
 
     if (void 0 !== props.onPlayerInitCallback) {
       props.onPlayerInitCallback(player, videoElemRef.current);
@@ -402,12 +179,9 @@ export function VideoPlayer(props) {
   }
 
   function unsetPlayer() {
-    hlsQualityApplyToken += 1;
-
     if (null === player) {
       return;
     }
-
     videojs(videoElemRef.current).dispose();
     player = null;
   }

@@ -182,11 +182,6 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
       return;
     }
 
-    const masterUrl =
-      'string' === typeof hlsGroup.master_file && hlsGroup.master_file
-        ? formatInnerLink(hlsGroup.master_file, SiteContext._currentValue.url)
-        : null;
-
     for (i in hlsGroup) {
       if (hlsGroup.hasOwnProperty(i)) {
         k = hlsKeyFromInfoKey(i);
@@ -195,12 +190,11 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
           continue;
         }
 
-        ret[k] = void 0 === ret[k] ? { format: [], url: [], hlsMaster: null } : ret[k];
+        ret[k] = void 0 === ret[k] ? { format: [], url: [] } : ret[k];
 
         if (-1 === ret[k].format.indexOf('hls')) {
           ret[k].format.push('hls');
           ret[k].url.push(formatInnerLink(hlsGroup[i], SiteContext._currentValue.url));
-          ret[k].hlsMaster = masterUrl;
         }
       }
     }
