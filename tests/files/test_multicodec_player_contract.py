@@ -5,9 +5,9 @@ def test_video_viewer_functions_prefer_av1_then_hevc_then_h264_hls():
     repo_root = Path(__file__).resolve().parents[2]
     functions_js = (repo_root / "frontend/src/static/js/components/media-viewer/VideoViewer/functions.js").read_text()
 
-    av1_pos = functions_js.index("addPreferredHlsData(av1HlsData)")
-    hevc_pos = functions_js.index("addPreferredHlsData(hevcHlsData)")
-    h264_pos = functions_js.index("addPreferredHlsData(hlsData)")
+    av1_pos = functions_js.index("addPreferredHlsData(av1HlsData")
+    hevc_pos = functions_js.index("addPreferredHlsData(hevcHlsData")
+    h264_pos = functions_js.index("addPreferredHlsData(hlsData")
 
     assert av1_pos < hevc_pos < h264_pos
     assert "supportedFormats.support.av1" in functions_js

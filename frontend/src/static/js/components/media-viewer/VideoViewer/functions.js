@@ -177,7 +177,7 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
     return 2 === parts.length ? parts[0] : null;
   }
 
-  function addPreferredHlsData(hlsGroup) {
+  function addPreferredHlsData(hlsGroup, codec) {
     if (!hlsGroup || 'object' !== typeof hlsGroup) {
       return;
     }
@@ -195,11 +195,31 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
           continue;
         }
 
-        ret[k] = void 0 === ret[k] ? { format: [], url: [], hlsMaster: null } : ret[k];
+        const playlistUrl = formatInnerLink(hlsGroup[i], SiteContext._currentValue.url);
+
+        ret[k] =
+          void 0 === ret[k]
+            ? { format: [], url: [], hlsMaster: null, hlsFallbacks: [] }
+            : ret[k];
+
+        ret[k].hlsFallbacks = Array.isArray(ret[k].hlsFallbacks) ? ret[k].hlsFallbacks : [];
+
+        if (
+          -1 ===
+          ret[k].hlsFallbacks.findIndex(
+            (candidate) => candidate.codec === codec && candidate.playlist === playlistUrl
+          )
+        ) {
+          ret[k].hlsFallbacks.push({
+            codec: codec,
+            playlist: playlistUrl,
+            master: masterUrl,
+          });
+        }
 
         if (-1 === ret[k].format.indexOf('hls')) {
           ret[k].format.push('hls');
-          ret[k].url.push(formatInnerLink(hlsGroup[i], SiteContext._currentValue.url));
+          ret[k].url.push(playlistUrl);
           ret[k].hlsMaster = masterUrl;
         }
       }
@@ -211,16 +231,16 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
       ? hlsData.av1
       : null;
 
-  addPreferredHlsData(av1HlsData);
+  addPreferredHlsData(av1HlsData, 'av1');
 
   const hevcHlsData =
     hlsData.hevc && 'object' === typeof hlsData.hevc && supportedFormats.support && supportedFormats.support.h265
       ? hlsData.hevc
       : null;
 
-  addPreferredHlsData(hevcHlsData);
+  addPreferredHlsData(hevcHlsData, 'hevc');
 
-  addPreferredHlsData(hlsData);
+  addPreferredHlsData(hlsData, 'h264');
 
   for (k in data) {
     if (data.hasOwnProperty(k) && Object.keys(data[k]).length) {
@@ -235,6 +255,11 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
               data[k][validVideoFormats[i]] &&
               data[k][validVideoFormats[i]].url
             ) {
+              if (ret[k] && -1 < ret[k].format.indexOf('hls')) {
+                i += 1;
+                continue;
+              }
+
               if (100 !== data[k][validVideoFormats[i]].progress) {
                 console.warn('VIDEO DEBUG:', 'PROGRESS value is', data[k][validVideoFormats[i]].progress);
               }

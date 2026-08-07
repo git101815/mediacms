@@ -41,26 +41,19 @@ function hlsSourceForQuality(info, quality) {
   };
 }
 
-function nonHlsSourcesForQuality(info, quality) {
+function hlsFallbackForQuality(info, quality, codec) {
   const item = info && info[quality];
+  const fallbacks = item && Array.isArray(item.hlsFallbacks) ? item.hlsFallbacks : [];
 
-  if (!item || !Array.isArray(item.format) || !Array.isArray(item.url)) {
-    return [];
-  }
+  for (let index = 0; index < fallbacks.length; index += 1) {
+    const fallback = fallbacks[index];
 
-  const sources = [];
-  const seen = {};
-
-  for (let index = 0; index < item.format.length; index += 1) {
-    const url = item.url[index];
-
-    if ('hls' !== item.format[index] && url && !seen[url]) {
-      sources.push({ src: url });
-      seen[url] = true;
+    if (fallback && fallback.codec === codec && fallback.playlist) {
+      return fallback;
     }
   }
 
-  return sources;
+  return null;
 }
 
 function qualityFromSources(sources, info) {
@@ -128,6 +121,9 @@ function normalizedHlsVideoInfo(info) {
     normalized[quality] = Object.assign({}, item, {
       format: Array.isArray(item.format) ? item.format.slice() : [],
       url: Array.isArray(item.url) ? item.url.slice() : [],
+      hlsFallbacks: Array.isArray(item.hlsFallbacks)
+        ? item.hlsFallbacks.map((fallback) => Object.assign({}, fallback))
+        : [],
     });
 
     const hlsIndex = normalized[quality].format.indexOf('hls');
@@ -181,13 +177,13 @@ function applyHlsQuality(videoJsPlayer, quality) {
   const controller = videoJsHlsController(videoJsPlayer);
 
   if (!controller || 'function' !== typeof controller.representations) {
-    return false;
+    return 'unsupported';
   }
 
   const representations = controller.representations();
 
   if (!representations || !representations.length) {
-    return false;
+    return 'pending';
   }
 
   if ('Auto' === quality) {
@@ -197,13 +193,13 @@ function applyHlsQuality(videoJsPlayer, quality) {
       }
     }
 
-    return true;
+    return 'applied';
   }
 
   const targetResolution = parseInt(quality, 10);
 
   if (isNaN(targetResolution)) {
-    return false;
+    return 'missing';
   }
 
   const matchingRepresentations = representations.filter(
@@ -211,7 +207,7 @@ function applyHlsQuality(videoJsPlayer, quality) {
   );
 
   if (!matchingRepresentations.length) {
-    return false;
+    return 'missing';
   }
 
   // Enable the requested representation first. VHS must never temporarily see
@@ -233,7 +229,7 @@ function applyHlsQuality(videoJsPlayer, quality) {
     }
   }
 
-  return true;
+  return 'applied';
 }
 
 export function VideoPlayerError(props) {
@@ -294,11 +290,15 @@ export function VideoPlayer(props) {
     }
   }
 
-  function fallbackToEncodedQuality(videoJsPlayer, quality, token) {
-    const sources = nonHlsSourcesForQuality(videoInfo, quality);
+  function fallbackToH264HlsQuality(videoJsPlayer, quality, token) {
+    const fallback = hlsFallbackForQuality(videoInfo, quality, 'h264');
 
-    if (token !== hlsQualityApplyToken || !sources.length) {
+    if (token !== hlsQualityApplyToken || !fallback || !fallback.playlist) {
       return false;
+    }
+
+    if (sameSourceUrl(videoJsPlayer.currentSrc(), fallback.playlist)) {
+      return true;
     }
 
     const currentTime = videoJsPlayer.currentTime();
@@ -326,7 +326,7 @@ export function VideoPlayer(props) {
 
     videoJsPlayer.one('loadedmetadata', restorePlayback);
     videoJsPlayer.one('loadeddata', restorePlayback);
-    videoJsPlayer.src(sources);
+    videoJsPlayer.src([{ src: fallback.playlist }]);
 
     if ('function' === typeof videoJsPlayer.techCall_) {
       videoJsPlayer.techCall_('reset');
@@ -352,7 +352,7 @@ export function VideoPlayer(props) {
 
     function apply() {
       if (token !== hlsQualityApplyToken) {
-        return false;
+        return 'cancelled';
       }
 
       return applyHlsQuality(videoJsPlayer, quality);
@@ -365,12 +365,14 @@ export function VideoPlayer(props) {
 
       attempts += 1;
 
-      if (apply()) {
+      const result = apply();
+
+      if ('applied' === result) {
         hlsQualityRetryTimer = null;
         return;
       }
 
-      if (attempts < HLS_QUALITY_RETRY_LIMIT) {
+      if ('pending' === result && attempts < HLS_QUALITY_RETRY_LIMIT) {
         hlsQualityRetryTimer = window.setTimeout(retry, 100);
         return;
       }
@@ -378,12 +380,26 @@ export function VideoPlayer(props) {
       hlsQualityRetryTimer = null;
 
       if ('Auto' !== quality) {
-        fallbackToEncodedQuality(videoJsPlayer, quality, token);
+        fallbackToH264HlsQuality(videoJsPlayer, quality, token);
       }
     }
 
     function startRetry() {
       if (started || token !== hlsQualityApplyToken) {
+        return;
+      }
+
+      const controller = videoJsHlsController(videoJsPlayer);
+
+      // Native HLS does not expose VHS representations. For a manual quality,
+      // use the H264 HLS rendition for that resolution; never leave HLS.
+      if (!controller || 'function' !== typeof controller.representations) {
+        started = true;
+
+        if ('Auto' !== quality) {
+          fallbackToH264HlsQuality(videoJsPlayer, quality, token);
+        }
+
         return;
       }
 
@@ -417,10 +433,22 @@ export function VideoPlayer(props) {
     const originalChangeVideoResolution = plugin.changeVideoResolution.bind(plugin);
 
     plugin.changeVideoResolution = function () {
-      const hlsSource = hlsSourceForQuality(videoInfo, this.state.theSelectedQuality);
+      const quality = this.state.theSelectedQuality;
+      const hlsSource = hlsSourceForQuality(videoInfo, quality);
+      const controller = videoJsHlsController(videoJsPlayer);
+      const nativeHls =
+        !controller || 'function' !== typeof controller.representations;
+      const h264Fallback = hlsFallbackForQuality(videoInfo, quality, 'h264');
 
-      // The quality menu already selected another representation from the same
-      // codec master. Keep the current source and let VHS switch representation.
+      // Native HLS cannot lock a representation through VHS. Keep source
+      // switching under our control so manual qualities can move directly
+      // between H264 HLS rendition playlists.
+      if ('Auto' !== quality && nativeHls && h264Fallback) {
+        return;
+      }
+
+      // VHS can keep the codec master loaded and only enable the requested
+      // representation.
       if (
         hlsSource &&
         hlsSource.master &&
