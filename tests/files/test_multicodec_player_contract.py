@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-def test_video_viewer_functions_prefer_av1_then_hevc_then_h264_hls():
+def test_video_viewer_functions_prefer_hevc_then_av1_then_h264_hls():
     repo_root = Path(__file__).resolve().parents[2]
     functions_js = (repo_root / "frontend/src/static/js/components/media-viewer/VideoViewer/functions.js").read_text()
 
@@ -9,7 +9,7 @@ def test_video_viewer_functions_prefer_av1_then_hevc_then_h264_hls():
     hevc_pos = functions_js.index("addPreferredHlsData(hevcHlsData")
     h264_pos = functions_js.index("addPreferredHlsData(hlsData")
 
-    assert av1_pos < hevc_pos < h264_pos
+    assert hevc_pos < av1_pos < h264_pos
     assert "supportedFormats.support.av1" in functions_js
     assert "supportedFormats.support.h265" in functions_js
 

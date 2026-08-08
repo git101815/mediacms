@@ -231,7 +231,6 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
       ? hlsData.av1
       : null;
 
-  addPreferredHlsData(av1HlsData, 'av1');
 
   const hevcHlsData =
     hlsData.hevc && 'object' === typeof hlsData.hevc && supportedFormats.support && supportedFormats.support.h265
@@ -239,7 +238,7 @@ export function videoAvailableCodecsAndResolutions(data, hlsData, supportedForma
       : null;
 
   addPreferredHlsData(hevcHlsData, 'hevc');
-
+  addPreferredHlsData(av1HlsData, 'av1');
   addPreferredHlsData(hlsData, 'h264');
 
   for (k in data) {
