@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -497,6 +498,126 @@ def test_signal_records_only_first_public_transition_and_queues_short_task(
 
     assert PremiumMediaRelease.objects.filter(media=media).count() == 1
     assert enqueue.call_count == 1
+
+
+@pytest.mark.django_db
+def test_remote_encoding_callback_records_subscription_release(
+    django_user_model,
+    django_capture_on_commit_callbacks,
+    rf,
+):
+    from files.remote_encoding_views import remote_encoding_callback
+
+    creator = create_user(
+        django_user_model,
+        "sub_creator_remote_release",
+        creator=True,
+    )
+    media = create_media(
+        creator,
+        "sub_remote_release",
+        listable=False,
+        state="public",
+    )
+    Media.objects.filter(pk=media.pk).update(
+        encoding_status="running",
+        listable=False,
+    )
+    media.refresh_from_db()
+
+    payload = {
+        "media_id": media.id,
+        "friendly_token": media.friendly_token,
+        "status": "success",
+        "outputs": {},
+        "encodings": [],
+        "media": {},
+        "signature": "test",
+    }
+    request = rf.post(
+        "/remote-encoding-callback/",
+        data=json.dumps(payload),
+        content_type="application/json",
+    )
+
+    with patch(
+        "files.remote_encoding_views.verify_signature",
+        return_value=True,
+    ), patch(
+        "premium.subscription_tasks."
+        "grant_premium_release_unlocks.apply_async"
+    ) as enqueue:
+        with django_capture_on_commit_callbacks(execute=True):
+            response = remote_encoding_callback(
+                request,
+                media.friendly_token,
+            )
+
+    assert response.status_code == 200
+
+    media.refresh_from_db()
+    assert media.listable is True
+    assert media.encoding_status == "success"
+
+    release = PremiumMediaRelease.objects.get(media=media)
+    enqueue.assert_called_once_with(
+        args=[release.id],
+        queue="short_tasks",
+    )
+
+
+@pytest.mark.django_db
+def test_remote_encoding_callback_does_not_redate_existing_release_candidate(
+    django_user_model,
+    django_capture_on_commit_callbacks,
+    rf,
+):
+    from files.remote_encoding_views import remote_encoding_callback
+
+    creator = create_user(
+        django_user_model,
+        "sub_creator_remote_existing",
+        creator=True,
+    )
+    media = create_media(
+        creator,
+        "sub_remote_existing",
+        listable=True,
+        state="public",
+    )
+
+    payload = {
+        "media_id": media.id,
+        "friendly_token": media.friendly_token,
+        "status": "success",
+        "outputs": {},
+        "encodings": [],
+        "media": {},
+        "merge_outputs": True,
+        "signature": "test",
+    }
+    request = rf.post(
+        "/remote-encoding-callback/",
+        data=json.dumps(payload),
+        content_type="application/json",
+    )
+
+    with patch(
+        "files.remote_encoding_views.verify_signature",
+        return_value=True,
+    ), patch(
+        "premium.subscription_tasks."
+        "grant_premium_release_unlocks.apply_async"
+    ) as enqueue:
+        with django_capture_on_commit_callbacks(execute=True):
+            response = remote_encoding_callback(
+                request,
+                media.friendly_token,
+            )
+
+    assert response.status_code == 200
+    assert PremiumMediaRelease.objects.filter(media=media).exists() is False
+    enqueue.assert_not_called()
 
 
 @pytest.mark.django_db

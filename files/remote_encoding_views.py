@@ -1,4 +1,5 @@
 import json
+import logging
 
 from django.db import transaction
 from django.http import JsonResponse
@@ -8,6 +9,35 @@ from django.views.decorators.http import require_POST
 from files import helpers
 from files.models import Encoding, Media, MediaHLSRendition
 from files.remote_encoding import verify_signature
+
+
+logger = logging.getLogger(__name__)
+
+
+def _record_premium_release_after_remote_publish(media_id):
+    # Local imports keep the files app independent from premium at module load
+    # time and avoid introducing an import cycle during Django startup.
+    from premium.subscription_tasks import grant_premium_release_unlocks
+    from premium.subscriptions import record_media_release
+
+    media = Media.objects.select_related("user").get(pk=media_id)
+    release, release_created = record_media_release(media=media)
+
+    if release is None or not release_created:
+        return
+
+    try:
+        grant_premium_release_unlocks.apply_async(
+            args=[release.id],
+            queue="short_tasks",
+        )
+    except Exception:
+        # Keep the release row even if the immediate enqueue fails. The
+        # existing pending-release processor can pick it up afterwards.
+        logger.exception(
+            "Could not enqueue premium release grants release_id=%s",
+            release.id,
+        )
 
 
 def _output_for(outputs, *keys):
@@ -281,6 +311,25 @@ def remote_encoding_callback(request, friendly_token):
 
     try:
         with transaction.atomic():
+            # A remote callback uses QuerySet.update(), so Django's Media
+            # pre_save/post_save signals do not run. Lock the row and remember
+            # the real pre-callback value so only the first False -> True
+            # transition can become a subscription release.
+            (
+                was_listable,
+                current_state,
+                current_is_reviewed,
+            ) = (
+                Media.objects.select_for_update()
+                .values_list(
+                    "listable",
+                    "state",
+                    "is_reviewed",
+                )
+                .get(pk=media.pk)
+            )
+            was_listable = bool(was_listable)
+
             media_update = _media_update_from_payload(payload.get("media") or {})
 
             preview_file_path = _update_encodings_from_payload(media, encodings)
@@ -319,11 +368,22 @@ def remote_encoding_callback(request, friendly_token):
 
             media_update["encoding_status"] = "success"
             media_update["listable"] = (
-                media.state == "public"
-                and media.is_reviewed is True
+                current_state == "public"
+                and current_is_reviewed is True
+            )
+            became_listable = (
+                not was_listable
+                and bool(media_update["listable"])
             )
 
             Media.objects.filter(pk=media.pk).update(**media_update)
+
+            if became_listable:
+                transaction.on_commit(
+                    lambda media_id=media.pk: (
+                        _record_premium_release_after_remote_publish(media_id)
+                    )
+                )
 
     except ValueError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
