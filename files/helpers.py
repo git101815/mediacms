@@ -40,9 +40,9 @@ VP9_SPEED = 2
 VIDEO_CRFS = {
     "h264_baseline": 23,
     "h264": 23,
-    "h265": 28,
+    "h265": 28,  #on a 51 scale
     "vp9": 32,
-    "av1": 30,
+    "av1": 38, #on a 63 scale
 }
 
 VIDEO_BITRATES = {
