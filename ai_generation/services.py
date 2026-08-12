@@ -300,112 +300,23 @@ def create_generation_request(*, actor, prompt) -> AIGenerationRequest:
     return generation
 
 
-@transaction.atomic
-def refund_generation(
+
+def _mark_generation_failed_locked(
+    generation: AIGenerationRequest,
     *,
-    public_id,
     error_code: str,
     error_message: str,
+    completed_at=None,
 ) -> AIGenerationRequest:
-    generation = (
-        AIGenerationRequest.objects.select_for_update()
-        .select_related("user", "charge_txn", "refund_txn")
-        .get(public_id=public_id)
-    )
-
-    if generation.status == AIGenerationRequest.STATUS_SUCCESS:
-        raise ValidationError("Successful generation cannot be refunded")
-
-    if generation.refund_txn_id:
-        if generation.status != AIGenerationRequest.STATUS_FAILED:
-            generation.status = AIGenerationRequest.STATUS_FAILED
-            generation.save(update_fields=["status", "updated_at"])
-        _clear_runtime_state_for_generation(generation)
-        return generation
-
-    if not generation.charge_txn_id:
-        generation.status = AIGenerationRequest.STATUS_FAILED
-        generation.error_code = str(error_code or "generation_failed")[:64]
-        generation.error_message = str(error_message or "")[:2000]
-        generation.completed_at = timezone.now()
-        generation.save(
-            update_fields=[
-                "status",
-                "error_code",
-                "error_message",
-                "completed_at",
-                "updated_at",
-            ]
-        )
-        _clear_runtime_state_for_generation(generation)
-        return generation
-
-    user_wallet = _lock_user_wallet(generation.user)
-    platform_wallet = _lock_platform_wallet()
-    price_tokens = int(generation.price_tokens)
-
-    if int(platform_wallet.balance) < price_tokens:
-        raise ValidationError("Platform wallet cannot fund AI generation refund")
-
-    external_id = f"refund:ai_generation:{generation.public_id}"
-    request_hash = _request_hash(
-        {
-            "external_id": external_id,
-            "generation_public_id": str(generation.public_id),
-            "charge_txn_id": generation.charge_txn_id,
-            "user_id": generation.user_id,
-            "price_tokens": price_tokens,
-        }
-    )
-
-    user_wallet.balance = int(user_wallet.balance) + price_tokens
-    platform_wallet.balance = int(platform_wallet.balance) - price_tokens
-    user_wallet.save(update_fields=["balance", "updated_at"])
-    platform_wallet.save(update_fields=["balance", "updated_at"])
-
-    refund_txn = LedgerTransaction.objects.create(
-        kind="ai_generation_refund",
-        external_id=external_id,
-        request_hash=request_hash,
-        created_by=generation.user,
-        memo=f"AI image generation refund {generation.public_id}",
-        metadata={
-            "product": "ai_generation",
-            "generation_public_id": str(generation.public_id),
-            "charge_txn_id": generation.charge_txn_id,
-            "user_id": generation.user_id,
-            "price_tokens": price_tokens,
-            "error_code": str(error_code or "generation_failed")[:64],
-        },
-        metadata_version=LEDGER_METADATA_VERSION,
-    )
-
-    LedgerEntry.objects.create(
-        txn=refund_txn,
-        wallet=user_wallet,
-        delta=price_tokens,
-        balance_after=user_wallet.balance,
-    )
-    LedgerEntry.objects.create(
-        txn=refund_txn,
-        wallet=platform_wallet,
-        delta=-price_tokens,
-        balance_after=platform_wallet.balance,
-    )
-
-    generation.refund_txn = refund_txn
-    generation.refunded_at = timezone.now()
     generation.status = AIGenerationRequest.STATUS_FAILED
     generation.error_code = str(error_code or "generation_failed")[:64]
     generation.error_message = str(error_message or "")[:2000]
-    generation.completed_at = timezone.now()
+    generation.completed_at = completed_at or timezone.now()
     generation.claimed_by_service = ""
     generation.claim_token = ""
     generation.claim_expires_at = None
     generation.save(
         update_fields=[
-            "refund_txn",
-            "refunded_at",
             "status",
             "error_code",
             "error_message",
@@ -416,21 +327,6 @@ def refund_generation(
             "updated_at",
         ]
     )
-
-    _create_outbox_event(
-        txn=refund_txn,
-        topic="ledger.refund",
-        payload={
-            "product": "ai_generation",
-            "generation_public_id": str(generation.public_id),
-            "charge_txn_id": generation.charge_txn_id,
-            "user_id": generation.user_id,
-            "price_tokens": price_tokens,
-        },
-        metadata_version=LEDGER_METADATA_VERSION,
-    )
-
-    _clear_runtime_state_for_generation(generation)
     return generation
 
 
@@ -441,6 +337,7 @@ def claim_next_generation(*, service_name: str) -> AIGenerationRequest | None:
     )
     state = AIGenerationRuntimeState.objects.select_for_update().get(pk=state.pk)
 
+    now = timezone.now()
     if state.current_generation_id:
         current = (
             AIGenerationRequest.objects.select_for_update()
@@ -448,9 +345,20 @@ def claim_next_generation(*, service_name: str) -> AIGenerationRequest | None:
             .first()
         )
         if current and current.status == AIGenerationRequest.STATUS_RUNNING:
-            return None
-        state.current_generation = None
-        state.save(update_fields=["current_generation", "updated_at"])
+            if current.claim_expires_at is None or current.claim_expires_at <= now:
+                _mark_generation_failed_locked(
+                    current,
+                    error_code="worker_timeout",
+                    error_message="Image generation worker stopped responding.",
+                    completed_at=now,
+                )
+                state.current_generation = None
+                state.save(update_fields=["current_generation", "updated_at"])
+            else:
+                return None
+        else:
+            state.current_generation = None
+            state.save(update_fields=["current_generation", "updated_at"])
 
     generation = (
         AIGenerationRequest.objects.select_for_update(skip_locked=True)
@@ -507,7 +415,32 @@ def _get_claimed_generation_for_update(
         raise ValidationError("Generation is not claimed by this service")
     if not claim_token or generation.claim_token != claim_token:
         raise ValidationError("Generation claim token does not match")
+    if generation.claim_expires_at is None or generation.claim_expires_at <= timezone.now():
+        raise ValidationError("Generation claim has expired")
 
+    return generation
+
+
+@transaction.atomic
+def fail_generation(
+    *,
+    public_id,
+    service_name: str,
+    claim_token: str,
+    error_code: str,
+    error_message: str,
+) -> AIGenerationRequest:
+    generation = _get_claimed_generation_for_update(
+        public_id=public_id,
+        service_name=service_name,
+        claim_token=claim_token,
+    )
+    _mark_generation_failed_locked(
+        generation,
+        error_code=error_code,
+        error_message=error_message,
+    )
+    _clear_runtime_state_for_generation(generation)
     return generation
 
 
@@ -570,8 +503,10 @@ def download_provider_image(url: str) -> tuple[bytes, str, str]:
             url,
             stream=True,
             timeout=timeout_seconds,
-            allow_redirects=True,
+            allow_redirects=False,
         ) as response:
+            if 300 <= response.status_code < 400:
+                raise ValidationError("Provider result redirects are not allowed")
             response.raise_for_status()
             _validate_result_url(response.url)
 
@@ -717,6 +652,15 @@ def complete_generation_from_url(
     provider_request_id: str = "",
     provider_metadata: dict | None = None,
 ) -> AIGenerationRequest:
+    # Do not make a provider-side HTTP request for an expired/foreign claim.
+    # complete_generation() checks the lease again after the download.
+    with transaction.atomic():
+        _get_claimed_generation_for_update(
+            public_id=public_id,
+            service_name=service_name,
+            claim_token=claim_token,
+        )
+
     image_bytes, content_type, extension = download_provider_image(result_url)
     return complete_generation(
         public_id=public_id,
@@ -743,14 +687,6 @@ def generation_provider_payload(generation: AIGenerationRequest) -> dict:
             "guidance_scale": int(
                 getattr(settings, "AI_GENERATION_PROVIDER_GUIDANCE_SCALE", 7)
             ),
-            "negative_prompt": str(
-                getattr(
-                    settings,
-                    "AI_GENERATION_PROVIDER_NEGATIVE_PROMPT",
-                    "child, children, minor, underage, preteen, loli, shota",
-                )
-                or ""
-            ),
         },
     }
 
@@ -770,7 +706,6 @@ def serialize_generation(generation: AIGenerationRequest, *, request=None) -> di
         "prompt": generation.prompt,
         "price_tokens": int(generation.price_tokens),
         "price_display": format_token_amount(generation.price_tokens),
-        "refunded": bool(generation.refund_txn_id),
         "image_url": image_url,
         "error_code": generation.error_code,
         "error_message": generation.error_message,
@@ -781,6 +716,38 @@ def serialize_generation(generation: AIGenerationRequest, *, request=None) -> di
             else None
         ),
     }
+
+
+@transaction.atomic
+def _fail_stale_generation(
+    *,
+    public_id,
+    expected_status: str,
+    error_code: str,
+    error_message: str,
+) -> bool:
+    generation = (
+        AIGenerationRequest.objects.select_for_update()
+        .filter(public_id=public_id, status=expected_status)
+        .first()
+    )
+    if generation is None:
+        return False
+
+    now = timezone.now()
+    if expected_status == AIGenerationRequest.STATUS_RUNNING:
+        # A heartbeat may have renewed the lease after the stale-id scan.
+        if generation.claim_expires_at is not None and generation.claim_expires_at > now:
+            return False
+
+    _mark_generation_failed_locked(
+        generation,
+        error_code=error_code,
+        error_message=error_message,
+        completed_at=now,
+    )
+    _clear_runtime_state_for_generation(generation)
+    return True
 
 
 def fail_stale_generations() -> dict:
@@ -804,32 +771,28 @@ def fail_stale_generations() -> dict:
         ).values_list("public_id", flat=True)
     )
 
-    refunded_running = 0
-    refunded_queued = 0
+    failed_running = 0
+    failed_queued = 0
 
     for public_id in stale_ids:
-        try:
-            refund_generation(
-                public_id=public_id,
-                error_code="worker_timeout",
-                error_message="Image generation worker stopped responding.",
-            )
-            refunded_running += 1
-        except AIGenerationRequest.DoesNotExist:
-            continue
+        if _fail_stale_generation(
+            public_id=public_id,
+            expected_status=AIGenerationRequest.STATUS_RUNNING,
+            error_code="worker_timeout",
+            error_message="Image generation worker stopped responding.",
+        ):
+            failed_running += 1
 
     for public_id in stale_queue_ids:
-        try:
-            refund_generation(
-                public_id=public_id,
-                error_code="queue_timeout",
-                error_message="Image generation could not start in time.",
-            )
-            refunded_queued += 1
-        except AIGenerationRequest.DoesNotExist:
-            continue
+        if _fail_stale_generation(
+            public_id=public_id,
+            expected_status=AIGenerationRequest.STATUS_QUEUED,
+            error_code="queue_timeout",
+            error_message="Image generation could not start in time.",
+        ):
+            failed_queued += 1
 
     return {
-        "refunded_running": refunded_running,
-        "refunded_queued": refunded_queued,
+        "failed_running": failed_running,
+        "failed_queued": failed_queued,
     }

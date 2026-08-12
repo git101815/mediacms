@@ -454,8 +454,8 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=1, minute=1, day_of_week=6),
     },
     # AI_GENERATION_FEATURE_V1 periodic recovery/nudge
-    "ai_generation_refund_stale": {
-        "task": "ai_generation.tasks.refund_stale_ai_generations",
+    "ai_generation_fail_stale": {
+        "task": "ai_generation.tasks.fail_stale_ai_generations",
         "schedule": 60.0,
     },
     "ai_generation_nudge_worker": {
@@ -524,7 +524,6 @@ AI_GENERATION_MAX_PENDING_PER_USER=3
 AI_GENERATION_PROVIDER="perchance"
 AI_GENERATION_PROVIDER_RESOLUTION="512x768"
 AI_GENERATION_PROVIDER_GUIDANCE_SCALE=7
-AI_GENERATION_PROVIDER_NEGATIVE_PROMPT="child, children, minor, underage, preteen, loli, shota"
 AI_GENERATION_FORBIDDEN_TERMS=""
 AI_GENERATION_CLAIM_LEASE_SECONDS=300
 AI_GENERATION_QUEUE_TIMEOUT_SECONDS=1800

@@ -29,7 +29,7 @@ from .services import (
     generation_provider_payload,
     get_user_wallet,
     heartbeat_generation,
-    refund_generation,
+    fail_generation,
     serialize_generation,
     setting_enabled,
 )
@@ -283,24 +283,13 @@ def internal_generation_success(request, public_id):
 def internal_generation_failed(request, public_id):
     try:
         _actor, payload, service_name = authenticate_ai_generation_service(request)
-
-        generation = get_object_or_404(
-            AIGenerationRequest,
+        generation = fail_generation(
             public_id=public_id,
-        )
-        if (
-            generation.status == AIGenerationRequest.STATUS_RUNNING
-            and (
-                generation.claimed_by_service != service_name
-                or generation.claim_token
-                != str(payload.get("claim_token", "") or "")
-            )
-        ):
-            raise ValidationError("Generation claim token does not match")
-
-        generation = refund_generation(
-            public_id=public_id,
-            error_code=str(payload.get("error_code", "provider_failed") or "provider_failed"),
+            service_name=service_name,
+            claim_token=str(payload.get("claim_token", "") or ""),
+            error_code=str(
+                payload.get("error_code", "provider_failed") or "provider_failed"
+            ),
             error_message=str(payload.get("error_message", "") or ""),
         )
         return JsonResponse(
@@ -308,7 +297,6 @@ def internal_generation_failed(request, public_id):
                 "success": True,
                 "generation_id": str(generation.public_id),
                 "status": generation.status,
-                "refunded": bool(generation.refund_txn_id),
             }
         )
     except Exception as exc:

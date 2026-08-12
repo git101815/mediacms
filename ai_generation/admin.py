@@ -14,7 +14,6 @@ class AIGenerationRequestAdmin(admin.ModelAdmin):
         "provider",
         "created_at",
         "completed_at",
-        "refunded_at",
     )
     list_filter = ("status", "provider", "created_at")
     search_fields = (
@@ -26,9 +25,7 @@ class AIGenerationRequestAdmin(admin.ModelAdmin):
     readonly_fields = (
         "public_id",
         "charge_txn",
-        "refund_txn",
         "charged_at",
-        "refunded_at",
         "completed_at",
         "created_at",
         "updated_at",

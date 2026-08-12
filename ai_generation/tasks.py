@@ -65,8 +65,8 @@ def nudge_ai_generation_worker():
 
 
 @shared_task
-def refund_stale_ai_generations():
+def fail_stale_ai_generations():
     result = fail_stale_generations()
-    if result["refunded_running"] or result["refunded_queued"]:
-        logger.warning("Refunded stale AI generations: %s", result)
+    if result["failed_running"] or result["failed_queued"]:
+        logger.warning("Failed stale AI generations: %s", result)
     return result

@@ -57,13 +57,6 @@ class AIGenerationRequest(models.Model):
         null=True,
         blank=True,
     )
-    refund_txn = models.ForeignKey(
-        "ledger.LedgerTransaction",
-        on_delete=models.PROTECT,
-        related_name="ai_generation_refunds",
-        null=True,
-        blank=True,
-    )
 
     result_file = models.FileField(
         upload_to="ai_generations/%Y/%m/%d/",
@@ -81,7 +74,6 @@ class AIGenerationRequest(models.Model):
     last_heartbeat_at = models.DateTimeField(null=True, blank=True)
 
     charged_at = models.DateTimeField(null=True, blank=True)
-    refunded_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)

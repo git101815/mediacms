@@ -83,7 +83,6 @@
       } else if (item.status === "failed") {
         body = '<p style="margin-top:8px;">' +
           escapeHtml(item.error_message || "Generation failed.") +
-          (item.refunded ? " Tokens refunded." : "") +
           "</p>";
       } else {
         body = '<p style="margin-top:8px;">Status: <strong>' +
