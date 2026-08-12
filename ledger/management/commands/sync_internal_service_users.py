@@ -30,6 +30,11 @@ SERVICE_USER_SPECS = [
             "ledger.can_view_onchain_transfers",
         ],
     },
+    # AI_GENERATION_FEATURE_V1
+    {
+        "setting": "AI_GENERATION_INTERNAL_SERVICE_USERNAME",
+        "permissions": [],
+    },
 ]
 
 class Command(BaseCommand):

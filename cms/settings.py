@@ -301,6 +301,7 @@ INSTALLED_APPS = [
     "imagekit",
     "ledger.apps.LedgerConfig",
     "premium.apps.PremiumConfig",
+    "ai_generation.apps.AIGenerationConfig",
     "files.apps.FilesConfig",
     "users.apps.UsersConfig",
     "actions.apps.ActionsConfig",
@@ -452,6 +453,15 @@ CELERY_BEAT_SCHEDULE = {
         "task": "clear_sessions",
         "schedule": crontab(hour=1, minute=1, day_of_week=6),
     },
+    # AI_GENERATION_FEATURE_V1 periodic recovery/nudge
+    "ai_generation_refund_stale": {
+        "task": "ai_generation.tasks.refund_stale_ai_generations",
+        "schedule": 60.0,
+    },
+    "ai_generation_nudge_worker": {
+        "task": "ai_generation.tasks.nudge_ai_generation_worker",
+        "schedule": 60.0,
+    },
     "get_list_of_popular_media": {
         "task": "get_list_of_popular_media",
         "schedule": crontab(minute=1, hour="*/10"),
@@ -506,6 +516,27 @@ REMOTE_ENCODING_SOURCE_ENDPOINT_URL = "eu-1"
 REMOTE_ENCODING_SOURCE_REGION_NAME = "auto"
 REMOTE_ENCODING_SOURCE_ADDRESSING_STYLE = "path"
 DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+
+AI_GENERATION_ENABLED=1
+AI_GENERATION_PRICE_TOKENS=10000000
+AI_GENERATION_MAX_PROMPT_CHARS=1200
+AI_GENERATION_MAX_PENDING_PER_USER=3
+AI_GENERATION_PROVIDER="perchance"
+AI_GENERATION_PROVIDER_RESOLUTION="512x768"
+AI_GENERATION_PROVIDER_GUIDANCE_SCALE=7
+AI_GENERATION_PROVIDER_NEGATIVE_PROMPT="child, children, minor, underage, preteen, loli, shota"
+AI_GENERATION_FORBIDDEN_TERMS=""
+AI_GENERATION_CLAIM_LEASE_SECONDS=300
+AI_GENERATION_QUEUE_TIMEOUT_SECONDS=1800
+AI_GENERATION_RESULT_DOWNLOAD_TIMEOUT_SECONDS=30
+AI_GENERATION_RESULT_MAX_BYTES=20971520
+AI_GENERATION_ALLOWED_RESULT_HOSTS="image-generation.perchance.org"
+AI_GENERATION_INTERNAL_SERVICE_USERNAME="ai-generation-service"
+AI_GENERATION_INTERNAL_SERVICE_SHARED_SECRET=""
+AI_GENERATION_N8N_WAKE_WEBHOOK_URL=""
+AI_GENERATION_N8N_WAKE_SECRET=""
+AI_GENERATION_N8N_WAKE_TIMEOUT_SECONDS=5
+
 
 LANGUAGES = [
     ('ar', _('Arabic')),

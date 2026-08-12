@@ -1,0 +1,168 @@
+
+{% extends "base.html" %}
+
+{% block headtitle %}AI Image Generator - {{PORTAL_NAME}}{% endblock headtitle %}
+
+{% block innercontent %}
+<div class="custom-page-wrapper" style="max-width: 980px; margin: 0 auto;">
+  <h2>AI Image Generator</h2>
+  <p>
+    Cost: <strong>{{ ai_generation_price }} tokens</strong> per generation.
+    Balance: <strong id="ai-generation-balance">{{ ai_generation_balance }}</strong> tokens.
+  </p>
+
+  {% if not ai_generation_enabled %}
+    <div class="alert alert-warning">AI image generation is temporarily unavailable.</div>
+  {% else %}
+    <form id="ai-generation-form">
+      {% csrf_token %}
+      <div class="form-group">
+        <label for="ai-generation-prompt">Prompt</label>
+        <textarea
+          id="ai-generation-prompt"
+          class="form-control"
+          rows="5"
+          maxlength="{{ ai_generation_max_prompt_chars }}"
+          required
+          placeholder="Describe the image you want to generate"
+        ></textarea>
+      </div>
+      <div style="margin-top: 12px;">
+        <button class="btn btn-primary" type="submit" id="ai-generation-submit">
+          Generate - {{ ai_generation_price }} tokens
+        </button>
+      </div>
+      <div id="ai-generation-error" class="alert alert-danger" style="display:none; margin-top:12px;"></div>
+    </form>
+  {% endif %}
+
+  <hr/>
+  <h3>Your generations</h3>
+  <div id="ai-generation-list"></div>
+</div>
+
+{{ ai_generation_initial|json_script:"ai-generation-initial-data" }}
+
+<script>
+(function () {
+  const form = document.getElementById("ai-generation-form");
+  const list = document.getElementById("ai-generation-list");
+  const balance = document.getElementById("ai-generation-balance");
+  const errorBox = document.getElementById("ai-generation-error");
+  const submit = document.getElementById("ai-generation-submit");
+  const promptInput = document.getElementById("ai-generation-prompt");
+  const csrfInput = form ? form.querySelector("[name=csrfmiddlewaretoken]") : null;
+
+  let generations = [];
+  const initialNode = document.getElementById("ai-generation-initial-data");
+  if (initialNode) {
+    try {
+      generations = JSON.parse(initialNode.textContent || "[]");
+    } catch (_error) {
+      generations = [];
+    }
+  }
+
+  function escapeHtml(value) {
+    const div = document.createElement("div");
+    div.textContent = value == null ? "" : String(value);
+    return div.innerHTML;
+  }
+
+  function render() {
+    if (!list) return;
+    if (!generations.length) {
+      list.innerHTML = "<p>No generations yet.</p>";
+      return;
+    }
+
+    list.innerHTML = generations.map(function (item) {
+      let body = "";
+      if (item.status === "success" && item.image_url) {
+        body = '<img src="' + escapeHtml(item.image_url) + '" alt="Generated image" style="max-width:100%; max-height:720px; display:block; margin-top:10px;">';
+      } else if (item.status === "failed") {
+        body = '<p style="margin-top:8px;">' +
+          escapeHtml(item.error_message || "Generation failed.") +
+          (item.refunded ? " Tokens refunded." : "") +
+          "</p>";
+      } else {
+        body = '<p style="margin-top:8px;">Status: <strong>' +
+          escapeHtml(item.status) + "</strong></p>";
+      }
+
+      return '<div class="card" style="padding:14px; margin-bottom:14px;">' +
+        '<div><strong>' + escapeHtml(item.prompt) + "</strong></div>" +
+        '<div style="opacity:.75; margin-top:4px;">' +
+          escapeHtml(item.price_display) + " tokens - " +
+          escapeHtml(item.status) +
+        "</div>" +
+        body +
+      "</div>";
+    }).join("");
+  }
+
+  function upsert(item) {
+    const index = generations.findIndex(function (row) { return row.id === item.id; });
+    if (index >= 0) generations[index] = item;
+    else generations.unshift(item);
+    render();
+  }
+
+  async function refreshActive() {
+    const active = generations.filter(function (row) {
+      return row.status === "queued" || row.status === "running";
+    });
+
+    await Promise.all(active.map(async function (row) {
+      try {
+        const response = await fetch("/api/v1/ai/generations/" + encodeURIComponent(row.id), {
+          credentials: "same-origin"
+        });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (payload && payload.generation) upsert(payload.generation);
+      } catch (_error) {
+      }
+    }));
+  }
+
+  if (form) {
+    form.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      errorBox.style.display = "none";
+      submit.disabled = true;
+
+      try {
+        const response = await fetch("/api/v1/ai/generations", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": csrfInput ? csrfInput.value : ""
+          },
+          body: JSON.stringify({prompt: promptInput.value})
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Could not create generation.");
+        }
+
+        upsert(payload.generation);
+        if (balance && payload.balance_display != null) {
+          balance.textContent = payload.balance_display;
+        }
+        promptInput.value = "";
+      } catch (error) {
+        errorBox.textContent = error.message || "Could not create generation.";
+        errorBox.style.display = "block";
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  }
+
+  render();
+  window.setInterval(refreshActive, 3000);
+})();
+</script>
+{% endblock %}
