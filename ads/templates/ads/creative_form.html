@@ -56,9 +56,20 @@
             <div class="group-help">Banner 728×90 / 300×250, VAST in-video, or popunder URL.</div>
           </div>
 
-          <div data-creative-banner-section>
+          <div
+            data-creative-banner-section
+            {% if form.placement.value != 'home_leaderboard' and form.placement.value != 'media_sidebar_rectangle' %}hidden{% endif %}
+          >
             <div class="file-control">{{ form.image }}{{ form.image.errors }}</div>
             <div class="group-help">PNG, JPG, SVG or animated GIF at the exact selected dimensions.</div>
+
+            <div class="creative-preview" data-creative-preview>
+              {% if creative and creative.is_banner and creative.image %}
+                <img src="{{ creative.image.url }}" alt="{{ creative.name }}">
+              {% else %}
+                <span>Creative preview</span>
+              {% endif %}
+            </div>
           </div>
 
           <div class="group" data-creative-vast-section hidden>
@@ -73,18 +84,6 @@
             <span class="title">Destination URL</span>
             {{ form.destination_url.errors }}
             <div class="group-help">URL opened by the existing popunder/tabunder engine.</div>
-          </div>
-
-          <div class="creative-preview" data-creative-preview>
-            {% if creative and creative.is_banner and creative.image %}
-              <img src="{{ creative.image.url }}" alt="{{ creative.name }}">
-            {% elif creative and creative.is_in_video %}
-              <span>VAST creative</span>
-            {% elif creative and creative.is_popunder %}
-              <span>Popunder URL creative</span>
-            {% else %}
-              <span>Creative preview</span>
-            {% endif %}
           </div>
         </div>
 
