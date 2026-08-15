@@ -4,7 +4,10 @@ import ads.runtime as runtime
 import ads.services as services
 from ads.models import AdCampaign, AdSettlementBatch
 from ledger.models import LedgerEntry, LedgerTransaction, TokenWallet
-from ledger.services import get_system_wallet
+from ledger.services import (
+    get_system_wallet,
+    get_wallet_available_balance,
+)
 
 
 @pytest.mark.django_db
@@ -118,6 +121,34 @@ def test_full_settlement_debits_advertiser_credits_platform_and_acks_redis(
         )
         or 0
     ) == 0
+
+
+@pytest.mark.django_db
+def test_unsettled_ads_spend_stays_reserved_after_advertiser_flag_is_removed(
+    advertiser_factory,
+    campaign_factory,
+    ads_redis,
+):
+    user = advertiser_factory(balance=100)
+    campaign = campaign_factory(advertiser=user)
+    wallet = TokenWallet.objects.select_related("user").get(user=user)
+
+    # 30_000 nanos = 30 microtokens already consumed by Ads but not settled.
+    ads_redis.set(
+        runtime.account_accrued_key(user.pk),
+        30_000,
+    )
+    assert get_wallet_available_balance(wallet) == 70
+
+    user.advertiserUser = False
+    user.save(update_fields=["advertiserUser"])
+
+    wallet = TokenWallet.objects.select_related("user").get(pk=wallet.pk)
+    assert wallet.user.ad_campaigns.filter(pk=campaign.pk).exists()
+    assert not wallet.user.advertiserUser
+
+    # Removing the role must not make already-consumed Ads money spendable.
+    assert get_wallet_available_balance(wallet) == 70
 
 
 @pytest.mark.django_db

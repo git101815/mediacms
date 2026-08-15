@@ -61,7 +61,7 @@
             {% if form.placement.value != 'home_leaderboard' and form.placement.value != 'media_sidebar_rectangle' %}hidden{% endif %}
           >
             <div class="file-control">{{ form.image }}{{ form.image.errors }}</div>
-            <div class="group-help">PNG, JPG, SVG or animated GIF at the exact selected dimensions.</div>
+            <div class="group-help">PNG, JPG, SVG or animated GIF at the exact selected dimensions. Maximum 5 MB.</div>
 
             <div class="creative-preview" data-creative-preview>
               {% if creative and creative.is_banner and creative.image %}

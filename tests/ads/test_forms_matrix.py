@@ -133,6 +133,25 @@ def test_banner_rejects_missing_corrupt_and_unsupported_files():
 
 
 @pytest.mark.django_db
+def test_banner_creative_rejects_files_over_5_mb_before_image_parsing():
+    oversized = SimpleUploadedFile(
+        "oversized.png",
+        b"x" * (5 * 1024 * 1024 + 1),
+        content_type="image/png",
+    )
+    form = AdCreativeForm(
+        data={
+            "name": "Oversized",
+            "placement": AdCreative.PLACEMENT_HOME,
+        },
+        files={"image": oversized},
+    )
+
+    assert not form.is_valid()
+    assert "5 MB or smaller" in str(form.errors)
+
+
+@pytest.mark.django_db
 def test_svg_accepts_exact_dimensions_and_viewbox():
     explicit = AdCreativeForm(
         data={

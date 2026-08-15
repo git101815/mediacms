@@ -331,13 +331,33 @@ def get_wallet_available_balance(wallet: TokenWallet) -> int:
             user = wallet.user
         except Exception:
             user = None
-        if user is not None and getattr(user, "advertiserUser", False):
+
+        # Unsettled Ads spend remains reserved even if advertiserUser is later
+        # removed. Campaigns are retained in the database, so their existence
+        # is the durable indicator that this wallet can still have Redis-metered
+        # spend waiting for settlement. Superusers can also own Ads campaigns
+        # without advertiserUser.
+        has_ads_exposure = bool(
+            user is not None
+            and (
+                getattr(user, "advertiserUser", False)
+                or getattr(user, "is_superuser", False)
+                or user.ad_campaigns.exists()
+            )
+        )
+        if has_ads_exposure:
             try:
                 from ads.runtime import get_account_unsettled_microtokens
-                available -= int(get_account_unsettled_microtokens(wallet.user_id))
+
+                available -= int(
+                    get_account_unsettled_microtokens(wallet.user_id)
+                )
             except Exception as exc:
-                # Advertiser wallet outflows fail closed if the Ads meter is unavailable.
-                raise ValidationError("Advertising balance is temporarily unavailable") from exc
+                # Wallet outflows fail closed whenever this account can still
+                # have unsettled advertising spend.
+                raise ValidationError(
+                    "Advertising balance is temporarily unavailable"
+                ) from exc
     return max(0, available)
 
 def _require_wallet_not_blocked(wallet: TokenWallet):

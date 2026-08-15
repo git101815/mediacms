@@ -24,6 +24,9 @@ USD_TO_MICROTOKENS = (
 
 # Ads is USD-denominated. Storage remains integer ledger units internally.
 _DEFAULT_MIN_BID_USD = Decimal("0.000001")
+# Banner creatives are the only uploaded direct-ad assets. Keep the hard
+# application-side cap small even though nginx accepts much larger media uploads.
+_MAX_BANNER_CREATIVE_BYTES = 5 * 1024 * 1024
 
 _BANNER_DIMENSIONS = {
     AdCreative.PLACEMENT_HOME: (728, 90),
@@ -102,6 +105,20 @@ def _validate_http_url(value, *, field_name):
 
 
 def _read_upload_bytes(upload):
+    declared_size = getattr(upload, "size", None)
+    if declared_size is not None:
+        try:
+            declared_size = int(declared_size)
+        except (TypeError, ValueError):
+            declared_size = None
+    if (
+        declared_size is not None
+        and declared_size > _MAX_BANNER_CREATIVE_BYTES
+    ):
+        raise forms.ValidationError(
+            "Banner creative must be 5 MB or smaller."
+        )
+
     try:
         upload.seek(0)
     except Exception:
@@ -111,7 +128,9 @@ def _read_upload_bytes(upload):
             pass
 
     try:
-        data = upload.read()
+        # Never trust only the declared upload size. The bounded read protects
+        # the worker even for a malformed/custom UploadedFile implementation.
+        data = upload.read(_MAX_BANNER_CREATIVE_BYTES + 1)
     except Exception as exc:
         raise forms.ValidationError(
             "Creative file could not be read."
@@ -121,6 +140,11 @@ def _read_upload_bytes(upload):
             upload.seek(0)
         except Exception:
             pass
+
+    if len(data) > _MAX_BANNER_CREATIVE_BYTES:
+        raise forms.ValidationError(
+            "Banner creative must be 5 MB or smaller."
+        )
 
     return data
 
