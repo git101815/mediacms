@@ -1,9 +1,9 @@
 import os
 from celery.schedules import crontab
 from datetime import timedelta
-FRONTEND_HOST = "http://localhost"
-ADS_HOST = "ads.localhost"
-ADS_SCHEME = "http"
+FRONTEND_HOST = "https://celebfakes.ru"
+ADS_HOST = "ads.celebfakes.ru"
+ADS_SCHEME = "https"
 TIME_ZONE = "Europe/Moscow"
 ALLOWED_HOSTS = [
     "www.celebfakes.ru",
@@ -24,8 +24,8 @@ PORTAL_DESCRIPTION = "CelebFakes gathers the best creators to offer it's users h
 DFANS_REF_CODE = "A14Q9C"
 DEPOSIT_EVM_ACCOUNT_XPUB = os.getenv("DEPOSIT_EVM_ACCOUNT_XPUB", "").strip()
 LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
-TABUNDER_COOLDOWN_SECONDS = 0
-PREROLLS_COOLDOWN_SECONDS = 0
+TABUNDER_COOLDOWN_SECONDS = 60
+PREROLLS_COOLDOWN_SECONDS = 10
 
 # ads-min-bids-by-type-v3
 # Human USD amounts. Keep strings to avoid float rounding.
