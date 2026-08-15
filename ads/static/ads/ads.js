@@ -88,7 +88,7 @@
       '[name="pricing_model"]'
     );
     const campaignBid = campaignForm.querySelector(
-      '[name="bid_tokens"]'
+      '[name="bid_usd"]'
     );
 
     const syncCampaignBidMinimum = () => {
@@ -204,6 +204,7 @@
     packGrossCanonical: 0,
     method: null,
     assetKey: '',
+    asset: null,
     route: null,
     reviewBackStep: 2,
   };
@@ -389,8 +390,16 @@
     copy.append(strong, small);
 
     button.append(icon, copy);
-    button.addEventListener('click', onClick);
+    button.addEventListener('click', () => onClick(button));
     return button;
+  }
+
+  function markChoiceSelected(container, selectedButton) {
+    container.querySelectorAll('.finance-choice-card').forEach((button) => {
+      const selected = button === selectedButton;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
   }
 
   function paymentMethods() {
@@ -430,6 +439,10 @@
       '[data-finance-payment-methods]'
     );
     container.innerHTML = '';
+    const continueButton = financeForm.querySelector(
+      '[data-finance-payment-continue]'
+    );
+    if (continueButton) continueButton.disabled = true;
 
     paymentMethods().forEach((method) => {
       const requiresRoute = method.routes.some(
@@ -448,26 +461,18 @@
           detail,
           iconUrl: method.iconUrl,
           iconText: method.iconText,
-          onClick: () => {
+          onClick: (button) => {
+            markChoiceSelected(container, button);
             state.method = method;
             state.assetKey = '';
+            state.asset = null;
             state.route = null;
             routeInput.value = '';
             setRouteIndicatorsVisible(requiresRoute);
-
-            if (requiresRoute) {
-              renderAssets();
-              showStep(3);
-              return;
-            }
-
-            state.route = method.routes[0] || null;
-            if (state.route) {
-              routeInput.value = state.route.key;
-            }
-            state.reviewBackStep = 2;
-            renderReview();
-            showStep(5);
+            const continueButton = financeForm.querySelector(
+              '[data-finance-payment-continue]'
+            );
+            if (continueButton) continueButton.disabled = false;
           },
         })
       );
@@ -514,6 +519,10 @@
       '[data-finance-assets]'
     );
     container.innerHTML = '';
+    const continueButton = financeForm.querySelector(
+      '[data-finance-asset-continue]'
+    );
+    if (continueButton) continueButton.disabled = true;
 
     assetChoices().forEach((asset) => {
       container.appendChild(
@@ -522,10 +531,16 @@
           detail: 'Select network next',
           iconUrl: asset.iconUrl,
           iconText: asset.label,
-          onClick: () => {
+          onClick: (button) => {
+            markChoiceSelected(container, button);
             state.assetKey = asset.key;
-            renderNetworks(asset.routes);
-            showStep(4);
+            state.asset = asset;
+            state.route = null;
+            routeInput.value = '';
+            const continueButton = financeForm.querySelector(
+              '[data-finance-asset-continue]'
+            );
+            if (continueButton) continueButton.disabled = false;
           },
         })
       );
@@ -537,6 +552,10 @@
       '[data-finance-networks]'
     );
     container.innerHTML = '';
+    const continueButton = financeForm.querySelector(
+      '[data-finance-network-continue]'
+    );
+    if (continueButton) continueButton.disabled = true;
 
     [...assetRoutes]
       .sort((a, b) => (
@@ -556,12 +575,14 @@
               || route.assetCode,
             iconUrl: route.networkGroupIconUrl,
             iconText: label,
-            onClick: () => {
+            onClick: (button) => {
+              markChoiceSelected(container, button);
               state.route = route;
               routeInput.value = route.key;
-              state.reviewBackStep = 4;
-              renderReview();
-              showStep(5);
+              const continueButton = financeForm.querySelector(
+                '[data-finance-network-continue]'
+              );
+              if (continueButton) continueButton.disabled = false;
             },
           })
         );
@@ -642,7 +663,7 @@
       || ''
     );
     state.packLabel = (
-      input.getAttribute('data-pack-token-label')
+      input.getAttribute('data-pack-label')
       || ''
     );
     state.packPriceLabel = (
@@ -658,6 +679,7 @@
 
     state.method = null;
     state.assetKey = '';
+    state.asset = null;
     state.route = null;
     routeInput.value = '';
     setRouteIndicatorsVisible(false);
@@ -694,6 +716,58 @@
       if (!state.packCode) return;
       renderPaymentMethods();
       showStep(2);
+    });
+  }
+
+  const financePaymentContinue = financeForm.querySelector(
+    '[data-finance-payment-continue]'
+  );
+  if (financePaymentContinue) {
+    financePaymentContinue.addEventListener('click', () => {
+      if (!state.method) return;
+
+      const requiresRoute = state.method.routes.some(
+        (route) => (
+          route.paymentRequiresRouteSelection
+          || route.paymentMethodType === 'crypto'
+        )
+      );
+
+      if (requiresRoute) {
+        renderAssets();
+        showStep(3);
+        return;
+      }
+
+      state.route = state.method.routes[0] || null;
+      if (!state.route) return;
+      routeInput.value = state.route.key;
+      state.reviewBackStep = 2;
+      renderReview();
+      showStep(5);
+    });
+  }
+
+  const financeAssetContinue = financeForm.querySelector(
+    '[data-finance-asset-continue]'
+  );
+  if (financeAssetContinue) {
+    financeAssetContinue.addEventListener('click', () => {
+      if (!state.asset) return;
+      renderNetworks(state.asset.routes);
+      showStep(4);
+    });
+  }
+
+  const financeNetworkContinue = financeForm.querySelector(
+    '[data-finance-network-continue]'
+  );
+  if (financeNetworkContinue) {
+    financeNetworkContinue.addEventListener('click', () => {
+      if (!state.route) return;
+      state.reviewBackStep = 4;
+      renderReview();
+      showStep(5);
     });
   }
 

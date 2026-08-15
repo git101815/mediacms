@@ -38,7 +38,7 @@
       <div class="deposit-sheet" data-deposit-status-url="{{ wallet_deposit_session_status_url }}">
         <div class="deposit-status-line"><span class="deposit-status-dot"></span><span class="deposit-status-text" data-deposit-status-label>{{ deposit_session.status_label }}</span></div>
         <dl class="deposit-grid">
-          <dt>Token pack</dt><dd>{{ deposit_session.token_pack_label|default:"—" }}</dd>
+          <dt>Amount</dt><dd>{{ deposit_session.ads_pack_usd|default:"—" }}</dd>
           <dt>Payment method</dt><dd>{{ deposit_session.payment_method_label|default:deposit_session.display_label }}</dd>
           <dt>Expected payment</dt><dd>{{ deposit_session.expected_payment_amount_display }} {{ deposit_session.expected_payment_currency }}</dd>
           {% if deposit_session.network_display %}<dt>Network</dt><dd>{{ deposit_session.network_display }}</dd>{% endif %}

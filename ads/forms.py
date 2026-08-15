@@ -4,12 +4,17 @@ from django import forms
 from django.conf import settings
 from PIL import Image
 
+from ledger.services import PLATFORM_TOKENS_PER_STABLECOIN
+
 from .models import AdCampaign, AdCampaignCreative, AdCreative
 
 TOKEN_SCALE = 10 ** 6
+USD_TO_MICROTOKENS = (
+    Decimal(PLATFORM_TOKENS_PER_STABLECOIN) * Decimal(TOKEN_SCALE)
+)
 
-# configurable-ad-min-bids-v1
-_DEFAULT_MIN_BID_TOKENS = Decimal("0.000001")
+# Ads is USD-denominated. Storage remains integer ledger units internally.
+_DEFAULT_MIN_BID_USD = Decimal("0.000001")
 
 
 def _ad_type_for_placement(placement):
@@ -22,18 +27,18 @@ def _ad_type_for_placement(placement):
     return str(placement or "")
 
 
-def _minimum_bid_tokens(placement, pricing_model):
+def _minimum_bid_usd(placement, pricing_model):
     ad_type = _ad_type_for_placement(placement)
     configured = getattr(
         settings,
-        "ADS_MIN_BID_TOKENS_BY_AD_TYPE",
+        "ADS_MIN_BID_USD_BY_AD_TYPE",
         {},
     )
 
-    raw = _DEFAULT_MIN_BID_TOKENS
+    raw = _DEFAULT_MIN_BID_USD
     type_config = configured.get(ad_type, {}) if isinstance(configured, dict) else {}
     if isinstance(type_config, dict):
-        raw = type_config.get(pricing_model, _DEFAULT_MIN_BID_TOKENS)
+        raw = type_config.get(pricing_model, _DEFAULT_MIN_BID_USD)
     elif type_config not in (None, ""):
         raw = type_config
 
@@ -99,14 +104,14 @@ class AdCreativeForm(forms.ModelForm):
 
 
 class AdCampaignForm(forms.ModelForm):
-    bid_tokens = forms.DecimalField(
-        label="Bid",
+    bid_usd = forms.DecimalField(
+        label="Bid ($)",
         min_value=Decimal("0.000001"),
         max_digits=20,
         decimal_places=6,
         help_text=(
-            "CPM: tokens per 1,000 impressions. "
-            "CPC: tokens per click."
+            "CPM: USD per 1,000 impressions. "
+            "CPC: USD per valid click."
         ),
         widget=forms.TextInput(
             attrs={
@@ -157,10 +162,10 @@ class AdCampaignForm(forms.ModelForm):
         self.fields["creative_ids"].queryset = queryset
 
         # Keep the HTML constraint synchronized with local_settings.py.
-        bid_widget = self.fields["bid_tokens"].widget
+        bid_widget = self.fields["bid_usd"].widget
         configured = getattr(
             settings,
-            "ADS_MIN_BID_TOKENS_BY_AD_TYPE",
+            "ADS_MIN_BID_USD_BY_AD_TYPE",
             {},
         )
         for ad_type in ("banner", "preroll", "popunder"):
@@ -176,12 +181,12 @@ class AdCampaignForm(forms.ModelForm):
                 if isinstance(type_config, dict):
                     raw_min = type_config.get(
                         pricing_model,
-                        _DEFAULT_MIN_BID_TOKENS,
+                        _DEFAULT_MIN_BID_USD,
                     )
                 elif type_config not in (None, ""):
                     raw_min = type_config
                 else:
-                    raw_min = _DEFAULT_MIN_BID_TOKENS
+                    raw_min = _DEFAULT_MIN_BID_USD
                 bid_widget.attrs[
                     f"data-min-{ad_type}-{pricing_model}"
                 ] = str(raw_min)
@@ -189,11 +194,11 @@ class AdCampaignForm(forms.ModelForm):
         if (
             self.instance
             and self.instance.pk
-            and "bid_tokens" not in self.initial
+            and "bid_usd" not in self.initial
         ):
-            self.initial["bid_tokens"] = (
+            self.initial["bid_usd"] = (
                 Decimal(self.instance.bid_microtokens)
-                / Decimal(TOKEN_SCALE)
+                / USD_TO_MICROTOKENS
             )
 
         if (
@@ -207,10 +212,10 @@ class AdCampaignForm(forms.ModelForm):
                 .values_list("creative_id", flat=True)
             )
 
-    def clean_bid_tokens(self):
-        value = self.cleaned_data["bid_tokens"]
+    def clean_bid_usd(self):
+        value = self.cleaned_data["bid_usd"]
         units = int(
-            (Decimal(value) * Decimal(TOKEN_SCALE)).quantize(
+            (Decimal(value) * USD_TO_MICROTOKENS).quantize(
                 Decimal("1"),
                 rounding=ROUND_DOWN,
             )
@@ -225,21 +230,21 @@ class AdCampaignForm(forms.ModelForm):
         cleaned = super().clean()
         placement = cleaned.get("placement")
         pricing_model = cleaned.get("pricing_model")
-        bid_tokens = cleaned.get("bid_tokens")
+        bid_usd = cleaned.get("bid_usd")
         creatives = cleaned.get("creative_ids")
 
-        if placement and pricing_model and bid_tokens is not None:
-            minimum = _minimum_bid_tokens(
+        if placement and pricing_model and bid_usd is not None:
+            minimum = _minimum_bid_usd(
                 placement,
                 pricing_model,
             )
-            if bid_tokens < minimum:
+            if bid_usd < minimum:
                 ad_type = _ad_type_for_placement(placement)
                 self.add_error(
-                    "bid_tokens",
+                    "bid_usd",
                     (
                         f"Minimum {pricing_model.upper()} bid for "
-                        f"{ad_type} ads is {minimum} tokens."
+                        f"{ad_type} ads is ${minimum}."
                     ),
                 )
 
@@ -261,8 +266,13 @@ class AdCampaignForm(forms.ModelForm):
     def save(self, commit=True):
         obj = super().save(commit=False)
         obj.bid_microtokens = int(
-            Decimal(self.cleaned_data["bid_tokens"])
-            * Decimal(TOKEN_SCALE)
+            (
+                Decimal(self.cleaned_data["bid_usd"])
+                * USD_TO_MICROTOKENS
+            ).quantize(
+                Decimal("1"),
+                rounding=ROUND_DOWN,
+            )
         )
         if commit:
             obj.save()

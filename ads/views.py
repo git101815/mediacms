@@ -22,10 +22,11 @@ from ledger.models import DepositSession, TokenWallet
 from ledger.services import (
     PLATFORM_TOKEN_DECIMALS,
     PLATFORM_TOKENS_PER_STABLECOIN,
+    STABLECOIN_CANONICAL_DECIMALS,
     get_wallet_available_balance,
 )
 
-from .forms import AdCampaignForm, AdCreativeForm, TOKEN_SCALE
+from .forms import AdCampaignForm, AdCreativeForm
 from .models import AdCampaign, AdCampaignCreative, AdCreative
 from .runtime import (
     NANOS_PER_MICROTOKEN,
@@ -62,26 +63,76 @@ def _ads_base_url():
     return f"{scheme}://{settings.ADS_HOST}"
 
 
-def _format_tokens_from_micro(value):
-    number = Decimal(int(value)) / Decimal(TOKEN_SCALE)
-    text = f"{number:,.6f}".rstrip("0").rstrip(".")
-    return text or "0"
+def _format_ads_usd(value, *, decimal_places=6):
+    number = Decimal(value)
+    text = f"{number:,.{decimal_places}f}".rstrip("0").rstrip(".")
+    return f"${text or '0'}"
 
 
-def _format_tokens_from_nanos(value):
-    number = nanos_to_token_decimal(value)
-    text = f"{number:,.6f}".rstrip("0").rstrip(".")
-    return text or "0"
+def _format_usd_from_microtokens(value):
+    token_value = (
+        Decimal(int(value))
+        / (Decimal(10) ** PLATFORM_TOKEN_DECIMALS)
+    )
+    usd_value = token_value / Decimal(PLATFORM_TOKENS_PER_STABLECOIN)
+    return _format_ads_usd(usd_value)
+
+
+def _format_usd_from_nanos(value):
+    token_value = nanos_to_token_decimal(value)
+    usd_value = token_value / Decimal(PLATFORM_TOKENS_PER_STABLECOIN)
+    return _format_ads_usd(usd_value)
 
 
 def _format_ads_balance_usd(available_micro):
-    tokens = (
+    token_value = (
         Decimal(int(available_micro))
         / (Decimal(10) ** PLATFORM_TOKEN_DECIMALS)
     )
-    usd_value = tokens / Decimal(PLATFORM_TOKENS_PER_STABLECOIN)
-    text = f"{usd_value:,.2f}".rstrip("0").rstrip(".")
-    return f"{text or '0'}$"
+    usd_value = token_value / Decimal(PLATFORM_TOKENS_PER_STABLECOIN)
+    return _format_ads_usd(usd_value, decimal_places=2)
+
+
+def _format_ads_pack_usd(metadata):
+    token_pack = (metadata or {}).get("token_pack") or {}
+    try:
+        gross = int(token_pack.get("gross_stable_amount") or 0)
+    except (TypeError, ValueError):
+        return ""
+    if gross <= 0:
+        return ""
+    usd_value = (
+        Decimal(gross)
+        / (Decimal(10) ** STABLECOIN_CANONICAL_DECIMALS)
+    )
+    return _format_ads_usd(usd_value, decimal_places=2)
+
+
+def _build_ads_recent_deposit_rows(wallet, wallet_views):
+    rows = [
+        dict(row)
+        for row in wallet_views._build_recent_deposit_session_rows(wallet)
+    ]
+    public_ids = [row.get("public_id") for row in rows if row.get("public_id")]
+    if not public_ids:
+        return rows
+
+    sessions = DepositSession.objects.filter(
+        wallet=wallet,
+        public_id__in=public_ids,
+    ).only("public_id", "metadata")
+    session_by_public_id = {
+        str(session.public_id): session
+        for session in sessions
+    }
+    for row in rows:
+        session = session_by_public_id.get(str(row.get("public_id") or ""))
+        row["amount_usd"] = (
+            _format_ads_pack_usd(session.metadata)
+            if session is not None
+            else ""
+        )
+    return rows
 
 
 def _get_user_wallet(user):
@@ -99,13 +150,10 @@ def _ads_nav_context(user):
     try:
         wallet = _get_user_wallet(user)
         available_micro = get_wallet_available_balance(wallet)
-        balance = _format_tokens_from_micro(available_micro)
         balance_usd = _format_ads_balance_usd(available_micro)
     except Exception:
-        balance = "Unavailable"
         balance_usd = "—"
     return {
-        "balance": balance,
         "balance_usd": balance_usd,
         "finance_url": "/finance/",
         "portal_name": getattr(settings, "PORTAL_NAME", "MediaCMS"),
@@ -311,8 +359,8 @@ def dashboard(request):
                 "impressions": metrics["impressions"],
                 "clicks": metrics["clicks"],
                 "ctr": f"{metrics['ctr']:.2f}",
-                "spend": _format_tokens_from_nanos(metrics["spend_nanos"]),
-                "bid": _format_tokens_from_micro(campaign.bid_microtokens),
+                "spend": _format_usd_from_nanos(metrics["spend_nanos"]),
+                "bid": _format_usd_from_microtokens(campaign.bid_microtokens),
             }
         )
 
@@ -329,7 +377,7 @@ def dashboard(request):
         "total_impressions": totals["impressions"],
         "total_clicks": totals["clicks"],
         "total_ctr": f"{total_ctr:.2f}",
-        "total_spend": _format_tokens_from_nanos(totals["spend_nanos"]),
+        "total_spend": _format_usd_from_nanos(totals["spend_nanos"]),
         "active_campaigns": totals["active"],
     }
     return render(request, "ads/dashboard.html", context)
@@ -554,7 +602,10 @@ def finance(request):
             **_ads_nav_context(request.user),
             "deposit_options": wallet_views._build_wallet_deposit_options(),
             "token_pack_rows": wallet_views._build_wallet_token_pack_rows(),
-            "recent_deposit_sessions": wallet_views._build_recent_deposit_session_rows(wallet),
+            "recent_deposit_sessions": _build_ads_recent_deposit_rows(
+                wallet,
+                wallet_views,
+            ),
         },
     )
 
@@ -573,12 +624,14 @@ def finance_deposit_session(request, public_id):
         public_id=public_id,
         user=request.user,
     )
+    deposit_payload = wallet_views._build_deposit_session_payload(session)
+    deposit_payload["ads_pack_usd"] = _format_ads_pack_usd(session.metadata)
     return render(
         request,
         "ads/deposit_session.html",
         {
             **_ads_nav_context(request.user),
-            "deposit_session": wallet_views._build_deposit_session_payload(session),
+            "deposit_session": deposit_payload,
             "wallet_deposit_session_status_url": reverse(
                 "wallet_deposit_session_status",
                 kwargs={"public_id": session.public_id},

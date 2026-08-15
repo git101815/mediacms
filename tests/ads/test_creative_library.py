@@ -43,7 +43,7 @@ def test_one_creative_can_be_reused_by_multiple_campaigns(
                 "placement": AdCampaign.PLACEMENT_HOME,
                 "target_url": "https://example.com/",
                 "pricing_model": AdCampaign.PRICING_CPM,
-                "bid_tokens": "1",
+                "bid_usd": "1",
                 "creative_ids": [str(creative.pk)],
             },
             advertiser=user,
@@ -82,7 +82,7 @@ def test_campaign_can_have_multiple_creatives(
             "placement": AdCampaign.PLACEMENT_HOME,
             "target_url": "https://example.com/",
             "pricing_model": AdCampaign.PRICING_CPC,
-            "bid_tokens": "1",
+            "bid_usd": "1",
             "creative_ids": [
                 str(creatives[0].pk),
                 str(creatives[1].pk),

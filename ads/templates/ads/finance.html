@@ -42,7 +42,7 @@
 
         <section class="finance-section">
           <h2>Balance</h2>
-          <div class="finance-balance"><span class="finance-balance__amount">{{ balance_usd }}</span><span class="finance-balance__tokens">{{ balance }} tokens available</span></div>
+          <div class="finance-balance"><span class="finance-balance__amount">{{ balance_usd }}</span></div>
         </section>
 
         <section class="finance-section">
@@ -58,7 +58,7 @@
             <input type="hidden" name="return_status" value="all">
 
             <div class="finance-stepper">
-              <span class="finance-stepper__item is-active" data-finance-step-indicator="1"><b>1</b>Pack</span>
+              <span class="finance-stepper__item is-active" data-finance-step-indicator="1"><b>1</b>Amount</span>
               <span class="finance-stepper__item" data-finance-step-indicator="2"><b>2</b>Payment</span>
               <span class="finance-stepper__item finance-stepper__route" data-finance-step-indicator="3"><b>3</b>Asset</span>
               <span class="finance-stepper__item finance-stepper__route" data-finance-step-indicator="4"><b>4</b>Network</span>
@@ -66,7 +66,7 @@
             </div>
 
             <section class="finance-flow-panel" data-finance-step-panel="1">
-              <h3>Choose token pack</h3>
+              <h3>Choose amount</h3>
               <div class="finance-pack-radio-list">
                 {% for pack in token_pack_rows %}
                 <label class="finance-pack-radio">
@@ -75,16 +75,14 @@
                          value="{{ pack.code }}"
                          data-finance-pack
                          data-pack-code="{{ pack.code }}"
-                         data-pack-token-label="{{ pack.token_amount_display }} tokens"
-                         data-pack-price-label="{{ pack.price_display }}$"
+                         data-pack-label="${{ pack.price_display }}"
+                         data-pack-price-label="${{ pack.price_display }}"
                          data-pack-gross-canonical="{{ pack.gross_stable_amount }}"
                          {% if forloop.first %}checked{% endif %}>
                   <span class="finance-pack-radio__control"></span>
                   <span class="finance-pack-radio__body">
-                    <strong>{{ pack.token_amount_display }} tokens</strong>
-                    {% if pack.description %}<small>{{ pack.description }}</small>{% endif %}
+                    <strong>${{ pack.price_display }}</strong>
                   </span>
-                  <span class="finance-pack-radio__price">{{ pack.price_display }}$</span>
                 </label>
                 {% endfor %}
               </div>
@@ -98,25 +96,33 @@
             <section class="finance-flow-panel" data-finance-step-panel="2" hidden>
               <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-back="1">← back</button><h3>Choose payment method</h3></div>
               <div class="finance-choice-grid" data-finance-payment-methods></div>
+              <div class="finance-actions finance-flow-continue">
+                <button class="btn success" type="button" data-finance-payment-continue disabled>continue</button>
+              </div>
             </section>
 
             <section class="finance-flow-panel" data-finance-step-panel="3" hidden>
               <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-back="2">← back</button><h3>Choose asset</h3></div>
               <div class="finance-choice-grid" data-finance-assets></div>
+              <div class="finance-actions finance-flow-continue">
+                <button class="btn success" type="button" data-finance-asset-continue disabled>continue</button>
+              </div>
             </section>
 
             <section class="finance-flow-panel" data-finance-step-panel="4" hidden>
               <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-back="3">← back</button><h3>Choose network</h3></div>
               <div class="finance-choice-grid" data-finance-networks></div>
+              <div class="finance-actions finance-flow-continue">
+                <button class="btn success" type="button" data-finance-network-continue disabled>continue</button>
+              </div>
             </section>
 
             <section class="finance-flow-panel" data-finance-step-panel="5" hidden>
               <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-review-back>← back</button><h3>Review</h3></div>
               <div class="finance-review">
-                <div><span>Pack</span><strong data-finance-review-pack>—</strong></div>
+                <div><span>Amount</span><strong data-finance-review-pack>—</strong></div>
                 <div><span>Payment</span><strong data-finance-review-payment>—</strong></div>
                 <div data-finance-review-route-row><span>Route</span><strong data-finance-review-route>—</strong></div>
-                <div><span>Pack price</span><strong data-finance-review-price>—</strong></div>
               </div>
               <div class="finance-actions"><button class="btn success --big" type="submit">continue to payment</button></div>
             </section>
@@ -170,7 +176,7 @@
                 <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
                 <td>{{ row.display_label }}</td>
                 <td>{{ row.status_label }}</td>
-                <td>{% if row.credited_amount_display %}{{ row.credited_amount_display }} tokens{% else %}—{% endif %}</td>
+                <td>{% if row.amount_usd %}{{ row.amount_usd }}{% else %}—{% endif %}</td>
                 <td>{% if row.show_view %}<a class="table-btn" href="/finance/deposits/{{ row.public_id }}/">view</a>{% endif %}</td>
               </tr>
               {% endfor %}

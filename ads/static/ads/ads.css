@@ -1447,3 +1447,33 @@ h1, h2, h3, h4, h5 { color: #4A4A4A; font-weight: 400; }
   margin: 0;
 }
 
+
+
+/* ads-usd-explicit-finance-flow-v1 */
+.finance-pack-radio-list {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.finance-pack-radio {
+  width: 100%;
+  grid-template-columns: 28px minmax(0, 1fr);
+}
+
+.finance-choice-card.is-selected {
+  border-color: #00acc1;
+  background: #f8feff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+}
+
+.finance-flow-continue {
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.btn:disabled {
+  opacity: .45;
+  cursor: default;
+  box-shadow: none !important;
+}
