@@ -108,8 +108,11 @@ class AdCampaignForm(forms.ModelForm):
             "CPM: tokens per 1,000 impressions. "
             "CPC: tokens per click."
         ),
-        widget=forms.NumberInput(
-            attrs={"step": "0.000001", "min": "0.000001"}
+        widget=forms.TextInput(
+            attrs={
+                "inputmode": "decimal",
+                "autocomplete": "off",
+            }
         ),
     )
     creative_ids = forms.ModelMultipleChoiceField(

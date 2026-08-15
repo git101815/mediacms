@@ -49,7 +49,12 @@
         <div class="general-form-section">
           <h2 class="general-form-section__title">Creative</h2>
           <div class="group">{{ form.name }}<span class="title">Creative name</span>{{ form.name.errors }}</div>
-          <div class="group has-value">{{ form.placement }}<span class="title">Format</span>{{ form.placement.errors }}<div class="group-help">The image must exactly match the selected format.</div></div>
+          <div class="group select-group">
+            <label class="select-field-title" for="{{ form.placement.id_for_label }}">Format</label>
+            {{ form.placement }}
+            {{ form.placement.errors }}
+            <div class="group-help">The image must exactly match the selected format.</div>
+          </div>
           <div class="file-control">{{ form.image }}{{ form.image.errors }}</div>
           <div class="group-help">728×90 for Homepage, 300×250 for Video Sidebar.</div>
           <div class="creative-preview" data-creative-preview>
