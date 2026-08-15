@@ -44,7 +44,7 @@ h1, h2, h3, h4, h5 { color: #4A4A4A; font-weight: 400; }
 
 .navbar__logo-link {
   display: block;
-  width: 128px;
+  width: 260px;
   height: 34px;
 }
 
@@ -54,12 +54,12 @@ h1, h2, h3, h4, h5 { color: #4A4A4A; font-weight: 400; }
   transform: translate(0, -50%);
   display: flex;
   align-items: center;
-  width: 128px;
+  width: 260px;
   height: 22px;
   color: #fff;
   text-decoration: none;
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .clickaine-logo__mark {
@@ -95,9 +95,9 @@ h1, h2, h3, h4, h5 { color: #4A4A4A; font-weight: 400; }
   line-height: 20px;
   font-weight: 500;
   letter-spacing: .4px;
-  max-width: 97px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .navbar--switch-menu {
@@ -654,4 +654,264 @@ h1, h2, h3, h4, h5 { color: #4A4A4A; font-weight: 400; }
 
 @media (max-width: 1199px) {
   body { min-width: 1000px; }
+}
+
+
+/* Ads-only product surface. No apex/main-site navigation is exposed. */
+.navbar--switch-menu,
+.navbar__new-version { display: none !important; }
+.navbar #navbar-info { right: 82px; }
+.navbar #navbar-amount::before { content: ''; }
+
+.ads-page-note {
+  color: #a8a8a8;
+  font-size: 14px;
+  font-weight: 300;
+  margin: 8px 34px 0;
+}
+
+/* Creatives */
+.creative-thumb {
+  width: 96px;
+  height: 46px;
+  object-fit: contain;
+  background: #f7f7f7;
+  border: 1px solid #eee;
+}
+.creative-name {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Finance — same flat/material language as the supplied Clickaine finance UI. */
+.finance-content {
+  margin: 26px 34px 80px;
+  max-width: 980px;
+}
+.finance-balance {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  padding: 8px 0 24px;
+  border-bottom: 1px solid #ededed;
+}
+.finance-balance__amount {
+  color: #00acc1;
+  font-size: 34px;
+  font-weight: 300;
+}
+.finance-balance__tokens {
+  color: #9b9b9b;
+  font-size: 14px;
+  font-weight: 300;
+}
+.finance-section {
+  padding: 30px 0 34px;
+  border-bottom: 1px solid #ededed;
+}
+.finance-section:last-child { border-bottom: 0; }
+.finance-section h2 {
+  margin: 0 0 22px;
+  font-size: 20px;
+  font-weight: 400;
+}
+.finance-section__hint {
+  color: #9b9b9b;
+  font-size: 13px;
+  font-weight: 300;
+  margin: -14px 0 22px;
+}
+.finance-form {
+  width: 620px;
+  max-width: 100%;
+}
+.finance-field {
+  position: relative;
+  margin-bottom: 28px;
+}
+.finance-field label {
+  display: block;
+  color: #9b9b9b;
+  font-size: 13px;
+  margin-bottom: 7px;
+}
+.finance-field select {
+  width: 100%;
+  height: 38px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px solid #e6e6e6;
+  border-radius: 0;
+  background: #fff;
+  color: #4a4a4a;
+  font-size: 16px;
+  outline: none;
+}
+.finance-field select:focus { border-bottom-color: #00acc1; }
+.token-pack-list {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 24px;
+}
+.token-pack-list tr { border-bottom: 1px solid #eee; }
+.token-pack-list tr:first-child { border-top: 1px solid #eee; }
+.token-pack-list td { padding: 13px 8px; color: #616161; font-weight: 300; }
+.token-pack-list td:first-child { width: 42px; }
+.token-pack-list td:last-child { text-align: right; color: #00acc1; }
+.token-pack-list input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #c9c9c9;
+  border-radius: 50%;
+  position: relative;
+  vertical-align: middle;
+}
+.token-pack-list input[type='radio']:checked { border-color: #00acc1; }
+.token-pack-list input[type='radio']:checked::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  background: #00acc1;
+}
+.finance-actions { display: flex; align-items: center; gap: 12px; }
+.finance-actions .btn { margin-right: 0; }
+.finance-message {
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  border-left: 3px solid #00acc1;
+  background: #f7fbfc;
+  color: #606060;
+  font-size: 14px;
+}
+
+/* Deposit session */
+.deposit-sheet {
+  margin: 30px 34px 80px;
+  width: 720px;
+  max-width: calc(100% - 68px);
+}
+.deposit-status-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 0 22px;
+  border-bottom: 1px solid #ededed;
+}
+.deposit-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #00acc1;
+}
+.deposit-status-text { color: #4a4a4a; font-size: 18px; }
+.deposit-grid {
+  display: grid;
+  grid-template-columns: 210px 1fr;
+  border-bottom: 1px solid #ededed;
+}
+.deposit-grid dt,
+.deposit-grid dd {
+  margin: 0;
+  padding: 13px 0;
+  border-top: 1px solid #f3f3f3;
+  font-size: 14px;
+}
+.deposit-grid dt { color: #9b9b9b; font-weight: 300; }
+.deposit-grid dd { color: #4a4a4a; word-break: break-word; }
+.deposit-grid dt:first-of-type,
+.deposit-grid dt:first-of-type + dd { border-top: 0; }
+.deposit-address-row { display: flex; gap: 10px; align-items: center; }
+.deposit-address-row code {
+  font-family: monospace;
+  font-size: 13px;
+  color: #4a4a4a;
+  word-break: break-all;
+}
+.deposit-actions { display: flex; align-items: center; gap: 12px; margin-top: 24px; }
+.deposit-actions form { display: inline; }
+
+/* AuthWall — local Ads sign-in, no main-site visual dependency. */
+.auth-page {
+  min-height: 100vh;
+  background: #f7f8f9;
+  padding-top: 50px;
+}
+.auth-panel {
+  width: 410px;
+  margin: 92px auto 0;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0,0,0,.16);
+  padding: 38px 42px 42px;
+}
+.auth-panel h1 {
+  font-size: 30px;
+  font-weight: 300;
+  margin-bottom: 8px;
+  text-align: center;
+}
+.auth-panel__subtitle {
+  text-align: center;
+  color: #9b9b9b;
+  font-size: 14px;
+  font-weight: 300;
+  margin-bottom: 34px;
+}
+.auth-field { position: relative; margin-bottom: 30px; }
+.auth-field label {
+  display: block;
+  color: #9b9b9b;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.auth-field input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #dedede;
+  border-radius: 0;
+  padding: 8px 0;
+  font-size: 16px;
+  color: #4a4a4a;
+  outline: 0;
+}
+.auth-field input:focus { border-bottom-color: #00acc1; }
+.auth-error {
+  color: #f44336;
+  font-size: 13px;
+  line-height: 19px;
+  margin: -8px 0 22px;
+}
+.auth-submit {
+  width: 100%;
+  height: 42px;
+  border: 0;
+  border-radius: 2px;
+  background: #00acc1;
+  color: #fff;
+  text-transform: uppercase;
+  font-size: 14px;
+  letter-spacing: .5px;
+  cursor: pointer;
+}
+.auth-submit:hover { background: #00bfd7; box-shadow: 0 2px 3px rgba(0,0,0,.22); }
+.auth-wordmark {
+  display: flex;
+  align-items: center;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.auth-navbar { padding-left: 19px; }
+
+@media (max-width: 1199px) {
+  .finance-content { max-width: calc(100vw - 130px); }
 }

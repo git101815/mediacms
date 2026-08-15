@@ -38,4 +38,36 @@
       preview.appendChild(img);
     });
   }
+
+  const copyButton = document.querySelector('[data-copy-address]');
+  if (copyButton) {
+    copyButton.addEventListener('click', async () => {
+      const value = copyButton.getAttribute('data-copy-address') || '';
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        const previous = copyButton.textContent;
+        copyButton.textContent = 'copied';
+        window.setTimeout(() => { copyButton.textContent = previous; }, 1200);
+      } catch (_) {}
+    });
+  }
+
+  const statusNode = document.querySelector('[data-deposit-status-url]');
+  if (statusNode) {
+    const statusUrl = statusNode.getAttribute('data-deposit-status-url');
+    const label = document.querySelector('[data-deposit-status-label]');
+    const terminal = new Set(['transaction_complete', 'canceled', 'failed', 'expired']);
+    const poll = async () => {
+      try {
+        const response = await fetch(statusUrl, {credentials: 'same-origin', cache: 'no-store'});
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (label && payload.status_label) label.textContent = payload.status_label;
+        if (terminal.has(payload.status)) return;
+      } catch (_) {}
+      window.setTimeout(poll, 3000);
+    };
+    window.setTimeout(poll, 1500);
+  }
 })();

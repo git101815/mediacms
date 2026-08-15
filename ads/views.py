@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib.auth import get_user_model, login, logout
+from django.contrib.auth.forms import AuthenticationForm
 from django.core import signing
 from django.core.cache import cache
 from django.core.signing import BadSignature, SignatureExpired
@@ -13,9 +14,15 @@ from django.db import transaction
 from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from ledger.services import get_wallet_available_balance
+from ledger.models import DepositSession, TokenWallet
+from ledger.services import (
+    PLATFORM_TOKEN_DECIMALS,
+    PLATFORM_TOKENS_PER_STABLECOIN,
+    get_wallet_available_balance,
+)
 
 from .forms import AdCampaignForm, TOKEN_SCALE
 from .models import AdCampaign
@@ -66,24 +73,73 @@ def _format_tokens_from_nanos(value):
     return text or "0"
 
 
+def _format_ads_balance_usd(available_micro):
+    tokens = (
+        Decimal(int(available_micro))
+        / (Decimal(10) ** PLATFORM_TOKEN_DECIMALS)
+    )
+    usd_value = tokens / Decimal(PLATFORM_TOKENS_PER_STABLECOIN)
+    text = f"{usd_value:,.2f}".rstrip("0").rstrip(".")
+    return f"{text or '0'}$"
+
+
+def _get_user_wallet(user):
+    wallet, _created = TokenWallet.objects.get_or_create(
+        user=user,
+        defaults={
+            "wallet_type": TokenWallet.TYPE_USER,
+            "allow_negative": False,
+        },
+    )
+    return wallet
+
+
 def _ads_nav_context(user):
     try:
-        available_micro = get_wallet_available_balance(user.token_wallet)
+        wallet = _get_user_wallet(user)
+        available_micro = get_wallet_available_balance(wallet)
         balance = _format_tokens_from_micro(available_micro)
+        balance_usd = _format_ads_balance_usd(available_micro)
     except Exception:
         balance = "Unavailable"
-    frontend = str(settings.FRONTEND_HOST).rstrip("/")
+        balance_usd = "—"
     return {
         "balance": balance,
-        "add_funds_url": frontend + reverse("wallet", urlconf="cms.urls"),
-        "profile_url": frontend
-        + reverse(
-            "get_user",
-            kwargs={"username": user.username},
-            urlconf="cms.urls",
-        ),
+        "balance_usd": balance_usd,
+        "finance_url": "/finance/",
         "portal_name": getattr(settings, "PORTAL_NAME", "MediaCMS"),
     }
+
+
+@never_cache
+@require_http_methods(["GET", "POST"])
+def ads_login(request):
+    next_path = _safe_next(request.POST.get("next") or request.GET.get("next"))
+    if _is_advertiser(request.user):
+        return redirect(next_path)
+
+    form = AuthenticationForm(
+        request=request,
+        data=request.POST if request.method == "POST" else None,
+    )
+    if request.method == "POST" and form.is_valid():
+        user = form.get_user()
+        if not _is_advertiser(user):
+            form.add_error(None, "This account does not have advertiser access.")
+        else:
+            login(request, user)
+            return redirect(next_path)
+
+    return render(
+        request,
+        "ads/login.html",
+        {
+            "form": form,
+            "next_path": next_path,
+            "denied": request.GET.get("denied") == "1",
+            "portal_name": getattr(settings, "PORTAL_NAME", "MediaCMS"),
+        },
+    )
 
 
 @require_GET
@@ -154,7 +210,7 @@ def sso_callback(request):
 @require_GET
 def ads_logout(request):
     logout(request)
-    return redirect(str(settings.FRONTEND_HOST).rstrip("/") + "/")
+    return redirect("/login/")
 
 
 def _campaigns_for_user(user):
@@ -215,12 +271,7 @@ def dashboard(request):
             }
         )
 
-    wallet = request.user.token_wallet
-    try:
-        available_micro = get_wallet_available_balance(wallet)
-        balance = _format_tokens_from_micro(available_micro)
-    except Exception:
-        balance = "Unavailable"
+    nav_context = _ads_nav_context(request.user)
 
     total_ctr = (
         Decimal(totals["clicks"]) * Decimal(100) / Decimal(totals["impressions"])
@@ -229,25 +280,12 @@ def dashboard(request):
     )
     context = {
         "rows": rows,
-        "balance": balance,
+        **nav_context,
         "total_impressions": totals["impressions"],
         "total_clicks": totals["clicks"],
         "total_ctr": f"{total_ctr:.2f}",
         "total_spend": _format_tokens_from_nanos(totals["spend_nanos"]),
         "active_campaigns": totals["active"],
-        "add_funds_url": (
-            str(settings.FRONTEND_HOST).rstrip("/")
-            + reverse("wallet", urlconf="cms.urls")
-        ),
-        "profile_url": (
-            str(settings.FRONTEND_HOST).rstrip("/")
-            + reverse(
-                "get_user",
-                kwargs={"username": request.user.username},
-                urlconf="cms.urls",
-            )
-        ),
-        "portal_name": getattr(settings, "PORTAL_NAME", "MediaCMS"),
     }
     return render(request, "ads/dashboard.html", context)
 
@@ -332,6 +370,123 @@ def campaign_toggle(request, campaign_id):
     # PAUSED_FUNDS is intentionally not a manual resume state. It will resume
     # automatically when a wallet refresh sees enough funds.
     return redirect("/")
+
+
+# ads-independent-subdomain-v1
+def _wallet_views():
+    from files import views as wallet_views
+    return wallet_views
+
+
+@require_GET
+def creatives(request):
+    rows = []
+    campaigns = _campaigns_for_user(request.user).order_by("-updated_at", "-id")
+    for campaign in campaigns:
+        status_label, status_class = _status_view(campaign)
+        rows.append({
+            "campaign": campaign,
+            "status_label": status_label,
+            "status_class": status_class,
+        })
+    return render(
+        request,
+        "ads/creatives.html",
+        {"rows": rows, **_ads_nav_context(request.user)},
+    )
+
+
+@never_cache
+@require_GET
+def finance(request):
+    wallet = _get_user_wallet(request.user)
+    wallet_views = _wallet_views()
+    return render(
+        request,
+        "ads/finance.html",
+        {
+            **_ads_nav_context(request.user),
+            "deposit_options": wallet_views._build_wallet_deposit_options(),
+            "token_pack_rows": wallet_views._build_wallet_token_pack_rows(),
+            "recent_deposit_sessions": wallet_views._build_recent_deposit_session_rows(wallet),
+        },
+    )
+
+
+@require_POST
+def finance_deposit_request(request):
+    return _wallet_views().wallet_deposit_request(request)
+
+
+@never_cache
+@require_GET
+def finance_deposit_session(request, public_id):
+    wallet_views = _wallet_views()
+    session = get_object_or_404(
+        DepositSession.objects.select_related("wallet"),
+        public_id=public_id,
+        user=request.user,
+    )
+    return render(
+        request,
+        "ads/deposit_session.html",
+        {
+            **_ads_nav_context(request.user),
+            "deposit_session": wallet_views._build_deposit_session_payload(session),
+            "wallet_deposit_session_status_url": reverse(
+                "wallet_deposit_session_status",
+                kwargs={"public_id": session.public_id},
+            ),
+            "cancel_url": reverse(
+                "wallet_deposit_session_cancel",
+                kwargs={"public_id": session.public_id},
+            ),
+        },
+    )
+
+
+@never_cache
+@require_GET
+def finance_deposit_session_status(request, public_id):
+    session = get_object_or_404(
+        DepositSession.objects.only(
+            "public_id", "user_id", "status", "chain", "asset_code",
+            "deposit_address", "required_confirmations", "confirmations",
+            "min_amount", "observed_txid", "observed_amount", "expires_at",
+            "metadata",
+        ),
+        public_id=public_id,
+        user=request.user,
+    )
+    return JsonResponse(_wallet_views()._build_deposit_session_payload(session))
+
+
+@require_POST
+def finance_deposit_session_cancel(request, public_id):
+    return _wallet_views().wallet_deposit_session_cancel(request, public_id)
+
+
+@never_cache
+@require_GET
+def finance_dfx_launch(request, public_id):
+    return _wallet_views().wallet_dfx_launch(request, public_id)
+
+
+@require_GET
+def finance_dfx_return(request, public_id):
+    return _wallet_views().wallet_dfx_return(request, public_id)
+
+
+@never_cache
+@require_GET
+def finance_mtpelerin_launch(request, public_id):
+    return _wallet_views().wallet_mtpelerin_launch(request, public_id)
+
+
+@never_cache
+@require_GET
+def finance_banxa_launch(request, public_id):
+    return _wallet_views().wallet_banxa_launch(request, public_id)
 
 
 def _no_store(response):
