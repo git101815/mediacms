@@ -432,7 +432,7 @@ def test_review_notification_task_is_disabled_during_testing(
     post = Mock()
     monkeypatch.setattr(tasks.requests, "post", post)
     monkeypatch.setenv(
-        "ADS_REVIEW_WEBHOOK_URL",
+        "NOTIFICATION_WEBHOOK_URL",
         "https://n8n.example/webhook/ads-review",
     )
 
@@ -464,11 +464,11 @@ def test_review_notification_task_posts_campaign_payload(
     post = Mock(return_value=response)
     monkeypatch.setattr(tasks.requests, "post", post)
     monkeypatch.setenv(
-        "ADS_REVIEW_WEBHOOK_URL",
+        "NOTIFICATION_WEBHOOK_URL",
         "https://n8n.example/webhook/ads-review",
     )
     monkeypatch.setenv(
-        "ADS_REVIEW_WEBHOOK_SECRET",
+        "NOTIFICATION_WEBHOOK_SECRET",
         "review-secret",
     )
 
@@ -509,7 +509,7 @@ def test_review_notification_task_posts_creative_source(
     post = Mock(return_value=response)
     monkeypatch.setattr(tasks.requests, "post", post)
     monkeypatch.setenv(
-        "ADS_REVIEW_WEBHOOK_URL",
+        "NOTIFICATION_WEBHOOK_URL",
         "https://n8n.example/webhook/ads-review",
     )
 
