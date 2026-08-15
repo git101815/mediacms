@@ -2,14 +2,18 @@ import os
 from celery.schedules import crontab
 from datetime import timedelta
 FRONTEND_HOST = "https://celebfakes.ru"
+ADS_HOST = "ads.celebfakes.ru"
+ADS_SCHEME = "https"
 TIME_ZONE = "Europe/Moscow"
 ALLOWED_HOSTS = [
     "www.celebfakes.ru",
     "celebfakes.ru",
+    "ads.celebfakes.ru",
     "medias.celebfakes.ru",
     "mediapull.ru",
     "127.0.0.1",
     "localhost",
+    "ads.localhost",
     "testserver",
     "web",
 ]
@@ -20,8 +24,29 @@ PORTAL_DESCRIPTION = "CelebFakes gathers the best creators to offer it's users h
 DFANS_REF_CODE = "A14Q9C"
 DEPOSIT_EVM_ACCOUNT_XPUB = os.getenv("DEPOSIT_EVM_ACCOUNT_XPUB", "").strip()
 LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
-TABUNDER_COOLDOWN_SECONDS = 0
-PREROLLS_COOLDOWN_SECONDS = 0
+TABUNDER_COOLDOWN_SECONDS = 60
+PREROLLS_COOLDOWN_SECONDS = 10
+
+# ads-min-bids-by-type-v3
+# Human USD amounts. Keep strings to avoid float rounding.
+# "banner" applies to both 728x90 and 300x250.
+# "preroll" applies to all existing IMA/VAST in-video positions:
+# preroll, midroll and postroll.
+# "popunder" applies to the existing tabunder/popunder engine.
+ADS_MIN_BID_USD_BY_AD_TYPE = {
+    "banner": {
+        "cpm": "0.01",
+        "cpc": "0.0001", #even on 1% CTR
+    },
+    "preroll": {
+        "cpm": "0.6",
+        "cpc": "0.03", #even on 5% CTR
+    },
+    "popunder": {
+        "cpm": "2.0",
+        "cpc": "0.002", #even because each popunder is a click (100% CTR)
+    },
+}
 
 CAN_ADD_MEDIA = "advancedUser"
 MAX_VIDEO_UPLOADS_PER_DAY = 2
@@ -248,6 +273,16 @@ CELERY_BEAT_SCHEDULE = {
     "update_listings_thumbnails": {
         "task": "update_listings_thumbnails",
         "schedule": crontab(minute=2, hour="*/30"),
+    },
+    "ads_refresh_runtime": {
+        "task": "ads.refresh_runtime_state",
+        "schedule": 10.0,
+        "options": {"queue": "short_tasks"},
+    },
+    "ads_settle_runtime": {
+        "task": "ads.settle_runtime",
+        "schedule": 15.0,
+        "options": {"queue": "short_tasks"},
     },
     "push_all_media_to_storj": {
         "task": "push_all_media_to_storj",

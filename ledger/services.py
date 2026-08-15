@@ -325,7 +325,40 @@ def get_failed_sagas(*, actor, limit: int = 100):
     ).order_by("failed_at", "created_at")[:limit]
 
 def get_wallet_available_balance(wallet: TokenWallet) -> int:
-    return int(wallet.balance) - int(wallet.held_balance)
+    available = int(wallet.balance) - int(wallet.held_balance)
+    if wallet.wallet_type == TokenWallet.TYPE_USER and wallet.user_id:
+        try:
+            user = wallet.user
+        except Exception:
+            user = None
+
+        # Unsettled Ads spend remains reserved even if advertiserUser is later
+        # removed. Campaigns are retained in the database, so their existence
+        # is the durable indicator that this wallet can still have Redis-metered
+        # spend waiting for settlement. Superusers can also own Ads campaigns
+        # without advertiserUser.
+        has_ads_exposure = bool(
+            user is not None
+            and (
+                getattr(user, "advertiserUser", False)
+                or getattr(user, "is_superuser", False)
+                or user.ad_campaigns.exists()
+            )
+        )
+        if has_ads_exposure:
+            try:
+                from ads.runtime import get_account_unsettled_microtokens
+
+                available -= int(
+                    get_account_unsettled_microtokens(wallet.user_id)
+                )
+            except Exception as exc:
+                # Wallet outflows fail closed whenever this account can still
+                # have unsettled advertising spend.
+                raise ValidationError(
+                    "Advertising balance is temporarily unavailable"
+                ) from exc
+    return max(0, available)
 
 def _require_wallet_not_blocked(wallet: TokenWallet):
     if wallet.risk_status == LEDGER_RISK_STATUS_BLOCKED:

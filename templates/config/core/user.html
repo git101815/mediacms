@@ -11,6 +11,9 @@ MediaCMS.user = {
 	is: {
 		admin: {% if IS_MEDIACMS_ADMIN %}true{% else %}false{% endif %},
 		anonymous: {% if request.user.is_authenticated %}false{% else %}true{% endif %},
+		advanced: {% if request.user.is_authenticated and request.user.advancedUser %}true{% else %}false{% endif %},
+		adFree: {% if request.user.is_authenticated and request.user.adFreeUser %}true{% else %}false{% endif %},
+		advertiser: {% if request.user.is_authenticated and request.user.advertiserUser %}true{% else %}false{% endif %},
 	},
 	can: {
 		addMedia: {% if CAN_UPLOAD_MEDIA %}true{% else %}false{% endif %},

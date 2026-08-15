@@ -195,8 +195,10 @@ export default class VideoViewer extends React.PureComponent {
     this.playerInstance = null;
 
     this.premiumEndCtaDuration = 5000;
+    this.directInVideoAdsInitialized = false;
 
     this.onPlayerInit = this.onPlayerInit.bind(this);
+    this.initDirectInVideoAds = this.initDirectInVideoAds.bind(this);
 
     this.onClickNext = this.onClickNext.bind(this);
     this.onClickPrevious = this.onClickPrevious.bind(this);
@@ -450,6 +452,67 @@ export default class VideoViewer extends React.PureComponent {
     }
   }
 
+  initDirectInVideoAds() {
+    const vmapUrl = window.__mcDirectAdsVmapUrl;
+    const pluginPromise = window.__vjsPluginsLoadedPromise;
+    const sdkPromise = window.__mcImaSdkPromise;
+
+    if (
+      this.directInVideoAdsInitialized
+      || !vmapUrl
+      || !pluginPromise
+      || !sdkPromise
+      || !this.playerInstance
+      || !this.playerInstance.player
+    ) {
+      return;
+    }
+
+    Promise.all([pluginPromise, sdkPromise])
+      .then(() => {
+        if (
+          this.directInVideoAdsInitialized
+          || !this.playerInstance
+          || !this.playerInstance.player
+        ) {
+          return;
+        }
+
+        const videoJsPlayer = this.playerInstance.player;
+        if (typeof videoJsPlayer.ima !== 'function') {
+          return;
+        }
+
+        videoJsPlayer.ima({
+          adTagUrl: vmapUrl,
+          autoPlayAdBreaks: true,
+          preventLateAdStart: true,
+        });
+        this.directInVideoAdsInitialized = true;
+
+        const initializeDisplayContainer = () => {
+          try {
+            videoJsPlayer.ima.initializeAdDisplayContainer();
+          } catch (error) {}
+        };
+
+        const playerElement = videoJsPlayer.el();
+        if (playerElement) {
+          playerElement.addEventListener(
+            'click',
+            initializeDisplayContainer,
+            { once: true, capture: true }
+          );
+          playerElement.addEventListener(
+            'touchend',
+            initializeDisplayContainer,
+            { once: true, capture: true }
+          );
+        }
+      })
+      .catch(() => {});
+  }
+
   onPlayerInit(instance, elem) {
     this.playerElem = elem;
     this.playerInstance = instance;
@@ -473,6 +536,7 @@ export default class VideoViewer extends React.PureComponent {
     }
 
     this.playerInstance.player.one('ended', this.onVideoEnd);
+    this.initDirectInVideoAds();
   }
 
   onVideoRestart() {

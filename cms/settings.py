@@ -1,7 +1,13 @@
 import os
+from urllib.parse import urlsplit, urlunsplit
 
 from celery.schedules import crontab
 from django.utils.translation import gettext_lazy as _
+
+TESTING = (
+    str(os.environ.get("TESTING", "")).strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 
 DEBUG = False
 TABUNDER_COOLDOWN_SECONDS = 300
@@ -300,6 +306,7 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "imagekit",
     "ledger.apps.LedgerConfig",
+    "ads.apps.AdsConfig",
     "premium.apps.PremiumConfig",
     "files.apps.FilesConfig",
     "users.apps.UsersConfig",
@@ -325,6 +332,7 @@ MIDDLEWARE = [
     "cms.middleware_googleflag.GooglebotFlagMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "ads.middleware.AdsHostMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "cms.middleware_clickjacking.MoneyFrameDenyMiddleware",
@@ -381,34 +389,53 @@ FILE_UPLOAD_HANDLERS = [
 
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
-error_filename = os.path.join(LOGS_DIR, "debug.log")
-if not os.path.exists(LOGS_DIR):
-    try:
-        os.mkdir(LOGS_DIR)
-    except PermissionError:
-        pass
-
-if not os.path.isfile(error_filename):
-    open(error_filename, 'a').close()
-
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "handlers": {
-        "file": {
-            "level": "ERROR",
-            "class": "logging.FileHandler",
-            "filename": error_filename,
+if TESTING:
+    # Never create/write logs/debug.log while running the test suite.
+    LOGGING = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "handlers": {
+            "null": {
+                "class": "logging.NullHandler",
+            },
         },
-    },
-    "loggers": {
-        "django": {
-            "handlers": ["file"],
-            "level": "ERROR",
-            "propagate": True,
+        "loggers": {
+            "django": {
+                "handlers": ["null"],
+                "level": "ERROR",
+                "propagate": False,
+            },
         },
-    },
-}
+    }
+else:
+    error_filename = os.path.join(LOGS_DIR, "debug.log")
+    if not os.path.exists(LOGS_DIR):
+        try:
+            os.mkdir(LOGS_DIR)
+        except PermissionError:
+            pass
+
+    if not os.path.isfile(error_filename):
+        open(error_filename, "a").close()
+
+    LOGGING = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "handlers": {
+            "file": {
+                "level": "ERROR",
+                "class": "logging.FileHandler",
+                "filename": error_filename,
+            },
+        },
+        "loggers": {
+            "django": {
+                "handlers": ["file"],
+                "level": "ERROR",
+                "propagate": True,
+            },
+        },
+    }
 
 DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "NAME": "mediacms", "HOST": "127.0.0.1", "PORT": "5432", "USER": "mediacms", "PASSWORD": "mediacms", "OPTIONS": {'pool': True}}}
 
@@ -460,6 +487,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "update_listings_thumbnails",
         "schedule": crontab(minute=2, hour="*/30"),
     },
+    "ads_refresh_runtime": {
+        "task": "ads.refresh_runtime_state",
+        "schedule": 10.0,
+    },
+    "ads_settle_runtime": {
+        "task": "ads.settle_runtime",
+        "schedule": 15.0,
+    },
 }
 # TODO: beat, delete chunks from media root
 # chunks_dir after xx days...(also uploads_dir)
@@ -474,8 +509,10 @@ GLOBAL_LOGIN_REQUIRED = False
 # TODO: separate settings on production/development more properly, for now
 # this should be ok
 CELERY_TASK_ALWAYS_EAGER = False
-if os.environ.get("TESTING"):
+if TESTING:
     CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_EAGER_PROPAGATES = True
+    CELERY_TASK_STORE_EAGER_RESULT = False
 
 # if True, only show original, don't perform any action on videos
 DO_NOT_TRANSCODE_VIDEO = False
@@ -551,6 +588,17 @@ CRISPY_TEMPLATE_PACK = "bootstrap5"
 # keep the trailing slash
 DJANGO_ADMIN_URL = "admin/"
 
+# Self-serve direct advertising. Production overrides ADS_HOST in local_settings.py.
+ADS_HOST = os.environ.get("ADS_HOST", "ads.localhost").strip().lower()
+ADS_SCHEME = os.environ.get("ADS_SCHEME", "https").strip().lower()
+ADS_SSO_TICKET_MAX_AGE_SECONDS = 60
+ADS_CLICK_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+# VMAP position for direct midroll campaigns. local_settings.py may override.
+ADS_MIDROLL_TIME_OFFSET = "50%"
+# CPC campaigns are ranked against CPM using a smoothed 1% CTR prior.
+ADS_CPC_PRIOR_IMPRESSIONS = 1000
+ADS_CPC_PRIOR_CTR_PPM = 10000
+
 # this are used around a number of places and will need to be well documented!!!
 
 USE_SAML = False
@@ -603,6 +651,88 @@ try:
         from .dev_settings import *  # noqa
 except ImportError:
     pass
+
+# TESTING=True is allowed against a production-shaped stack, so every
+# mutable subsystem is forced away from live state after local/dev overrides.
+if TESTING:
+    TESTING_ROOT = os.environ.get(
+        "TESTING_ROOT",
+        "/tmp/mediacms-pytest",
+    ).strip() or "/tmp/mediacms-pytest"
+
+    TESTING_LIVE_DATABASE_NAME = str(
+        DATABASES["default"].get("NAME") or ""
+    )
+    TESTING_DATABASE_NAME = os.environ.get(
+        "TEST_DATABASE_NAME",
+        f"test_{TESTING_LIVE_DATABASE_NAME}",
+    ).strip()
+
+    if (
+        not TESTING_LIVE_DATABASE_NAME
+        or not TESTING_DATABASE_NAME
+        or TESTING_DATABASE_NAME == TESTING_LIVE_DATABASE_NAME
+        or not TESTING_DATABASE_NAME.startswith("test_")
+    ):
+        raise RuntimeError(
+            "Unsafe TESTING database configuration: "
+            f"live={TESTING_LIVE_DATABASE_NAME!r}, "
+            f"test={TESTING_DATABASE_NAME!r}"
+        )
+
+    DATABASES["default"].setdefault("TEST", {})["NAME"] = (
+        TESTING_DATABASE_NAME
+    )
+
+    TESTING_LIVE_REDIS_LOCATION = str(REDIS_LOCATION)
+    _testing_live_redis = urlsplit(TESTING_LIVE_REDIS_LOCATION)
+    _testing_live_redis_db = int(
+        (_testing_live_redis.path or "/0").strip("/") or 0
+    )
+    TESTING_REDIS_DB = int(
+        os.environ.get("TEST_REDIS_DB", "15")
+    )
+
+    if TESTING_REDIS_DB == _testing_live_redis_db:
+        raise RuntimeError(
+            "TEST_REDIS_DB must differ from the live Redis DB "
+            f"({_testing_live_redis_db})."
+        )
+
+    REDIS_LOCATION = urlunsplit(
+        (
+            _testing_live_redis.scheme,
+            _testing_live_redis.netloc,
+            f"/{TESTING_REDIS_DB}",
+            _testing_live_redis.query,
+            _testing_live_redis.fragment,
+        )
+    )
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_LOCATION,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
+        }
+    }
+    BROKER_URL = REDIS_LOCATION
+    CELERY_RESULT_BACKEND = REDIS_LOCATION
+
+    MEDIA_ROOT = os.path.join(TESTING_ROOT, "media")
+    HLS_DIR = os.path.join(MEDIA_ROOT, "hls")
+    STATIC_ROOT = os.path.join(TESTING_ROOT, "static_collected")
+    TEMP_DIRECTORY = os.path.join(TESTING_ROOT, "tmp")
+    DB_BACKUP_DIR = os.path.join(TESTING_ROOT, "backup")
+    LOGS_DIR = os.path.join(TESTING_ROOT, "logs")
+    LEDGER_OPERATIONAL_FLAGS_PATH = os.path.join(
+        TESTING_ROOT,
+        "ledger_operational_flags.json",
+    )
+
+    # No real email delivery from tests.
+    EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
 LEDGER_INTERNAL_API_MAX_SKEW_SECONDS = int(
     os.environ.get("LEDGER_INTERNAL_API_MAX_SKEW_SECONDS", "300")

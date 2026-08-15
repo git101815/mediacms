@@ -362,6 +362,7 @@ def prepare_banxa_browser_launch(
     *,
     session: DepositSession,
     actor,
+    return_url: str | None = None,
 ) -> dict:
     if not banxa_enabled():
         raise ValidationError(
@@ -424,8 +425,9 @@ def prepare_banxa_browser_launch(
         asset_code=session.asset_code,
         target_canonical_amount=int(session.min_amount),
         wallet_address=session.deposit_address,
-        return_url=_absolute_banxa_return_url(
-            session.public_id
+        return_url=(
+            str(return_url or "").strip()
+            or _absolute_banxa_return_url(session.public_id)
         ),
         fiat_currency=get_banxa_fiat_currency(),
     )

@@ -502,6 +502,7 @@ def prepare_dfx_browser_launch(
     *,
     session: DepositSession,
     actor,
+    redirect_uri: str | None = None,
 ) -> dict:
     if session.status != DepositSession.STATUS_AWAITING_PAYMENT:
         raise ValidationError(
@@ -592,8 +593,9 @@ def prepare_dfx_browser_launch(
             fiat_currency=currency,
             source_amount=checkout_amount,
             external_transaction_id=str(session.public_id),
-            redirect_uri=_absolute_dfx_return_url(
-                session.public_id
+            redirect_uri=(
+                str(redirect_uri or "").strip()
+                or _absolute_dfx_return_url(session.public_id)
             ),
             # The buyer may use a different email for DFX onboarding.
             customer_email="",

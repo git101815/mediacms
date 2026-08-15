@@ -1,0 +1,32 @@
+.direct-ad {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-left: auto;
+  margin-right: auto;
+
+  a, img {
+    display: block;
+    border: 0;
+  }
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
+
+.direct-ad--home_leaderboard {
+  width: min(728px, calc(100% - 24px));
+  aspect-ratio: 728 / 90;
+  margin-top: 16px;
+  margin-bottom: 20px;
+}
+
+.direct-ad--media_sidebar_rectangle {
+  width: min(300px, 100%);
+  aspect-ratio: 300 / 250;
+  margin-top: 14px;
+  margin-bottom: 14px;
+}

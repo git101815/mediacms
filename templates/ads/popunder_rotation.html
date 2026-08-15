@@ -313,8 +313,15 @@
     return mode;
   }
 
+  var fallbackProvider = chooseWeightedKey(
+    config.providers,
+    "clickaine"
+  );
+
   window.mcPopAdsRuntime = {
-    chosenProvider: chooseWeightedKey(config.providers, "clickaine"),
+    chosenProvider: null,
+    directAd: null,
+    ready: null,
     chooseWeightedOffer: chooseWeightedOffer,
     canRun: canRun,
     markOpen: markOpen,
@@ -323,5 +330,31 @@
     detectBrowserEnv: detectBrowserEnv,
     resolvePreferredMode: resolvePreferredMode
   };
+
+  window.mcPopAdsRuntime.ready = fetch(
+    "/api/v1/direct-ads/reserve/popunder/",
+    {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "Accept": "application/json" }
+    }
+  ).then(function (response) {
+    if (response.status === 204 || !response.ok) {
+      return null;
+    }
+    return response.json();
+  }).then(function (ad) {
+    if (ad && ad.open_url) {
+      window.mcPopAdsRuntime.directAd = ad;
+      window.mcPopAdsRuntime.chosenProvider = "direct";
+    } else {
+      window.mcPopAdsRuntime.chosenProvider = fallbackProvider;
+    }
+    return window.mcPopAdsRuntime.chosenProvider;
+  }).catch(function () {
+    window.mcPopAdsRuntime.chosenProvider = fallbackProvider;
+    return fallbackProvider;
+  });
 })();
 </script>

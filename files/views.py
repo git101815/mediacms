@@ -1465,10 +1465,22 @@ def wallet_dfx_launch(request, public_id):
         raise Http404
 
     try:
-        launch = prepare_dfx_browser_launch(
-            session=session,
-            actor=request.user,
-        )
+        dfx_kwargs = {
+            "session": session,
+            "actor": request.user,
+        }
+        ads_host = str(getattr(settings, "ADS_HOST", "") or "").strip().lower()
+        request_host = request.get_host().split(":", 1)[0].lower()
+        if ads_host and request_host == ads_host:
+            ads_scheme = str(getattr(settings, "ADS_SCHEME", "https") or "https")
+            dfx_kwargs["redirect_uri"] = (
+                f"{ads_scheme}://{request.get_host()}"
+                + reverse(
+                    "wallet_dfx_return",
+                    kwargs={"public_id": session.public_id},
+                )
+            )
+        launch = prepare_dfx_browser_launch(**dfx_kwargs)
 
         auth_origin = _dfx_auth_origin(
             launch.get("auth_url")
@@ -1607,10 +1619,22 @@ def wallet_banxa_launch(request, public_id):
         raise Http404
 
     try:
-        launch = prepare_banxa_browser_launch(
-            session=session,
-            actor=request.user,
-        )
+        banxa_kwargs = {
+            "session": session,
+            "actor": request.user,
+        }
+        ads_host = str(getattr(settings, "ADS_HOST", "") or "").strip().lower()
+        request_host = request.get_host().split(":", 1)[0].lower()
+        if ads_host and request_host == ads_host:
+            ads_scheme = str(getattr(settings, "ADS_SCHEME", "https") or "https")
+            banxa_kwargs["return_url"] = (
+                f"{ads_scheme}://{request.get_host()}"
+                + reverse(
+                    "wallet_deposit_session",
+                    kwargs={"public_id": session.public_id},
+                )
+            )
+        launch = prepare_banxa_browser_launch(**banxa_kwargs)
         checkout_url = str(launch.get("checkout_url") or "").strip()
         parsed_checkout_url = urlparse(checkout_url)
         if (

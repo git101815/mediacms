@@ -1,4 +1,25 @@
 {% if SHOW_PREROLL %}
-<!-- IMA SDK -->
-<!--<script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"></script>-->
+<script>
+(function () {
+  window.__mcDirectAdsVmapUrl = "/api/v1/direct-ads/vmap/";
+
+  if (window.__mcImaSdkPromise) {
+    return;
+  }
+
+  if (window.google && window.google.ima) {
+    window.__mcImaSdkPromise = Promise.resolve();
+    return;
+  }
+
+  window.__mcImaSdkPromise = new Promise(function (resolve, reject) {
+    var script = document.createElement("script");
+    script.src = "https://imasdk.googleapis.com/js/sdkloader/ima3.js";
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+})();
+</script>
 {% endif %}

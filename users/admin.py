@@ -30,9 +30,10 @@ class UserAdmin(admin.ModelAdmin):
         "is_manager",
         "advancedUser",
         "adFreeUser",
+        "advertiserUser",
         "media_count",
     ]
-    list_filter = ["is_superuser", "is_editor", "is_manager", "advancedUser", "adFreeUser"]
+    list_filter = ["is_superuser", "is_editor", "is_manager", "advancedUser", "adFreeUser", "advertiserUser"]
     ordering = ("-date_added",)
 
 

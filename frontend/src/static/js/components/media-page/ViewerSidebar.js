@@ -3,6 +3,7 @@ import { MediaPageStore } from '../../utils/stores/';
 import { AutoPlay } from './AutoPlay';
 import { RelatedMedia } from './RelatedMedia';
 import PlaylistView from './PlaylistView';
+import { DirectAd } from '../ads/DirectAd';
 
 export default class ViewerSidebar extends React.PureComponent {
   constructor(props) {
@@ -50,6 +51,7 @@ export default class ViewerSidebar extends React.PureComponent {
         ) : 'video' === this.state.mediaType || 'audio' === this.state.mediaType ? (
           <AutoPlay />
         ) : null}
+        {'video' === this.state.mediaType ? <DirectAd slot="media_sidebar_rectangle" /> : null}
         <RelatedMedia hideFirst={!this.state.isPlaylistPage} />
       </div>
     );

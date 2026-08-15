@@ -4,10 +4,6 @@
     return;
   }
 
-  if (window.mcPopAdsRuntime.chosenProvider !== "partner") {
-    return;
-  }
-
   if (window.__mcPartnerPopadsBooted) {
     return;
   }
@@ -44,10 +40,26 @@
   }
 
   function chooseOffer() {
+    if (runtime.chosenProvider === "direct" && runtime.directAd) {
+      return {
+        key: "direct",
+        direct: true,
+        url: runtime.directAd.open_url
+      };
+    }
+
+    if (runtime.chosenProvider !== "partner") {
+      return null;
+    }
+
     return runtime.chooseWeightedOffer(partnerConfig.offers || []);
   }
 
   function buildAdUrl(offer) {
+    if (offer && offer.direct) {
+      return String(offer.url || "");
+    }
+
     var clickId = randomId();
     var url = String(offer.urlTemplate || "").replace(/CLICKID/g, encodeURIComponent(clickId));
     var separator = url.indexOf("?") === -1 ? "?" : "&";
@@ -143,7 +155,7 @@
 
   function markAttempt(offer, mode) {
     window.mcPopLastAttempt = {
-      provider: "partner",
+      provider: runtime.chosenProvider,
       offer: offer ? offer.key : null,
       mode: mode,
       ts: Date.now()
@@ -152,20 +164,20 @@
 
   function markSuccess(offer, mode) {
     window.mcPopLastSuccess = {
-      provider: "partner",
+      provider: runtime.chosenProvider,
       offer: offer ? offer.key : null,
       mode: mode,
       ts: Date.now()
     };
 
     runtime.markOpen({
-      provider: "partner",
+      provider: runtime.chosenProvider,
       offer: offer ? offer.key : null,
       mode: mode
     });
 
     plausibleSafe("popunder_open", {
-      provider: "partner",
+      provider: runtime.chosenProvider,
       offer: offer ? offer.key : "",
       blocked: "0"
     });
@@ -173,7 +185,7 @@
 
   function markBlocked(offer, mode) {
     plausibleSafe("popunder_blocked", {
-      provider: "partner",
+      provider: runtime.chosenProvider,
       offer: offer ? offer.key : "",
       mode: mode || "",
       blocked: "1"
@@ -248,6 +260,13 @@
   }
 
   function handleTrigger(event, triggerEventName) {
+    if (
+      runtime.chosenProvider !== "partner"
+      && runtime.chosenProvider !== "direct"
+    ) {
+      return;
+    }
+
     if (isTriggerLocked) {
       return;
     }
