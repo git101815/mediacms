@@ -47,7 +47,7 @@
 
         <section class="finance-section">
           <h2>Add funds</h2>
-          <p class="finance-section__hint">Choose the pack, payment method and route without leaving the Ads interface. External checkouts open in a new tab.</p>
+          <p class="finance-section__hint">Choose the amount, payment method and route without leaving the Ads interface. External checkouts open in a new tab.</p>
 
           {% if deposit_options and token_pack_rows %}
           <form class="finance-form finance-buy-flow" method="post" action="/finance/deposit-request/" data-finance-buy-form>
@@ -76,7 +76,6 @@
                          data-finance-pack
                          data-pack-code="{{ pack.code }}"
                          data-pack-label="${{ pack.price_display }}"
-                         data-pack-price-label="${{ pack.price_display }}"
                          data-pack-gross-canonical="{{ pack.gross_stable_amount }}"
                          {% if forloop.first %}checked{% endif %}>
                   <span class="finance-pack-radio__control"></span>

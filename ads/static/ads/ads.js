@@ -200,7 +200,6 @@
   const state = {
     packCode: '',
     packLabel: '',
-    packPriceLabel: '',
     packGrossCanonical: 0,
     method: null,
     assetKey: '',
@@ -602,9 +601,6 @@
     const routeRow = financeForm.querySelector(
       '[data-finance-review-route-row]'
     );
-    const price = financeForm.querySelector(
-      '[data-finance-review-price]'
-    );
 
     if (pack) pack.textContent = state.packLabel || '—';
     if (payment) {
@@ -612,10 +608,6 @@
         state.method ? state.method.label : '—'
       );
     }
-    if (price) {
-      price.textContent = state.packPriceLabel || '—';
-    }
-
     const requiresRoute = Boolean(
       state.method
       && state.method.routes.some(
@@ -664,10 +656,6 @@
     );
     state.packLabel = (
       input.getAttribute('data-pack-label')
-      || ''
-    );
-    state.packPriceLabel = (
-      input.getAttribute('data-pack-price-label')
       || ''
     );
     state.packGrossCanonical = Number(
