@@ -1,12 +1,34 @@
 (() => {
+  const sidebar = document.querySelector('.sidebar');
+  const page = document.querySelector('.active-page');
+  const toggle = document.querySelector('.toggle-sidebar-button');
+
+  if (sidebar && page && toggle) {
+    toggle.addEventListener('click', () => {
+      const closed = sidebar.classList.toggle('--closed');
+      page.classList.toggle('--sidebar-closed', closed);
+      toggle.classList.toggle('--closed', closed);
+    });
+  }
+
+  document.querySelectorAll('.general-form .group').forEach((group) => {
+    const control = group.querySelector('input:not([type="file"]), select, textarea');
+    if (!control) return;
+    const sync = () => {
+      const value = control.value == null ? '' : String(control.value).trim();
+      group.classList.toggle('has-value', value.length > 0);
+    };
+    control.addEventListener('input', sync);
+    control.addEventListener('change', sync);
+    sync();
+  });
+
   const file = document.querySelector('input[type="file"][name="creative"]');
   const preview = document.querySelector('[data-creative-preview]');
-  const label = document.querySelector('[data-creative-label]');
   if (file && preview) {
     file.addEventListener('change', () => {
       const selected = file.files && file.files[0];
       if (!selected) return;
-      if (label) label.textContent = selected.name;
       const url = URL.createObjectURL(selected);
       preview.innerHTML = '';
       const img = document.createElement('img');
@@ -15,18 +37,5 @@
       img.onload = () => URL.revokeObjectURL(url);
       preview.appendChild(img);
     });
-  }
-
-  const model = document.querySelector('[name="pricing_model"]');
-  const help = document.querySelector('[data-bid-help]');
-  const updateBidHelp = () => {
-    if (!model || !help) return;
-    help.textContent = model.value === 'cpc'
-      ? 'Tokens charged for each valid click.'
-      : 'Tokens charged for every 1,000 delivered impressions.';
-  };
-  if (model) {
-    model.addEventListener('change', updateBidHelp);
-    updateBidHelp();
   }
 })();

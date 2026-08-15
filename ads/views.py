@@ -66,6 +66,26 @@ def _format_tokens_from_nanos(value):
     return text or "0"
 
 
+def _ads_nav_context(user):
+    try:
+        available_micro = get_wallet_available_balance(user.token_wallet)
+        balance = _format_tokens_from_micro(available_micro)
+    except Exception:
+        balance = "Unavailable"
+    frontend = str(settings.FRONTEND_HOST).rstrip("/")
+    return {
+        "balance": balance,
+        "add_funds_url": frontend + reverse("wallet", urlconf="cms.urls"),
+        "profile_url": frontend
+        + reverse(
+            "get_user",
+            kwargs={"username": user.username},
+            urlconf="cms.urls",
+        ),
+        "portal_name": getattr(settings, "PORTAL_NAME", "MediaCMS"),
+    }
+
+
 @require_GET
 def sso_start(request):
     next_path = _safe_next(request.GET.get("next"))
@@ -215,8 +235,18 @@ def dashboard(request):
         "total_ctr": f"{total_ctr:.2f}",
         "total_spend": _format_tokens_from_nanos(totals["spend_nanos"]),
         "active_campaigns": totals["active"],
-        "add_funds_url": str(settings.FRONTEND_HOST).rstrip("/") + reverse("wallet"),
-        "profile_url": str(settings.FRONTEND_HOST).rstrip("/") + request.user.get_absolute_url(),
+        "add_funds_url": (
+            str(settings.FRONTEND_HOST).rstrip("/")
+            + reverse("wallet", urlconf="cms.urls")
+        ),
+        "profile_url": (
+            str(settings.FRONTEND_HOST).rstrip("/")
+            + reverse(
+                "get_user",
+                kwargs={"username": request.user.username},
+                urlconf="cms.urls",
+            )
+        ),
         "portal_name": getattr(settings, "PORTAL_NAME", "MediaCMS"),
     }
     return render(request, "ads/dashboard.html", context)
@@ -242,6 +272,7 @@ def campaign_create(request):
             "form": form,
             "campaign": None,
             "title": "Create campaign",
+            **_ads_nav_context(request.user),
             "portal_name": getattr(settings, "PORTAL_NAME", "MediaCMS"),
         },
     )
@@ -282,6 +313,7 @@ def campaign_edit(request, campaign_id):
             "form": form,
             "campaign": campaign,
             "title": f"Edit · {campaign.name}",
+            **_ads_nav_context(request.user),
             "portal_name": getattr(settings, "PORTAL_NAME", "MediaCMS"),
         },
     )
