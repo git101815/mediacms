@@ -34,16 +34,16 @@ PREROLLS_COOLDOWN_SECONDS = 0
 # when they are added to the self-serve campaign model.
 ADS_MIN_BID_TOKENS_BY_AD_TYPE = {
     "banner": {
-        "cpm": "0.000001",
-        "cpc": "0.000001",
+        "cpm": "0.01",
+        "cpc": "0.0001", #even on 1% CTR
     },
     "preroll": {
-        "cpm": "0.000001",
-        "cpc": "0.000001",
+        "cpm": "0.6",
+        "cpc": "0.03", #even on 5% CTR
     },
     "popunder": {
-        "cpm": "0.000001",
-        "cpc": "0.000001",
+        "cpm": "2.0",
+        "cpc": "0.002", #even because each popunder is a click (100% CTR)
     },
 }
 
