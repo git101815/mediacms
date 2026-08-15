@@ -18,6 +18,7 @@
     <a id="logout" href="/logout/" aria-label="Logout"><svg class="icon icon--logout" viewBox="0 0 20 17"><path d="M13.5 11.3a.53.53 0 0 0 .75 0l3.5-3.45a.5.5 0 0 0 0-.72l-3.5-3.45a.53.53 0 0 0-.75.74L16.1 7H7.8a.52.52 0 1 0 0 1.05h8.3l-2.6 2.56a.5.5 0 0 0 0 .69zM9.4 14.9a.52.52 0 0 0 .52-.52v-2.56a.52.52 0 1 0-1.04 0v2.04H1.14V1.12h7.69v2.04a.52.52 0 1 0 1.04 0V.6a.52.52 0 0 0-.52-.52H.6A.52.52 0 0 0 .08.6v13.79c0 .29.23.52.52.52h8.8z"/></svg></a>
   </span>
 </div>
+
 <div class="sidebar">
   <a class="sidebar-item" title="Campaigns" href="/">
     <div><span class="sidebar-item--icon"><svg class="icon" viewBox="0 0 24 24"><path d="M3 3h18v5H3V3zm0 7h18v5H3v-5zm0 7h18v4H3v-4z"/></svg></span><span class="item--heading">Campaigns</span></div>
@@ -35,8 +36,10 @@
   <div class="active-page__top-space">
     <div class="active-page--container">
       <header class="page-header"><h1 class="active-page--title">Finance</h1></header>
+
       <div class="finance-content">
         {% if messages %}{% for message in messages %}<div class="finance-message">{{ message }}</div>{% endfor %}{% endif %}
+
         <section class="finance-section">
           <h2>Balance</h2>
           <div class="finance-balance"><span class="finance-balance__amount">{{ balance_usd }}</span><span class="finance-balance__tokens">{{ balance }} tokens available</span></div>
@@ -44,33 +47,99 @@
 
         <section class="finance-section">
           <h2>Add funds</h2>
-          <p class="finance-section__hint">Choose a payment method and a token pack. Payment checkout opens in a new tab so the Ads dashboard stays open.</p>
+          <p class="finance-section__hint">Choose the pack, payment method and route without leaving the Ads interface. External checkouts open in a new tab.</p>
+
           {% if deposit_options and token_pack_rows %}
-          <form class="finance-form" method="post" action="/finance/deposit-request/" target="_blank">
+          <form class="finance-form finance-buy-flow" method="post" action="/finance/deposit-request/" data-finance-buy-form>
             {% csrf_token %}
-            <div class="finance-field">
-              <label for="deposit-option">Payment method</label>
-              <select id="deposit-option" name="deposit_option_key" required>
-                <option value="">Select payment method</option>
-                {% for option in deposit_options %}
-                <option value="{{ option.key }}">{{ option.payment_group_label }}{% if option.payment_method_label and option.payment_method_label != option.payment_group_label %} · {{ option.payment_method_label }}{% endif %}{% if option.network_display and option.payment_requires_route_selection %} · {{ option.network_display }}{% endif %}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <table class="token-pack-list">
-              <tbody>
-                {% for pack in token_pack_rows %}
-                <tr>
-                  <td><input type="radio" name="token_pack_key" value="{{ pack.code }}" {% if forloop.first %}checked{% endif %} required></td>
-                  <td><strong>{{ pack.token_amount_display }} tokens</strong>{% if pack.description %}<br><small>{{ pack.description }}</small>{% endif %}</td>
-                  <td>{{ pack.price_display }}$</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
+            <input type="hidden" name="token_pack_key" value="" data-finance-selected-pack>
+            <input type="hidden" name="deposit_option_key" value="" data-finance-selected-route>
             <input type="hidden" name="return_tab" value="all">
             <input type="hidden" name="return_status" value="all">
-            <div class="finance-actions"><button class="btn success --big" type="submit">add funds</button></div>
+
+            <div class="finance-stepper">
+              <span class="finance-stepper__item is-active" data-finance-step-indicator="1"><b>1</b>Pack</span>
+              <span class="finance-stepper__item" data-finance-step-indicator="2"><b>2</b>Payment</span>
+              <span class="finance-stepper__item finance-stepper__route" data-finance-step-indicator="3"><b>3</b>Asset</span>
+              <span class="finance-stepper__item finance-stepper__route" data-finance-step-indicator="4"><b>4</b>Network</span>
+              <span class="finance-stepper__item" data-finance-step-indicator="5"><b>5</b>Review</span>
+            </div>
+
+            <section class="finance-flow-panel" data-finance-step-panel="1">
+              <h3>Choose token pack</h3>
+              <div class="finance-choice-grid finance-pack-grid">
+                {% for pack in token_pack_rows %}
+                <button type="button" class="finance-choice-card finance-pack-card"
+                        data-finance-pack
+                        data-pack-code="{{ pack.code }}"
+                        data-pack-token-label="{{ pack.token_amount_display }} tokens"
+                        data-pack-price-label="{{ pack.price_display }}$"
+                        data-pack-gross-canonical="{{ pack.gross_stable_amount }}">
+                  {% if pack.image_path %}<img class="finance-choice-card__logo finance-pack-logo" src="{% static pack.image_path %}" alt="">{% endif %}
+                  <span class="finance-choice-card__copy"><strong>{{ pack.token_amount_display }} tokens</strong><small>{% if pack.description %}{{ pack.description }} · {% endif %}{{ pack.price_display }}$</small></span>
+                </button>
+                {% endfor %}
+              </div>
+            </section>
+
+            <section class="finance-flow-panel" data-finance-step-panel="2" hidden>
+              <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-back="1">← back</button><h3>Choose payment method</h3></div>
+              <div class="finance-choice-grid" data-finance-payment-methods></div>
+            </section>
+
+            <section class="finance-flow-panel" data-finance-step-panel="3" hidden>
+              <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-back="2">← back</button><h3>Choose asset</h3></div>
+              <div class="finance-choice-grid" data-finance-assets></div>
+            </section>
+
+            <section class="finance-flow-panel" data-finance-step-panel="4" hidden>
+              <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-back="3">← back</button><h3>Choose network</h3></div>
+              <div class="finance-choice-grid" data-finance-networks></div>
+            </section>
+
+            <section class="finance-flow-panel" data-finance-step-panel="5" hidden>
+              <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-review-back>← back</button><h3>Review</h3></div>
+              <div class="finance-review">
+                <div><span>Pack</span><strong data-finance-review-pack>—</strong></div>
+                <div><span>Payment</span><strong data-finance-review-payment>—</strong></div>
+                <div data-finance-review-route-row><span>Route</span><strong data-finance-review-route>—</strong></div>
+                <div><span>Pack price</span><strong data-finance-review-price>—</strong></div>
+              </div>
+              <div class="finance-actions"><button class="btn success --big" type="submit">continue to payment</button></div>
+            </section>
+
+            <div class="finance-route-data" hidden>
+              {% for option in deposit_options %}
+              <span data-finance-route-option
+                    data-option-key="{{ option.key }}"
+                    data-payment-method-key="{{ option.payment_method_key }}"
+                    data-payment-method-label="{{ option.payment_method_label }}"
+                    data-payment-method-type="{{ option.payment_method_type }}"
+                    data-payment-group-key="{{ option.payment_group_key }}"
+                    data-payment-group-label="{{ option.payment_group_label }}"
+                    data-payment-group-icon="{{ option.payment_group_icon }}"
+                    data-payment-group-icon-url="{% if option.payment_group_icon_path %}{% static option.payment_group_icon_path %}{% endif %}"
+                    data-payment-price-bps="{{ option.payment_price_bps|default:0 }}"
+                    data-payment-price-fixed-canonical="{{ option.payment_price_fixed_canonical|default:0 }}"
+                    data-payment-currency="{{ option.payment_currency|default:'USD' }}"
+                    data-payment-currency-symbol="{{ option.payment_currency_symbol|default:'$' }}"
+                    data-payment-currency-usd-rate="{{ option.payment_currency_usd_rate|default:'1' }}"
+                    data-payment-requires-route-selection="{% if option.payment_requires_route_selection %}true{% else %}false{% endif %}"
+                    data-payment-open-new-tab="{% if option.payment_open_new_tab %}true{% else %}false{% endif %}"
+                    data-asset-code="{{ option.asset_code }}"
+                    data-asset-group-key="{{ option.asset_group_key }}"
+                    data-asset-group-label="{{ option.asset_group_label }}"
+                    data-asset-group-icon-url="{% if option.asset_group_icon_path %}{% static option.asset_group_icon_path %}{% endif %}"
+                    data-asset-group-order="{{ option.asset_group_order|default:100 }}"
+                    data-chain="{{ option.chain }}"
+                    data-network-label="{{ option.network_display }}"
+                    data-network-group-key="{{ option.network_group_key }}"
+                    data-network-group-label="{{ option.network_group_label }}"
+                    data-network-group-icon-url="{% if option.network_group_icon_path %}{% static option.network_group_icon_path %}{% endif %}"
+                    data-network-group-order="{{ option.network_group_order|default:100 }}"
+                    data-min-amount-canonical="{{ option.min_amount|default:0 }}"></span>
+              {% endfor %}
+            </div>
           </form>
           {% else %}
           <div class="finance-message">Top-ups are currently unavailable.</div>

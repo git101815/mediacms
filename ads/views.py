@@ -11,6 +11,7 @@ from django.core import signing
 from django.core.cache import cache
 from django.core.signing import BadSignature, SignatureExpired
 from django.db import transaction
+from django.db.models import Count
 from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -24,8 +25,8 @@ from ledger.services import (
     get_wallet_available_balance,
 )
 
-from .forms import AdCampaignForm, TOKEN_SCALE
-from .models import AdCampaign
+from .forms import AdCampaignForm, AdCreativeForm, TOKEN_SCALE
+from .models import AdCampaign, AdCampaignCreative, AdCreative
 from .runtime import (
     NANOS_PER_MICROTOKEN,
     get_campaign_live_metrics,
@@ -220,6 +221,50 @@ def _campaigns_for_user(user):
     return qs
 
 
+def _creatives_for_user(user):
+    qs = AdCreative.objects.all()
+    if not getattr(user, "is_superuser", False):
+        qs = qs.filter(advertiser=user)
+    return qs
+
+
+def _creative_status_view(creative):
+    labels = {
+        AdCreative.REVIEW_PENDING: ("Pending review", "pending"),
+        AdCreative.REVIEW_APPROVED: ("Approved", "active"),
+        AdCreative.REVIEW_REJECTED: ("Rejected", "rejected"),
+    }
+    return labels.get(
+        creative.review_status,
+        (creative.review_status, "paused"),
+    )
+
+
+def _campaign_creative_library_context(form):
+    selected_ids = set()
+    if form.is_bound:
+        selected_ids = {
+            str(value)
+            for value in form.data.getlist("creative_ids")
+        }
+    else:
+        for value in form.initial.get("creative_ids", []) or []:
+            selected_ids.add(str(getattr(value, "pk", value)))
+
+    rows = []
+    for creative in form.fields["creative_ids"].queryset:
+        status_label, status_class = _creative_status_view(creative)
+        rows.append(
+            {
+                "creative": creative,
+                "selected": str(creative.pk) in selected_ids,
+                "status_label": status_label,
+                "status_class": status_class,
+            }
+        )
+    return rows
+
+
 def _status_view(campaign):
     status = campaign.visible_status
     labels = {
@@ -292,23 +337,30 @@ def dashboard(request):
 
 @require_http_methods(["GET", "POST"])
 def campaign_create(request):
+    advertiser = request.user
     if request.method == "POST":
-        form = AdCampaignForm(request.POST, request.FILES)
+        form = AdCampaignForm(
+            request.POST,
+            advertiser=advertiser,
+        )
         if form.is_valid():
             campaign = form.save(commit=False)
-            campaign.advertiser = request.user
+            campaign.advertiser = advertiser
             campaign.review_status = AdCampaign.REVIEW_PENDING
             campaign.delivery_status = AdCampaign.DELIVERY_ACTIVE
             campaign.save()
+            form.save_creatives(campaign)
             return redirect("/")
     else:
-        form = AdCampaignForm()
+        form = AdCampaignForm(advertiser=advertiser)
+
     return render(
         request,
         "ads/campaign_form.html",
         {
             "form": form,
             "campaign": None,
+            "creative_library": _campaign_creative_library_context(form),
             "title": "Create campaign",
             **_ads_nav_context(request.user),
             "portal_name": getattr(settings, "PORTAL_NAME", "MediaCMS"),
@@ -318,31 +370,41 @@ def campaign_create(request):
 
 @require_http_methods(["GET", "POST"])
 def campaign_edit(request, campaign_id):
-    campaign = get_object_or_404(_campaigns_for_user(request.user), pk=campaign_id)
+    campaign = get_object_or_404(
+        _campaigns_for_user(request.user),
+        pk=campaign_id,
+    )
+    advertiser = campaign.advertiser
     previous = {
         "placement": campaign.placement,
         "target_url": campaign.target_url,
-        "creative_name": campaign.creative.name,
         "pricing_model": campaign.pricing_model,
     }
 
     if request.method == "POST":
-        form = AdCampaignForm(request.POST, request.FILES, instance=campaign)
+        form = AdCampaignForm(
+            request.POST,
+            instance=campaign,
+            advertiser=advertiser,
+        )
         if form.is_valid():
             edited = form.save(commit=False)
             moderation_sensitive = (
                 edited.placement != previous["placement"]
                 or edited.target_url != previous["target_url"]
                 or edited.pricing_model != previous["pricing_model"]
-                or bool(request.FILES.get("creative"))
             )
             if moderation_sensitive:
                 edited.review_status = AdCampaign.REVIEW_PENDING
                 edited.review_note = ""
             edited.save()
+            form.save_creatives(edited)
             return redirect("/")
     else:
-        form = AdCampaignForm(instance=campaign)
+        form = AdCampaignForm(
+            instance=campaign,
+            advertiser=advertiser,
+        )
 
     return render(
         request,
@@ -350,6 +412,7 @@ def campaign_edit(request, campaign_id):
         {
             "form": form,
             "campaign": campaign,
+            "creative_library": _campaign_creative_library_context(form),
             "title": f"Edit · {campaign.name}",
             **_ads_nav_context(request.user),
             "portal_name": getattr(settings, "PORTAL_NAME", "MediaCMS"),
@@ -380,19 +443,102 @@ def _wallet_views():
 
 @require_GET
 def creatives(request):
+    queryset = (
+        _creatives_for_user(request.user)
+        .annotate(campaign_count=Count("campaigns", distinct=True))
+        .order_by("-updated_at", "-id")
+    )
     rows = []
-    campaigns = _campaigns_for_user(request.user).order_by("-updated_at", "-id")
-    for campaign in campaigns:
-        status_label, status_class = _status_view(campaign)
-        rows.append({
-            "campaign": campaign,
-            "status_label": status_label,
-            "status_class": status_class,
-        })
+    for creative in queryset:
+        status_label, status_class = _creative_status_view(creative)
+        rows.append(
+            {
+                "creative": creative,
+                "status_label": status_label,
+                "status_class": status_class,
+                "campaign_count": creative.campaign_count,
+            }
+        )
     return render(
         request,
         "ads/creatives.html",
         {"rows": rows, **_ads_nav_context(request.user)},
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def creative_create(request):
+    if request.method == "POST":
+        form = AdCreativeForm(request.POST, request.FILES)
+        if form.is_valid():
+            creative = form.save(commit=False)
+            creative.advertiser = request.user
+            creative.review_status = AdCreative.REVIEW_PENDING
+            creative.review_note = ""
+            creative.save()
+            return redirect("/creatives/")
+    else:
+        form = AdCreativeForm()
+
+    return render(
+        request,
+        "ads/creative_form.html",
+        {
+            "form": form,
+            "creative": None,
+            "title": "Add creative",
+            **_ads_nav_context(request.user),
+        },
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def creative_edit(request, creative_id):
+    creative = get_object_or_404(
+        _creatives_for_user(request.user),
+        pk=creative_id,
+    )
+    previous_placement = creative.placement
+    previous_image = creative.image.name
+
+    if request.method == "POST":
+        form = AdCreativeForm(
+            request.POST,
+            request.FILES,
+            instance=creative,
+        )
+        if form.is_valid():
+            edited = form.save(commit=False)
+            moderation_sensitive = (
+                edited.placement != previous_placement
+                or edited.image.name != previous_image
+                or bool(request.FILES.get("image"))
+            )
+            if moderation_sensitive:
+                edited.review_status = AdCreative.REVIEW_PENDING
+                edited.review_note = ""
+            edited.save()
+
+            if edited.placement != previous_placement:
+                (
+                    AdCampaignCreative.objects
+                    .filter(creative=edited)
+                    .exclude(campaign__placement=edited.placement)
+                    .delete()
+                )
+            return redirect("/creatives/")
+    else:
+        form = AdCreativeForm(instance=creative)
+
+    return render(
+        request,
+        "ads/creative_form.html",
+        {
+            "form": form,
+            "creative": creative,
+            "title": f"Edit · {creative.name}",
+            **_ads_nav_context(request.user),
+        },
     )
 
 

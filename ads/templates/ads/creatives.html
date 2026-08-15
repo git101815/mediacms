@@ -18,6 +18,7 @@
     <a id="logout" href="/logout/" aria-label="Logout"><svg class="icon icon--logout" viewBox="0 0 20 17"><path d="M13.5 11.3a.53.53 0 0 0 .75 0l3.5-3.45a.5.5 0 0 0 0-.72l-3.5-3.45a.53.53 0 0 0-.75.74L16.1 7H7.8a.52.52 0 1 0 0 1.05h8.3l-2.6 2.56a.5.5 0 0 0 0 .69zM9.4 14.9a.52.52 0 0 0 .52-.52v-2.56a.52.52 0 1 0-1.04 0v2.04H1.14V1.12h7.69v2.04a.52.52 0 1 0 1.04 0V.6a.52.52 0 0 0-.52-.52H.6A.52.52 0 0 0 .08.6v13.79c0 .29.23.52.52.52h8.8z"/></svg></a>
   </span>
 </div>
+
 <div class="sidebar">
   <a class="sidebar-item" title="Campaigns" href="/">
     <div><span class="sidebar-item--icon"><svg class="icon" viewBox="0 0 24 24"><path d="M3 3h18v5H3V3zm0 7h18v5H3v-5zm0 7h18v4H3v-4z"/></svg></span><span class="item--heading">Campaigns</span></div>
@@ -36,26 +37,30 @@
     <div class="active-page--container">
       <header class="page-header">
         <h1 class="active-page--title">Creatives</h1>
-        <div class="page-header__right"><a href="/campaigns/new/"><button type="button" class="btn add"><span class="btn-icon"></span>add campaign</button></a></div>
+        <div class="page-header__right"><a href="/creatives/new/"><button type="button" class="btn add"><span class="btn-icon"></span>add creative</button></a></div>
       </header>
-      <p class="ads-page-note">Creatives currently belong directly to campaigns. Edit the campaign to replace a banner.</p>
+      <p class="ads-page-note">Reusable creative library. One creative can be attached to multiple campaigns; multiple creatives on one campaign rotate automatically.</p>
+
       <section class="active-page--content">
         <table class="active-page--content--table">
-          <thead><tr><th>ID</th><th>Creative</th><th>Campaign</th><th>Format</th><th>Status</th><th></th></tr></thead>
+          <thead>
+            <tr><th>ID</th><th>Creative</th><th>Name</th><th>Format</th><th>Status</th><th>Campaigns</th><th></th></tr>
+          </thead>
           <tbody>
           {% if rows %}
             {% for row in rows %}
             <tr>
-              <td>{{ row.campaign.id }}</td>
-              <td>{% if row.campaign.creative %}<img class="creative-thumb" src="{{ row.campaign.creative.url }}" alt="{{ row.campaign.name }} creative">{% endif %}</td>
-              <td><a class="link" href="/campaigns/{{ row.campaign.id }}/edit/">{{ row.campaign.name }}</a></td>
-              <td>{{ row.campaign.get_placement_display }}</td>
+              <td>{{ row.creative.id }}</td>
+              <td><img class="creative-thumb" src="{{ row.creative.image.url }}" alt="{{ row.creative.name }}"></td>
+              <td><a class="link" href="/creatives/{{ row.creative.id }}/edit/">{{ row.creative.name }}</a></td>
+              <td>{{ row.creative.get_placement_display }}</td>
               <td><span class="status-dot {{ row.status_class }}"></span>{{ row.status_label }}</td>
-              <td><a class="table-btn" href="/campaigns/{{ row.campaign.id }}/edit/">edit</a></td>
+              <td>{{ row.campaign_count }}</td>
+              <td><a class="table-btn" href="/creatives/{{ row.creative.id }}/edit/">edit</a></td>
             </tr>
             {% endfor %}
           {% else %}
-            <tr class="empty-row"><td colspan="6">No creatives yet.</td></tr>
+            <tr class="empty-row"><td colspan="7">No creatives yet. Create a reusable banner to start.</td></tr>
           {% endif %}
           </tbody>
         </table>

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import contextlib
+import json
+import secrets
 import threading
 import uuid
 from decimal import Decimal
@@ -9,7 +11,7 @@ from django.conf import settings
 from django.core import signing
 from django_redis import get_redis_connection
 
-from .models import AdCampaign
+from .models import AdCampaign, AdCreative
 
 TOKEN_SCALE = 10 ** 6
 NANOS_PER_MICROTOKEN = 1000
@@ -182,28 +184,77 @@ def sync_campaign_runtime(campaign):
         or campaign.delivery_status != AdCampaign.DELIVERY_ACTIVE
     ):
         redis.delete(cfg_key)
-        redis.zrem(slot_key(AdCampaign.PLACEMENT_HOME), campaign.pk)
-        redis.zrem(slot_key(AdCampaign.PLACEMENT_SIDEBAR), campaign.pk)
+        redis.zrem(
+            slot_key(AdCampaign.PLACEMENT_HOME),
+            campaign.pk,
+        )
+        redis.zrem(
+            slot_key(AdCampaign.PLACEMENT_SIDEBAR),
+            campaign.pk,
+        )
         return
 
-    try:
-        creative_url = campaign.creative.url
-    except Exception:
-        creative_url = ""
-    if not creative_url:
+    links = (
+        campaign.creative_links
+        .filter(
+            enabled=True,
+            creative__review_status=AdCreative.REVIEW_APPROVED,
+            creative__placement=campaign.placement,
+            creative__advertiser_id=campaign.advertiser_id,
+        )
+        .select_related("creative")
+        .order_by("id")
+    )
+    creative_pool = []
+    for link in links:
+        try:
+            creative_url = link.creative.image.url
+        except Exception:
+            creative_url = ""
+        if not creative_url:
+            continue
+        creative_pool.append(
+            {
+                "id": int(link.creative_id),
+                "url": creative_url,
+                "weight": max(1, int(link.weight or 1)),
+            }
+        )
+
+    if not creative_pool:
         redis.delete(cfg_key)
+        redis.zrem(
+            slot_key(AdCampaign.PLACEMENT_HOME),
+            campaign.pk,
+        )
+        redis.zrem(
+            slot_key(AdCampaign.PLACEMENT_SIDEBAR),
+            campaign.pk,
+        )
         return
 
-    live_impressions = _redis_int(redis, campaign_impressions_key(campaign.pk))
-    live_clicks = _redis_int(redis, campaign_clicks_key(campaign.pk))
+    live_impressions = _redis_int(
+        redis,
+        campaign_impressions_key(campaign.pk),
+    )
+    live_clicks = _redis_int(
+        redis,
+        campaign_clicks_key(campaign.pk),
+    )
     score = campaign_ecpm_microtokens(
         campaign,
         live_impressions=live_impressions,
         live_clicks=live_clicks,
     )
-    effective = get_effective_balance_nanos(campaign.advertiser_id)
+    effective = get_effective_balance_nanos(
+        campaign.advertiser_id
+    )
     funded = int(
-        effective >= event_cost_nanos(campaign.pricing_model, campaign.bid_microtokens)
+        effective
+        >= event_cost_nanos(
+            campaign.pricing_model,
+            campaign.bid_microtokens,
+        )
     )
 
     mapping = {
@@ -212,7 +263,10 @@ def sync_campaign_runtime(campaign):
         "slot": campaign.placement,
         "pricing": campaign.pricing_model,
         "bid_microtokens": int(campaign.bid_microtokens),
-        "creative_url": creative_url,
+        "creative_pool": json.dumps(
+            creative_pool,
+            separators=(",", ":"),
+        ),
         "target_url": campaign.target_url,
         "funded": funded,
         "ecpm_microtokens": score,
@@ -220,10 +274,19 @@ def sync_campaign_runtime(campaign):
     redis.hset(cfg_key, mapping=mapping)
     redis.expire(cfg_key, 120)
 
-    redis.zrem(slot_key(AdCampaign.PLACEMENT_HOME), campaign.pk)
-    redis.zrem(slot_key(AdCampaign.PLACEMENT_SIDEBAR), campaign.pk)
+    redis.zrem(
+        slot_key(AdCampaign.PLACEMENT_HOME),
+        campaign.pk,
+    )
+    redis.zrem(
+        slot_key(AdCampaign.PLACEMENT_SIDEBAR),
+        campaign.pk,
+    )
     if funded:
-        redis.zadd(slot_key(campaign.placement), {str(campaign.pk): score})
+        redis.zadd(
+            slot_key(campaign.placement),
+            {str(campaign.pk): score},
+        )
 
 
 IMPRESSION_LUA = r"""
@@ -350,6 +413,39 @@ def _decode_hash(raw):
     }
 
 
+def _choose_creative(creative_pool):
+    normalized = []
+    total_weight = 0
+    for item in creative_pool or []:
+        try:
+            creative_id = int(item["id"])
+            creative_url = str(item["url"])
+            weight = max(1, int(item.get("weight", 1)))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not creative_url:
+            continue
+        normalized.append(
+            {
+                "id": creative_id,
+                "url": creative_url,
+                "weight": weight,
+            }
+        )
+        total_weight += weight
+
+    if not normalized or total_weight <= 0:
+        return None
+
+    pick = secrets.randbelow(total_weight)
+    cursor = 0
+    for item in normalized:
+        cursor += item["weight"]
+        if pick < cursor:
+            return item
+    return normalized[-1]
+
+
 def serve(slot):
     if slot not in {
         AdCampaign.PLACEMENT_HOME,
@@ -358,20 +454,40 @@ def serve(slot):
         return None
 
     redis = redis_connection()
-    candidates = redis.zrevrange(slot_key(slot), 0, 19)
+    candidates = redis.zrevrange(
+        slot_key(slot),
+        0,
+        19,
+    )
     impression_script = redis.register_script(IMPRESSION_LUA)
 
     for raw_id in candidates:
         campaign_id = int(raw_id)
-        cfg = _decode_hash(redis.hgetall(campaign_config_key(campaign_id)))
+        cfg = _decode_hash(
+            redis.hgetall(campaign_config_key(campaign_id))
+        )
         if not cfg or cfg.get("slot") != slot:
+            redis.zrem(slot_key(slot), campaign_id)
+            continue
+
+        try:
+            creative_pool = json.loads(
+                cfg.get("creative_pool") or "[]"
+            )
+        except (TypeError, ValueError):
+            creative_pool = []
+        creative = _choose_creative(creative_pool)
+        if creative is None:
             redis.zrem(slot_key(slot), campaign_id)
             continue
 
         advertiser_id = int(cfg["advertiser_id"])
         pricing = cfg["pricing"]
         bid_microtokens = int(cfg["bid_microtokens"])
-        affordability_cost = event_cost_nanos(pricing, bid_microtokens)
+        affordability_cost = event_cost_nanos(
+            pricing,
+            bid_microtokens,
+        )
 
         result = int(
             impression_script(
@@ -397,6 +513,7 @@ def serve(slot):
         impression_id = uuid.uuid4().hex
         payload = {
             "c": campaign_id,
+            "r": creative["id"],
             "a": advertiser_id,
             "p": pricing,
             "b": bid_microtokens,
@@ -404,10 +521,15 @@ def serve(slot):
             "i": impression_id,
             "u": cfg["target_url"],
         }
-        click_token = signing.dumps(payload, salt="ads.click.v1", compress=True)
+        click_token = signing.dumps(
+            payload,
+            salt="ads.click.v1",
+            compress=True,
+        )
         return {
             "campaign_id": campaign_id,
-            "creative_url": cfg["creative_url"],
+            "creative_id": creative["id"],
+            "creative_url": creative["url"],
             "click_url": f"/ads/click/{click_token}/",
             "pricing_model": pricing,
         }
