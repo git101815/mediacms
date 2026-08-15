@@ -1402,3 +1402,48 @@ h1, h2, h3, h4, h5 { color: #4A4A4A; font-weight: 400; }
   justify-content: flex-end;
 }
 
+/* ads-campaign-field-fixes-v1 */
+.active-page .general-form .select-group {
+  padding-top: 0;
+}
+
+.active-page .general-form .select-field-title {
+  position: static;
+  display: block;
+  margin: 0 0 2px;
+  color: #b6b6b6;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  pointer-events: none;
+}
+
+.active-page .general-form .select-group select {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  padding: 4px 0 6px;
+  border: 0;
+  border-bottom: 1px solid #f0f0f0;
+  border-radius: 0;
+  background: transparent;
+  color: #5c5c5c;
+  font-size: 16px;
+  outline: 0;
+}
+
+.active-page .general-form .select-group select:focus {
+  border-bottom-color: #00acc1;
+}
+
+.active-page .general-form input[name="bid_tokens"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.active-page .general-form input[name="bid_tokens"]::-webkit-outer-spin-button,
+.active-page .general-form input[name="bid_tokens"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+

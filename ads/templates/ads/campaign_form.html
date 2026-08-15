@@ -50,17 +50,31 @@
         <div class="general-form-section">
           <h2 class="general-form-section__title">General</h2>
           <div class="group">{{ form.name }}<span class="title">Campaign name</span>{{ form.name.errors }}</div>
-          <div class="group">{{ form.target_url }}<span class="title">URL</span>{{ form.target_url.errors }}</div>
+          <div class="group">
+            {{ form.target_url }}
+            <span class="title">Destination URL</span>
+            {{ form.target_url.errors }}
+            <div class="group-help">The landing page opened when a visitor clicks the ad.</div>
+          </div>
         </div>
 
         <div class="general-form-section">
           <h2 class="general-form-section__title">Ad format</h2>
-          <div class="group has-value">{{ form.placement }}<span class="title">Format</span>{{ form.placement.errors }}<div class="group-help">Homepage 728×90 or Video Sidebar 300×250.</div></div>
+          <div class="group select-group">
+            <label class="select-field-title" for="{{ form.placement.id_for_label }}">Format</label>
+            {{ form.placement }}
+            {{ form.placement.errors }}
+            <div class="group-help">Homepage 728×90 or Video Sidebar 300×250.</div>
+          </div>
         </div>
 
         <div class="general-form-section">
           <h2 class="general-form-section__title">Pricing</h2>
-          <div class="group has-value">{{ form.pricing_model }}<span class="title">Pay type</span>{{ form.pricing_model.errors }}</div>
+          <div class="group select-group">
+            <label class="select-field-title" for="{{ form.pricing_model.id_for_label }}">Pay type</label>
+            {{ form.pricing_model }}
+            {{ form.pricing_model.errors }}
+          </div>
           <div class="group">{{ form.bid_tokens }}<span class="title">Bid, tokens</span>{{ form.bid_tokens.errors }}<div class="group-help">CPM: tokens per 1,000 impressions. CPC: tokens per valid click.</div></div>
         </div>
 
@@ -70,7 +84,7 @@
               <h2 class="general-form-section__title">Creatives</h2>
               <div class="group-help creative-section-help">Select one or more compatible creatives. With two or more selected, delivery rotates evenly for A/B testing.</div>
             </div>
-            <a class="table-btn creative-add-link" href="/creatives/new/" target="_blank" rel="noopener">+ add creative</a>
+            <a class="table-btn creative-add-link" href="/creatives/new/">+ add creative</a>
           </div>
 
           {% if form.creative_ids.errors %}<div class="form-errors creative-picker-errors">{{ form.creative_ids.errors }}</div>{% endif %}

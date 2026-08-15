@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from PIL import Image
 
 from ads.forms import AdCampaignForm, AdCreativeForm
@@ -131,3 +132,82 @@ def test_advertiser_wallet_available_balance_subtracts_unsettled(
         return_value=2_000_000,
     ):
         assert get_wallet_available_balance(wallet) == 7_000_000
+
+
+
+@pytest.mark.django_db
+@override_settings(
+    ADS_MIN_BID_TOKENS_BY_AD_TYPE={
+        "banner": {
+            "cpm": "2.5",
+            "cpc": "0.25",
+        },
+        "preroll": {
+            "cpm": "4",
+            "cpc": "0.5",
+        },
+        "popunder": {
+            "cpm": "3",
+            "cpc": "0.4",
+        },
+    }
+)
+def test_campaign_form_enforces_configured_banner_minimum_bid(
+    django_user_model,
+):
+    user = django_user_model.objects.create_user(
+        username="ads-min-bid-user",
+        advertiserUser=True,
+    )
+    creative = AdCreative.objects.create(
+        advertiser=user,
+        name="Homepage creative",
+        placement=AdCreative.PLACEMENT_HOME,
+        image=_image("minimum.png", (728, 90)),
+        review_status=AdCreative.REVIEW_APPROVED,
+    )
+
+    below_cpm = AdCampaignForm(
+        data={
+            "name": "Below CPM minimum",
+            "placement": AdCampaign.PLACEMENT_HOME,
+            "target_url": "https://example.com/",
+            "pricing_model": AdCampaign.PRICING_CPM,
+            "bid_tokens": "2.49",
+            "creative_ids": [str(creative.pk)],
+        },
+        advertiser=user,
+    )
+    assert not below_cpm.is_valid()
+    assert "Minimum CPM bid for banner ads is 2.5 tokens" in str(
+        below_cpm.errors
+    )
+
+    at_cpm = AdCampaignForm(
+        data={
+            "name": "At CPM minimum",
+            "placement": AdCampaign.PLACEMENT_HOME,
+            "target_url": "https://example.com/",
+            "pricing_model": AdCampaign.PRICING_CPM,
+            "bid_tokens": "2.5",
+            "creative_ids": [str(creative.pk)],
+        },
+        advertiser=user,
+    )
+    assert at_cpm.is_valid()
+
+    below_cpc = AdCampaignForm(
+        data={
+            "name": "Below CPC minimum",
+            "placement": AdCampaign.PLACEMENT_HOME,
+            "target_url": "https://example.com/",
+            "pricing_model": AdCampaign.PRICING_CPC,
+            "bid_tokens": "0.24",
+            "creative_ids": [str(creative.pk)],
+        },
+        advertiser=user,
+    )
+    assert not below_cpc.is_valid()
+    assert "Minimum CPC bid for banner ads is 0.25 tokens" in str(
+        below_cpc.errors
+    )

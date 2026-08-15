@@ -78,6 +78,58 @@
     syncPicker();
   }
 
+  // ads-min-bid-ui-v1
+  const campaignForm = document.querySelector('#campaign-form');
+  if (campaignForm) {
+    const campaignPlacement = campaignForm.querySelector(
+      '[name="placement"]'
+    );
+    const campaignPricing = campaignForm.querySelector(
+      '[name="pricing_model"]'
+    );
+    const campaignBid = campaignForm.querySelector(
+      '[name="bid_tokens"]'
+    );
+
+    const syncCampaignBidMinimum = () => {
+      if (!campaignPlacement || !campaignPricing || !campaignBid) {
+        return;
+      }
+
+      const bannerPlacements = new Set([
+        'home_leaderboard',
+        'media_sidebar_rectangle',
+      ]);
+      const adType = bannerPlacements.has(campaignPlacement.value)
+        ? 'banner'
+        : campaignPlacement.value;
+      const key = (
+        'data-min-'
+        + adType
+        + '-'
+        + campaignPricing.value
+      );
+      const minimum = campaignBid.getAttribute(key);
+      if (minimum) {
+        campaignBid.setAttribute('min', minimum);
+      }
+    };
+
+    if (campaignPlacement) {
+      campaignPlacement.addEventListener(
+        'change',
+        syncCampaignBidMinimum
+      );
+    }
+    if (campaignPricing) {
+      campaignPricing.addEventListener(
+        'change',
+        syncCampaignBidMinimum
+      );
+    }
+    syncCampaignBidMinimum();
+  }
+
   const copyButton = document.querySelector('[data-copy-address]');
   if (copyButton) {
     copyButton.addEventListener('click', async () => {

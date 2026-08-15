@@ -27,6 +27,26 @@ LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
 TABUNDER_COOLDOWN_SECONDS = 0
 PREROLLS_COOLDOWN_SECONDS = 0
 
+# ads-min-bids-by-type-v1
+# Human token amounts. Keep strings to avoid float rounding.
+# Current self-serve placements (728x90 + 300x250) are both "banner".
+# "preroll" and "popunder" are reserved for those direct inventory types
+# when they are added to the self-serve campaign model.
+ADS_MIN_BID_TOKENS_BY_AD_TYPE = {
+    "banner": {
+        "cpm": "0.000001",
+        "cpc": "0.000001",
+    },
+    "preroll": {
+        "cpm": "0.000001",
+        "cpc": "0.000001",
+    },
+    "popunder": {
+        "cpm": "0.000001",
+        "cpc": "0.000001",
+    },
+}
+
 CAN_ADD_MEDIA = "advancedUser"
 MAX_VIDEO_UPLOADS_PER_DAY = 2
 CAN_COMMENT = "email_verified"

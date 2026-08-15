@@ -1,11 +1,54 @@
 from decimal import Decimal, ROUND_DOWN
 
 from django import forms
+from django.conf import settings
 from PIL import Image
 
 from .models import AdCampaign, AdCampaignCreative, AdCreative
 
 TOKEN_SCALE = 10 ** 6
+
+# configurable-ad-min-bids-v1
+_DEFAULT_MIN_BID_TOKENS = Decimal("0.000001")
+
+
+def _ad_type_for_placement(placement):
+    # The self-serve currently exposes only the two native banner slots.
+    if placement in {
+        AdCampaign.PLACEMENT_HOME,
+        AdCampaign.PLACEMENT_SIDEBAR,
+    }:
+        return "banner"
+    return str(placement or "")
+
+
+def _minimum_bid_tokens(placement, pricing_model):
+    ad_type = _ad_type_for_placement(placement)
+    configured = getattr(
+        settings,
+        "ADS_MIN_BID_TOKENS_BY_AD_TYPE",
+        {},
+    )
+
+    raw = _DEFAULT_MIN_BID_TOKENS
+    type_config = configured.get(ad_type, {}) if isinstance(configured, dict) else {}
+    if isinstance(type_config, dict):
+        raw = type_config.get(pricing_model, _DEFAULT_MIN_BID_TOKENS)
+    elif type_config not in (None, ""):
+        raw = type_config
+
+    try:
+        value = Decimal(str(raw))
+    except Exception as exc:
+        raise forms.ValidationError(
+            f"Invalid minimum bid configured for {ad_type or 'unknown'} ads."
+        ) from exc
+
+    if value <= 0:
+        raise forms.ValidationError(
+            f"Minimum bid for {ad_type or 'unknown'} ads must be greater than zero."
+        )
+    return value
 
 
 def _validate_image_dimensions(upload, placement):
@@ -110,6 +153,36 @@ class AdCampaignForm(forms.ModelForm):
             )
         self.fields["creative_ids"].queryset = queryset
 
+        # Keep the HTML constraint synchronized with local_settings.py.
+        bid_widget = self.fields["bid_tokens"].widget
+        configured = getattr(
+            settings,
+            "ADS_MIN_BID_TOKENS_BY_AD_TYPE",
+            {},
+        )
+        for ad_type in ("banner", "preroll", "popunder"):
+            type_config = (
+                configured.get(ad_type, {})
+                if isinstance(configured, dict)
+                else {}
+            )
+            for pricing_model in (
+                AdCampaign.PRICING_CPM,
+                AdCampaign.PRICING_CPC,
+            ):
+                if isinstance(type_config, dict):
+                    raw_min = type_config.get(
+                        pricing_model,
+                        _DEFAULT_MIN_BID_TOKENS,
+                    )
+                elif type_config not in (None, ""):
+                    raw_min = type_config
+                else:
+                    raw_min = _DEFAULT_MIN_BID_TOKENS
+                bid_widget.attrs[
+                    f"data-min-{ad_type}-{pricing_model}"
+                ] = str(raw_min)
+
         if (
             self.instance
             and self.instance.pk
@@ -148,7 +221,25 @@ class AdCampaignForm(forms.ModelForm):
     def clean(self):
         cleaned = super().clean()
         placement = cleaned.get("placement")
+        pricing_model = cleaned.get("pricing_model")
+        bid_tokens = cleaned.get("bid_tokens")
         creatives = cleaned.get("creative_ids")
+
+        if placement and pricing_model and bid_tokens is not None:
+            minimum = _minimum_bid_tokens(
+                placement,
+                pricing_model,
+            )
+            if bid_tokens < minimum:
+                ad_type = _ad_type_for_placement(placement)
+                self.add_error(
+                    "bid_tokens",
+                    (
+                        f"Minimum {pricing_model.upper()} bid for "
+                        f"{ad_type} ads is {minimum} tokens."
+                    ),
+                )
+
         if not placement or creatives is None:
             return cleaned
 
