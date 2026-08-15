@@ -1,7 +1,8 @@
 import logging
+import uuid
 
 from django.db import transaction
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
 from ledger.models import TokenWallet
@@ -36,12 +37,66 @@ def _sync_campaign_id(campaign_id):
         sync_campaign_runtime(campaign)
 
 
-@receiver(post_save, sender=AdCampaign)
-def ad_campaign_saved(sender, instance, **kwargs):
-    campaign_id = instance.pk
-    transaction.on_commit(
-        lambda: _safe(lambda: _sync_campaign_id(campaign_id))
+def _remember_previous_review_status(model, instance):
+    if not instance.pk:
+        instance._ads_previous_review_status = None
+        return
+    instance._ads_previous_review_status = (
+        model.objects
+        .filter(pk=instance.pk)
+        .values_list("review_status", flat=True)
+        .first()
     )
+
+
+def _queue_review_notification(kind, object_id):
+    from .tasks import notify_admin_review
+
+    event_id = uuid.uuid4().hex
+    _safe(
+        lambda: notify_admin_review.delay(
+            kind,
+            int(object_id),
+            event_id,
+        )
+    )
+
+
+@receiver(pre_save, sender=AdCampaign)
+def ad_campaign_before_save(sender, instance, **kwargs):
+    _remember_previous_review_status(AdCampaign, instance)
+
+
+@receiver(pre_save, sender=AdCreative)
+def ad_creative_before_save(sender, instance, **kwargs):
+    _remember_previous_review_status(AdCreative, instance)
+
+
+@receiver(post_save, sender=AdCampaign)
+def ad_campaign_saved(sender, instance, created=False, **kwargs):
+    campaign_id = instance.pk
+    previous_review_status = getattr(
+        instance,
+        "_ads_previous_review_status",
+        None,
+    )
+    review_requested = (
+        instance.review_status == AdCampaign.REVIEW_PENDING
+        and (
+            created
+            or previous_review_status != AdCampaign.REVIEW_PENDING
+        )
+    )
+
+    def after_commit():
+        _safe(lambda: _sync_campaign_id(campaign_id))
+        if review_requested:
+            _queue_review_notification(
+                "campaign",
+                campaign_id,
+            )
+
+    transaction.on_commit(after_commit)
 
 
 @receiver(post_delete, sender=AdCampaign)
@@ -62,10 +117,22 @@ def ad_campaign_creative_changed(sender, instance, **kwargs):
 
 
 @receiver(post_save, sender=AdCreative)
-def ad_creative_saved(sender, instance, **kwargs):
+def ad_creative_saved(sender, instance, created=False, **kwargs):
     creative_id = instance.pk
+    previous_review_status = getattr(
+        instance,
+        "_ads_previous_review_status",
+        None,
+    )
+    review_requested = (
+        instance.review_status == AdCreative.REVIEW_PENDING
+        and (
+            created
+            or previous_review_status != AdCreative.REVIEW_PENDING
+        )
+    )
 
-    def sync():
+    def after_commit():
         campaign_ids = list(
             AdCampaignCreative.objects
             .filter(creative_id=creative_id)
@@ -73,8 +140,13 @@ def ad_creative_saved(sender, instance, **kwargs):
         )
         for campaign_id in campaign_ids:
             _sync_campaign_id(campaign_id)
+        if review_requested:
+            _queue_review_notification(
+                "creative",
+                creative_id,
+            )
 
-    transaction.on_commit(lambda: _safe(sync))
+    transaction.on_commit(lambda: _safe(after_commit))
 
 
 @receiver(post_save, sender=TokenWallet)

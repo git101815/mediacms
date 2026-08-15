@@ -1,6 +1,7 @@
 from unittest.mock import Mock
 
 import pytest
+from django.test import override_settings
 
 import ads.runtime as runtime
 import ads.signals as signals
@@ -415,6 +416,154 @@ def test_enabling_advertiser_user_syncs_wallet_and_campaigns(
     )
     assert wallet_calls == [user.pk]
     assert campaign_calls == [campaign.pk]
+
+
+@pytest.mark.django_db
+def test_review_notification_task_is_disabled_during_testing(
+    advertiser_factory,
+    campaign_factory,
+    monkeypatch,
+):
+    user = advertiser_factory()
+    campaign = campaign_factory(
+        advertiser=user,
+        review_status=AdCampaign.REVIEW_PENDING,
+    )
+    post = Mock()
+    monkeypatch.setattr(tasks.requests, "post", post)
+    monkeypatch.setenv(
+        "ADS_REVIEW_WEBHOOK_URL",
+        "https://n8n.example/webhook/ads-review",
+    )
+
+    assert (
+        tasks.notify_admin_review(
+            "campaign",
+            campaign.pk,
+            "event-test",
+        )
+        is False
+    )
+    post.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(TESTING=False, FRONTEND_HOST="https://celebfakes.ru")
+def test_review_notification_task_posts_campaign_payload(
+    advertiser_factory,
+    campaign_factory,
+    monkeypatch,
+):
+    user = advertiser_factory()
+    campaign = campaign_factory(
+        advertiser=user,
+        review_status=AdCampaign.REVIEW_PENDING,
+    )
+    response = Mock()
+    response.raise_for_status.return_value = None
+    post = Mock(return_value=response)
+    monkeypatch.setattr(tasks.requests, "post", post)
+    monkeypatch.setenv(
+        "ADS_REVIEW_WEBHOOK_URL",
+        "https://n8n.example/webhook/ads-review",
+    )
+    monkeypatch.setenv(
+        "ADS_REVIEW_WEBHOOK_SECRET",
+        "review-secret",
+    )
+
+    assert tasks.notify_admin_review(
+        "campaign",
+        campaign.pk,
+        "event-123",
+    ) is True
+
+    kwargs = post.call_args.kwargs
+    payload = kwargs["json"]
+    assert payload["event"] == "ads.review_requested"
+    assert payload["event_id"] == "event-123"
+    assert payload["kind"] == "campaign"
+    assert payload["id"] == campaign.pk
+    assert payload["advertiser"]["id"] == user.pk
+    assert payload["admin_url"].endswith(
+        f"/admin/ads/adcampaign/{campaign.pk}/change/"
+    )
+    assert kwargs["headers"]["X-Ads-Review-Secret"] == "review-secret"
+
+
+@pytest.mark.django_db
+@override_settings(TESTING=False, FRONTEND_HOST="https://celebfakes.ru")
+def test_review_notification_task_posts_creative_source(
+    advertiser_factory,
+    creative_factory,
+    monkeypatch,
+):
+    user = advertiser_factory()
+    creative = creative_factory(
+        advertiser=user,
+        placement=AdCreative.PLACEMENT_IN_VIDEO,
+        review_status=AdCreative.REVIEW_PENDING,
+    )
+    response = Mock()
+    response.raise_for_status.return_value = None
+    post = Mock(return_value=response)
+    monkeypatch.setattr(tasks.requests, "post", post)
+    monkeypatch.setenv(
+        "ADS_REVIEW_WEBHOOK_URL",
+        "https://n8n.example/webhook/ads-review",
+    )
+
+    assert tasks.notify_admin_review(
+        "creative",
+        creative.pk,
+        "event-456",
+    ) is True
+
+    payload = post.call_args.kwargs["json"]
+    assert payload["kind"] == "creative"
+    assert payload["source_kind"] == "vast"
+    assert payload["vast_url"] == creative.vast_url
+    assert payload["admin_url"].endswith(
+        f"/admin/ads/adcreative/{creative.pk}/change/"
+    )
+
+
+@pytest.mark.django_db
+def test_review_notification_only_on_transition_to_pending(
+    advertiser_factory,
+    campaign_factory,
+    monkeypatch,
+):
+    user = advertiser_factory()
+    campaign = campaign_factory(
+        advertiser=user,
+        review_status=AdCampaign.REVIEW_APPROVED,
+    )
+    queued = []
+    monkeypatch.setattr(
+        signals.transaction,
+        "on_commit",
+        lambda callback: callback(),
+    )
+    monkeypatch.setattr(
+        signals,
+        "_sync_campaign_id",
+        lambda pk: None,
+    )
+    monkeypatch.setattr(
+        signals,
+        "_queue_review_notification",
+        lambda kind, pk: queued.append((kind, pk)),
+    )
+
+    campaign.review_status = AdCampaign.REVIEW_PENDING
+    campaign.save(update_fields=["review_status", "updated_at"])
+    assert queued == [("campaign", campaign.pk)]
+
+    # Saving an already-pending object does not generate another DM.
+    campaign.name = "Still pending"
+    campaign.save(update_fields=["name", "updated_at"])
+    assert queued == [("campaign", campaign.pk)]
 
 
 @pytest.mark.django_db

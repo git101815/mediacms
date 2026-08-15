@@ -1,6 +1,10 @@
 import logging
+import os
+import uuid
 
+import requests
 from celery import shared_task
+from django.conf import settings
 from django.db import transaction
 
 from ledger.models import TokenWallet
@@ -21,6 +25,149 @@ from .runtime import (
 from .services import create_settlement_batch, process_settlement_batch
 
 logger = logging.getLogger(__name__)
+
+
+def _admin_url(path):
+    base = str(getattr(settings, "FRONTEND_HOST", "") or "").rstrip("/")
+    return f"{base}{path}" if base else path
+
+
+def _review_webhook_payload(kind, object_id, event_id):
+    if kind == "campaign":
+        obj = (
+            AdCampaign.objects
+            .select_related("advertiser")
+            .filter(pk=object_id)
+            .first()
+        )
+        if obj is None or obj.review_status != AdCampaign.REVIEW_PENDING:
+            return None
+
+        return {
+            "event": "ads.review_requested",
+            "event_id": event_id,
+            "kind": "campaign",
+            "id": obj.pk,
+            "name": obj.name,
+            "review_status": obj.review_status,
+            "advertiser": {
+                "id": obj.advertiser_id,
+                "username": obj.advertiser.username,
+                "email": obj.advertiser.email,
+            },
+            "placement": obj.placement,
+            "pricing_model": obj.pricing_model,
+            "bid_microtokens": int(obj.bid_microtokens),
+            "target_url": obj.target_url,
+            "creative_ids": list(
+                obj.creative_links
+                .filter(enabled=True)
+                .values_list("creative_id", flat=True)
+            ),
+            "admin_url": _admin_url(
+                f"/admin/ads/adcampaign/{obj.pk}/change/"
+            ),
+        }
+
+    if kind == "creative":
+        from .models import AdCreative
+
+        obj = (
+            AdCreative.objects
+            .select_related("advertiser")
+            .filter(pk=object_id)
+            .first()
+        )
+        if obj is None or obj.review_status != AdCreative.REVIEW_PENDING:
+            return None
+
+        try:
+            banner_url = obj.image.url if obj.image else ""
+        except Exception:
+            banner_url = ""
+
+        return {
+            "event": "ads.review_requested",
+            "event_id": event_id,
+            "kind": "creative",
+            "id": obj.pk,
+            "name": obj.name,
+            "review_status": obj.review_status,
+            "advertiser": {
+                "id": obj.advertiser_id,
+                "username": obj.advertiser.username,
+                "email": obj.advertiser.email,
+            },
+            "placement": obj.placement,
+            "source_kind": obj.source_kind,
+            "banner_url": banner_url,
+            "vast_url": obj.vast_url,
+            "destination_url": obj.destination_url,
+            "admin_url": _admin_url(
+                f"/admin/ads/adcreative/{obj.pk}/change/"
+            ),
+        }
+
+    return None
+
+
+@shared_task(
+    bind=True,
+    name="ads.notify_admin_review",
+    autoretry_for=(requests.RequestException,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    retry_jitter=True,
+    retry_kwargs={"max_retries": 3},
+)
+def notify_admin_review(self, kind, object_id, event_id=""):
+    # The production test command may run against a production-shaped stack.
+    # Never let tests contact n8n/Telegram even if the prod worker environment
+    # contains the webhook variables.
+    if getattr(settings, "TESTING", False):
+        return False
+
+    webhook_url = str(
+        os.environ.get("NOTIFICATION_WEBHOOK_URL", "")
+    ).strip()
+    if not webhook_url:
+        logger.info(
+            "Ads review webhook not configured; skipping %s #%s",
+            kind,
+            object_id,
+        )
+        return False
+
+    event_id = str(event_id or uuid.uuid4().hex)
+    payload = _review_webhook_payload(
+        str(kind),
+        int(object_id),
+        event_id,
+    )
+    if payload is None:
+        # Object disappeared or is no longer pending by the time the task ran.
+        return False
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Ads-Review-Event": event_id,
+    }
+    secret = str(
+        os.environ.get("NOTIFICATION_WEBHOOK_SECRET", "")
+    ).strip()
+    if secret:
+        headers["X-Ads-Review-Secret"] = secret
+
+    timeout = 5.0
+
+    response = requests.post(
+        webhook_url,
+        json=payload,
+        headers=headers,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    return True
 
 
 def _campaign_can_afford(campaign):
