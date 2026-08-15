@@ -31,8 +31,18 @@ def _signed_payload(**overrides):
 
 
 def _assert_no_store(response):
-    assert response["Cache-Control"] == "no-store, private, max-age=0"
-    assert response["Pragma"] == "no-cache"
+    directives = {
+        part.strip().lower()
+        for part in response["Cache-Control"].split(",")
+        if part.strip()
+    }
+    assert {
+        "no-store",
+        "private",
+        "max-age=0",
+        "no-cache",
+    }.issubset(directives)
+    assert response["Pragma"].lower() == "no-cache"
 
 
 def test_vmap_is_valid_xml_and_contains_all_three_breaks(client):

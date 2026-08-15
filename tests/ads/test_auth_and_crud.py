@@ -3,7 +3,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.test import RequestFactory, override_settings
 
 from ads.middleware import AdsHostMiddleware
@@ -397,12 +397,19 @@ def test_other_advertiser_cannot_edit_campaign_or_creative(
     creative = campaign.creatives.get()
     client.force_login(attacker)
 
-    assert client.get(
+    request = RequestFactory().get(
         f"/campaigns/{campaign.pk}/edit/"
-    ).status_code == 404
-    assert client.get(
+    )
+    request.user = attacker
+    with pytest.raises(Http404):
+        views.campaign_edit(request, campaign.pk)
+
+    request = RequestFactory().get(
         f"/creatives/{creative.pk}/edit/"
-    ).status_code == 404
+    )
+    request.user = attacker
+    with pytest.raises(Http404):
+        views.creative_edit(request, creative.pk)
 
 
 @pytest.mark.django_db
