@@ -12,6 +12,7 @@ from django.core import signing
 from django_redis import get_redis_connection
 
 from .models import AdCampaign, AdCreative
+from .public_urls import banner_public_url
 
 TOKEN_SCALE = 10 ** 6
 NANOS_PER_MICROTOKEN = 1000
@@ -220,10 +221,7 @@ def sync_campaign_runtime(campaign):
     creative_pool = []
     for link in links:
         creative = link.creative
-        try:
-            banner_url = creative.image.url if creative.image else ""
-        except Exception:
-            banner_url = ""
+        banner_url = banner_public_url(creative)
 
         item = {
             "id": int(link.creative_id),

@@ -5,11 +5,14 @@ import uuid
 import requests
 from celery import shared_task
 from django.conf import settings
+from django.core.files import File
 from django.db import transaction
+from django.utils.module_loading import import_string
 
 from ledger.models import TokenWallet
 
 from .models import AdCampaign, AdSettlementBatch
+from .public_urls import banner_public_url
 from .runtime import (
     acquire_account_sync_lock,
     drop_campaign_runtime,
@@ -30,6 +33,43 @@ logger = logging.getLogger(__name__)
 def _admin_url(path):
     base = str(getattr(settings, "FRONTEND_HOST", "") or "").rstrip("/")
     return f"{base}{path}" if base else path
+
+
+def _development_mode_enabled():
+    return (
+        str(os.environ.get("DEVELOPMENT_MODE", "") or "")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+
+def _ensure_banner_available_on_storj(creative):
+    if (
+        creative is None
+        or not creative.is_banner
+        or not creative.image
+        or _development_mode_enabled()
+    ):
+        return
+
+    name = str(creative.image.name or "").lstrip("/")
+    if not name:
+        return
+
+    StorageClass = import_string(settings.STORJ_STORAGE)
+    storj_storage = StorageClass()
+
+    if storj_storage.exists(name):
+        return
+
+    with open(creative.image.path, "rb") as handle:
+        storj_storage.save(name, File(handle))
+
+    if not storj_storage.exists(name):
+        raise RuntimeError(
+            f"Banner creative was not persisted to Storj: {name}"
+        )
 
 
 def _review_webhook_payload(kind, object_id, event_id):
@@ -81,10 +121,8 @@ def _review_webhook_payload(kind, object_id, event_id):
         if obj is None or obj.review_status != AdCreative.REVIEW_PENDING:
             return None
 
-        try:
-            banner_url = obj.image.url if obj.image else ""
-        except Exception:
-            banner_url = ""
+        _ensure_banner_available_on_storj(obj)
+        banner_url = banner_public_url(obj)
 
         return {
             "event": "ads.review_requested",
@@ -114,6 +152,7 @@ def _review_webhook_payload(kind, object_id, event_id):
 @shared_task(
     bind=True,
     name="ads.notify_admin_review",
+    queue="short_tasks",
     autoretry_for=(requests.RequestException,),
     retry_backoff=True,
     retry_backoff_max=60,
@@ -139,11 +178,14 @@ def notify_admin_review(self, kind, object_id, event_id=""):
         return False
 
     event_id = str(event_id or uuid.uuid4().hex)
-    payload = _review_webhook_payload(
-        str(kind),
-        int(object_id),
-        event_id,
-    )
+    try:
+        payload = _review_webhook_payload(
+            str(kind),
+            int(object_id),
+            event_id,
+        )
+    except Exception as exc:
+        raise self.retry(exc=exc, countdown=5)
     if payload is None:
         # Object disappeared or is no longer pending by the time the task ran.
         return False

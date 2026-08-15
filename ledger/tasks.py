@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 @shared_task(
     bind=True,
     name="ledger.notify_admin_event",
+    queue="short_tasks",
     autoretry_for=(requests.RequestException,),
     retry_backoff=True,
     retry_backoff_max=60,

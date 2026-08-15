@@ -1,8 +1,10 @@
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 from django.test import override_settings
 
+import ads.public_urls as public_urls
 import ads.runtime as runtime
 import ads.signals as signals
 import ads.tasks as tasks
@@ -416,6 +418,87 @@ def test_enabling_advertiser_user_syncs_wallet_and_campaigns(
     )
     assert wallet_calls == [user.pk]
     assert campaign_calls == [campaign.pk]
+
+
+@override_settings(
+    MEDIA_URL="https://medias.celebfakes.ru/mediafiles/",
+)
+def test_banner_public_url_uses_existing_media_url():
+    creative = SimpleNamespace(
+        image=SimpleNamespace(
+            name="ads/creatives/2026/08/16/banner test.png",
+        ),
+    )
+
+    assert public_urls.banner_public_url(creative) == (
+        "https://medias.celebfakes.ru/mediafiles/"
+        "ads/creatives/2026/08/16/banner%20test.png"
+    )
+
+
+@pytest.mark.django_db
+def test_new_pending_creative_queues_review_notification(
+    advertiser_factory,
+    creative_factory,
+    monkeypatch,
+):
+    queued = []
+    monkeypatch.setattr(
+        signals.transaction,
+        "on_commit",
+        lambda callback: callback(),
+    )
+    monkeypatch.setattr(
+        signals,
+        "_queue_review_notification",
+        lambda kind, pk: queued.append((kind, pk)),
+    )
+
+    creative = creative_factory(
+        advertiser=advertiser_factory(),
+        review_status=AdCreative.REVIEW_PENDING,
+    )
+
+    assert queued == [("creative", creative.pk)]
+
+
+@pytest.mark.django_db
+@override_settings(
+    MEDIA_URL="https://medias.celebfakes.ru/mediafiles/",
+)
+def test_banner_review_payload_publishes_before_public_url(
+    advertiser_factory,
+    creative_factory,
+    monkeypatch,
+):
+    user = advertiser_factory()
+    creative = creative_factory(
+        advertiser=user,
+        placement=AdCreative.PLACEMENT_HOME,
+        review_status=AdCreative.REVIEW_PENDING,
+    )
+    AdCreative.objects.filter(pk=creative.pk).update(
+        image="ads/creatives/2026/08/16/review-banner.png"
+    )
+
+    published = []
+    monkeypatch.setattr(
+        tasks,
+        "_ensure_banner_available_on_storj",
+        lambda value: published.append(value.pk),
+    )
+
+    payload = tasks._review_webhook_payload(
+        "creative",
+        creative.pk,
+        "event-banner",
+    )
+
+    assert published == [creative.pk]
+    assert payload["banner_url"] == (
+        "https://medias.celebfakes.ru/mediafiles/"
+        "ads/creatives/2026/08/16/review-banner.png"
+    )
 
 
 @pytest.mark.django_db
