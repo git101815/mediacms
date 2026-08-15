@@ -582,38 +582,68 @@
     }
   }
 
-  financeForm.querySelectorAll(
-    '[data-finance-pack]'
-  ).forEach((button) => {
-    button.addEventListener('click', () => {
-      state.packCode = (
-        button.getAttribute('data-pack-code')
-        || ''
-      );
-      state.packLabel = (
-        button.getAttribute('data-pack-token-label')
-        || ''
-      );
-      state.packPriceLabel = (
-        button.getAttribute('data-pack-price-label')
-        || ''
-      );
-      state.packGrossCanonical = Number(
-        button.getAttribute(
-          'data-pack-gross-canonical'
-        ) || 0
-      );
-      packInput.value = state.packCode;
+  function selectFinancePack(input) {
+    if (!input) return;
 
-      state.method = null;
-      state.assetKey = '';
-      state.route = null;
-      routeInput.value = '';
-      setRouteIndicatorsVisible(false);
+    state.packCode = (
+      input.getAttribute('data-pack-code')
+      || ''
+    );
+    state.packLabel = (
+      input.getAttribute('data-pack-token-label')
+      || ''
+    );
+    state.packPriceLabel = (
+      input.getAttribute('data-pack-price-label')
+      || ''
+    );
+    state.packGrossCanonical = Number(
+      input.getAttribute(
+        'data-pack-gross-canonical'
+      ) || 0
+    );
+    packInput.value = state.packCode;
+
+    state.method = null;
+    state.assetKey = '';
+    state.route = null;
+    routeInput.value = '';
+    setRouteIndicatorsVisible(false);
+  }
+
+  const financePackInputs = Array.from(
+    financeForm.querySelectorAll(
+      '[data-finance-pack]'
+    )
+  );
+
+  financePackInputs.forEach((input) => {
+    input.addEventListener('change', () => {
+      if (input.checked) {
+        selectFinancePack(input);
+      }
+    });
+  });
+
+  const initialFinancePack = financePackInputs.find(
+    (input) => input.checked
+  ) || financePackInputs[0];
+
+  if (initialFinancePack) {
+    initialFinancePack.checked = true;
+    selectFinancePack(initialFinancePack);
+  }
+
+  const financePackContinue = financeForm.querySelector(
+    '[data-finance-pack-continue]'
+  );
+  if (financePackContinue) {
+    financePackContinue.addEventListener('click', () => {
+      if (!state.packCode) return;
       renderPaymentMethods();
       showStep(2);
     });
-  });
+  }
 
   financeForm.querySelectorAll(
     '[data-finance-back]'

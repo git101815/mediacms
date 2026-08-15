@@ -67,18 +67,31 @@
 
             <section class="finance-flow-panel" data-finance-step-panel="1">
               <h3>Choose token pack</h3>
-              <div class="finance-choice-grid finance-pack-grid">
+              <div class="finance-pack-radio-list">
                 {% for pack in token_pack_rows %}
-                <button type="button" class="finance-choice-card finance-pack-card"
-                        data-finance-pack
-                        data-pack-code="{{ pack.code }}"
-                        data-pack-token-label="{{ pack.token_amount_display }} tokens"
-                        data-pack-price-label="{{ pack.price_display }}$"
-                        data-pack-gross-canonical="{{ pack.gross_stable_amount }}">
-                  {% if pack.image_path %}<img class="finance-choice-card__logo finance-pack-logo" src="{% static pack.image_path %}" alt="">{% endif %}
-                  <span class="finance-choice-card__copy"><strong>{{ pack.token_amount_display }} tokens</strong><small>{% if pack.description %}{{ pack.description }} · {% endif %}{{ pack.price_display }}$</small></span>
-                </button>
+                <label class="finance-pack-radio">
+                  <input type="radio"
+                         name="finance_pack_choice"
+                         value="{{ pack.code }}"
+                         data-finance-pack
+                         data-pack-code="{{ pack.code }}"
+                         data-pack-token-label="{{ pack.token_amount_display }} tokens"
+                         data-pack-price-label="{{ pack.price_display }}$"
+                         data-pack-gross-canonical="{{ pack.gross_stable_amount }}"
+                         {% if forloop.first %}checked{% endif %}>
+                  <span class="finance-pack-radio__control"></span>
+                  <span class="finance-pack-radio__body">
+                    <strong>{{ pack.token_amount_display }} tokens</strong>
+                    {% if pack.description %}<small>{{ pack.description }}</small>{% endif %}
+                  </span>
+                  <span class="finance-pack-radio__price">{{ pack.price_display }}$</span>
+                </label>
                 {% endfor %}
+              </div>
+              <div class="finance-actions finance-pack-actions">
+                <button class="btn success" type="button" data-finance-pack-continue>
+                  continue
+                </button>
               </div>
             </section>
 
