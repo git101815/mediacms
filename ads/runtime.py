@@ -348,18 +348,23 @@ return 1
 
 CLICK_LUA = r"""
 local once_key = KEYS[1]
-local cfg = KEYS[2]
-local slotz = KEYS[3]
-local funded_key = KEYS[4]
-local account_accrued = KEYS[5]
-local campaign_accrued = KEYS[6]
-local clicks = KEYS[7]
-local pause_queue = KEYS[8]
+local impression_once_key = KEYS[2]
+local cfg = KEYS[3]
+local slotz = KEYS[4]
+local funded_key = KEYS[5]
+local account_accrued = KEYS[6]
+local campaign_accrued = KEYS[7]
+local clicks = KEYS[8]
+local pause_queue = KEYS[9]
 
 local campaign_id = ARGV[1]
 local pricing = ARGV[2]
 local click_cost = tonumber(ARGV[3])
 local ttl = tonumber(ARGV[4])
+
+if redis.call('EXISTS', impression_once_key) == 0 then
+  return 0
+end
 
 if redis.call('SET', once_key, '1', 'NX', 'EX', ttl) == false then
   return 2
@@ -476,92 +481,101 @@ def _candidate_payload(slot, *, bill_impression):
         return None
 
     redis = redis_connection()
-    candidates = redis.zrevrange(
-        slot_key(slot),
-        0,
-        19,
-    )
+    seen_campaign_ids = set()
 
-    for raw_id in candidates:
-        campaign_id = int(raw_id)
-        cfg = _decode_hash(
-            redis.hgetall(campaign_config_key(campaign_id))
+    while True:
+        candidates = redis.zrevrange(
+            slot_key(slot),
+            0,
+            19,
         )
-        if (
-            not cfg
-            or cfg.get("slot") != slot
-            or cfg.get("funded") != "1"
-        ):
-            redis.zrem(slot_key(slot), campaign_id)
-            continue
+        candidates = [
+            raw_id
+            for raw_id in candidates
+            if int(raw_id) not in seen_campaign_ids
+        ]
+        if not candidates:
+            return None
 
-        try:
-            creative_pool = json.loads(
-                cfg.get("creative_pool") or "[]"
+        for raw_id in candidates:
+            campaign_id = int(raw_id)
+            seen_campaign_ids.add(campaign_id)
+            cfg = _decode_hash(
+                redis.hgetall(campaign_config_key(campaign_id))
             )
-        except (TypeError, ValueError):
-            creative_pool = []
-
-        creative = _choose_creative(creative_pool)
-        if creative is None:
-            redis.zrem(slot_key(slot), campaign_id)
-            continue
-
-        advertiser_id = int(cfg["advertiser_id"])
-        pricing = cfg["pricing"]
-        bid_microtokens = int(cfg["bid_microtokens"])
-        impression_id = uuid.uuid4().hex
-
-        if creative["format"] in {
-            AdCreative.PLACEMENT_HOME,
-            AdCreative.PLACEMENT_SIDEBAR,
-        }:
-            target_url = str(cfg.get("target_url") or "")
-        elif creative["format"] == AdCreative.PLACEMENT_POPUNDER:
-            target_url = creative["destination_url"]
-        else:
-            target_url = ""
-
-        payload = {
-            "c": campaign_id,
-            "r": creative["id"],
-            "a": advertiser_id,
-            "p": pricing,
-            "b": bid_microtokens,
-            "s": slot,
-            "i": impression_id,
-            "u": target_url,
-        }
-
-        if bill_impression:
-            result = record_impression(payload)
-            if result != 1:
+            if (
+                not cfg
+                or cfg.get("slot") != slot
+                or cfg.get("funded") != "1"
+            ):
+                redis.zrem(slot_key(slot), campaign_id)
                 continue
 
-        event_token = signing.dumps(
-            payload,
-            salt="ads.click.v1",
-            compress=True,
-        )
-        click_url = (
-            f"/ads/click/{event_token}/"
-            if target_url
-            else ""
-        )
+            try:
+                creative_pool = json.loads(
+                    cfg.get("creative_pool") or "[]"
+                )
+            except (TypeError, ValueError):
+                creative_pool = []
 
-        return {
-            "campaign_id": campaign_id,
-            "creative_id": creative["id"],
-            "creative_format": creative["format"],
-            "creative_url": creative["url"],
-            "vast_url": creative["vast_url"],
-            "destination_url": target_url,
-            "click_url": click_url,
-            "event_token": event_token,
-            "pricing_model": pricing,
-        }
+            creative = _choose_creative(creative_pool)
+            if creative is None:
+                redis.zrem(slot_key(slot), campaign_id)
+                continue
 
-    return None
+            advertiser_id = int(cfg["advertiser_id"])
+            pricing = cfg["pricing"]
+            bid_microtokens = int(cfg["bid_microtokens"])
+            impression_id = uuid.uuid4().hex
+
+            if creative["format"] in {
+                AdCreative.PLACEMENT_HOME,
+                AdCreative.PLACEMENT_SIDEBAR,
+            }:
+                target_url = str(cfg.get("target_url") or "")
+            elif creative["format"] == AdCreative.PLACEMENT_POPUNDER:
+                target_url = creative["destination_url"]
+            else:
+                target_url = ""
+
+            payload = {
+                "c": campaign_id,
+                "r": creative["id"],
+                "a": advertiser_id,
+                "p": pricing,
+                "b": bid_microtokens,
+                "s": slot,
+                "i": impression_id,
+                "u": target_url,
+            }
+
+            if bill_impression:
+                result = record_impression(payload)
+                if result != 1:
+                    continue
+
+            event_token = signing.dumps(
+                payload,
+                salt="ads.click.v1",
+                compress=True,
+            )
+            click_url = (
+                f"/ads/click/{event_token}/"
+                if target_url
+                else ""
+            )
+
+            return {
+                "campaign_id": campaign_id,
+                "creative_id": creative["id"],
+                "creative_format": creative["format"],
+                "creative_url": creative["url"],
+                "vast_url": creative["vast_url"],
+                "destination_url": target_url,
+                "click_url": click_url,
+                "event_token": event_token,
+                "pricing_model": pricing,
+            }
 
 
 def serve(slot):
@@ -637,6 +651,7 @@ def record_click(payload):
         click_script(
             keys=[
                 f"{PREFIX}:click-once:{impression_id}",
+                f"{PREFIX}:impression-once:{impression_id}",
                 campaign_config_key(campaign_id),
                 slot_key(slot),
                 wallet_funded_key(advertiser_id),

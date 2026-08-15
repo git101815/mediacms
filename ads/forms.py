@@ -91,6 +91,16 @@ def _minimum_bid_usd(placement, pricing_model):
     return value
 
 
+def _validate_http_url(value, *, field_name):
+    value = str(value or "").strip()
+    if not value:
+        return
+    if not value.lower().startswith(("http://", "https://")):
+        raise forms.ValidationError(
+            f"{field_name} must use http:// or https://."
+        )
+
+
 def _read_upload_bytes(upload):
     try:
         upload.seek(0)
@@ -169,11 +179,16 @@ def _validate_svg_banner(upload, expected):
                     "SVG external references are not allowed."
                 )
 
+            css_urls = re.findall(
+                r"url\s*\(\s*[\"']?([^)\"']+)",
+                value,
+                flags=re.IGNORECASE,
+            )
             if (
                 "javascript:" in value
-                or re.search(
-                    r"url\s*\(\s*[\"']?(?:https?:|//|data:|javascript:)",
-                    value,
+                or any(
+                    not ref.strip().startswith("#")
+                    for ref in css_urls
                 )
             ):
                 raise forms.ValidationError(
@@ -314,6 +329,14 @@ class AdCreativeForm(forms.ModelForm):
                     "vast_url",
                     "A VAST URL is required for in-video ads.",
                 )
+            else:
+                try:
+                    _validate_http_url(
+                        vast_url,
+                        field_name="VAST URL",
+                    )
+                except forms.ValidationError as exc:
+                    self.add_error("vast_url", exc)
             cleaned["image"] = None
             cleaned["destination_url"] = ""
 
@@ -323,6 +346,14 @@ class AdCreativeForm(forms.ModelForm):
                     "destination_url",
                     "A destination URL is required for popunder.",
                 )
+            else:
+                try:
+                    _validate_http_url(
+                        destination_url,
+                        field_name="Destination URL",
+                    )
+                except forms.ValidationError as exc:
+                    self.add_error("destination_url", exc)
             cleaned["image"] = None
             cleaned["vast_url"] = ""
 
@@ -497,11 +528,22 @@ class AdCampaignForm(forms.ModelForm):
             AdCampaign.PLACEMENT_HOME,
             AdCampaign.PLACEMENT_SIDEBAR,
         }:
-            if not cleaned.get("target_url"):
+            target_url = str(
+                cleaned.get("target_url") or ""
+            ).strip()
+            if not target_url:
                 self.add_error(
                     "target_url",
                     "A destination URL is required for banner campaigns.",
                 )
+            else:
+                try:
+                    _validate_http_url(
+                        target_url,
+                        field_name="Destination URL",
+                    )
+                except forms.ValidationError as exc:
+                    self.add_error("target_url", exc)
         else:
             cleaned["target_url"] = ""
 

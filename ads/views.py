@@ -110,6 +110,18 @@ def _format_ads_pack_usd(metadata):
     return _format_ads_usd(usd_value, decimal_places=2)
 
 
+def _build_ads_deposit_session_payload(session, wallet_views):
+    payload = dict(
+        wallet_views._build_deposit_session_payload(session)
+    )
+    payload["ads_pack_usd"] = _format_ads_pack_usd(
+        session.metadata
+    )
+    payload.pop("token_pack_name", None)
+    payload.pop("token_pack_label", None)
+    return payload
+
+
 def _build_ads_recent_deposit_rows(wallet, wallet_views):
     rows = [
         dict(row)
@@ -640,8 +652,10 @@ def finance_deposit_session(request, public_id):
         public_id=public_id,
         user=request.user,
     )
-    deposit_payload = wallet_views._build_deposit_session_payload(session)
-    deposit_payload["ads_pack_usd"] = _format_ads_pack_usd(session.metadata)
+    deposit_payload = _build_ads_deposit_session_payload(
+        session,
+        wallet_views,
+    )
     return render(
         request,
         "ads/deposit_session.html",
@@ -673,7 +687,13 @@ def finance_deposit_session_status(request, public_id):
         public_id=public_id,
         user=request.user,
     )
-    return JsonResponse(_wallet_views()._build_deposit_session_payload(session))
+    wallet_views = _wallet_views()
+    return JsonResponse(
+        _build_ads_deposit_session_payload(
+            session,
+            wallet_views,
+        )
+    )
 
 
 @require_POST
