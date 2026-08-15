@@ -11,10 +11,21 @@ import pytest
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _TEST_ROOT = Path("/tmp/mediacms-pytest")
+_PYTEST_TEMP_ROOT = _TEST_ROOT / "pytest"
+_PYTEST_CACHE_ROOT = _TEST_ROOT / "cache"
 
 
 def _testing_enabled():
-    return str(os.environ.get("TESTING", "")).strip().lower() in _TRUE_VALUES
+    return (
+        str(os.environ.get("TESTING", ""))
+        .strip()
+        .lower()
+        in _TRUE_VALUES
+    )
+
+
+if _testing_enabled():
+    os.environ["PYTEST_DEBUG_TEMPROOT"] = str(_PYTEST_TEMP_ROOT)
 
 
 def _settings():
@@ -57,12 +68,8 @@ def _assert_isolated_runtime():
             f"live={live_db!r}, test={test_db!r}"
         )
 
-    live_redis = urlsplit(
-        str(settings.TESTING_LIVE_REDIS_LOCATION)
-    )
-    live_redis_db = int(
-        (live_redis.path or "/0").strip("/") or 0
-    )
+    live_redis = urlsplit(str(settings.TESTING_LIVE_REDIS_LOCATION))
+    live_redis_db = int((live_redis.path or "/0").strip("/") or 0)
     redis = _redis_connection()
     active_redis_db = _redis_db_number(redis)
 
@@ -74,8 +81,7 @@ def _assert_isolated_runtime():
     if active_redis_db != int(settings.TESTING_REDIS_DB):
         raise pytest.UsageError(
             "Unexpected Redis test DB: "
-            f"expected {settings.TESTING_REDIS_DB}, "
-            f"got {active_redis_db}."
+            f"expected {settings.TESTING_REDIS_DB}, got {active_redis_db}."
         )
 
     test_root = Path(settings.TESTING_ROOT).resolve()
@@ -92,6 +98,21 @@ def _cleanup_test_root():
     shutil.rmtree(_TEST_ROOT, ignore_errors=True)
 
 
+def _ensure_runtime_dirs():
+    settings = _settings()
+    for path in {
+        Path(settings.TESTING_ROOT),
+        Path(settings.MEDIA_ROOT),
+        Path(settings.HLS_DIR),
+        Path(settings.STATIC_ROOT),
+        Path(settings.TEMP_DIRECTORY),
+        Path(settings.DB_BACKUP_DIR),
+        Path(settings.LOGS_DIR),
+        _PYTEST_TEMP_ROOT,
+        _PYTEST_CACHE_ROOT,
+    }:
+        path.mkdir(parents=True, exist_ok=True)
+
 
 def _network_host_is_test_safe(host):
     if isinstance(host, bytes):
@@ -100,26 +121,17 @@ def _network_host_is_test_safe(host):
 
     if not host:
         return True
-
-    # Docker Compose service names are single-label names (db, redis, web,
-    # frontend, etc.). They stay inside the compose/private network.
     if "." not in host:
         return True
-
     if host == "localhost" or host.endswith(".localhost"):
         return True
 
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
-        # A dotted public hostname is external by default.
         return False
 
-    return bool(
-        ip.is_loopback
-        or ip.is_private
-        or ip.is_link_local
-    )
+    return bool(ip.is_loopback or ip.is_private or ip.is_link_local)
 
 
 @pytest.fixture(autouse=True)
@@ -151,22 +163,22 @@ def _block_public_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
 
 
+@pytest.hookimpl(trylast=True)
 def pytest_configure(config):
     _assert_isolated_runtime()
+
+    _cleanup_test_root()
+    _ensure_runtime_dirs()
+
+    cache = getattr(config, "cache", None)
+    if cache is not None and hasattr(cache, "_cachedir"):
+        cache._cachedir = _PYTEST_CACHE_ROOT
 
 
 def pytest_sessionstart(session):
     redis = _assert_isolated_runtime()
-
-    # DB 15 is reserved by cms.settings specifically for TESTING=True.
-    # Clearing it before the run makes repeated executions deterministic.
+    _ensure_runtime_dirs()
     redis.flushdb()
-
-    # pytest's --basetemp is below this path and clears its own directory.
-    # Remove leftovers from interrupted older runs before current tests start.
-    media_root = _TEST_ROOT / "media"
-    if media_root.exists():
-        shutil.rmtree(media_root, ignore_errors=True)
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -174,20 +186,10 @@ def pytest_sessionfinish(session, exitstatus):
         redis = _assert_isolated_runtime()
         redis.flushdb()
     except Exception as exc:
-        # A cleanup failure means idempotence is no longer guaranteed.
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
-        terminal = session.config.pluginmanager.get_plugin(
-            "terminalreporter"
-        )
+        terminal = session.config.pluginmanager.get_plugin("terminalreporter")
         if terminal is not None:
-            terminal.write_line(
-                f"TEST CLEANUP ERROR: {exc}",
-                red=True,
-            )
-
-
-def pytest_unconfigure(config):
-    _cleanup_test_root()
+            terminal.write_line(f"TEST CLEANUP ERROR: {exc}", red=True)
 
 
 atexit.register(_cleanup_test_root)

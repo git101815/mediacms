@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import socket
 from urllib.parse import urlsplit
@@ -74,6 +75,32 @@ def test_testing_runtime_paths_and_redis_location_are_explicit():
     assert settings.REDIS_LOCATION != settings.TESTING_LIVE_REDIS_LOCATION
     assert settings.HLS_DIR.startswith(settings.MEDIA_ROOT)
 
+    for value in (
+        settings.MEDIA_ROOT,
+        settings.HLS_DIR,
+        settings.STATIC_ROOT,
+        settings.TEMP_DIRECTORY,
+        settings.DB_BACKUP_DIR,
+        settings.LOGS_DIR,
+    ):
+        assert Path(value).is_dir()
+
+
+def test_pytest_runtime_artifacts_are_outside_repository(request):
+    base = Path(settings.BASE_DIR).resolve()
+    test_root = Path(settings.TESTING_ROOT).resolve()
+
+    pytest_temp_root = Path(os.environ["PYTEST_DEBUG_TEMPROOT"]).resolve()
+    assert base not in pytest_temp_root.parents
+    assert pytest_temp_root != base
+    assert pytest_temp_root == test_root or test_root in pytest_temp_root.parents
+
+    cache = getattr(request.config, "cache", None)
+    assert cache is not None
+    cache_root = Path(cache._cachedir).resolve()
+    assert base not in cache_root.parents
+    assert cache_root != base
+    assert cache_root == test_root or test_root in cache_root.parents
 
 
 def test_public_network_is_blocked_during_tests():

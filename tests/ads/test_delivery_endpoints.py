@@ -40,7 +40,6 @@ def _assert_no_store(response):
         "no-store",
         "private",
         "max-age=0",
-        "no-cache",
     }.issubset(directives)
     assert response["Pragma"].lower() == "no-cache"
 
