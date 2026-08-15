@@ -274,6 +274,16 @@ CELERY_BEAT_SCHEDULE = {
         "task": "update_listings_thumbnails",
         "schedule": crontab(minute=2, hour="*/30"),
     },
+    "ads_refresh_runtime": {
+        "task": "ads.refresh_runtime_state",
+        "schedule": 10.0,
+        "options": {"queue": "short_tasks"},
+    },
+    "ads_settle_runtime": {
+        "task": "ads.settle_runtime",
+        "schedule": 15.0,
+        "options": {"queue": "short_tasks"},
+    },
     "push_all_media_to_storj": {
         "task": "push_all_media_to_storj",
         "schedule": timedelta(minutes=5),

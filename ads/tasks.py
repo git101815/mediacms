@@ -259,7 +259,10 @@ def _resume_funded_campaigns():
             sync_campaign_runtime(campaign)
 
 
-@shared_task(name="ads.refresh_runtime_state")
+@shared_task(
+    name="ads.refresh_runtime_state",
+    queue="short_tasks",
+)
 def refresh_runtime_state():
     advertiser_ids = list(
         AdCampaign.objects.values_list("advertiser_id", flat=True).distinct()
@@ -300,7 +303,10 @@ def refresh_runtime_state():
                 redis.zrem(slot_key(slot), campaign_id)
 
 
-@shared_task(name="ads.settle_runtime")
+@shared_task(
+    name="ads.settle_runtime",
+    queue="short_tasks",
+)
 def settle_runtime():
     # First complete any DB-posted batch that crashed before Redis ack.
     stranded = list(

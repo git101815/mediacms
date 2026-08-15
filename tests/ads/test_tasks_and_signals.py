@@ -12,6 +12,27 @@ from ads.models import AdCampaign, AdCampaignCreative, AdCreative, AdSettlementB
 from ledger.models import TokenWallet
 
 
+def test_ads_periodic_tasks_use_consumed_queue():
+    assert tasks.refresh_runtime_state.queue == "short_tasks"
+    assert tasks.settle_runtime.queue == "short_tasks"
+
+
+def test_prod_local_settings_keep_ads_periodic_tasks():
+    from pathlib import Path
+
+    text = Path("deploy/docker/local_settings.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"ads_refresh_runtime"' in text
+    assert '"task": "ads.refresh_runtime_state"' in text
+    assert '"schedule": 10.0' in text
+    assert '"ads_settle_runtime"' in text
+    assert '"task": "ads.settle_runtime"' in text
+    assert '"schedule": 15.0' in text
+    assert text.count('"options": {"queue": "short_tasks"}') >= 2
+
+
 @pytest.mark.django_db
 def test_pause_queue_drops_missing_campaign_runtime(
     ads_redis,
