@@ -1,0 +1,118 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ title }} · {{ portal_name }} Ads</title>
+  <link rel="stylesheet" href="{% static 'ads/ads.css' %}">
+</head>
+<body class="ads-body">
+<div class="ads-shell">
+  <aside class="ads-sidebar">
+    <a class="ads-brand" href="/">
+      <span class="ads-brand-mark">▶</span>
+      <span>{{ portal_name }} <b>ADS</b></span>
+    </a>
+    <nav class="ads-nav">
+      <a href="/"><span>←</span> Campaigns</a>
+    </nav>
+    <div class="ads-sidebar-spacer"></div>
+    <div class="ads-sidebar-note">
+      <strong>Simple direct inventory</strong>
+      <p>No budgets or schedules. An approved campaign runs until you pause it or the wallet runs out.</p>
+    </div>
+  </aside>
+
+  <main class="ads-main">
+    <header class="ads-topbar">
+      <div>
+        <a class="ads-back" href="/">← Campaigns</a>
+        <h1>{{ title }}</h1>
+        <p>Configure only what affects delivery.</p>
+      </div>
+    </header>
+
+    <form class="campaign-form" method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <div class="form-errors">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <section class="form-card">
+        <div class="form-card-title"><span>1</span><div><h2>Campaign</h2><p>Name and landing page.</p></div></div>
+        <div class="form-grid">
+          <label>
+            <span>Campaign name</span>
+            {{ form.name }}
+            {{ form.name.errors }}
+          </label>
+          <label>
+            <span>Destination URL</span>
+            {{ form.target_url }}
+            {{ form.target_url.errors }}
+          </label>
+        </div>
+      </section>
+
+      <section class="form-card">
+        <div class="form-card-title"><span>2</span><div><h2>Placement</h2><p>Choose one of the two direct banner slots.</p></div></div>
+        <div class="placement-options">
+          {% for value, label in form.placement.field.choices %}
+          <label class="placement-card">
+            <input type="radio" name="placement" value="{{ value }}" {% if form.placement.value == value %}checked{% endif %}>
+            <span class="placement-preview placement-preview-{{ value }}"></span>
+            <strong>{{ label }}</strong>
+            <small>{% if value == 'home_leaderboard' %}Between Recommended and Latest{% else %}Above Related Media on video pages{% endif %}</small>
+          </label>
+          {% endfor %}
+        </div>
+        {{ form.placement.errors }}
+      </section>
+
+      <section class="form-card">
+        <div class="form-card-title"><span>3</span><div><h2>Creative</h2><p>The file must match the selected placement exactly.</p></div></div>
+        <div class="creative-upload">
+          <label class="upload-drop">
+            {{ form.creative }}
+            <strong>Choose banner image</strong>
+            <span data-creative-label>{% if campaign %}{{ campaign.creative.name }}{% else %}PNG, JPG or WEBP{% endif %}</span>
+          </label>
+          <div class="creative-preview" data-creative-preview>
+            {% if campaign and campaign.creative %}
+            <img src="{{ campaign.creative.url }}" alt="Current creative">
+            {% else %}
+            <span>Preview</span>
+            {% endif %}
+          </div>
+        </div>
+        {{ form.creative.errors }}
+      </section>
+
+      <section class="form-card">
+        <div class="form-card-title"><span>4</span><div><h2>Pricing</h2><p>CPM pays per impression. CPC pays on a valid click.</p></div></div>
+        <div class="pricing-grid">
+          <label>
+            <span>Model</span>
+            {{ form.pricing_model }}
+            {{ form.pricing_model.errors }}
+          </label>
+          <label>
+            <span>Bid</span>
+            <div class="bid-field">{{ form.bid_tokens }} <b>tokens</b></div>
+            <small data-bid-help>CPM: tokens per 1,000 impressions. CPC: tokens per click.</small>
+            {{ form.bid_tokens.errors }}
+          </label>
+        </div>
+      </section>
+
+      <div class="form-submit">
+        <a href="/">Cancel</a>
+        <button type="submit">{% if campaign %}Save campaign{% else %}Submit for review{% endif %}</button>
+      </div>
+    </form>
+  </main>
+</div>
+<script src="{% static 'ads/ads.js' %}"></script>
+</body>
+</html>

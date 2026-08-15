@@ -1,0 +1,136 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Campaigns · {{ portal_name }} Ads</title>
+  <link rel="stylesheet" href="{% static 'ads/ads.css' %}">
+</head>
+<body class="ads-body">
+<div class="ads-shell">
+  <aside class="ads-sidebar">
+    <a class="ads-brand" href="/">
+      <span class="ads-brand-mark">▶</span>
+      <span>{{ portal_name }} <b>ADS</b></span>
+    </a>
+    <a class="ads-create" href="/campaigns/new/">＋ Create Campaign</a>
+
+    <nav class="ads-nav">
+      <a class="is-active" href="/"><span>◉</span> Campaigns</a>
+      <a href="{{ add_funds_url }}"><span>＋</span> Add funds</a>
+    </nav>
+
+    <div class="ads-sidebar-spacer"></div>
+    <div class="ads-balance-card">
+      <small>Available balance</small>
+      <strong>{{ balance }}</strong>
+      <span>tokens</span>
+      <a href="{{ add_funds_url }}">Add funds</a>
+    </div>
+    <nav class="ads-nav ads-nav-bottom">
+      <a href="{{ profile_url }}"><span>○</span> Profile</a>
+      <a href="/logout/"><span>↪</span> Logout</a>
+    </nav>
+  </aside>
+
+  <main class="ads-main">
+    <header class="ads-topbar">
+      <div>
+        <h1>Campaigns</h1>
+        <p>Manage your direct advertising campaigns</p>
+      </div>
+      <div class="ads-top-balance">
+        <span>Balance</span>
+        <strong>{{ balance }} <small>tokens</small></strong>
+        <a href="{{ add_funds_url }}">Add Funds</a>
+      </div>
+    </header>
+
+    <section class="ads-metrics">
+      <article><span class="metric-icon">◉</span><div><small>Impressions</small><strong>{{ total_impressions }}</strong></div></article>
+      <article><span class="metric-icon">↗</span><div><small>Clicks</small><strong>{{ total_clicks }}</strong></div></article>
+      <article><span class="metric-icon">%</span><div><small>CTR</small><strong>{{ total_ctr }}%</strong></div></article>
+      <article><span class="metric-icon">◎</span><div><small>Spend</small><strong>{{ total_spend }}</strong><em>tokens</em></div></article>
+      <article><span class="metric-icon">▣</span><div><small>Active campaigns</small><strong>{{ active_campaigns }}</strong></div></article>
+    </section>
+
+    <section class="ads-table-card">
+      <div class="ads-table-head">
+        <div>
+          <h2>All campaigns</h2>
+          <p>CPM and CPC campaigns compete for the two direct placements.</p>
+        </div>
+        <a class="ads-primary" href="/campaigns/new/">＋ Create Campaign</a>
+      </div>
+
+      {% if rows %}
+      <div class="ads-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Campaign</th>
+              <th>Placement</th>
+              <th>Model</th>
+              <th>Bid</th>
+              <th>Status</th>
+              <th>Impressions</th>
+              <th>Clicks</th>
+              <th>CTR</th>
+              <th>Spend</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>
+                <a class="campaign-name" href="/campaigns/{{ row.campaign.id }}/edit/">{{ row.campaign.name }}</a>
+                <small>#{{ row.campaign.id }}</small>
+              </td>
+              <td>
+                <strong>{{ row.campaign.get_placement_display }}</strong>
+              </td>
+              <td><span class="model-pill">{{ row.campaign.get_pricing_model_display }}</span></td>
+              <td>
+                <strong>{{ row.bid }}</strong>
+                <small>{% if row.campaign.pricing_model == 'cpm' %}tokens / 1,000 imp.{% else %}tokens / click{% endif %}</small>
+              </td>
+              <td>
+                <span class="status-pill status-{{ row.status_class }}">{{ row.status_label }}</span>
+                {% if row.campaign.review_note %}<small>{{ row.campaign.review_note }}</small>{% endif %}
+              </td>
+              <td>{{ row.impressions }}</td>
+              <td>{{ row.clicks }}</td>
+              <td>{{ row.ctr }}%</td>
+              <td><strong>{{ row.spend }}</strong><small>tokens</small></td>
+              <td>
+                <div class="ads-actions">
+                  <a title="Edit" href="/campaigns/{{ row.campaign.id }}/edit/">✎</a>
+                  {% if row.campaign.delivery_status == 'active' or row.campaign.delivery_status == 'paused_user' %}
+                  <form method="post" action="/campaigns/{{ row.campaign.id }}/toggle/">
+                    {% csrf_token %}
+                    <button title="{% if row.campaign.delivery_status == 'active' %}Pause{% else %}Resume{% endif %}">
+                      {% if row.campaign.delivery_status == 'active' %}Ⅱ{% else %}▶{% endif %}
+                    </button>
+                  </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="ads-empty">
+        <strong>No campaigns yet</strong>
+        <p>Create a 728×90 homepage banner or a 300×250 video-sidebar campaign.</p>
+        <a class="ads-primary" href="/campaigns/new/">Create your first campaign</a>
+      </div>
+      {% endif %}
+    </section>
+  </main>
+</div>
+</body>
+</html>

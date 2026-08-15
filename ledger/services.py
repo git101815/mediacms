@@ -325,7 +325,20 @@ def get_failed_sagas(*, actor, limit: int = 100):
     ).order_by("failed_at", "created_at")[:limit]
 
 def get_wallet_available_balance(wallet: TokenWallet) -> int:
-    return int(wallet.balance) - int(wallet.held_balance)
+    available = int(wallet.balance) - int(wallet.held_balance)
+    if wallet.wallet_type == TokenWallet.TYPE_USER and wallet.user_id:
+        try:
+            user = wallet.user
+        except Exception:
+            user = None
+        if user is not None and getattr(user, "advertiserUser", False):
+            try:
+                from ads.runtime import get_account_unsettled_microtokens
+                available -= int(get_account_unsettled_microtokens(wallet.user_id))
+            except Exception as exc:
+                # Advertiser wallet outflows fail closed if the Ads meter is unavailable.
+                raise ValidationError("Advertising balance is temporarily unavailable") from exc
+    return max(0, available)
 
 def _require_wallet_not_blocked(wallet: TokenWallet):
     if wallet.risk_status == LEDGER_RISK_STATUS_BLOCKED:

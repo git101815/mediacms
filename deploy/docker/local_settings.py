@@ -2,10 +2,13 @@ import os
 from celery.schedules import crontab
 from datetime import timedelta
 FRONTEND_HOST = "https://celebfakes.ru"
+ADS_HOST = os.getenv("ADS_HOST", "ads.celebfakes.ru").strip().lower()
+ADS_SCHEME = "https"
 TIME_ZONE = "Europe/Moscow"
 ALLOWED_HOSTS = [
     "www.celebfakes.ru",
     "celebfakes.ru",
+    "ads.celebfakes.ru",
     "medias.celebfakes.ru",
     "mediapull.ru",
     "127.0.0.1",

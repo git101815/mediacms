@@ -300,6 +300,7 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "imagekit",
     "ledger.apps.LedgerConfig",
+    "ads.apps.AdsConfig",
     "premium.apps.PremiumConfig",
     "files.apps.FilesConfig",
     "users.apps.UsersConfig",
@@ -325,6 +326,7 @@ MIDDLEWARE = [
     "cms.middleware_googleflag.GooglebotFlagMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "ads.middleware.AdsHostMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "cms.middleware_clickjacking.MoneyFrameDenyMiddleware",
@@ -460,6 +462,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "update_listings_thumbnails",
         "schedule": crontab(minute=2, hour="*/30"),
     },
+    "ads_refresh_runtime": {
+        "task": "ads.refresh_runtime_state",
+        "schedule": 10.0,
+    },
+    "ads_settle_runtime": {
+        "task": "ads.settle_runtime",
+        "schedule": 15.0,
+    },
 }
 # TODO: beat, delete chunks from media root
 # chunks_dir after xx days...(also uploads_dir)
@@ -550,6 +560,15 @@ CRISPY_TEMPLATE_PACK = "bootstrap5"
 # allow option to override the default admin url
 # keep the trailing slash
 DJANGO_ADMIN_URL = "admin/"
+
+# Self-serve direct advertising. Production overrides ADS_HOST in local_settings.py.
+ADS_HOST = os.environ.get("ADS_HOST", "ads.localhost").strip().lower()
+ADS_SCHEME = os.environ.get("ADS_SCHEME", "https").strip().lower()
+ADS_SSO_TICKET_MAX_AGE_SECONDS = 60
+ADS_CLICK_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+# CPC campaigns are ranked against CPM using a smoothed 1% CTR prior.
+ADS_CPC_PRIOR_IMPRESSIONS = 1000
+ADS_CPC_PRIOR_CTR_PPM = 10000
 
 # this are used around a number of places and will need to be well documented!!!
 
