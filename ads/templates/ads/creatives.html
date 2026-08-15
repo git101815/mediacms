@@ -51,7 +51,17 @@
             {% for row in rows %}
             <tr>
               <td>{{ row.creative.id }}</td>
-              <td><img class="creative-thumb" src="{{ row.creative.image.url }}" alt="{{ row.creative.name }}"></td>
+              <td>
+                {% if row.creative.is_banner and row.creative.image %}
+                  <img class="creative-thumb" src="{{ row.creative.image.url }}" alt="{{ row.creative.name }}">
+                {% elif row.creative.is_in_video %}
+                  <span class="creative-kind-badge">VAST</span>
+                {% elif row.creative.is_popunder %}
+                  <span class="creative-kind-badge">URL</span>
+                {% else %}
+                  <span class="creative-kind-badge">—</span>
+                {% endif %}
+              </td>
               <td><a class="link" href="/creatives/{{ row.creative.id }}/edit/">{{ row.creative.name }}</a></td>
               <td>{{ row.creative.get_placement_display }}</td>
               <td><span class="status-dot {{ row.status_class }}"></span>{{ row.status_label }}</td>
@@ -60,7 +70,7 @@
             </tr>
             {% endfor %}
           {% else %}
-            <tr class="empty-row"><td colspan="7">No creatives yet. Create a reusable banner to start.</td></tr>
+            <tr class="empty-row"><td colspan="7">No creatives yet. Create a reusable creative to start.</td></tr>
           {% endif %}
           </tbody>
         </table>

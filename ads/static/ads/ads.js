@@ -28,7 +28,7 @@
   });
 
   const imageInput = document.querySelector(
-    'input[type="file"][name="image"], input[type="file"][name="creative"]'
+    'input[type="file"][name="image"]'
   );
   const preview = document.querySelector('[data-creative-preview]');
   if (imageInput && preview) {
@@ -45,6 +45,52 @@
     });
   }
 
+  const creativeForm = document.querySelector('#creative-form');
+  if (creativeForm) {
+    const creativePlacement = creativeForm.querySelector(
+      '[name="placement"]'
+    );
+    const bannerSection = creativeForm.querySelector(
+      '[data-creative-banner-section]'
+    );
+    const vastSection = creativeForm.querySelector(
+      '[data-creative-vast-section]'
+    );
+    const popunderSection = creativeForm.querySelector(
+      '[data-creative-popunder-section]'
+    );
+    const vastInput = creativeForm.querySelector('[name="vast_url"]');
+    const popunderInput = creativeForm.querySelector(
+      '[name="destination_url"]'
+    );
+
+    const syncCreativeFormat = () => {
+      const format = creativePlacement ? creativePlacement.value : '';
+      const banner = (
+        format === 'home_leaderboard'
+        || format === 'media_sidebar_rectangle'
+      );
+      const inVideo = format === 'in_video';
+      const popunder = format === 'popunder';
+
+      if (bannerSection) bannerSection.hidden = !banner;
+      if (vastSection) vastSection.hidden = !inVideo;
+      if (popunderSection) popunderSection.hidden = !popunder;
+
+      if (imageInput) imageInput.disabled = !banner;
+      if (vastInput) vastInput.disabled = !inVideo;
+      if (popunderInput) popunderInput.disabled = !popunder;
+    };
+
+    if (creativePlacement) {
+      creativePlacement.addEventListener(
+        'change',
+        syncCreativeFormat
+      );
+    }
+    syncCreativeFormat();
+  }
+
   const placement = document.querySelector(
     '#campaign-form [name="placement"]'
   );
@@ -52,15 +98,28 @@
   const pickerEmpty = document.querySelector(
     '[data-creative-picker-empty]'
   );
+  const creativeFormatForPlacement = (value) => {
+    if (
+      value === 'video_preroll'
+      || value === 'video_midroll'
+      || value === 'video_postroll'
+    ) {
+      return 'in_video';
+    }
+    return value;
+  };
   if (placement && picker) {
     const syncPicker = () => {
       let visible = 0;
+      const requiredFormat = creativeFormatForPlacement(
+        placement.value
+      );
       picker.querySelectorAll(
-        '[data-creative-placement]'
+        '[data-creative-format]'
       ).forEach((item) => {
         const matches = (
-          item.getAttribute('data-creative-placement')
-          === placement.value
+          item.getAttribute('data-creative-format')
+          === requiredFormat
         );
         item.hidden = !matches;
         if (!matches) {
@@ -90,6 +149,22 @@
     const campaignBid = campaignForm.querySelector(
       '[name="bid_usd"]'
     );
+    const campaignTarget = campaignForm.querySelector(
+      '[data-campaign-target-url]'
+    );
+
+    const syncCampaignTarget = () => {
+      if (!campaignPlacement || !campaignTarget) return;
+      const banner = (
+        campaignPlacement.value === 'home_leaderboard'
+        || campaignPlacement.value === 'media_sidebar_rectangle'
+      );
+      campaignTarget.hidden = !banner;
+      const targetInput = campaignTarget.querySelector(
+        '[name="target_url"]'
+      );
+      if (targetInput) targetInput.disabled = !banner;
+    };
 
     const syncCampaignBidMinimum = () => {
       if (!campaignPlacement || !campaignPricing || !campaignBid) {
@@ -100,9 +175,18 @@
         'home_leaderboard',
         'media_sidebar_rectangle',
       ]);
+      const inVideoPlacements = new Set([
+        'video_preroll',
+        'video_midroll',
+        'video_postroll',
+      ]);
       const adType = bannerPlacements.has(campaignPlacement.value)
         ? 'banner'
-        : campaignPlacement.value;
+        : (
+            inVideoPlacements.has(campaignPlacement.value)
+              ? 'preroll'
+              : campaignPlacement.value
+          );
       const key = (
         'data-min-'
         + adType
@@ -120,6 +204,10 @@
         'change',
         syncCampaignBidMinimum
       );
+      campaignPlacement.addEventListener(
+        'change',
+        syncCampaignTarget
+      );
     }
     if (campaignPricing) {
       campaignPricing.addEventListener(
@@ -128,6 +216,7 @@
       );
     }
     syncCampaignBidMinimum();
+    syncCampaignTarget();
   }
 
   const copyButton = document.querySelector('[data-copy-address]');

@@ -34,6 +34,8 @@ from .runtime import (
     get_effective_balance_nanos,
     nanos_to_token_decimal,
     record_click,
+    record_impression,
+    reserve,
     serve,
     sync_campaign_runtime,
 )
@@ -548,6 +550,8 @@ def creative_edit(request, creative_id):
     )
     previous_placement = creative.placement
     previous_image = creative.image.name
+    previous_vast_url = creative.vast_url
+    previous_destination_url = creative.destination_url
 
     if request.method == "POST":
         form = AdCreativeForm(
@@ -560,6 +564,8 @@ def creative_edit(request, creative_id):
             moderation_sensitive = (
                 edited.placement != previous_placement
                 or edited.image.name != previous_image
+                or edited.vast_url != previous_vast_url
+                or edited.destination_url != previous_destination_url
                 or bool(request.FILES.get("image"))
             )
             if moderation_sensitive:
@@ -571,7 +577,17 @@ def creative_edit(request, creative_id):
                 (
                     AdCampaignCreative.objects
                     .filter(creative=edited)
-                    .exclude(campaign__placement=edited.placement)
+                    .exclude(
+                        campaign__placement__in=(
+                            (
+                                AdCampaign.PLACEMENT_PREROLL,
+                                AdCampaign.PLACEMENT_MIDROLL,
+                                AdCampaign.PLACEMENT_POSTROLL,
+                            )
+                            if edited.placement == AdCreative.PLACEMENT_IN_VIDEO
+                            else (edited.placement,)
+                        )
+                    )
                     .delete()
                 )
             return redirect("/creatives/")
@@ -694,6 +710,243 @@ def _no_store(response):
     return response
 
 
+def _load_ad_event_token(token):
+    max_age = int(
+        getattr(
+            settings,
+            "ADS_CLICK_TOKEN_MAX_AGE_SECONDS",
+            7 * 24 * 60 * 60,
+        )
+    )
+    try:
+        return signing.loads(
+            token,
+            salt="ads.click.v1",
+            max_age=max_age,
+        )
+    except (BadSignature, SignatureExpired):
+        raise Http404
+
+
+def _cdata(value):
+    return str(value or "").replace("]]>", "]]]]><![CDATA[>")
+
+
+def _empty_vast():
+    return _no_store(
+        HttpResponse(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<VAST version="3.0"></VAST>',
+            content_type="application/xml",
+        )
+    )
+
+
+@never_cache
+@require_GET
+def direct_ads_vmap(request):
+    midroll_offset = str(
+        getattr(settings, "ADS_MIDROLL_TIME_OFFSET", "50%")
+        or "50%"
+    )
+    breaks = (
+        (
+            "start",
+            "preroll",
+            AdCampaign.PLACEMENT_PREROLL,
+        ),
+        (
+            midroll_offset,
+            "midroll",
+            AdCampaign.PLACEMENT_MIDROLL,
+        ),
+        (
+            "end",
+            "postroll",
+            AdCampaign.PLACEMENT_POSTROLL,
+        ),
+    )
+
+    chunks = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<vmap:VMAP version="1.0" '
+        'xmlns:vmap="http://www.iab.net/videosuite/vmap">',
+    ]
+
+    for time_offset, break_id, slot in breaks:
+        tag_url = request.build_absolute_uri(
+            reverse(
+                "direct_ads_vast",
+                kwargs={"slot": slot},
+            )
+        )
+        chunks.extend(
+            [
+                (
+                    f'<vmap:AdBreak timeOffset="{time_offset}" '
+                    f'breakType="linear" breakId="{break_id}">'
+                ),
+                (
+                    f'<vmap:AdSource id="{break_id}" '
+                    'allowMultipleAds="false" followRedirects="true">'
+                ),
+                '<vmap:AdTagURI templateType="vast3"><![CDATA['
+                + _cdata(tag_url)
+                + ']]></vmap:AdTagURI>',
+                '</vmap:AdSource>',
+                '</vmap:AdBreak>',
+            ]
+        )
+
+    chunks.append("</vmap:VMAP>")
+    return _no_store(
+        HttpResponse(
+            "".join(chunks),
+            content_type="application/xml",
+        )
+    )
+
+
+@never_cache
+@require_GET
+def direct_ads_vast(request, slot):
+    if slot not in {
+        AdCampaign.PLACEMENT_PREROLL,
+        AdCampaign.PLACEMENT_MIDROLL,
+        AdCampaign.PLACEMENT_POSTROLL,
+    }:
+        raise Http404
+
+    if getattr(request, "is_googlebot_verified", False):
+        return _empty_vast()
+
+    try:
+        candidate = reserve(slot)
+    except Exception:
+        return _empty_vast()
+
+    if not candidate:
+        return _empty_vast()
+
+    vast_url = str(candidate.get("vast_url") or "")
+    if not vast_url.startswith(("http://", "https://")):
+        return _empty_vast()
+
+    token = candidate["event_token"]
+    impression_url = request.build_absolute_uri(
+        reverse(
+            "direct_ad_impression",
+            kwargs={"token": token},
+        )
+    )
+    click_tracking_url = request.build_absolute_uri(
+        reverse(
+            "direct_ad_track_click",
+            kwargs={"token": token},
+        )
+    )
+
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<VAST version="3.0"><Ad id="direct-'
+        + str(candidate["campaign_id"])
+        + '-'
+        + str(candidate["creative_id"])
+        + '"><Wrapper>'
+        '<AdSystem version="1.0">MediaCMS Direct Ads</AdSystem>'
+        '<VASTAdTagURI><![CDATA['
+        + _cdata(vast_url)
+        + ']]></VASTAdTagURI>'
+        '<Impression><![CDATA['
+        + _cdata(impression_url)
+        + ']]></Impression>'
+        '<Creatives><Creative><Linear>'
+        '<VideoClicks><ClickTracking><![CDATA['
+        + _cdata(click_tracking_url)
+        + ']]></ClickTracking></VideoClicks>'
+        '</Linear></Creative></Creatives>'
+        '</Wrapper></Ad></VAST>'
+    )
+
+    return _no_store(
+        HttpResponse(
+            body,
+            content_type="application/xml",
+        )
+    )
+
+
+@never_cache
+@require_GET
+def reserve_direct_ad(request, slot):
+    if slot != AdCampaign.PLACEMENT_POPUNDER:
+        return _no_store(HttpResponse(status=204))
+
+    if getattr(request, "is_googlebot_verified", False):
+        return _no_store(HttpResponse(status=204))
+
+    try:
+        payload = reserve(slot)
+    except Exception:
+        return _no_store(HttpResponse(status=204))
+
+    if not payload:
+        return _no_store(HttpResponse(status=204))
+
+    return _no_store(
+        JsonResponse(
+            {
+                "campaign_id": payload["campaign_id"],
+                "creative_id": payload["creative_id"],
+                "open_url": reverse(
+                    "direct_ad_open",
+                    kwargs={"token": payload["event_token"]},
+                ),
+            }
+        )
+    )
+
+
+@require_GET
+def direct_ad_impression(request, token):
+    payload = _load_ad_event_token(token)
+    try:
+        record_impression(payload)
+    except Exception:
+        pass
+    return _no_store(HttpResponse(status=204))
+
+
+@require_GET
+def direct_ad_track_click(request, token):
+    payload = _load_ad_event_token(token)
+    try:
+        record_click(payload)
+    except Exception:
+        pass
+    return _no_store(HttpResponse(status=204))
+
+
+@require_GET
+def direct_ad_open(request, token):
+    payload = _load_ad_event_token(token)
+    target = str(payload.get("u") or "")
+    if not target.startswith(("http://", "https://")):
+        raise Http404
+
+    try:
+        record_impression(payload)
+    except Exception:
+        pass
+
+    try:
+        record_click(payload)
+    except Exception:
+        pass
+
+    return redirect(target)
+
+
 @require_GET
 def serve_direct_ad(request, slot):
     if getattr(request, "is_googlebot_verified", False):
@@ -711,11 +964,7 @@ def serve_direct_ad(request, slot):
 
 @require_GET
 def ad_click(request, token):
-    max_age = int(getattr(settings, "ADS_CLICK_TOKEN_MAX_AGE_SECONDS", 7 * 24 * 60 * 60))
-    try:
-        payload = signing.loads(token, salt="ads.click.v1", max_age=max_age)
-    except (BadSignature, SignatureExpired):
-        raise Http404
+    payload = _load_ad_event_token(token)
 
     target = str(payload.get("u") or "")
     if not target.startswith(("http://", "https://")):

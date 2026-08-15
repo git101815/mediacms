@@ -53,12 +53,38 @@
             <label class="select-field-title" for="{{ form.placement.id_for_label }}">Format</label>
             {{ form.placement }}
             {{ form.placement.errors }}
-            <div class="group-help">The image must exactly match the selected format.</div>
+            <div class="group-help">Banner 728×90 / 300×250, VAST in-video, or popunder URL.</div>
           </div>
-          <div class="file-control">{{ form.image }}{{ form.image.errors }}</div>
-          <div class="group-help">728×90 for Homepage, 300×250 for Video Sidebar.</div>
+
+          <div data-creative-banner-section>
+            <div class="file-control">{{ form.image }}{{ form.image.errors }}</div>
+            <div class="group-help">PNG, JPG, SVG or animated GIF at the exact selected dimensions.</div>
+          </div>
+
+          <div class="group" data-creative-vast-section hidden>
+            {{ form.vast_url }}
+            <span class="title">VAST URL</span>
+            {{ form.vast_url.errors }}
+            <div class="group-help">VAST tag used by the existing Video.js + IMA ad pipeline.</div>
+          </div>
+
+          <div class="group" data-creative-popunder-section hidden>
+            {{ form.destination_url }}
+            <span class="title">Destination URL</span>
+            {{ form.destination_url.errors }}
+            <div class="group-help">URL opened by the existing popunder/tabunder engine.</div>
+          </div>
+
           <div class="creative-preview" data-creative-preview>
-            {% if creative and creative.image %}<img src="{{ creative.image.url }}" alt="{{ creative.name }}">{% else %}<span>Creative preview</span>{% endif %}
+            {% if creative and creative.is_banner and creative.image %}
+              <img src="{{ creative.image.url }}" alt="{{ creative.name }}">
+            {% elif creative and creative.is_in_video %}
+              <span>VAST creative</span>
+            {% elif creative and creative.is_popunder %}
+              <span>Popunder URL creative</span>
+            {% else %}
+              <span>Creative preview</span>
+            {% endif %}
           </div>
         </div>
 
@@ -67,7 +93,7 @@
           <h2 class="general-form-section__title">Review status</h2>
           <div class="creative-review-state"><span class="status-dot {% if creative.review_status == 'approved' %}active{% elif creative.review_status == 'rejected' %}rejected{% else %}pending{% endif %}"></span>{{ creative.get_review_status_display }}</div>
           {% if creative.review_note %}<div class="group-help">{{ creative.review_note }}</div>{% endif %}
-          <div class="group-help">Changing the image or format sends the creative back to review. Campaigns continue with any other approved creatives in their rotation.</div>
+          <div class="group-help">Changing the creative source, destination, or format sends the creative back to review. Campaigns continue with any other approved creatives in their rotation.</div>
         </div>
         {% endif %}
       </form>

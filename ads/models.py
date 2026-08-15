@@ -11,10 +11,41 @@ from django.utils import timezone
 
 AD_PLACEMENT_HOME = "home_leaderboard"
 AD_PLACEMENT_SIDEBAR = "media_sidebar_rectangle"
-AD_PLACEMENT_CHOICES = (
-    (AD_PLACEMENT_HOME, "Homepage banner · 728×90"),
-    (AD_PLACEMENT_SIDEBAR, "Video page sidebar · 300×250"),
+AD_PLACEMENT_PREROLL = "video_preroll"
+AD_PLACEMENT_MIDROLL = "video_midroll"
+AD_PLACEMENT_POSTROLL = "video_postroll"
+AD_PLACEMENT_POPUNDER = "popunder"
+
+AD_CAMPAIGN_PLACEMENT_CHOICES = (
+    (AD_PLACEMENT_HOME, "Banner · 728×90"),
+    (AD_PLACEMENT_SIDEBAR, "Banner · 300×250"),
+    (AD_PLACEMENT_PREROLL, "In-video · Preroll"),
+    (AD_PLACEMENT_MIDROLL, "In-video · Midroll"),
+    (AD_PLACEMENT_POSTROLL, "In-video · Postroll"),
+    (AD_PLACEMENT_POPUNDER, "Popunder"),
 )
+
+AD_CREATIVE_IN_VIDEO = "in_video"
+AD_CREATIVE_POPUNDER = AD_PLACEMENT_POPUNDER
+AD_CREATIVE_PLACEMENT_CHOICES = (
+    (AD_PLACEMENT_HOME, "Banner · 728×90"),
+    (AD_PLACEMENT_SIDEBAR, "Banner · 300×250"),
+    (
+        AD_CREATIVE_IN_VIDEO,
+        "In-video · VAST (Preroll / Midroll / Postroll)",
+    ),
+    (AD_CREATIVE_POPUNDER, "Popunder · URL"),
+)
+
+
+def creative_format_for_campaign_placement(placement):
+    if placement in {
+        AD_PLACEMENT_PREROLL,
+        AD_PLACEMENT_MIDROLL,
+        AD_PLACEMENT_POSTROLL,
+    }:
+        return AD_CREATIVE_IN_VIDEO
+    return placement
 
 AD_REVIEW_PENDING = "pending"
 AD_REVIEW_APPROVED = "approved"
@@ -29,7 +60,11 @@ AD_REVIEW_CHOICES = (
 class AdCampaign(models.Model):
     PLACEMENT_HOME = AD_PLACEMENT_HOME
     PLACEMENT_SIDEBAR = AD_PLACEMENT_SIDEBAR
-    PLACEMENT_CHOICES = AD_PLACEMENT_CHOICES
+    PLACEMENT_PREROLL = AD_PLACEMENT_PREROLL
+    PLACEMENT_MIDROLL = AD_PLACEMENT_MIDROLL
+    PLACEMENT_POSTROLL = AD_PLACEMENT_POSTROLL
+    PLACEMENT_POPUNDER = AD_PLACEMENT_POPUNDER
+    PLACEMENT_CHOICES = AD_CAMPAIGN_PLACEMENT_CHOICES
 
     PRICING_CPM = "cpm"
     PRICING_CPC = "cpc"
@@ -64,7 +99,7 @@ class AdCampaign(models.Model):
         choices=PLACEMENT_CHOICES,
         db_index=True,
     )
-    target_url = models.URLField(max_length=1000)
+    target_url = models.URLField(max_length=1000, blank=True)
     pricing_model = models.CharField(
         max_length=8,
         choices=PRICING_CHOICES,
@@ -127,7 +162,17 @@ class AdCampaign(models.Model):
     def placement_dimensions(self):
         if self.placement == self.PLACEMENT_HOME:
             return (728, 90)
-        return (300, 250)
+        if self.placement == self.PLACEMENT_SIDEBAR:
+            return (300, 250)
+        return None
+
+    @property
+    def creative_format(self):
+        return creative_format_for_campaign_placement(self.placement)
+
+    @classmethod
+    def delivery_slots(cls):
+        return tuple(value for value, _label in cls.PLACEMENT_CHOICES)
 
     @property
     def visible_status(self):
@@ -141,7 +186,9 @@ class AdCampaign(models.Model):
 class AdCreative(models.Model):
     PLACEMENT_HOME = AD_PLACEMENT_HOME
     PLACEMENT_SIDEBAR = AD_PLACEMENT_SIDEBAR
-    PLACEMENT_CHOICES = AD_PLACEMENT_CHOICES
+    PLACEMENT_IN_VIDEO = AD_CREATIVE_IN_VIDEO
+    PLACEMENT_POPUNDER = AD_CREATIVE_POPUNDER
+    PLACEMENT_CHOICES = AD_CREATIVE_PLACEMENT_CHOICES
 
     REVIEW_PENDING = AD_REVIEW_PENDING
     REVIEW_APPROVED = AD_REVIEW_APPROVED
@@ -160,7 +207,22 @@ class AdCreative(models.Model):
         choices=PLACEMENT_CHOICES,
         db_index=True,
     )
-    image = models.ImageField(upload_to="ads/creatives/%Y/%m/%d")
+    # FileField is intentional: banners may be PNG/JPG/GIF/SVG.
+    # The field name is kept for backward compatibility with existing banners.
+    image = models.FileField(
+        upload_to="ads/creatives/%Y/%m/%d",
+        blank=True,
+    )
+    vast_url = models.URLField(
+        max_length=2000,
+        blank=True,
+        default="",
+    )
+    destination_url = models.URLField(
+        max_length=1000,
+        blank=True,
+        default="",
+    )
     review_status = models.CharField(
         max_length=16,
         choices=REVIEW_CHOICES,
@@ -181,7 +243,34 @@ class AdCreative(models.Model):
     def placement_dimensions(self):
         if self.placement == self.PLACEMENT_HOME:
             return (728, 90)
-        return (300, 250)
+        if self.placement == self.PLACEMENT_SIDEBAR:
+            return (300, 250)
+        return None
+
+    @property
+    def is_banner(self):
+        return self.placement in {
+            self.PLACEMENT_HOME,
+            self.PLACEMENT_SIDEBAR,
+        }
+
+    @property
+    def is_in_video(self):
+        return self.placement == self.PLACEMENT_IN_VIDEO
+
+    @property
+    def is_popunder(self):
+        return self.placement == self.PLACEMENT_POPUNDER
+
+    @property
+    def source_kind(self):
+        if self.is_banner:
+            return "banner"
+        if self.is_in_video:
+            return "vast"
+        if self.is_popunder:
+            return "url"
+        return "unknown"
 
 
 class AdCampaignCreative(models.Model):
@@ -225,7 +314,7 @@ class AdCampaignCreative(models.Model):
             raise ValidationError(
                 "Campaign and creative must belong to the same advertiser."
             )
-        if self.campaign.placement != self.creative.placement:
+        if self.campaign.creative_format != self.creative.placement:
             raise ValidationError(
                 "Creative format must match the campaign placement."
             )

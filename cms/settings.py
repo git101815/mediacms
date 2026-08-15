@@ -566,6 +566,8 @@ ADS_HOST = os.environ.get("ADS_HOST", "ads.localhost").strip().lower()
 ADS_SCHEME = os.environ.get("ADS_SCHEME", "https").strip().lower()
 ADS_SSO_TICKET_MAX_AGE_SECONDS = 60
 ADS_CLICK_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+# VMAP position for direct midroll campaigns. local_settings.py may override.
+ADS_MIDROLL_TIME_OFFSET = "50%"
 # CPC campaigns are ranked against CPM using a smoothed 1% CTR prior.
 ADS_CPC_PRIOR_IMPRESSIONS = 1000
 ADS_CPC_PRIOR_CTR_PPM = 10000

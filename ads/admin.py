@@ -125,6 +125,7 @@ class AdCreativeAdmin(admin.ModelAdmin):
         "name",
         "advertiser",
         "placement",
+        "source_kind",
         "review_status",
         "campaign_count",
         "updated_at",

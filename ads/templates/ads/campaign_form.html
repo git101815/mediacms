@@ -50,11 +50,11 @@
         <div class="general-form-section">
           <h2 class="general-form-section__title">General</h2>
           <div class="group">{{ form.name }}<span class="title">Campaign name</span>{{ form.name.errors }}</div>
-          <div class="group">
+          <div class="group" data-campaign-target-url>
             {{ form.target_url }}
             <span class="title">Destination URL</span>
             {{ form.target_url.errors }}
-            <div class="group-help">The landing page opened when a visitor clicks the ad.</div>
+            <div class="group-help">Banner landing page. VAST and popunder destinations are defined by their creative.</div>
           </div>
         </div>
 
@@ -64,7 +64,7 @@
             <label class="select-field-title" for="{{ form.placement.id_for_label }}">Format</label>
             {{ form.placement }}
             {{ form.placement.errors }}
-            <div class="group-help">Homepage 728×90 or Video Sidebar 300×250.</div>
+            <div class="group-help">Banner 728×90 / 300×250, in-video preroll / midroll / postroll, or popunder.</div>
           </div>
         </div>
 
@@ -91,11 +91,19 @@
 
           <div class="creative-picker" data-creative-picker>
             {% for row in creative_library %}
-            <label class="creative-picker__item" data-creative-placement="{{ row.creative.placement }}">
+            <label class="creative-picker__item" data-creative-format="{{ row.creative.placement }}">
               <input type="checkbox" name="creative_ids" value="{{ row.creative.id }}" {% if row.selected %}checked{% endif %}>
               <span class="creative-picker__check"></span>
               <span class="creative-picker__preview">
-                <img src="{{ row.creative.image.url }}" alt="{{ row.creative.name }}">
+                {% if row.creative.is_banner and row.creative.image %}
+                  <img src="{{ row.creative.image.url }}" alt="{{ row.creative.name }}">
+                {% elif row.creative.is_in_video %}
+                  <span class="creative-picker__preview-label">VAST</span>
+                {% elif row.creative.is_popunder %}
+                  <span class="creative-picker__preview-label">URL</span>
+                {% else %}
+                  <span class="creative-picker__preview-label">—</span>
+                {% endif %}
               </span>
               <span class="creative-picker__body">
                 <strong>{{ row.creative.name }}</strong>

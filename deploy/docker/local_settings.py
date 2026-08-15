@@ -27,11 +27,12 @@ LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
 TABUNDER_COOLDOWN_SECONDS = 0
 PREROLLS_COOLDOWN_SECONDS = 0
 
-# ads-min-bids-by-type-v2
+# ads-min-bids-by-type-v3
 # Human USD amounts. Keep strings to avoid float rounding.
-# Current self-serve placements (728x90 + 300x250) are both "banner".
-# "preroll" and "popunder" are reserved for those direct inventory types
-# when they are added to the self-serve campaign model.
+# "banner" applies to both 728x90 and 300x250.
+# "preroll" applies to all existing IMA/VAST in-video positions:
+# preroll, midroll and postroll.
+# "popunder" applies to the existing tabunder/popunder engine.
 ADS_MIN_BID_USD_BY_AD_TYPE = {
     "banner": {
         "cpm": "0.01",

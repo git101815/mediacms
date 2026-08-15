@@ -104,7 +104,7 @@ def refresh_runtime_state():
 
     # Remove stale members without querying during actual ad serving.
     redis = redis_connection()
-    for slot in (AdCampaign.PLACEMENT_HOME, AdCampaign.PLACEMENT_SIDEBAR):
+    for slot in AdCampaign.delivery_slots():
         for raw_id in redis.zrange(slot_key(slot), 0, -1):
             campaign_id = raw_id.decode() if isinstance(raw_id, bytes) else str(raw_id)
             if campaign_id not in live_ids:
