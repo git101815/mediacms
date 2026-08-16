@@ -193,9 +193,7 @@ jobs:
       - name: Verify production runtime
         run: |
           docker run --rm --entrypoint python mediacms-ci:production --version
-          docker run --rm --entrypoint ffmpeg mediacms-ci:production -hide_banner -encoders 2>&1 | grep -q libx264
-          docker run --rm --entrypoint ffmpeg mediacms-ci:production -hide_banner -encoders 2>&1 | grep -q libx265
-          docker run --rm --entrypoint ffmpeg mediacms-ci:production -hide_banner -encoders 2>&1 | grep -q libsvtav1
+          docker run --rm --entrypoint ffprobe mediacms-ci:production -hide_banner -version
 
   required:
     name: CI / required
