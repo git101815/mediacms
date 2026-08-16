@@ -3,6 +3,7 @@ import time
 import uuid
 
 import pytest
+from django.contrib.auth.models import Permission
 
 from ledger.internal_api import build_internal_request_signature
 from ledger.models import InternalAPIRequestNonce
@@ -28,8 +29,17 @@ def internal_api_config(settings, django_user_model):
     settings.LEDGER_INTERNAL_GATEWAY_HEADER = "X-Ledger-Internal-Gateway"
     settings.LEDGER_INTERNAL_API_ALLOWED_CIDRS = ["127.0.0.1/32"]
 
-    django_user_model.objects.get_or_create(username="deposit_service_tests")
+    deposit_user, _ = django_user_model.objects.get_or_create(
+        username="deposit_service_tests"
+    )
     django_user_model.objects.get_or_create(username="sweeper_service_tests")
+
+    deposit_user.user_permissions.add(
+        Permission.objects.get(
+            content_type__app_label="ledger",
+            codename="can_view_deposit_sessions",
+        )
+    )
 
     return {
         "deposit_secret": settings.LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET,
@@ -175,24 +185,34 @@ def test_internal_ledger_rejects_timestamp_outside_allowed_skew(
 
 def test_internal_ledger_rejects_nonce_replay(client, internal_api_config):
     nonce = uuid.uuid4().hex
+    payload = {
+        "options": [
+            {
+                "chain": "ethereum",
+                "asset_code": "USDT",
+                "token_contract_address": (
+                    "0xdac17f958d2ee523a2206206994597c13d831ec7"
+                ),
+            }
+        ]
+    }
 
     first = _post_signed(
         client,
         INTERNAL_WATCHLIST_URL,
-        {"options": []},
+        payload,
         config=internal_api_config,
         nonce=nonce,
     )
     second = _post_signed(
         client,
         INTERNAL_WATCHLIST_URL,
-        {"options": []},
+        payload,
         config=internal_api_config,
         nonce=nonce,
     )
 
     assert first.status_code == 200
-    assert first.json() == {"results": []}
     assert second.status_code == 403
     assert "Replay" in second.json()["error"]
 

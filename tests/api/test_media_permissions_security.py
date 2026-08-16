@@ -1,3 +1,5 @@
+from urllib.parse import urlencode
+
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
@@ -160,10 +162,13 @@ def test_owner_can_update_media_metadata(client, api_users, api_media_factory):
 
     response = client.put(
         f"/api/v1/media/{media.friendly_token}",
-        data={
-            "title": "new owner title",
-            "description": "new owner description",
-        },
+        data=urlencode(
+            {
+                "title": "new owner title",
+                "description": "new owner description",
+            }
+        ),
+        content_type="application/x-www-form-urlencoded",
     )
 
     assert response.status_code == 201

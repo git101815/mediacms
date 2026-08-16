@@ -29,7 +29,7 @@ class MediaSerializer(serializers.ModelSerializer):
     author_profile = serializers.SerializerMethodField()
     author_thumbnail = serializers.SerializerMethodField()
     author_dfans_url = serializers.SerializerMethodField()
-    description = serializers.SerializerMethodField()
+    description = serializers.CharField(required=False, allow_blank=True)
     premium = serializers.SerializerMethodField()
 
     def get_url(self, obj):
@@ -62,11 +62,12 @@ class MediaSerializer(serializers.ModelSerializer):
         q.setdefault("ref", ref_code)
         return urlunparse(u._replace(query=urlencode(q)))
 
-    def get_description(self, obj):
-        gd = getattr(obj.user, "global_media_description", "") or ""
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        gd = getattr(instance.user, "global_media_description", "") or ""
         if gd.strip():
-            return gd
-        return obj.description or ""
+            data["description"] = gd
+        return data
 
     def get_premium(self, obj):
         request = self.context.get("request")
