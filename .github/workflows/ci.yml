@@ -1,20 +1,204 @@
----
-name: "CI"
+name: CI
+
 on:
   pull_request:
+    branches:
+      - master
   push:
     branches:
-      - main
-    paths-ignore:
-      - '**/README.md'
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  pre-commit:
-    uses: ./.github/workflows/pre-commit.yml
-  test:
-    uses: ./.github/workflows/python.yml
-    needs: [pre-commit]
-  release:
-    uses: ./.github/workflows/docker-build-push.yml
-    secrets: inherit # pass all secrets
-    needs: [test]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.paths.outputs.frontend }}
+      production_image: ${{ steps.paths.outputs.production_image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect paths
+        id: paths
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          frontend=false
+          production_image=false
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            frontend=true
+            production_image=true
+          else
+            if [[ "$EVENT_NAME" == "pull_request" ]]; then
+              base_sha="$PR_BASE_SHA"
+            else
+              base_sha="$BEFORE_SHA"
+            fi
+
+            if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
+              frontend=true
+              production_image=true
+            else
+              git diff --name-only "$base_sha" "$GITHUB_SHA" > /tmp/ci-changed-files
+              cat /tmp/ci-changed-files
+
+              if grep -Eq '^frontend/' /tmp/ci-changed-files; then
+                frontend=true
+              fi
+
+              if grep -Eq '^(\.github/workflows/ci\.yml$|Dockerfile$|requirements\.txt$|requirements-dev\.txt$|ffmpeg_builder_cpu/|deploy/docker/)' /tmp/ci-changed-files; then
+                production_image=true
+              fi
+            fi
+          fi
+
+          echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
+          echo "production_image=$production_image" >> "$GITHUB_OUTPUT"
+
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build CI test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.ci
+          load: true
+          tags: mediacms-ci:test
+          cache-from: type=gha,scope=mediacms-ci-test
+          cache-to: type=gha,mode=max,scope=mediacms-ci-test
+
+      - name: Run Python sanity checks, migration check and pytest
+        run: |
+          docker compose -f docker-compose-ci.yaml run --rm tests bash -lc '
+            set -euo pipefail
+            python -m compileall -q .
+            flake8 . --select=E9,F63,F7,F82 --exclude=.git,frontend,node_modules,static,media_files
+            python manage.py makemigrations --check --dry-run
+            pytest -ra
+          '
+
+      - name: Show CI service logs on failure
+        if: failure()
+        run: docker compose -f docker-compose-ci.yaml logs --no-color --timestamps db redis || true
+
+      - name: Tear down CI services
+        if: always()
+        run: docker compose -f docker-compose-ci.yaml down -v --remove-orphans
+
+  frontend:
+    name: Frontend build
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build frontend distribution
+        run: npm run dist
+
+  production_image:
+    name: Production image build
+    needs: changes
+    if: needs.changes.outputs.production_image == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build FFmpeg CPU builder
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ffmpeg_builder_cpu
+          file: ./ffmpeg_builder_cpu/Dockerfile
+          load: true
+          tags: cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0
+          cache-from: type=gha,scope=mediacms-ffmpeg-cpu
+          cache-to: type=gha,mode=max,scope=mediacms-ffmpeg-cpu
+
+      - name: Build production image
+        run: |
+          docker build \
+            --build-arg FFMPEG_CPU_BUILDER_IMAGE=cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0 \
+            --build-arg DEVELOPMENT_MODE=False \
+            --tag mediacms-ci:production \
+            .
+
+      - name: Verify production runtime
+        run: |
+          docker run --rm --entrypoint python mediacms-ci:production --version
+          docker run --rm --entrypoint ffmpeg mediacms-ci:production -hide_banner -encoders 2>&1 | grep -q libx264
+          docker run --rm --entrypoint ffmpeg mediacms-ci:production -hide_banner -encoders 2>&1 | grep -q libx265
+          docker run --rm --entrypoint ffmpeg mediacms-ci:production -hide_banner -encoders 2>&1 | grep -q libsvtav1
+
+  required:
+    name: CI / required
+    if: always()
+    needs:
+      - changes
+      - backend
+      - frontend
+      - production_image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required jobs
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          PRODUCTION_IMAGE_RESULT: ${{ needs.production_image.result }}
+        run: |
+          set -euo pipefail
+
+          echo "changes=$CHANGES_RESULT"
+          echo "backend=$BACKEND_RESULT"
+          echo "frontend=$FRONTEND_RESULT"
+          echo "production_image=$PRODUCTION_IMAGE_RESULT"
+
+          [[ "$CHANGES_RESULT" == "success" ]]
+          [[ "$BACKEND_RESULT" == "success" ]]
+          [[ "$FRONTEND_RESULT" == "success" || "$FRONTEND_RESULT" == "skipped" ]]
+          [[ "$PRODUCTION_IMAGE_RESULT" == "success" || "$PRODUCTION_IMAGE_RESULT" == "skipped" ]]
