@@ -150,6 +150,71 @@ def s3_client(endpoint_url=None, region_name=None, addressing_style=None):
         ),
     )
 
+
+def load_packaging_inputs(job, temp_dir):
+    # Download successful MP4s used only to rebuild a complete HLS master.
+    # They are not returned as new encodes and are never re-uploaded as MP4s.
+    specs = list(job.get("packaging_inputs") or [])
+    if not specs:
+        return []
+
+    root = Path(temp_dir) / "packaging-inputs"
+    root.mkdir(parents=True, exist_ok=True)
+
+    items = []
+
+    for spec in specs:
+        source = spec.get("source") or {}
+
+        if source.get("type") != "s3":
+            raise RuntimeError("Packaging input must use S3 storage")
+
+        key = source.get("key")
+        if not key:
+            raise RuntimeError("Packaging input is missing S3 key")
+
+        profile_id = int(spec.get("profile_id") or 0)
+        resolution = int(spec.get("resolution") or 0)
+        codec = normalize_codec(spec.get("codec"))
+
+        if (
+            not profile_id
+            or not resolution
+            or codec not in ("h264", "h265", "av1")
+        ):
+            raise RuntimeError(f"Invalid packaging input: {spec}")
+
+        local_path = root / f"{profile_id}-{codec}-{resolution}.mp4"
+
+        client = s3_client(
+            endpoint_url=source.get("endpoint_url"),
+            region_name=source.get("region_name"),
+            addressing_style=source.get("addressing_style"),
+        )
+        client.download_file(
+            source.get("bucket") or S3_BUCKET,
+            key,
+            str(local_path),
+        )
+
+        items.append(
+            {
+                "encoding_id": spec.get("encoding_id"),
+                "profile_id": profile_id,
+                "codec": codec,
+                "extension": "mp4",
+                "resolution": resolution,
+                "media_file": key,
+                "media_url": "",
+                "status": "success",
+                "commands": "[]",
+                "local_path": str(local_path),
+                "packaging_input": True,
+            }
+        )
+
+    return items
+
 def content_type_for(filename):
     filename = str(filename).lower()
 
@@ -827,6 +892,22 @@ def extract_sprite(source_path, output_path, every_seconds):
                 image.close()
 
 
+
+def media_payload_from_media_info(media_info):
+    if not media_info:
+        return {}
+
+    return {
+        "media_type": "video",
+        "duration": int(
+            round(_float_or_zero(media_info.get("video_duration")))
+        ),
+        "video_height": int(media_info.get("video_height") or 0),
+        "media_info": media_info,
+        "md5sum": media_info.get("md5sum") or "",
+        "size_bytes": int(media_info.get("file_size") or 0),
+    }
+
 def generate_media_assets(job, source_path, media_info, temp_dir):
     assets = job.get("assets") or {}
     asset_dir = Path(temp_dir) / "assets"
@@ -1320,6 +1401,37 @@ def strict_requested_jobs(job):
     return job.get("strict_requested_jobs") is True
 
 
+
+def source_allows_requested_job(job_spec, policy, media_info):
+    if job_spec.get("extension") != "mp4":
+        return True
+
+    source_height = int(media_info.get("video_height") or 0)
+    resolution = int(job_spec.get("resolution") or 0)
+
+    if not source_height or not resolution:
+        return True
+
+    minimum_resolutions = {
+        int(value)
+        for value in policy.get("minimum_resolutions_to_encode", [])
+    }
+
+    if (
+        source_height < resolution
+        and resolution not in minimum_resolutions
+    ):
+        return False
+
+    return True
+
+
+def is_nonfatal_fill_missing_skip(job, item):
+    return (
+        job.get("mode") == "fill_missing_profiles"
+        and item.get("reason") == "source_below_target_resolution"
+    )
+
 def preserve_media_on_fail(job):
     return job.get("preserve_media_on_fail") is True
 
@@ -1439,10 +1551,12 @@ def build_fail_payload(
     failed_items=None,
     skipped_items=None,
     outputs=None,
+    media_payload=None,
 ):
     encoded_items = encoded_items or []
     failed_items = failed_items or []
     skipped_items = skipped_items or []
+    media_payload = media_payload or {}
 
     return {
         "version": 3,
@@ -1457,7 +1571,7 @@ def build_fail_payload(
         "preserve_media_on_fail": preserve_media_on_fail(job),
         "merge_outputs": job.get("merge_outputs") is True,
         "error": str(exc),
-        "media": {},
+        "media": media_payload,
         "encodings": [
             *[clean_encoding_for_callback(item) for item in encoded_items],
             *failed_items,
@@ -1529,7 +1643,7 @@ def handler(event):
 
             media_info = source_media_info(source_path)
             if job.get("skip_assets") is True:
-                media_payload = {}
+                media_payload = media_payload_from_media_info(media_info)
             else:
                 media_payload = generate_media_assets(
                     job=job,
@@ -1543,6 +1657,37 @@ def handler(event):
             skipped_items = []
             failed_items = []
             worker_count = upload_concurrency(job)
+
+            requested_jobs = list(job.get("jobs") or [])
+            eligible_jobs = []
+
+            for encode_job_spec in requested_jobs:
+                if (
+                    job.get("mode") == "fill_missing_profiles"
+                    and not source_allows_requested_job(
+                        encode_job_spec,
+                        policy,
+                        media_info,
+                    )
+                ):
+                    skipped_items.append(
+                        _skipped_encoding_payload(
+                            encode_job_spec,
+                            "source_below_target_resolution",
+                        )
+                    )
+                    continue
+
+                eligible_jobs.append(encode_job_spec)
+
+            # package_hls() derives strict expected resolutions from job["jobs"].
+            # Remove source-ineligible fill-missing requests after the worker
+            # has probed the real source height.
+            job["jobs"] = eligible_jobs
+
+            # Download before encoding so an unavailable historical MP4 fails
+            # the repair without creating new partial outputs.
+            packaging_inputs = load_packaging_inputs(job, temp_dir)
 
             batch_groups = {}
             batch_order = []
@@ -1683,19 +1828,32 @@ def handler(event):
                             failed_encoding_payload(encode_job_spec, exc)
                         )
 
-            if strict_requested_jobs(job) and (failed_items or skipped_items):
+            fatal_skipped_items = [
+                item
+                for item in skipped_items
+                if not is_nonfatal_fill_missing_skip(job, item)
+            ]
+
+            if strict_requested_jobs(job) and (
+                failed_items or fatal_skipped_items
+            ):
                 print("ENCODED_ITEMS=", json.dumps(encoded_items, default=str), flush=True)
                 print("FAILED_ITEMS=", json.dumps(failed_items, default=str), flush=True)
                 print("SKIPPED_ITEMS=", json.dumps(skipped_items, default=str), flush=True)
                 raise RuntimeError("Requested encoding failed or was skipped")
 
-            if require_h264(job) and not has_successful_h264(encoded_items):
+            packaging_items = [
+                *packaging_inputs,
+                *encoded_items,
+            ]
+
+            if require_h264(job) and not has_successful_h264(packaging_items):
                 print("ENCODED_ITEMS=", json.dumps(encoded_items, default=str), flush=True)
                 print("FAILED_ITEMS=", json.dumps(failed_items, default=str), flush=True)
                 print("SKIPPED_ITEMS=", json.dumps(skipped_items, default=str), flush=True)
                 raise RuntimeError("Mandatory H264 encoding failed")
 
-            outputs = package_hls(job, hls_dir, encoded_items)
+            outputs = package_hls(job, hls_dir, packaging_items)
 
             if require_h264(job) and not h264_master_exists(outputs):
                 raise RuntimeError("Mandatory H264 HLS packaging failed")
@@ -1738,6 +1896,12 @@ def handler(event):
                 failed_items=locals().get("failed_items") or [],
                 skipped_items=locals().get("skipped_items") or [],
                 outputs=locals().get("outputs") or {},
+                media_payload=(
+                    locals().get("media_payload")
+                    or media_payload_from_media_info(
+                        locals().get("media_info") or {}
+                    )
+                ),
             )
             callback(job["callback_url"], payload)
             return payload

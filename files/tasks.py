@@ -1812,10 +1812,11 @@ def _mark_remote_fill_missing_failed(media, profile_ids, message):
 )
 def submit_remote_fill_missing_encoding(self, friendly_token):
     """
-    Submit only missing remote MP4 profiles.
+    Encode only missing remote MP4 profiles and rebuild incomplete HLS.
 
-    Unlike a normal remote encoding submission, this path must preserve an
-    already-published media item and its existing successful encodings.
+    Existing successful MP4s are packaging inputs only: they are never
+    re-encoded. An already-published media item remains available while the
+    repair runs.
     """
     try:
         media = Media.objects.get(friendly_token=friendly_token)
@@ -1880,28 +1881,9 @@ def submit_remote_fill_missing_encoding(self, friendly_token):
         )
 
         unpackaged_profiles = get_unpackaged_remote_profiles(media)
-        if unpackaged_profiles:
-            labels = [
-                (
-                    f"{profile.id}:{profile.codec}:"
-                    f"{profile.extension}:{int(profile.resolution or 0)}"
-                )
-                for profile in unpackaged_profiles
-            ]
-            logger.warning(
-                "Remote fill-missing encoding skipped token=%s because "
-                "existing MP4 encodings still need local HLS packaging: %s",
-                friendly_token,
-                ", ".join(labels),
-            )
-            return {
-                "skipped": True,
-                "reason": "existing_mp4_missing_hls",
-                "profiles": labels,
-            }
-
         missing_profiles = get_missing_remote_profiles(media)
-        if not missing_profiles:
+
+        if not missing_profiles and not unpackaged_profiles:
             logger.info(
                 "Remote fill-missing encoding: nothing missing token=%s",
                 friendly_token,
@@ -1913,6 +1895,21 @@ def submit_remote_fill_missing_encoding(self, friendly_token):
 
         profile_ids = [profile.id for profile in missing_profiles]
 
+        if unpackaged_profiles:
+            logger.info(
+                "Remote fill-missing encoding: packaging existing MP4s "
+                "token=%s profiles=%s",
+                friendly_token,
+                [
+                    (
+                        profile.id,
+                        profile.codec,
+                        int(profile.resolution or 0),
+                    )
+                    for profile in unpackaged_profiles
+                ],
+            )
+
         response = submit_runpod_fill_missing_job(media)
 
         runpod_job_id = (
@@ -1922,7 +1919,7 @@ def submit_remote_fill_missing_encoding(self, friendly_token):
             or ""
         )
 
-        if runpod_job_id:
+        if runpod_job_id and profile_ids:
             Encoding.objects.filter(
                 media=media,
                 profile_id__in=profile_ids,
