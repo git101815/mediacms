@@ -1,4 +1,4 @@
-ARG FFMPEG_BUILDER_IMAGE=aad7xppz4fd4r8emr/cf-ffmpeg-builder:cuda12.4-ffmpeg7.1.1-nvcodec12.2.72.0
+ARG FFMPEG_BUILDER_IMAGE=aad7xppz4fd4r8emr/cf-encoder:av1nvenc-cuda12.4-ffmpeg7.1.1
 
 FROM ubuntu:22.04 AS nvscope_builder
 
