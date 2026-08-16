@@ -1,26 +1,18 @@
-ARG FFMPEG_CPU_BUILDER_IMAGE=cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0
+ARG FFMPEG_BUILDER_IMAGE=aad7xppz4fd4r8emr/cf-encoder:av1nvenc-cuda12.4-ffmpeg7.1.1
 FROM python:3.13.5-bookworm AS build-image
 
-# Install system dependencies needed for downloading and extracting
+# Install system dependencies needed for Bento4
 ARG BENTO4_VERSION=1-6-0-641
 ARG BENTO4_ZIP=Bento4-SDK-${BENTO4_VERSION}.x86_64-unknown-linux.zip
 ARG BENTO4_URL=https://www.bok.net/Bento4/binaries/${BENTO4_ZIP}
 
 RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends ca-certificates curl xz-utils unzip && \
+    apt-get install -y --no-install-recommends ca-certificates curl unzip && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get purge --auto-remove && \
     apt-get clean
 
-RUN curl -fsSL --retry 5 --retry-delay 3 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
-    -o /tmp/ffmpeg-release-amd64-static.tar.xz
-
-RUN mkdir -p /tmp/ffmpeg-tmp && \
-    tar -xf /tmp/ffmpeg-release-amd64-static.tar.xz --strip-components 1 -C /tmp/ffmpeg-tmp && \
-    cp -v /tmp/ffmpeg-tmp/ffmpeg /tmp/ffmpeg-tmp/ffprobe /tmp/ffmpeg-tmp/qt-faststart /usr/local/bin && \
-    rm -rf /tmp/ffmpeg-tmp /tmp/ffmpeg-release-amd64-static.tar.xz
-
-    # Install Bento4 in the specified location
+# Install Bento4 in the specified location
 RUN mkdir -p /home/mediacms.io/bento4 && \
     curl -fsSL --retry 5 --retry-delay 3 "${BENTO4_URL}" -o "/tmp/${BENTO4_ZIP}" && \
     unzip -q "/tmp/${BENTO4_ZIP}" -d /home/mediacms.io/bento4 && \
@@ -29,7 +21,7 @@ RUN mkdir -p /home/mediacms.io/bento4 && \
     rm -rf /home/mediacms.io/bento4/docs && \
     rm -f "/tmp/${BENTO4_ZIP}"
 
-FROM ${FFMPEG_CPU_BUILDER_IMAGE} AS ffmpeg_cpu_builder
+FROM ${FFMPEG_BUILDER_IMAGE} AS ffmpeg_builder
 ############ RUNTIME IMAGE ############
 FROM python:3.13.5-bookworm AS runtime_image
 
@@ -40,7 +32,6 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV CELERY_APP='cms'
 ENV VIRTUAL_ENV=/home/mediacms.io
 ENV PATH="/opt/ffmpeg/bin:$VIRTUAL_ENV/bin:$PATH"
-ENV LD_LIBRARY_PATH="/opt/svt-av1/lib:${LD_LIBRARY_PATH}"
 
 # Install runtime system dependencies
 RUN apt-get update -y && \
@@ -70,10 +61,8 @@ RUN apt-get update -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get purge --auto-remove -y && \
     apt-get clean
-# Copy ffmpeg and Bento4 from build image
-COPY --from=ffmpeg_cpu_builder /opt/ffmpeg /opt/ffmpeg
-COPY --from=ffmpeg_cpu_builder /opt/svt-av1 /opt/svt-av1
-COPY --from=build-image /usr/local/bin/qt-faststart /usr/local/bin/qt-faststart
+# Reuse the prebuilt encoder toolchain and add Bento4
+COPY --from=ffmpeg_builder /opt/ffmpeg /opt/ffmpeg
 COPY --from=build-image /home/mediacms.io/bento4 /home/mediacms.io/bento4
 
 # Set up virtualenv

@@ -63,7 +63,7 @@ jobs:
                 frontend=true
               fi
 
-              if grep -Eq '^(\.github/workflows/ci\.yml$|Dockerfile$|requirements\.txt$|requirements-dev\.txt$|ffmpeg_builder_cpu/|deploy/docker/)' /tmp/ci-changed-files; then
+              if grep -Eq '^(\.github/workflows/ci\.yml$|Dockerfile$|requirements\.txt$|requirements-dev\.txt$|deploy/docker/)' /tmp/ci-changed-files; then
                 production_image=true
               fi
             fi
@@ -80,23 +80,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build FFmpeg CPU builder
-        uses: docker/build-push-action@v6
-        with:
-          context: ./ffmpeg_builder_cpu
-          file: ./ffmpeg_builder_cpu/Dockerfile
-          load: true
-          tags: cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0
-          cache-from: type=gha,scope=mediacms-ffmpeg-cpu
-          cache-to: type=gha,mode=max,scope=mediacms-ffmpeg-cpu
-
       - name: Build MediaCMS test image from production Dockerfile
         run: |
           docker build \
-            --build-arg FFMPEG_CPU_BUILDER_IMAGE=cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0 \
             --build-arg DEVELOPMENT_MODE=True \
             --tag mediacms-ci:test \
             .
@@ -197,23 +183,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build FFmpeg CPU builder
-        uses: docker/build-push-action@v6
-        with:
-          context: ./ffmpeg_builder_cpu
-          file: ./ffmpeg_builder_cpu/Dockerfile
-          load: true
-          tags: cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0
-          cache-from: type=gha,scope=mediacms-ffmpeg-cpu
-          cache-to: type=gha,mode=max,scope=mediacms-ffmpeg-cpu
-
       - name: Build production image
         run: |
           docker build \
-            --build-arg FFMPEG_CPU_BUILDER_IMAGE=cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0 \
             --build-arg DEVELOPMENT_MODE=False \
             --tag mediacms-ci:production \
             .
