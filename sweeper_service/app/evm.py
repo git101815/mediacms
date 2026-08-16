@@ -42,7 +42,15 @@ def address_from_private_key(private_key: str) -> str:
     return Account.from_key(private_key).address.lower()
 
 
-def _build_fee_params(*, w3: Web3, gas_price_multiplier_bps: int) -> dict:
+def _build_fee_params(
+    *,
+    w3: Web3,
+    gas_price_multiplier_bps: int,
+    gas_price_wei: int | None = None,
+) -> dict:
+    if gas_price_wei is not None:
+        return {"gasPrice": max(1, int(gas_price_wei))}
+
     base_gas_price = int(w3.eth.gas_price)
     adjusted_gas_price = max(
         1,
@@ -85,6 +93,7 @@ def build_erc20_transfer_transaction(
     amount: int,
     gas_limit: int,
     gas_price_multiplier_bps: int,
+    gas_price_wei: int | None = None,
 ) -> dict:
     source_address = address_from_private_key(source_private_key)
     contract = w3.eth.contract(
@@ -106,6 +115,7 @@ def build_erc20_transfer_transaction(
             **_build_fee_params(
                 w3=w3,
                 gas_price_multiplier_bps=gas_price_multiplier_bps,
+                gas_price_wei=gas_price_wei,
             ),
         }
     )

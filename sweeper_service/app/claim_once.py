@@ -30,6 +30,28 @@ logging.basicConfig(
 )
 
 
+BASE_GAS_PRICE_ORACLE_ADDRESS = "0x420000000000000000000000000000000000000F"
+BASE_EXTRA_FEE_SAFETY_BPS = 11000
+BASE_SIGNATURE_SIZE_BYTES = 68
+
+BASE_GAS_PRICE_ORACLE_ABI = [
+    {
+        "inputs": [{"internalType": "uint256", "name": "_unsignedTxSize", "type": "uint256"}],
+        "name": "getL1FeeUpperBound",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "_gasUsed", "type": "uint256"}],
+        "name": "getOperatorFee",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+]
+
+
 def _build_option_selector(option) -> dict:
     return {
         "chain": option.chain,
@@ -238,6 +260,99 @@ def _compute_effective_gas_price_wei(*, w3, option) -> int:
     return effective_gas_price
 
 
+def _estimate_base_sweep_extra_fee_wei(
+    *,
+    w3,
+    option,
+    source_private_key: str,
+    amount: int,
+    gas_limit: int,
+    gas_price_wei: int,
+) -> int:
+    if str(option.chain or "").strip().lower() != "base":
+        return 0
+
+    # getL1FeeUpperBound() wants the unsigned transaction size and internally
+    # adds 68 bytes for the signature. Build a representative signed sweep
+    # only to derive its size. A large dummy nonce makes this conservative for
+    # deposit addresses whose nonce is normally very small.
+    sizing_tx = build_erc20_transfer_transaction(
+        w3=w3,
+        nonce=(1 << 64) - 1,
+        token_contract_address=option.token_contract_address,
+        source_private_key=source_private_key,
+        destination_address=option.destination_address,
+        amount=amount,
+        gas_limit=gas_limit,
+        gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+        gas_price_wei=gas_price_wei,
+    )
+    sizing_signed = sign_transaction(
+        tx=sizing_tx,
+        private_key=source_private_key,
+    )
+    signed_tx_size = len(sizing_signed["raw_transaction"])
+    unsigned_tx_size = max(
+        1,
+        signed_tx_size - BASE_SIGNATURE_SIZE_BYTES,
+    )
+
+    oracle = w3.eth.contract(
+        address=Web3.to_checksum_address(BASE_GAS_PRICE_ORACLE_ADDRESS),
+        abi=BASE_GAS_PRICE_ORACLE_ABI,
+    )
+    l1_fee_upper_bound = int(
+        oracle.functions.getL1FeeUpperBound(unsigned_tx_size).call()
+    )
+    operator_fee_upper_bound = int(
+        oracle.functions.getOperatorFee(int(gas_limit)).call()
+    )
+
+    raw_extra_fee = max(0, l1_fee_upper_bound) + max(0, operator_fee_upper_bound)
+    buffered_extra_fee = (
+        raw_extra_fee * BASE_EXTRA_FEE_SAFETY_BPS + 9999
+    ) // 10000
+
+    logging.info(
+        "sweeper_service action=base-extra-fee-budget chain=%s asset=%s "
+        "unsigned_tx_size=%s l1_fee_upper_bound=%s operator_fee_upper_bound=%s "
+        "raw_extra_fee=%s buffered_extra_fee=%s",
+        option.chain,
+        option.asset_code,
+        unsigned_tx_size,
+        l1_fee_upper_bound,
+        operator_fee_upper_bound,
+        raw_extra_fee,
+        buffered_extra_fee,
+    )
+    return int(buffered_extra_fee)
+
+
+def _compute_sweep_native_budget(
+    *,
+    w3,
+    option,
+    source_private_key: str,
+    amount: int,
+    gas_limit: int,
+) -> tuple[int, int]:
+    gas_price_wei = _compute_effective_gas_price_wei(
+        w3=w3,
+        option=option,
+    )
+    l2_execution_budget = int(gas_limit) * int(gas_price_wei)
+    extra_fee_budget = _estimate_base_sweep_extra_fee_wei(
+        w3=w3,
+        option=option,
+        source_private_key=source_private_key,
+        amount=amount,
+        gas_limit=gas_limit,
+        gas_price_wei=gas_price_wei,
+    )
+    required_native = int(l2_execution_budget) + int(extra_fee_budget)
+    return int(gas_price_wei), int(required_native)
+
+
 def _compute_required_native_wei(*, w3, option, source_address: str, amount: int) -> tuple[int, int]:
     gas_limit = _estimate_erc20_transfer_gas(
         w3=w3,
@@ -294,13 +409,20 @@ def _compute_retry_budget(
     w3,
     option,
     source_address: str,
+    source_private_key: str,
+    amount: int,
     retry_gas_limit: int,
-) -> tuple[int, int]:
-    effective_gas_price = _compute_effective_gas_price_wei(w3=w3, option=option)
-    required_native = int(retry_gas_limit) * int(effective_gas_price)
+) -> tuple[int, int, int]:
+    gas_price_wei, required_native = _compute_sweep_native_budget(
+        w3=w3,
+        option=option,
+        source_private_key=source_private_key,
+        amount=amount,
+        gas_limit=retry_gas_limit,
+    )
     source_native_balance = int(get_native_balance(w3=w3, address=source_address))
     extra_topup_needed = max(0, required_native - source_native_balance)
-    return required_native, extra_topup_needed
+    return gas_price_wei, required_native, extra_topup_needed
 
 
 
@@ -624,6 +746,7 @@ def _send_erc20_transfer_with_sender_lock(
     destination_address: str,
     amount: int,
     gas_limit: int,
+    gas_price_wei: int | None = None,
 ) -> str:
     source_address = address_from_private_key(source_private_key)
     sender_lock = None
@@ -646,6 +769,7 @@ def _send_erc20_transfer_with_sender_lock(
             amount=amount,
             gas_limit=gas_limit,
             gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+            gas_price_wei=gas_price_wei,
         )
         signed = sign_transaction(tx=tx, private_key=source_private_key)
         txid = signed["txid"]
@@ -749,6 +873,7 @@ def _run_single_sweep_attempt(
     source_private_key: str,
     amount: int,
     gas_limit: int,
+    gas_price_wei: int | None = None,
 ) -> tuple[str, dict]:
     sweep_txid = _send_erc20_transfer_with_sender_lock(
         client=client,
@@ -762,6 +887,7 @@ def _run_single_sweep_attempt(
         destination_address=option.destination_address,
         amount=amount,
         gas_limit=gas_limit,
+        gas_price_wei=gas_price_wei,
     )
     wait_for_confirmations(
         w3=w3,
@@ -817,10 +943,12 @@ def _finalize_sweep_with_single_retry(
         attempted_gas_limit=initial_gas_limit,
         gas_used=first_gas_used,
     )
-    required_native, extra_topup_needed = _compute_retry_budget(
+    retry_gas_price_wei, required_native, extra_topup_needed = _compute_retry_budget(
         w3=w3,
         option=option,
         source_address=source_address,
+        source_private_key=source_private_key,
+        amount=amount,
         retry_gas_limit=retry_gas_limit,
     )
 
@@ -857,6 +985,7 @@ def _finalize_sweep_with_single_retry(
         source_private_key=source_private_key,
         amount=amount,
         gas_limit=retry_gas_limit,
+        gas_price_wei=retry_gas_price_wei,
     )
 
     if int(second_receipt.get("status", 0) or 0) == 1:
@@ -1008,10 +1137,12 @@ def _process_claimed_job(
             attempted_gas_limit=attempted_gas_limit,
             gas_used=int(receipt.get("gasUsed", 0) or 0),
         )
-        required_native, extra_topup_needed = _compute_retry_budget(
+        _retry_gas_price_wei, required_native, extra_topup_needed = _compute_retry_budget(
             w3=w3,
             option=option,
             source_address=source_address,
+            source_private_key=source_private_key,
+            amount=amount,
             retry_gas_limit=retry_gas_limit,
         )
 
@@ -1159,7 +1290,7 @@ def _process_claimed_job(
     )
 
     source_native_balance = int(get_native_balance(w3=w3, address=source_address))
-    estimated_gas_limit, estimated_required_native = _compute_required_native_wei(
+    estimated_gas_limit = _estimate_erc20_transfer_gas(
         w3=w3,
         option=option,
         source_address=source_address,
@@ -1171,25 +1302,25 @@ def _process_claimed_job(
         or job.get("last_sweep_gas_limit")
         or estimated_gas_limit
     )
-    if chosen_gas_limit == int(estimated_gas_limit):
-        required_native = int(estimated_required_native)
-    else:
-        required_native = _compute_required_native_for_gas_limit(
-            w3=w3,
-            option=option,
-            gas_limit=chosen_gas_limit,
-        )
 
+    sweep_gas_price_wei, required_native = _compute_sweep_native_budget(
+        w3=w3,
+        option=option,
+        source_private_key=source_private_key,
+        amount=amount,
+        gas_limit=chosen_gas_limit,
+    )
     topup_needed = max(0, required_native - source_native_balance)
 
     logging.info(
-        "sweeper_service action=native-budget public_id=%s source=%s native_balance=%s required_native=%s topup_needed=%s gas_limit=%s",
+        "sweeper_service action=native-budget public_id=%s source=%s native_balance=%s required_native=%s topup_needed=%s gas_limit=%s gas_price_wei=%s",
         public_id,
         source_address,
         source_native_balance,
         required_native,
         topup_needed,
         chosen_gas_limit,
+        sweep_gas_price_wei,
     )
 
     if topup_needed > 0:
@@ -1254,6 +1385,7 @@ def _process_claimed_job(
         destination_address=option.destination_address,
         amount=amount,
         gas_limit=chosen_gas_limit,
+        gas_price_wei=sweep_gas_price_wei,
     )
     client.mark_rescheduled(
         public_id=public_id,

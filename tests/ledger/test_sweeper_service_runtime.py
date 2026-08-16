@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import sweeper_service.app.claim_once as claim_once
+import sweeper_service.app.evm as evm
 
 
 USDT_ETH = "0xdac17f958d2ee523a2206206994597c13d831ec7"
@@ -239,6 +240,7 @@ def test_run_once_resumes_funding_broadcasted_job_without_refunding():
         claim_once.run_once(client=client, config=config)
 
     build_native_transfer_transaction.assert_not_called()
+    assert build_erc20_transfer_transaction.call_args.kwargs["gas_price_wei"] == 1
     client.mark_funding_broadcasted.assert_not_called()
     client.mark_ready_to_sweep.assert_called_once_with(
         public_id="job-1",
@@ -408,3 +410,59 @@ def test_run_once_reschedules_when_token_balance_is_insufficient():
         retryable=True,
         increment_retry_count=True,
     )
+
+
+def test_base_sweep_budget_includes_l1_and_operator_fees():
+    option = _make_option()
+    option.chain = "base"
+    w3 = Mock()
+    w3.eth.gas_price = 6_000_000
+    oracle = Mock()
+    w3.eth.contract.return_value = oracle
+    oracle.functions.getL1FeeUpperBound.return_value.call.return_value = 400_000_000
+    oracle.functions.getOperatorFee.return_value.call.return_value = 10_000_000
+
+    with patch.object(
+        claim_once,
+        "build_erc20_transfer_transaction",
+        return_value={"kind": "erc20-sizing"},
+    ), patch.object(
+        claim_once,
+        "sign_transaction",
+        return_value={
+            "txid": "0xsizing",
+            "raw_transaction": b"x" * 168,
+        },
+    ):
+        gas_price_wei, required_native = claim_once._compute_sweep_native_budget(
+            w3=w3,
+            option=option,
+            source_private_key="0x" + "33" * 32,
+            amount=250,
+            gas_limit=54_788,
+        )
+
+    assert gas_price_wei == 7_200_000
+    assert required_native == (
+        54_788 * gas_price_wei
+        + 451_000_000
+    )
+    oracle.functions.getL1FeeUpperBound.assert_called_once_with(100)
+    oracle.functions.getOperatorFee.assert_called_once_with(54_788)
+
+
+def test_explicit_gas_price_does_not_refresh_rpc_gas_price():
+    class ExplodingEth:
+        @property
+        def gas_price(self):
+            raise AssertionError(
+                "RPC gas_price must not be read when an explicit price is supplied"
+            )
+
+    w3 = SimpleNamespace(eth=ExplodingEth())
+
+    assert evm._build_fee_params(
+        w3=w3,
+        gas_price_multiplier_bps=12000,
+        gas_price_wei=7_200_000,
+    ) == {"gasPrice": 7_200_000}
