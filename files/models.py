@@ -624,7 +624,9 @@ class Media(models.Model):
 
         from . import tasks
 
-        tasks.produce_sprite_from_video.delay(self.friendly_token)
+        transaction.on_commit(
+            lambda token=self.friendly_token: tasks.produce_sprite_from_video.delay(token)
+        )
         return True
 
     def encode(self, profiles=[], force=True, chunkize=True):

@@ -237,6 +237,15 @@ DATABASES = {
         "PORT": os.getenv("POSTGRES_PORT", "5432"),
         "USER": os.getenv("POSTGRES_USER", "mediacms"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "mediacms"),
+        "OPTIONS": {
+            "pool": {
+                "min_size": 0,
+                "max_size": 2,
+                "timeout": 10,
+                "max_lifetime": 30 * 60,
+                "max_idle": 10 * 60,
+            },
+        },
     }
 }
 

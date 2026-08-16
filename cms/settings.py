@@ -437,7 +437,25 @@ else:
         },
     }
 
-DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "NAME": "mediacms", "HOST": "127.0.0.1", "PORT": "5432", "USER": "mediacms", "PASSWORD": "mediacms", "OPTIONS": {'pool': True}}}
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "mediacms",
+        "HOST": "127.0.0.1",
+        "PORT": "5432",
+        "USER": "mediacms",
+        "PASSWORD": "mediacms",
+        "OPTIONS": {
+            "pool": {
+                "min_size": 0,
+                "max_size": 2,
+                "timeout": 10,
+                "max_lifetime": 30 * 60,
+                "max_idle": 10 * 60,
+            },
+        },
+    }
+}
 
 
 REDIS_LOCATION = "redis://127.0.0.1:6379/1"
