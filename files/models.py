@@ -637,9 +637,14 @@ class Media(models.Model):
         if remote_encoding_enabled():
             from . import tasks
 
-            self.encoding_status = "running"
-            self.save(update_fields=["encoding_status", "listable"])
-            tasks.submit_remote_encoding.apply_async(
+            if force is False:
+                submit_task = tasks.submit_remote_fill_missing_encoding
+            else:
+                self.encoding_status = "running"
+                self.save(update_fields=["encoding_status", "listable"])
+                submit_task = tasks.submit_remote_encoding
+
+            submit_task.apply_async(
                 args=[self.friendly_token],
                 countdown=int(getattr(settings, "REMOTE_ENCODING_SUBMIT_DELAY_SECONDS", 600)),
             )

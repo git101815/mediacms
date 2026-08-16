@@ -283,6 +283,9 @@ def build_runpod_payload(media):
             media.uid.hex,
         ),
         "segment_seconds": int(settings.REMOTE_ENCODING_HLS_SEGMENT_SECONDS),
+        "upload_concurrency": int(
+            getattr(settings, "REMOTE_ENCODING_UPLOAD_CONCURRENCY", 8)
+        ),
         "sprite_seconds": int(getattr(settings, "SPRITE_NUM_SECS", 10)),
         "assets": _asset_keys(media),
         "encoding_policy": build_encoding_policy(),
@@ -472,6 +475,9 @@ def build_runpod_fill_missing_payload(media):
             media.uid.hex,
         ),
         "segment_seconds": int(settings.REMOTE_ENCODING_HLS_SEGMENT_SECONDS),
+        "upload_concurrency": int(
+            getattr(settings, "REMOTE_ENCODING_UPLOAD_CONCURRENCY", 8)
+        ),
         "sprite_seconds": int(getattr(settings, "SPRITE_NUM_SECS", 10)),
         "assets": _asset_keys(media),
         "encoding_policy": build_encoding_policy(),

@@ -5,6 +5,8 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
 from pathlib import Path
 from urllib.parse import urlparse
@@ -167,6 +169,18 @@ def content_type_for(filename):
     return "application/octet-stream"
 
 
+_UPLOAD_THREAD_LOCAL = threading.local()
+
+
+def upload_concurrency(job):
+    try:
+        value = int(job.get("upload_concurrency") or 8)
+    except (TypeError, ValueError):
+        value = 8
+
+    return max(1, min(value, 32))
+
+
 def upload_file(local_path, key):
     s3_client().upload_file(
         str(local_path),
@@ -176,21 +190,48 @@ def upload_file(local_path, key):
     )
 
 
-def upload_directory(local_dir, prefix):
-    client = s3_client()
+def _thread_upload_client():
+    client = getattr(_UPLOAD_THREAD_LOCAL, "client", None)
+    if client is None:
+        client = s3_client()
+        _UPLOAD_THREAD_LOCAL.client = client
+    return client
+
+
+def _upload_entry(entry):
+    local_path, key = entry
+    _thread_upload_client().upload_file(
+        str(local_path),
+        S3_BUCKET,
+        key,
+        ExtraArgs={"ContentType": content_type_for(local_path)},
+    )
+    return key
+
+
+def upload_files(entries, max_workers):
+    entries = list(entries)
+    if not entries:
+        return
+
+    worker_count = max(1, min(int(max_workers), len(entries)))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        for _key in executor.map(_upload_entry, entries):
+            pass
+
+
+def upload_directory(local_dir, prefix, max_workers):
+    local_dir = Path(local_dir)
+    entries = []
 
     for root, _dirs, files in os.walk(local_dir):
         for filename in files:
             local_path = Path(root) / filename
             relative_path = local_path.relative_to(local_dir).as_posix()
             key = f"{prefix.strip('/')}/{relative_path}"
+            entries.append((local_path, key))
 
-            client.upload_file(
-                str(local_path),
-                S3_BUCKET,
-                key,
-                ExtraArgs={"ContentType": content_type_for(filename)},
-            )
+    upload_files(entries, max_workers=max_workers)
 
 
 def public_url(job, key):
@@ -807,9 +848,14 @@ def generate_media_assets(job, source_path, media_info, temp_dir):
     poster_key = assets["poster_key"]
     sprites_key = assets["sprites_key"]
 
-    upload_file(thumbnail_path, thumbnail_key)
-    upload_file(poster_path, poster_key)
-    upload_file(sprites_path, sprites_key)
+    upload_files(
+        [
+            (thumbnail_path, thumbnail_key),
+            (poster_path, poster_key),
+            (sprites_path, sprites_key),
+        ],
+        max_workers=upload_concurrency(job),
+    )
 
     return {
         "media_type": "video",
@@ -828,7 +874,7 @@ def generate_media_assets(job, source_path, media_info, temp_dir):
     }
 
 
-def encode_job(policy, source_path, media_info, job, temp_dir):
+def encode_job(policy, source_path, media_info, job, temp_dir, upload=True):
     extension = job.get("extension") or "mp4"
     codec = job.get("codec") or ""
     profile_id = int(job["profile_id"])
@@ -888,7 +934,8 @@ def encode_job(policy, source_path, media_info, job, temp_dir):
             "reason": f"Unsupported extension: {extension}",
         }
 
-    upload_file(output_path, job["output_key"])
+    if upload:
+        upload_file(output_path, job["output_key"])
 
     return {
         "encoding_id": job.get("encoding_id"),
@@ -904,6 +951,127 @@ def encode_job(policy, source_path, media_info, job, temp_dir):
         "bit_rate": meta.get("bit_rate") or 0,
         "status": "success",
         "commands": json.dumps([[str(part) for part in command]for command in commands]),
+        "local_path": str(output_path),
+    }
+
+
+def _skipped_encoding_payload(job_spec, reason):
+    return {
+        "skipped": True,
+        "encoding_id": job_spec.get("encoding_id"),
+        "profile_id": job_spec.get("profile_id"),
+        "codec": job_spec.get("codec") or "",
+        "extension": job_spec.get("extension") or "mp4",
+        "resolution": int(job_spec.get("resolution") or 0),
+        "reason": reason,
+    }
+
+
+def build_nvenc_batch_command(policy, source_path, media_info, job_specs, temp_dir):
+    command = [
+        policy.get("ffmpeg", "ffmpeg"),
+        "-y",
+        "-i",
+        source_path,
+    ]
+    prepared = []
+    skipped = []
+
+    for job_spec in sorted(
+        job_specs,
+        key=lambda item: (
+            int(item.get("resolution") or 0),
+            int(item.get("profile_id") or 0),
+        ),
+    ):
+        codec = job_spec.get("codec") or ""
+        encoder = codec_encoder(policy, codec)
+        if encoder not in NVENC_ENCODERS:
+            raise RuntimeError(
+                f"Batch encoding only supports NVENC codecs, got {codec}:{encoder}"
+            )
+
+        profile_id = int(job_spec["profile_id"])
+        output_dir = Path(temp_dir) / "encoded" / str(profile_id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"profile-{profile_id}.mp4"
+        pass_file = str(output_dir / f"profile-{profile_id}.pass")
+
+        single_commands = build_ffmpeg_commands(
+            policy=policy,
+            source_path=source_path,
+            media_info=media_info,
+            job=job_spec,
+            output_path=output_path,
+            pass_file=pass_file,
+        )
+
+        if not single_commands:
+            skipped.append(
+                _skipped_encoding_payload(
+                    job_spec,
+                    "No command generated by encoding policy",
+                )
+            )
+            continue
+
+        if len(single_commands) != 1:
+            raise RuntimeError(
+                f"NVENC batch expected one FFmpeg command for profile {profile_id}, "
+                f"got {len(single_commands)}"
+            )
+
+        single_command = single_commands[0]
+        expected_prefix = [
+            policy.get("ffmpeg", "ffmpeg"),
+            "-y",
+            "-i",
+            source_path,
+        ]
+
+        if [str(part) for part in single_command[:4]] != [
+            str(part) for part in expected_prefix
+        ]:
+            raise RuntimeError(
+                f"Unexpected FFmpeg command prefix for profile {profile_id}"
+            )
+
+        command.extend(["-map", "0:v:0"])
+        if media_info.get("has_audio"):
+            command.extend(["-map", "0:a:0?"])
+        command.extend(single_command[4:])
+
+        prepared.append(
+            {
+                "job": job_spec,
+                "output_path": output_path,
+            }
+        )
+
+    return command, prepared, skipped
+
+
+def encoded_item_from_batch(entry, batch_command):
+    job_spec = entry["job"]
+    output_path = entry["output_path"]
+    meta = output_metadata(output_path)
+
+    return {
+        "encoding_id": job_spec.get("encoding_id"),
+        "profile_id": int(job_spec["profile_id"]),
+        "codec": job_spec.get("codec") or "",
+        "extension": "mp4",
+        "resolution": int(job_spec.get("resolution") or 0),
+        "media_file": job_spec["output_key"],
+        "media_url": "",
+        "size_bytes": meta["size_bytes"],
+        "width": meta.get("width") or 0,
+        "height": meta.get("height") or int(job_spec.get("resolution") or 0),
+        "bit_rate": meta.get("bit_rate") or 0,
+        "status": "success",
+        "commands": json.dumps(
+            [[str(part) for part in batch_command]]
+        ),
         "local_path": str(output_path),
     }
 
@@ -1374,36 +1542,146 @@ def handler(event):
             encoded_items = []
             skipped_items = []
             failed_items = []
+            worker_count = upload_concurrency(job)
+
+            batch_groups = {}
+            batch_order = []
+            serial_jobs = []
 
             for encode_job_spec in job.get("jobs") or []:
-                try:
-                    item = encode_job(
-                        policy=policy,
-                        source_path=source_path,
-                        media_info=media_info,
-                        job=encode_job_spec,
-                        temp_dir=temp_dir,
-                    )
-
-                    if item.get("skipped"):
-                        skipped_items.append(item)
+                if encode_job_spec.get("extension") == "mp4":
+                    codec = encode_job_spec.get("codec") or ""
+                    encoder = codec_encoder(policy, codec)
+                    if encoder in NVENC_ENCODERS:
+                        if codec not in batch_groups:
+                            batch_groups[codec] = []
+                            batch_order.append(codec)
+                        batch_groups[codec].append(encode_job_spec)
                         continue
 
-                    item["media_url"] = public_url(job, item["media_file"])
-                    encoded_items.append(item)
+                serial_jobs.append(encode_job_spec)
 
-                except Exception as exc:
-                    print(
-                        "ENCODE_JOB_FAILED "
-                        f"profile_id={encode_job_spec.get('profile_id')} "
-                        f"codec={encode_job_spec.get('codec')} "
-                        f"extension={encode_job_spec.get('extension')} "
-                        f"resolution={encode_job_spec.get('resolution')} "
-                        f"error={exc}",
-                        flush=True,
-                    )
-                    failed_items.append(failed_encoding_payload(encode_job_spec, exc))
-                    continue
+            with ThreadPoolExecutor(max_workers=worker_count) as upload_executor:
+                pending_uploads = []
+
+                for codec in batch_order:
+                    specs = batch_groups[codec]
+                    prepared = []
+
+                    try:
+                        batch_command, prepared, batch_skipped = build_nvenc_batch_command(
+                            policy=policy,
+                            source_path=source_path,
+                            media_info=media_info,
+                            job_specs=specs,
+                            temp_dir=temp_dir,
+                        )
+                        skipped_items.extend(batch_skipped)
+
+                        if not prepared:
+                            continue
+
+                        run(batch_command)
+
+                    except Exception as exc:
+                        failed_specs = [entry["job"] for entry in prepared] or specs
+                        print(
+                            "ENCODE_BATCH_FAILED "
+                            f"codec={codec} "
+                            f"profiles={[spec.get('profile_id') for spec in failed_specs]} "
+                            f"error={exc}",
+                            flush=True,
+                        )
+                        failed_items.extend(
+                            failed_encoding_payload(spec, exc)
+                            for spec in failed_specs
+                        )
+                        continue
+
+                    for entry in prepared:
+                        encode_job_spec = entry["job"]
+
+                        try:
+                            item = encoded_item_from_batch(entry, batch_command)
+                        except Exception as exc:
+                            failed_items.append(
+                                failed_encoding_payload(encode_job_spec, exc)
+                            )
+                            continue
+
+                        item["media_url"] = public_url(job, item["media_file"])
+                        encoded_items.append(item)
+                        pending_uploads.append(
+                            (
+                                item,
+                                encode_job_spec,
+                                upload_executor.submit(
+                                    _upload_entry,
+                                    (entry["output_path"], encode_job_spec["output_key"]),
+                                ),
+                            )
+                        )
+
+                for encode_job_spec in serial_jobs:
+                    try:
+                        item = encode_job(
+                            policy=policy,
+                            source_path=source_path,
+                            media_info=media_info,
+                            job=encode_job_spec,
+                            temp_dir=temp_dir,
+                            upload=False,
+                        )
+
+                        if item.get("skipped"):
+                            skipped_items.append(item)
+                            continue
+
+                        item["media_url"] = public_url(job, item["media_file"])
+                        encoded_items.append(item)
+                        pending_uploads.append(
+                            (
+                                item,
+                                encode_job_spec,
+                                upload_executor.submit(
+                                    _upload_entry,
+                                    (item["local_path"], item["media_file"]),
+                                ),
+                            )
+                        )
+
+                    except Exception as exc:
+                        print(
+                            "ENCODE_JOB_FAILED "
+                            f"profile_id={encode_job_spec.get('profile_id')} "
+                            f"codec={encode_job_spec.get('codec')} "
+                            f"extension={encode_job_spec.get('extension')} "
+                            f"resolution={encode_job_spec.get('resolution')} "
+                            f"error={exc}",
+                            flush=True,
+                        )
+                        failed_items.append(failed_encoding_payload(encode_job_spec, exc))
+                        continue
+
+                for item, encode_job_spec, future in pending_uploads:
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        print(
+                            "ENCODING_UPLOAD_FAILED "
+                            f"profile_id={encode_job_spec.get('profile_id')} "
+                            f"codec={encode_job_spec.get('codec')} "
+                            f"resolution={encode_job_spec.get('resolution')} "
+                            f"error={exc}",
+                            flush=True,
+                        )
+                        try:
+                            encoded_items.remove(item)
+                        except ValueError:
+                            pass
+                        failed_items.append(
+                            failed_encoding_payload(encode_job_spec, exc)
+                        )
 
             if strict_requested_jobs(job) and (failed_items or skipped_items):
                 print("ENCODED_ITEMS=", json.dumps(encoded_items, default=str), flush=True)
@@ -1422,7 +1700,11 @@ def handler(event):
             if require_h264(job) and not h264_master_exists(outputs):
                 raise RuntimeError("Mandatory H264 HLS packaging failed")
 
-            upload_directory(hls_dir, job["output_prefix"])
+            upload_directory(
+                hls_dir,
+                job["output_prefix"],
+                max_workers=worker_count,
+            )
 
             payload = {
                 "version": 3,
@@ -1462,57 +1744,71 @@ def handler(event):
 
 def preflight_gpu():
     checks = [
-        ["nvidia-smi"],
-        ["nvidia-smi", "--query-gpu=name,driver_version,compute_cap", "--format=csv,noheader"],
-        ["ffmpeg", "-hide_banner", "-encoders"],
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-y",
-            "-f", "lavfi",
-            "-i", "testsrc2=size=1280x720:rate=30",
-            "-t", "3",
-            "-c:v", "h264_nvenc",
-            "-f", "null",
-            "-"
-        ],
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-y",
-            "-f", "lavfi",
-            "-i", "testsrc2=size=1280x720:rate=30",
-            "-t", "3",
-            "-c:v", "hevc_nvenc",
-            "-f", "null",
-            "-"
-        ],
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-y",
-            "-f", "lavfi",
-            "-i", "testsrc2=size=1280x720:rate=30",
-            "-t", "3",
-            "-c:v", "av1_nvenc",
-            "-f", "null",
-            "-"
-        ],
-        ["sh", "-lc", "echo NVIDIA_VISIBLE_DEVICES=$NVIDIA_VISIBLE_DEVICES"],
-        ["sh", "-lc", "echo CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"],
-        ["sh", "-lc", "echo NVIDIA_DRIVER_CAPABILITIES=$NVIDIA_DRIVER_CAPABILITIES"],
-        ["sh", "-lc", "ls -l /dev/nvidia* /dev/nvidia-caps/* 2>/dev/null || true"],
-        ["sh", "-lc", "ldconfig -p | grep -E 'libnvidia-encode|libnvcuvid|libcuda' || true"],
-        ["sh", "-lc",
-         "LD_DEBUG=libs ffmpeg -hide_banner -y -f lavfi -i testsrc2=size=1280x720:rate=30 -t 1 -c:v h264_nvenc -f null - 2>&1 | grep -E 'libnvidia-encode|libcuda|OpenEncodeSession|No capable|unsupported|Cannot load' || true"],
+        (
+            "nvidia-smi",
+            ["nvidia-smi"],
+        ),
+        (
+            "gpu-info",
+            [
+                "nvidia-smi",
+                "--query-gpu=name,driver_version,compute_cap",
+                "--format=csv,noheader",
+            ],
+        ),
+        (
+            "h264_nvenc",
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-y",
+                "-f", "lavfi",
+                "-i", "testsrc2=size=1280x720:rate=30",
+                "-t", "3",
+                "-c:v", "h264_nvenc",
+                "-f", "null",
+                "-",
+            ],
+        ),
+        (
+            "hevc_nvenc",
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-y",
+                "-f", "lavfi",
+                "-i", "testsrc2=size=1280x720:rate=30",
+                "-t", "3",
+                "-c:v", "hevc_nvenc",
+                "-f", "null",
+                "-",
+            ],
+        ),
+        (
+            "av1_nvenc",
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-y",
+                "-f", "lavfi",
+                "-i", "testsrc2=size=1280x720:rate=30",
+                "-t", "3",
+                "-c:v", "av1_nvenc",
+                "-f", "null",
+                "-",
+            ],
+        ),
     ]
 
-    for cmd in checks:
-        print("PREFLIGHT CMD:", " ".join(cmd), flush=True)
+    for name, cmd in checks:
         try:
-            print(run(cmd), flush=True)
+            run(cmd)
         except Exception as exc:
-            print("PREFLIGHT FAILED:", exc, flush=True)
+            print(f"PREFLIGHT FAILED: {name}: {exc}", flush=True)
+            raise RuntimeError(f"Mandatory GPU preflight failed: {name}") from exc
+
+    print("PREFLIGHT OK", flush=True)
+
 
 preflight_gpu()
 runpod.serverless.start({"handler": handler})
