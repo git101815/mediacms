@@ -97,7 +97,7 @@ jobs:
         id: correctness
         continue-on-error: true
         run: |
-          docker compose -f docker-compose-ci.yaml run --rm --no-deps tests bash -lc '
+          docker compose -f docker-compose-ci.yaml run --rm --no-deps tests bash -c '
             status=0
             python -m compileall -q . || status=1
             flake8 . --select=E9,F63,F7,F82 --exclude=.git,frontend,node_modules,static,media_files || status=1
@@ -109,7 +109,7 @@ jobs:
         id: migrations
         continue-on-error: true
         run: |
-          docker compose -f docker-compose-ci.yaml run --rm --no-deps tests bash -lc '
+          docker compose -f docker-compose-ci.yaml run --rm --no-deps tests bash -c '
             set -euo pipefail
             python manage.py makemigrations --check --dry-run
           '
@@ -118,7 +118,7 @@ jobs:
         id: pytest
         continue-on-error: true
         run: |
-          docker compose -f docker-compose-ci.yaml run --rm --no-deps tests bash -lc '
+          docker compose -f docker-compose-ci.yaml run --rm --no-deps tests bash -c '
             set -euo pipefail
             pytest -ra
           '
