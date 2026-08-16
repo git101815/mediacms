@@ -31,8 +31,19 @@ logging.basicConfig(
 
 
 BASE_GAS_PRICE_ORACLE_ADDRESS = "0x420000000000000000000000000000000000000F"
-BASE_EXTRA_FEE_SAFETY_BPS = 11000
 BASE_SIGNATURE_SIZE_BYTES = 68
+
+class _BroadcastRejectedAndRescheduled(RuntimeError):
+    pass
+
+
+def _is_rpc_insufficient_funds_error(exc: Exception) -> bool:
+    message = str(exc or "").strip().lower()
+    return (
+        "insufficient funds for gas" in message
+        and "price" in message
+    )
+
 
 BASE_GAS_PRICE_ORACLE_ABI = [
     {
@@ -308,24 +319,20 @@ def _estimate_base_sweep_extra_fee_wei(
         oracle.functions.getOperatorFee(int(gas_limit)).call()
     )
 
-    raw_extra_fee = max(0, l1_fee_upper_bound) + max(0, operator_fee_upper_bound)
-    buffered_extra_fee = (
-        raw_extra_fee * BASE_EXTRA_FEE_SAFETY_BPS + 9999
-    ) // 10000
+    extra_fee = max(0, l1_fee_upper_bound) + max(0, operator_fee_upper_bound)
 
     logging.info(
         "sweeper_service action=base-extra-fee-budget chain=%s asset=%s "
         "unsigned_tx_size=%s l1_fee_upper_bound=%s operator_fee_upper_bound=%s "
-        "raw_extra_fee=%s buffered_extra_fee=%s",
+        "extra_fee=%s",
         option.chain,
         option.asset_code,
         unsigned_tx_size,
         l1_fee_upper_bound,
         operator_fee_upper_bound,
-        raw_extra_fee,
-        buffered_extra_fee,
+        extra_fee,
     )
-    return int(buffered_extra_fee)
+    return int(extra_fee)
 
 
 def _compute_sweep_native_budget(
@@ -619,11 +626,24 @@ def _reserve_sender_nonce(
     if not normalized_address:
         raise RuntimeError("Cannot reserve nonce for an empty address")
 
-    lock = client.acquire_evm_sender_lock(
-        chain=option.chain,
-        address=normalized_address,
-        lock_seconds=_sender_lock_seconds(config),
-    )
+    try:
+        lock = client.acquire_evm_sender_lock(
+            chain=option.chain,
+            address=normalized_address,
+            lock_seconds=_sender_lock_seconds(config),
+        )
+    except Exception as exc:
+        if "evm sender is already locked" in str(exc or "").strip().lower():
+            _raise_structured_error(
+                code="SWEEP_SENDER_LOCK_BUSY",
+                message="EVM sender is already locked",
+                retryable=True,
+                details={
+                    "chain": option.chain,
+                    "address": normalized_address,
+                },
+            )
+        raise
 
     rpc_pending_nonce = _pending_nonce(w3=w3, address=normalized_address)
     backend_next_nonce = lock.get("next_nonce")
@@ -723,7 +743,48 @@ def _send_native_transfer_with_sender_lock(
             txid=txid,
         )
         return txid
-    except Exception:
+    except Exception as exc:
+        if backend_recorded and _is_rpc_insufficient_funds_error(exc):
+            error_message = _truncate_error(str(exc))
+            try:
+                client.mark_funding_broadcast_missing(
+                    public_id=public_id,
+                    claim_token=claim_token,
+                    gas_funding_txid=txid,
+                    next_retry_in_seconds=_default_retry_delay_seconds(config),
+                    error=error_message,
+                )
+            except Exception as recovery_exc:
+                _release_sender_lock_safely(
+                    client=client,
+                    option=option,
+                    sender_lock=sender_lock,
+                )
+                _raise_structured_error(
+                    code="SWEEP_FUNDING_RPC_REJECT_RECOVERY_UNCERTAIN",
+                    message=(
+                        "Funding RPC rejected the transaction for insufficient "
+                        "native balance and backend recovery could not be confirmed"
+                    ),
+                    retryable=True,
+                    details={
+                        "job_public_id": public_id,
+                        "txid": txid,
+                        "rpc_error": error_message,
+                        "recovery_error": _truncate_error(str(recovery_exc)),
+                    },
+                )
+
+            _release_sender_lock_safely(
+                client=client,
+                option=option,
+                sender_lock=sender_lock,
+            )
+            raise _BroadcastRejectedAndRescheduled(
+                "Funding RPC rejected transaction for insufficient native "
+                f"balance; same job rescheduled public_id={public_id} txid={txid}"
+            ) from exc
+
         if not backend_recorded:
             _release_sender_lock_safely(
                 client=client,
@@ -799,7 +860,48 @@ def _send_erc20_transfer_with_sender_lock(
             txid=txid,
         )
         return txid
-    except Exception:
+    except Exception as exc:
+        if backend_recorded and _is_rpc_insufficient_funds_error(exc):
+            error_message = _truncate_error(str(exc))
+            try:
+                client.mark_sweep_broadcast_missing(
+                    public_id=public_id,
+                    claim_token=claim_token,
+                    sweep_txid=txid,
+                    next_retry_in_seconds=_default_retry_delay_seconds(config),
+                    error=error_message,
+                )
+            except Exception as recovery_exc:
+                _release_sender_lock_safely(
+                    client=client,
+                    option=option,
+                    sender_lock=sender_lock,
+                )
+                _raise_structured_error(
+                    code="SWEEP_RPC_REJECT_RECOVERY_UNCERTAIN",
+                    message=(
+                        "Sweep RPC rejected the transaction for insufficient "
+                        "native balance and backend recovery could not be confirmed"
+                    ),
+                    retryable=True,
+                    details={
+                        "job_public_id": public_id,
+                        "txid": txid,
+                        "rpc_error": error_message,
+                        "recovery_error": _truncate_error(str(recovery_exc)),
+                    },
+                )
+
+            _release_sender_lock_safely(
+                client=client,
+                option=option,
+                sender_lock=sender_lock,
+            )
+            raise _BroadcastRejectedAndRescheduled(
+                "Sweep RPC rejected transaction for insufficient native "
+                f"balance; same job rescheduled public_id={public_id} txid={txid}"
+            ) from exc
+
         if not backend_recorded:
             _release_sender_lock_safely(
                 client=client,
@@ -1474,6 +1576,14 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
                 job=job,
                 w3=w3,
             )
+        except _BroadcastRejectedAndRescheduled as exc:
+            logging.warning(
+                "sweeper_service action=rpc-broadcast-rejected-recovered "
+                "public_id=%s error=%s",
+                public_id,
+                exc,
+            )
+            continue
         except Exception as exc:
             structured_error = _extract_structured_error(exc)
 
