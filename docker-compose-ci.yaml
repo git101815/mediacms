@@ -27,15 +27,10 @@ x-test-environment: &test_environment
 services:
   tests:
     image: mediacms-ci:test
-    build:
-      context: .
-      dockerfile: Dockerfile.ci
-    working_dir: /workspace
+    pull_policy: never
+    working_dir: /home/mediacms.io/mediacms
     environment:
       <<: *test_environment
-    volumes:
-      - ./:/workspace
-      - ./deploy/docker/local_settings.py:/workspace/cms/local_settings.py:ro
     depends_on:
       db:
         condition: service_healthy

@@ -21,6 +21,7 @@ from ledger.providers.paygate import (
     PAYGATE_PAYMENT_METHOD_TYPE,
     PAYGATE_PROVIDER_KEY,
     PAYGATE_STATUS_PAID,
+    PAYGATE_STATUS_UNPAID,
     build_paygate_checkout_url,
     canonical_stable_to_paygate_amount,
     check_paygate_payment,

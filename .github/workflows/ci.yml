@@ -83,29 +83,81 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build CI test image
+      - name: Build FFmpeg CPU builder
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile.ci
+          context: ./ffmpeg_builder_cpu
+          file: ./ffmpeg_builder_cpu/Dockerfile
           load: true
-          tags: mediacms-ci:test
-          cache-from: type=gha,scope=mediacms-ci-test
-          cache-to: type=gha,mode=max,scope=mediacms-ci-test
+          tags: cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0
+          cache-from: type=gha,scope=mediacms-ffmpeg-cpu
+          cache-to: type=gha,mode=max,scope=mediacms-ffmpeg-cpu
 
-      - name: Run Python sanity checks, migration check and pytest
+      - name: Build MediaCMS test image from production Dockerfile
         run: |
-          docker compose -f docker-compose-ci.yaml run --rm tests bash -lc '
+          docker build \
+            --build-arg FFMPEG_CPU_BUILDER_IMAGE=cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0 \
+            --build-arg DEVELOPMENT_MODE=True \
+            --tag mediacms-ci:test \
+            .
+
+      - name: Validate CI compose
+        run: docker compose -f docker-compose-ci.yaml config >/dev/null
+
+      - name: Start test dependencies
+        run: docker compose -f docker-compose-ci.yaml up -d --wait db redis
+
+      - name: Python correctness checks
+        id: correctness
+        continue-on-error: true
+        run: |
+          docker compose -f docker-compose-ci.yaml run --rm --no-deps tests bash -lc '
+            status=0
+            python -m compileall -q . || status=1
+            flake8 . --select=E9,F63,F7,F82 --exclude=.git,frontend,node_modules,static,media_files || status=1
+            python manage.py check || status=1
+            exit "$status"
+          '
+
+      - name: Migration check
+        id: migrations
+        continue-on-error: true
+        run: |
+          docker compose -f docker-compose-ci.yaml run --rm --no-deps tests bash -lc '
             set -euo pipefail
-            python -m compileall -q .
-            flake8 . --select=E9,F63,F7,F82 --exclude=.git,frontend,node_modules,static,media_files
             python manage.py makemigrations --check --dry-run
+          '
+
+      - name: Pytest
+        id: pytest
+        continue-on-error: true
+        run: |
+          docker compose -f docker-compose-ci.yaml run --rm --no-deps tests bash -lc '
+            set -euo pipefail
             pytest -ra
           '
 
       - name: Show CI service logs on failure
-        if: failure()
+        if: always() && (failure() || steps.correctness.outcome == 'failure' || steps.migrations.outcome == 'failure' || steps.pytest.outcome == 'failure')
         run: docker compose -f docker-compose-ci.yaml logs --no-color --timestamps db redis || true
+
+      - name: Check backend results
+        if: always()
+        shell: bash
+        env:
+          CORRECTNESS_RESULT: ${{ steps.correctness.outcome }}
+          MIGRATIONS_RESULT: ${{ steps.migrations.outcome }}
+          PYTEST_RESULT: ${{ steps.pytest.outcome }}
+        run: |
+          set -euo pipefail
+
+          echo "correctness=$CORRECTNESS_RESULT"
+          echo "migrations=$MIGRATIONS_RESULT"
+          echo "pytest=$PYTEST_RESULT"
+
+          [[ "$CORRECTNESS_RESULT" == "success" ]]
+          [[ "$MIGRATIONS_RESULT" == "success" ]]
+          [[ "$PYTEST_RESULT" == "success" ]]
 
       - name: Tear down CI services
         if: always()
