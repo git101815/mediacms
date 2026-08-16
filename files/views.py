@@ -3168,11 +3168,20 @@ class MediaSearch(APIView):
         if query:
             # move this processing to a prepare_query function
             query = clean_query(query)
-            q_parts = [q_part.rstrip("y") for q_part in query.split() if q_part not in STOP_WORDS]
+            q_parts = []
+            for q_part in query.split():
+                if q_part in STOP_WORDS:
+                    continue
+                q_part = q_part.rstrip("y")
+                if q_part:
+                    q_parts.append(q_part)
+
             if q_parts:
                 query = SearchQuery(q_parts[0] + ":*", search_type="raw")
                 for part in q_parts[1:]:
                     query &= SearchQuery(part + ":*", search_type="raw")
+            elif not (category or tag or celebrity):
+                return Response({}, status=status.HTTP_200_OK)
             else:
                 query = None
         if query:
