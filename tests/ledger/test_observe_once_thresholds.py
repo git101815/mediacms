@@ -99,6 +99,11 @@ def test_erc20_observer_detects_partial_payment_above_observation_minimum(monkey
         reference_heads_shared_secret="",
         reference_heads_timeout_seconds=1,
         reference_heads_max_age_seconds=60,
+        runtime_prices_base_url="",
+        runtime_prices_shared_secret="",
+        runtime_prices_timeout_seconds=1,
+        runtime_prices_max_age_seconds=180,
+        runtime_prices_future_skew_seconds=30,
         rpc_max_lag_blocks=64,
         rpc_max_reference_lag_blocks=64,
     )
@@ -164,6 +169,11 @@ def test_erc20_observer_ignores_dust_below_observation_minimum(monkeypatch):
         reference_heads_shared_secret="",
         reference_heads_timeout_seconds=1,
         reference_heads_max_age_seconds=60,
+        runtime_prices_base_url="",
+        runtime_prices_shared_secret="",
+        runtime_prices_timeout_seconds=1,
+        runtime_prices_max_age_seconds=180,
+        runtime_prices_future_skew_seconds=30,
         rpc_max_lag_blocks=64,
         rpc_max_reference_lag_blocks=64,
     )
