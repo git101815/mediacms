@@ -1,11 +1,16 @@
 {
+  "runtime_prices": {
+    "timeout_seconds": 5,
+    "max_age_seconds": 180,
+    "future_skew_seconds": 30
+  },
   "options": [
     {
       "key": "ethereum-usdt",
       "chain": "ethereum",
       "asset_code": "USDT",
       "token_contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
-      "display_label": "Ethereum · USDT",
+      "display_label": "Ethereum \u00b7 USDT",
       "rpc_urls": [
         "${ETHEREUM_RPC_URL}",
         "${ETHEREUM_RPC_URL_FALLBACK_1}",
@@ -24,7 +29,7 @@
       "chain": "ethereum",
       "asset_code": "USDC",
       "token_contract_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-      "display_label": "Ethereum · USDC",
+      "display_label": "Ethereum \u00b7 USDC",
       "rpc_urls": [
         "${ETHEREUM_RPC_URL}",
         "${ETHEREUM_RPC_URL_FALLBACK_1}",
@@ -43,7 +48,7 @@
       "chain": "bsc",
       "asset_code": "USDT",
       "token_contract_address": "0x55d398326f99059ff775485246999027b3197955",
-      "display_label": "BNB Chain · USDT",
+      "display_label": "BNB Chain \u00b7 USDT",
       "rpc_urls": [
         "${BSC_RPC_URL}",
         "${BSC_RPC_URL_FALLBACK_1}",
@@ -62,7 +67,7 @@
       "chain": "bsc",
       "asset_code": "USDC",
       "token_contract_address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-      "display_label": "BNB Chain · USDC",
+      "display_label": "BNB Chain \u00b7 USDC",
       "rpc_urls": [
         "${BSC_RPC_URL}",
         "${BSC_RPC_URL_FALLBACK_1}",
@@ -81,7 +86,7 @@
       "chain": "arbitrum",
       "asset_code": "USDT",
       "token_contract_address": "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
-      "display_label": "Arbitrum One · USDT",
+      "display_label": "Arbitrum One \u00b7 USDT",
       "rpc_urls": [
         "${ARBITRUM_RPC_URL}",
         "${ARBITRUM_RPC_URL_FALLBACK_1}",
@@ -100,7 +105,7 @@
       "chain": "arbitrum",
       "asset_code": "USDC",
       "token_contract_address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
-      "display_label": "Arbitrum One · USDC",
+      "display_label": "Arbitrum One \u00b7 USDC",
       "rpc_urls": [
         "${ARBITRUM_RPC_URL}",
         "${ARBITRUM_RPC_URL_FALLBACK_1}",
@@ -119,7 +124,7 @@
       "chain": "base",
       "asset_code": "USDC",
       "token_contract_address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "display_label": "Base · USDC",
+      "display_label": "Base \u00b7 USDC",
       "rpc_urls": [
         "${BASE_RPC_URL}",
         "${BASE_RPC_URL_FALLBACK_1}",
@@ -138,7 +143,7 @@
       "chain": "polygon",
       "asset_code": "POL",
       "token_contract_address": "",
-      "display_label": "Polygon · POL (PayGate settlement)",
+      "display_label": "Polygon \u00b7 POL (PayGate settlement)",
       "rpc_urls": [
         "${POLYGON_RPC_URL}",
         "${POLYGON_RPC_URL_FALLBACK_1}",

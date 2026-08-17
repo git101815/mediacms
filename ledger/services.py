@@ -43,13 +43,12 @@ from ledger.paygate_polygon import (
     PAYGATE_POLYGON_ASSET,
     PAYGATE_POLYGON_CHAIN,
     build_pol_valuation_metadata,
-    canonical_usd_to_required_pol_wei,
-    get_fresh_pol_usd_quote,
     get_paygate_polygon_credit_minimum_canonical,
     get_paygate_polygon_policy,
     is_paygate_polygon_metadata,
     is_paygate_polygon_route,
     is_paygate_polygon_session,
+    normalize_pol_usd_quote,
     pol_wei_to_canonical_usd,
 )
 ACTIVE_DEPOSIT_SESSION_STATUSES = {
@@ -1305,12 +1304,8 @@ def _deposit_session_min_amounts(session: DepositSession) -> tuple[int, int]:
     if is_paygate_polygon_session(session):
         token_pack_snapshot = (session.metadata or {}).get("token_pack") or {}
         canonical_minimum = get_paygate_polygon_credit_minimum_canonical(token_pack_snapshot)
-        quote = get_fresh_pol_usd_quote(required=False)
-        if quote is None:
-            return int(canonical_minimum), 0
-        return int(canonical_minimum), int(
-            canonical_usd_to_required_pol_wei(canonical_minimum, quote)
-        )
+        raw_amount = getattr(session, "expected_onchain_raw_amount", None)
+        return int(canonical_minimum), int(raw_amount or 0)
 
     return _canonical_and_raw_amounts_from_stored_route_value(
         chain=session.chain,
@@ -2811,7 +2806,12 @@ def record_onchain_observation(
     route_raw_amount = _normalize_positive_int(amount, field_name="Observed raw on-chain amount")
     pol_valuation_metadata = None
     if is_paygate_polygon_session(deposit_session):
-        quote = get_fresh_pol_usd_quote(required=True)
+        if not isinstance(raw_payload, dict):
+            raise ValidationError("PayGate Polygon observation raw_payload must be an object")
+        quote_payload = raw_payload.get("runtime_price_quote")
+        if not isinstance(quote_payload, dict):
+            raise ValidationError("PayGate Polygon observation is missing runtime_price_quote")
+        quote = normalize_pol_usd_quote(quote_payload, require_current=True)
         canonical_amount = pol_wei_to_canonical_usd(route_raw_amount, quote)
         pol_valuation_metadata = build_pol_valuation_metadata(
             raw_amount_wei=route_raw_amount,
@@ -2925,7 +2925,10 @@ def record_onchain_observation(
             or observed.to_address != to_address
             or observed.token_contract_address != token_contract_address
             or observed.asset_code != asset_code
-            or int(existing_canonical_amount) != canonical_amount
+            or (
+                not is_paygate_polygon_session(deposit_session)
+                and int(existing_canonical_amount) != canonical_amount
+            )
             or int(existing_raw_amount) != route_raw_amount
             or getattr(observed, "detected_block_number", None) != detected_block_number
             or getattr(observed, "detection_method", "event") != detection_method
@@ -2938,7 +2941,10 @@ def record_onchain_observation(
 
         update_fields = []
 
-        if int(observed.amount) != canonical_amount:
+        if (
+            not is_paygate_polygon_session(deposit_session)
+            and int(observed.amount) != canonical_amount
+        ):
             observed.amount = canonical_amount
             update_fields.append("amount")
 
@@ -2972,12 +2978,22 @@ def record_onchain_observation(
                 deposit_session=deposit_session,
             )
             update_fields.append("raw_payload")
-        elif raw_payload_for_create and not _is_residual_observed_transfer(observed) and observed.raw_payload != raw_payload_for_create:
+        elif (
+            not is_paygate_polygon_session(deposit_session)
+            and raw_payload_for_create
+            and not _is_residual_observed_transfer(observed)
+            and observed.raw_payload != raw_payload_for_create
+        ):
             observed.raw_payload = raw_payload_for_create
             update_fields.append("raw_payload")
 
         if update_fields:
             observed.save(update_fields=list(dict.fromkeys(update_fields)))
+
+    if is_paygate_polygon_session(deposit_session):
+        # The first accepted quote is immutable for this event. Later watcher
+        # cycles may carry a newer quote, but only confirmations may advance.
+        canonical_amount = int(observed.amount)
 
     is_primary_credited_observation = _is_primary_credited_observation(
         deposit_session=deposit_session,
@@ -4036,12 +4052,7 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
                 canonical_min_amount = get_paygate_polygon_credit_minimum_canonical(
                     session_metadata.get("token_pack") or {}
                 )
-                quote = get_fresh_pol_usd_quote(required=False)
-                onchain_min_amount = (
-                    canonical_usd_to_required_pol_wei(canonical_min_amount, quote)
-                    if quote is not None
-                    else 0
-                )
+                onchain_min_amount = 0
                 amount_semantics = PAYGATE_POLYGON_AMOUNT_SEMANTICS
             else:
                 canonical_min_amount, onchain_min_amount = _canonical_and_raw_amounts_from_stored_route_value(

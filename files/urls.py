@@ -115,11 +115,6 @@ urlpatterns = [
     path("api/payments/paygate/callback", paygate_webhooks.paygate_callback, name="paygate_callback"),
     re_path(r"^wallet$", views.wallet, name="wallet"),
     re_path(
-        r"^api/internal/ledger/runtime-prices/pol-usd$",
-        views.internal_paygate_pol_price,
-        name="internal_paygate_pol_price",
-    ),
-    re_path(
         r"^api/internal/ledger/deposit-observations$",
         views.internal_deposit_observation,
         name="internal_deposit_observation",

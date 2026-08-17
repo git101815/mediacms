@@ -154,6 +154,11 @@ def main():
                 reference_heads_shared_secret=config.reference_heads_shared_secret,
                 reference_heads_timeout_seconds=config.reference_heads_timeout_seconds,
                 reference_heads_max_age_seconds=config.reference_heads_max_age_seconds,
+                runtime_prices_base_url=config.runtime_prices_base_url,
+                runtime_prices_shared_secret=config.runtime_prices_shared_secret,
+                runtime_prices_timeout_seconds=config.runtime_prices_timeout_seconds,
+                runtime_prices_max_age_seconds=config.runtime_prices_max_age_seconds,
+                runtime_prices_future_skew_seconds=config.runtime_prices_future_skew_seconds,
                 rpc_max_lag_blocks=config.rpc_max_lag_blocks,
                 rpc_max_reference_lag_blocks=config.rpc_max_reference_lag_blocks,
             )

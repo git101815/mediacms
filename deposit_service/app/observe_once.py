@@ -5,6 +5,10 @@ from web3 import Web3
 from .evm_rpc import build_web3
 from .reference_head import get_reference_head
 from .rpc_pool import choose_best_rpc_url
+from .runtime_price import (
+    canonical_usd_to_required_pol_wei,
+    fetch_pol_usd_quote,
+)
 
 
 ERC20_ABI = [
@@ -234,6 +238,11 @@ def _observe_token_option(
     reference_heads_shared_secret: str,
     reference_heads_timeout_seconds: float,
     reference_heads_max_age_seconds: int,
+    runtime_prices_base_url: str,
+    runtime_prices_shared_secret: str,
+    runtime_prices_timeout_seconds: float,
+    runtime_prices_max_age_seconds: int,
+    runtime_prices_future_skew_seconds: int,
     rpc_max_lag_blocks: int,
     rpc_max_reference_lag_blocks: int,
 ):
@@ -259,6 +268,25 @@ def _observe_token_option(
     latest_block = int(w3.eth.block_number)
 
     if _is_native_option(option):
+        runtime_price_quote = None
+        if str(option.amount_semantics or "").strip().lower() == "native_quoted":
+            try:
+                runtime_price_quote = fetch_pol_usd_quote(
+                    base_url=runtime_prices_base_url,
+                    shared_secret=runtime_prices_shared_secret,
+                    timeout_seconds=runtime_prices_timeout_seconds,
+                    max_age_seconds=runtime_prices_max_age_seconds,
+                    future_skew_seconds=runtime_prices_future_skew_seconds,
+                )
+            except Exception:
+                logging.exception(
+                    "native quoted runtime price unavailable option=%s chain=%s asset=%s action=skip",
+                    option.key,
+                    option.chain,
+                    option.asset_code,
+                )
+                return
+
         for target in targets:
             session_public_id = target["session_public_id"]
             deposit_address = target["deposit_address"]
@@ -270,13 +298,17 @@ def _observe_token_option(
                 target.get("amount_semantics") or option.amount_semantics or "canonical_stable"
             ).strip().lower()
             if amount_semantics == "native_quoted":
-                if onchain_min_amount <= 0:
-                    logging.info(
-                        "native quoted target skipped without fresh quote option=%s session=%s",
+                if runtime_price_quote is None:
+                    logging.warning(
+                        "native quoted target skipped without runtime quote option=%s session=%s",
                         option.key,
                         session_public_id,
                     )
                     continue
+                onchain_min_amount = canonical_usd_to_required_pol_wei(
+                    min_amount,
+                    runtime_price_quote,
+                )
                 observation_min_amount = max(
                     option_observation_min_amount,
                     onchain_min_amount,
@@ -354,6 +386,11 @@ def _observe_token_option(
                     "min_amount": str(min_amount),
                     "onchain_min_amount": str(onchain_min_amount),
                     "target_amount_unit": target.get("amount_unit", "canonical_stable"),
+                    "runtime_price_quote": (
+                        runtime_price_quote
+                        if amount_semantics == "native_quoted"
+                        else None
+                    ),
                 },
                 log_index=None,
             )
@@ -478,6 +515,11 @@ def observe_once(
     reference_heads_shared_secret: str,
     reference_heads_timeout_seconds: float,
     reference_heads_max_age_seconds: int,
+    runtime_prices_base_url: str,
+    runtime_prices_shared_secret: str,
+    runtime_prices_timeout_seconds: float,
+    runtime_prices_max_age_seconds: int,
+    runtime_prices_future_skew_seconds: int,
     rpc_max_lag_blocks: int,
     rpc_max_reference_lag_blocks: int,
 ):
@@ -502,6 +544,11 @@ def observe_once(
                 reference_heads_shared_secret=reference_heads_shared_secret,
                 reference_heads_timeout_seconds=reference_heads_timeout_seconds,
                 reference_heads_max_age_seconds=reference_heads_max_age_seconds,
+                runtime_prices_base_url=runtime_prices_base_url,
+                runtime_prices_shared_secret=runtime_prices_shared_secret,
+                runtime_prices_timeout_seconds=runtime_prices_timeout_seconds,
+                runtime_prices_max_age_seconds=runtime_prices_max_age_seconds,
+                runtime_prices_future_skew_seconds=runtime_prices_future_skew_seconds,
                 rpc_max_lag_blocks=rpc_max_lag_blocks,
                 rpc_max_reference_lag_blocks=rpc_max_reference_lag_blocks,
             )

@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import hmac
 import json
-import os
 from functools import lru_cache
 from pathlib import Path
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from datetime import datetime, timezone as dt_timezone
 
-from django.core.cache import cache
-from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.utils import timezone
 
 
@@ -17,7 +14,6 @@ PAYGATE_POLYGON_CHAIN = "polygon"
 PAYGATE_POLYGON_ASSET = "POL"
 PAYGATE_POLYGON_TOKEN_CONTRACT = ""
 PAYGATE_POLYGON_AMOUNT_SEMANTICS = "native_quoted"
-PAYGATE_POLYGON_QUOTE_CACHE_KEY = "ledger:runtime-price:POL:USD:v1"
 CANONICAL_STABLE_DECIMALS = 6
 
 
@@ -95,7 +91,7 @@ def _parse_iso8601(value, *, field_name: str) -> datetime:
     return parsed.astimezone(dt_timezone.utc)
 
 
-def _normalize_quote_payload(payload: dict, *, require_current: bool = True) -> dict:
+def normalize_pol_usd_quote(payload: dict, *, require_current: bool = True) -> dict:
     if not isinstance(payload, dict):
         raise ValidationError("POL/USD quote payload must be an object")
     if str(payload.get("asset") or "").strip().upper() != PAYGATE_POLYGON_ASSET:
@@ -138,42 +134,6 @@ def _normalize_quote_payload(payload: dict, *, require_current: bool = True) -> 
         "observed_at": observed_at.isoformat(),
         "expires_at": expires_at.isoformat(),
     }
-
-
-def validate_pol_price_push_secret(provided_secret: str) -> None:
-    expected = os.environ.get("PAYGATE_POL_PRICE_PUSH_SECRET", "").strip()
-    if not expected:
-        raise ImproperlyConfigured("PAYGATE_POL_PRICE_PUSH_SECRET is not configured")
-    if not hmac.compare_digest(str(provided_secret or "").strip(), expected):
-        raise PermissionDenied("Invalid POL/USD price push secret")
-
-
-def store_pol_usd_quote(payload: dict) -> dict:
-    quote = _normalize_quote_payload(payload, require_current=True)
-    now = timezone.now().astimezone(dt_timezone.utc)
-    expires_at = _parse_iso8601(quote["expires_at"], field_name="expires_at")
-    observed_at = _parse_iso8601(quote["observed_at"], field_name="observed_at")
-    policy = get_paygate_polygon_policy()
-    ttl_by_expiry = int((expires_at - now).total_seconds())
-    ttl_by_age = int(policy["quote_max_age_seconds"] - max(0, (now - observed_at).total_seconds()))
-    ttl = max(1, min(ttl_by_expiry, ttl_by_age))
-    cache.set(PAYGATE_POLYGON_QUOTE_CACHE_KEY, quote, timeout=ttl)
-    return quote
-
-
-def get_fresh_pol_usd_quote(*, required: bool = True) -> dict | None:
-    payload = cache.get(PAYGATE_POLYGON_QUOTE_CACHE_KEY)
-    if payload is None:
-        if required:
-            raise ValidationError("POL/USD runtime quote is unavailable")
-        return None
-    try:
-        return _normalize_quote_payload(payload, require_current=True)
-    except ValidationError:
-        cache.delete(PAYGATE_POLYGON_QUOTE_CACHE_KEY)
-        if required:
-            raise
-        return None
 
 
 def is_paygate_polygon_route(*, chain: str, asset_code: str, token_contract_address: str = "") -> bool:
@@ -238,7 +198,7 @@ def pol_wei_to_canonical_usd(raw_amount_wei: int, quote: dict) -> int:
     raw_amount_wei = int(raw_amount_wei)
     if raw_amount_wei <= 0:
         raise ValidationError("POL raw amount must be positive")
-    normalized_quote = _normalize_quote_payload(quote, require_current=True)
+    normalized_quote = normalize_pol_usd_quote(quote, require_current=True)
     price = Decimal(normalized_quote["price"])
     policy = get_paygate_polygon_policy()
     native_base = Decimal(10) ** int(policy["native_decimals"])
@@ -254,7 +214,7 @@ def canonical_usd_to_required_pol_wei(canonical_amount: int, quote: dict) -> int
     canonical_amount = int(canonical_amount)
     if canonical_amount <= 0:
         raise ValidationError("Canonical coverage amount must be positive")
-    normalized_quote = _normalize_quote_payload(quote, require_current=True)
+    normalized_quote = normalize_pol_usd_quote(quote, require_current=True)
     price = Decimal(normalized_quote["price"])
     policy = get_paygate_polygon_policy()
     native_base = Decimal(10) ** int(policy["native_decimals"])
@@ -264,7 +224,7 @@ def canonical_usd_to_required_pol_wei(canonical_amount: int, quote: dict) -> int
 
 
 def build_pol_valuation_metadata(*, raw_amount_wei: int, canonical_amount: int, quote: dict) -> dict:
-    normalized_quote = _normalize_quote_payload(quote, require_current=True)
+    normalized_quote = normalize_pol_usd_quote(quote, require_current=True)
     return {
         "amount_semantics": PAYGATE_POLYGON_AMOUNT_SEMANTICS,
         "asset": PAYGATE_POLYGON_ASSET,

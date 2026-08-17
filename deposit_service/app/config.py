@@ -52,6 +52,11 @@ class ServiceConfig:
     reference_heads_shared_secret: str
     reference_heads_timeout_seconds: float
     reference_heads_max_age_seconds: int
+    runtime_prices_base_url: str
+    runtime_prices_shared_secret: str
+    runtime_prices_timeout_seconds: float
+    runtime_prices_max_age_seconds: int
+    runtime_prices_future_skew_seconds: int
     options: list[DepositOptionConfig]
 
 
@@ -174,6 +179,20 @@ def load_config() -> ServiceConfig:
     if not isinstance(raw_options, list) or not raw_options:
         raise RuntimeError("Deposit service config must contain a non-empty 'options' list")
 
+    runtime_prices = raw.get("runtime_prices") or {}
+    if not isinstance(runtime_prices, dict):
+        raise RuntimeError("Deposit service runtime_prices config must be an object")
+
+    runtime_prices_timeout_seconds = float(runtime_prices.get("timeout_seconds", 5))
+    runtime_prices_max_age_seconds = int(runtime_prices.get("max_age_seconds", 180))
+    runtime_prices_future_skew_seconds = int(runtime_prices.get("future_skew_seconds", 30))
+    if runtime_prices_timeout_seconds <= 0:
+        raise RuntimeError("runtime_prices.timeout_seconds must be > 0")
+    if runtime_prices_max_age_seconds <= 0:
+        raise RuntimeError("runtime_prices.max_age_seconds must be > 0")
+    if runtime_prices_future_skew_seconds < 0:
+        raise RuntimeError("runtime_prices.future_skew_seconds must be >= 0")
+
     evm_account_xpub = _require_env("DEPOSIT_EVM_ACCOUNT_XPUB")
 
     options: list[DepositOptionConfig] = []
@@ -290,5 +309,10 @@ def load_config() -> ServiceConfig:
         reference_heads_shared_secret=_require_env("REFERENCE_HEADS_SHARED_SECRET"),
         reference_heads_timeout_seconds=reference_heads_timeout_seconds,
         reference_heads_max_age_seconds=reference_heads_max_age_seconds,
+        runtime_prices_base_url=_require_env("RUNTIME_PRICES_BASE_URL").rstrip("/"),
+        runtime_prices_shared_secret=_require_env("RUNTIME_PRICES_SHARED_SECRET"),
+        runtime_prices_timeout_seconds=runtime_prices_timeout_seconds,
+        runtime_prices_max_age_seconds=runtime_prices_max_age_seconds,
+        runtime_prices_future_skew_seconds=runtime_prices_future_skew_seconds,
         options=options,
     )
