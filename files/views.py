@@ -1083,6 +1083,10 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
     payment_method = metadata.get("payment_method") or {}
     provider = metadata.get("payment_provider") or {}
     is_provider_checkout = _is_provider_checkout_session(session)
+    amount_semantics = str(
+        metadata.get("amount_semantics") or "canonical_stable"
+    ).strip().lower()
+    is_native_quoted = amount_semantics == "native_quoted"
 
     if is_provider_checkout:
         network_display = provider.get("network_display") or "Hosted checkout"
@@ -1112,13 +1116,11 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         ).strip()
         if checkout_amount:
             token_pack_price_label = f"{get_fiat_currency_symbol(checkout_currency)}{checkout_amount}"
-        if provider.get("key") == PAYGATE_PROVIDER_KEY:
-            observed_asset_code = "USDC"
 
     expected_raw_amount = session.expected_onchain_raw_amount
     if expected_raw_amount in (None, ""):
         expected_raw_amount = metadata.get("expected_route_raw_amount")
-    if expected_raw_amount in (None, ""):
+    if expected_raw_amount in (None, "") and not is_native_quoted:
         expected_raw_amount = session.min_amount
 
     token_pack_label = ""
@@ -1134,7 +1136,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
             f"{token_pack_price_label}"
         )
 
-    if is_provider_checkout:
+    if is_provider_checkout or is_native_quoted:
         min_amount_display = _format_canonical_stable_amount(session.min_amount)
     else:
         min_amount_display = _format_route_amount(
@@ -1144,7 +1146,9 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         )
 
     expected_payment_amount_display = min_amount_display
-    expected_payment_currency = session.asset_code
+    expected_payment_currency = (
+        "USD" if is_native_quoted else session.asset_code
+    )
     if is_provider_checkout and checkout_amount:
         expected_payment_amount_display = checkout_amount
         expected_payment_currency = checkout_currency
@@ -1168,6 +1172,11 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "expected_payment_amount_display": expected_payment_amount_display,
         "expected_payment_currency": expected_payment_currency,
         "observed_asset_code": observed_asset_code,
+        "observed_value_currency": (
+            "USD" if is_native_quoted else observed_asset_code
+        ),
+        "amount_semantics": amount_semantics,
+        "is_native_quoted": is_native_quoted,
         "observed_txid": session.observed_txid or "",
         "observed_amount": session.observed_amount,
         "observed_amount_display": (

@@ -286,6 +286,8 @@ services:
         target: base_sweeper_funding_private_key
       - source: bsc_sweeper_funding_private_key
         target: bsc_sweeper_funding_private_key
+      - source: polygon_sweeper_funding_private_key
+        target: polygon_sweeper_funding_private_key
     volumes:
       - ./sweeper_service/config:/app/config:ro
       - ./sweeper_service/data:/data
@@ -434,3 +436,6 @@ secrets:
     file: ../mediacms-secrets/sweeper/base_funding_private_key.txt
   bsc_sweeper_funding_private_key:
     file: ../mediacms-secrets/sweeper/bsc_funding_private_key.txt
+  polygon_sweeper_funding_private_key:
+    file: ../mediacms-secrets/sweeper/polygon_funding_private_key.txt
+

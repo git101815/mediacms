@@ -134,17 +134,25 @@ WALLET_NETWORK_DISPLAY_LABELS = {
     "arbitrum": "Arbitrum One",
     "base": "Base",
     "bsc": "BNB Chain",
+    "polygon": "Polygon",
 }
 
 WALLET_ROUTE_ONCHAIN_DECIMALS = {
     ("ethereum", "USDT"): 6,
     ("ethereum", "USDC"): 6,
+    ("ethereum", "ETH"): 18,
     ("arbitrum", "USDT"): 6,
     ("arbitrum", "USDC"): 6,
+    ("arbitrum", "ETH"): 18,
     ("base", "USDT"): 6,
     ("base", "USDC"): 6,
+    ("base", "ETH"): 18,
     ("bsc", "USDT"): 18,
     ("bsc", "USDC"): 18,
+    ("bsc", "BNB"): 18,
+    ("polygon", "USDC"): 6,
+    ("polygon", "USDT"): 6,
+    ("polygon", "POL"): 18,
 }
 
 WALLET_PAYMENT_GROUPS = {
@@ -161,6 +169,9 @@ WALLET_PAYMENT_GROUPS = {
 WALLET_CRYPTO_ASSET_GROUPS = {
     "USDC": {"label": "USDC", "icon_path": "images/wallet/usdc.svg", "order": 10},
     "USDT": {"label": "USDT", "icon_path": "images/wallet/usdt.svg", "order": 20},
+    "ETH": {"label": "ETH", "icon_path": "images/wallet/eth.svg", "order": 30},
+    "BNB": {"label": "BNB", "icon_path": "images/wallet/bnb.svg", "order": 40},
+    "POL": {"label": "POL", "icon_path": "images/wallet/crypto.svg", "order": 50},
 }
 
 WALLET_CRYPTO_NETWORK_GROUPS = {
@@ -168,6 +179,7 @@ WALLET_CRYPTO_NETWORK_GROUPS = {
     "arbitrum": {"label": "Arbitrum One", "icon_path": "images/wallet/arb.svg", "order": 20},
     "base": {"label": "Base", "icon_path": "images/wallet/base.svg", "order": 30},
     "bsc": {"label": "BNB Chain", "icon_path": "images/wallet/bnb.svg", "order": 40},
+    "polygon": {"label": "Polygon", "icon_path": "images/wallet/crypto.svg", "order": 50},
 }
 
 WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS = {

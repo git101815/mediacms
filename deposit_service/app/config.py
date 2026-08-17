@@ -8,12 +8,19 @@ STABLECOIN_CANONICAL_DECIMALS = 6
 ROUTE_ONCHAIN_DECIMALS = {
     ("ethereum", "USDT"): 6,
     ("ethereum", "USDC"): 6,
+    ("ethereum", "ETH"): 18,
     ("arbitrum", "USDT"): 6,
     ("arbitrum", "USDC"): 6,
+    ("arbitrum", "ETH"): 18,
     ("base", "USDT"): 6,
     ("base", "USDC"): 6,
+    ("base", "ETH"): 18,
     ("bsc", "USDT"): 18,
     ("bsc", "USDC"): 18,
+    ("bsc", "BNB"): 18,
+    ("polygon", "USDC"): 6,
+    ("polygon", "USDT"): 6,
+    ("polygon", "POL"): 18,
 }
 
 

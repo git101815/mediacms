@@ -6,8 +6,8 @@ from .evm_rpc import build_web3
 from .reference_head import get_reference_head
 from .rpc_pool import choose_best_rpc_url
 from .runtime_price import (
-    canonical_usd_to_required_pol_wei,
-    fetch_pol_usd_quote,
+    canonical_usd_to_required_native_units,
+    fetch_native_usd_quote,
 )
 
 
@@ -271,7 +271,8 @@ def _observe_token_option(
         runtime_price_quote = None
         if str(option.amount_semantics or "").strip().lower() == "native_quoted":
             try:
-                runtime_price_quote = fetch_pol_usd_quote(
+                runtime_price_quote = fetch_native_usd_quote(
+                    asset_code=option.asset_code,
                     base_url=runtime_prices_base_url,
                     shared_secret=runtime_prices_shared_secret,
                     timeout_seconds=runtime_prices_timeout_seconds,
@@ -305,10 +306,14 @@ def _observe_token_option(
                         session_public_id,
                     )
                     continue
-                onchain_min_amount = canonical_usd_to_required_pol_wei(
-                    min_amount,
-                    runtime_price_quote,
-                )
+                if onchain_min_amount <= 0:
+                    onchain_min_amount = (
+                        canonical_usd_to_required_native_units(
+                            min_amount,
+                            runtime_price_quote,
+                            asset_code=option.asset_code,
+                        )
+                    )
                 observation_min_amount = max(
                     option_observation_min_amount,
                     onchain_min_amount,

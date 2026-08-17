@@ -35,8 +35,11 @@ from ledger.providers.paygate import (
     paygate_enabled,
     paygate_route_key,
 )
+from ledger.native_quoted import (
+    NATIVE_QUOTED_AMOUNT_SEMANTICS,
+    get_native_asset_decimals,
+)
 from ledger.paygate_polygon import (
-    PAYGATE_POLYGON_AMOUNT_SEMANTICS,
     PAYGATE_POLYGON_ASSET,
     PAYGATE_POLYGON_CHAIN,
     get_paygate_polygon_policy,
@@ -323,13 +326,15 @@ def open_paygate_deposit_session(
             "display_label": provider_display_label,
             "allocation_source": "session_derivation",
             "chain_family": "evm",
-            "amount_semantics": PAYGATE_POLYGON_AMOUNT_SEMANTICS,
+            "amount_semantics": NATIVE_QUOTED_AMOUNT_SEMANTICS,
             "settlement": {
                 "provider": PAYGATE_PROVIDER_KEY,
                 "chain": PAYGATE_POLYGON_CHAIN,
                 "asset_code": PAYGATE_POLYGON_ASSET,
                 "token_contract_address": "",
-                "native_decimals": int(policy["native_decimals"]),
+                "native_decimals": get_native_asset_decimals(
+                    PAYGATE_POLYGON_ASSET
+                ),
                 "required_confirmations": int(policy["required_confirmations"]),
             },
             "token_pack": token_pack_snapshot,

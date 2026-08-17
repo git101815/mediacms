@@ -61,7 +61,9 @@ def provision_deposit_addresses_once(*, client, options, batch_size: int) -> dic
         route_next_index = _get_int(stats.get("next_derivation_index"), 0)
         provisioned_address_count = _get_int(stats.get("provisioned_address_count"), 0)
 
-        if route_next_index > 0 or provisioned_address_count > 0:
+        # next_derivation_index is global for EVM routes. A non-zero cursor
+        # therefore does not mean this specific route was provisioned.
+        if provisioned_address_count > 0:
             continue
 
         start_index = global_cursor
@@ -89,6 +91,7 @@ def provision_deposit_addresses_once(*, client, options, batch_size: int) -> dic
                     "metadata": {
                         "provisioned_by": "deposit-service",
                         "option_key": option.key,
+                        "amount_semantics": option.amount_semantics,
                     },
                     "derivation_index": address_index,
                 }

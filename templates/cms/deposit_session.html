@@ -90,10 +90,10 @@
           </div>
 
           <div class="wallet-deposit-ui__row">
-            <span class="wallet-deposit-ui__row-label">Paid</span>
+            <span class="wallet-deposit-ui__row-label">Paid value</span>
             <span class="wallet-deposit-ui__row-value">
               <span data-deposit-observed-amount>{{ deposit_session.observed_amount_display|default:"0" }}</span>
-              <span>{{ deposit_session.observed_asset_code }}</span>
+              <span>{{ deposit_session.observed_value_currency }}</span>
             </span>
           </div>
         </div>
@@ -102,7 +102,7 @@
           <i class="material-icons" aria-hidden="true">info</i>
           <div>
             Complete the hosted checkout. Tokens are credited only after the
-            USDC transfer is received and confirmed on-chain.
+            on-chain settlement is received and confirmed.
           </div>
         </div>
       {% else %}
@@ -120,8 +120,14 @@
           </div>
 
           <div class="wallet-deposit-ui__row">
-            <span class="wallet-deposit-ui__row-label">Expected amount</span>
-            <span class="wallet-deposit-ui__row-value">{{ deposit_session.min_amount_display }} {{ deposit_session.asset_code }}</span>
+            <span class="wallet-deposit-ui__row-label">{% if deposit_session.is_native_quoted %}Expected value{% else %}Expected amount{% endif %}</span>
+            <span class="wallet-deposit-ui__row-value">
+              {% if deposit_session.is_native_quoted %}
+              At least ${{ deposit_session.min_amount_display }} worth of {{ deposit_session.asset_code }}
+              {% else %}
+              {{ deposit_session.min_amount_display }} {{ deposit_session.asset_code }}
+              {% endif %}
+            </span>
           </div>
 
           <div class="wallet-deposit-ui__row">
@@ -149,10 +155,10 @@
 
       <div class="wallet-deposit-ui__footer">
         <div class="wallet-deposit-ui__balance">
-          <div class="wallet-deposit-ui__balance-label">{% if deposit_session.is_provider_checkout %}Paid{% else %}Received{% endif %}</div>
+          <div class="wallet-deposit-ui__balance-label">{% if deposit_session.is_provider_checkout %}Paid value{% elif deposit_session.is_native_quoted %}Received value{% else %}Received{% endif %}</div>
           <div class="wallet-deposit-ui__balance-value">
             <span data-deposit-observed-amount>{{ deposit_session.observed_amount_display|default:"0" }}</span>
-            <span>{{ deposit_session.observed_asset_code }}</span>
+            <span>{{ deposit_session.observed_value_currency }}</span>
             <button type="button" class="wallet-deposit-ui__refresh" data-deposit-refresh aria-label="Refresh deposit status">
               <i class="material-icons" aria-hidden="true">refresh</i>
             </button>
