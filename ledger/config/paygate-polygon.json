@@ -3,7 +3,7 @@
   "asset_code": "POL",
   "native_decimals": 18,
   "required_confirmations": 64,
-  "quote_max_age_seconds": 180,
+  "quote_max_age_seconds": 360,
   "quote_future_skew_seconds": 30,
   "underpayment_tolerance_bps": 500,
   "coverage_basis": "gross_stable_amount",

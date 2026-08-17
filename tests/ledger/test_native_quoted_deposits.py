@@ -132,6 +132,17 @@ class TestNativeQuotedDeposits(BaseLedgerTestCase):
         first_amount = int(first.amount)
         self.assertEqual(first_amount, 1_000_000)
 
+        session.refresh_from_db()
+        native_lock = (session.metadata or {}).get("native_quoted_lock")
+        self.assertIsInstance(native_lock, dict)
+        self.assertEqual(native_lock["event_key"], first.event_key)
+        self.assertEqual(native_lock["raw_amount"], str(raw_amount))
+        self.assertEqual(
+            native_lock["canonical_stable_amount"],
+            first_amount,
+        )
+        self.assertEqual(native_lock["detected_block_number"], 100)
+
         second = record_onchain_observation(
             actor=self.operator,
             deposit_session=session,
@@ -147,7 +158,7 @@ class TestNativeQuotedDeposits(BaseLedgerTestCase):
             amount=raw_amount,
             confirmations=12,
             detection_method="balance_verification",
-            raw_payload={"runtime_price_quote": self._quote("200")},
+            raw_payload={},
         )
 
         second.refresh_from_db()
@@ -169,6 +180,14 @@ class TestNativeQuotedDeposits(BaseLedgerTestCase):
         )
         target = watch[0]["targets"][0]
         self.assertEqual(target["onchain_min_amount"], str(raw_amount))
+        self.assertEqual(
+            target["native_quoted_lock"]["event_key"],
+            first.event_key,
+        )
+        self.assertEqual(
+            target["native_quoted_lock"]["raw_amount"],
+            str(raw_amount),
+        )
 
         txn = credit_confirmed_deposit_session(
             actor=self.operator,

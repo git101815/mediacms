@@ -1,7 +1,7 @@
 {
   "runtime_prices": {
     "timeout_seconds": 5,
-    "max_age_seconds": 180,
+    "max_age_seconds": 360,
     "future_skew_seconds": 30
   },
   "options": [

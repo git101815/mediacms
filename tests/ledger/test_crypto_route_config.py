@@ -86,3 +86,15 @@ def test_sweeper_has_matching_routes_and_polygon_erc20_gas_funding():
             == "/run/secrets/polygon_sweeper_funding_private_key"
         )
         assert int(options[key]["max_gas_funding_amount_wei"]) > 0
+
+def test_native_runtime_price_age_covers_five_minute_source_refresh():
+    native_policy = _read_json("ledger/config/native-quoted.json")
+    paygate_policy = _read_json("ledger/config/paygate-polygon.json")
+    deposit_config = _read_json(
+        "deposit_service/config/deposit-service.json"
+    )
+
+    assert native_policy["quote_max_age_seconds"] == 360
+    assert paygate_policy["quote_max_age_seconds"] == 360
+    assert deposit_config["runtime_prices"]["max_age_seconds"] == 360
+

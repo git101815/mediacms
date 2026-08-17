@@ -2833,33 +2833,71 @@ def record_onchain_observation(
     to_address = _normalize_evm_address(to_address)
     asset_code = (asset_code or "").strip().upper()
     route_raw_amount = _normalize_positive_int(amount, field_name="Observed raw on-chain amount")
+    native_quoted_lock = None
     native_valuation_metadata = None
     if is_native_quoted_session(deposit_session):
         if not isinstance(raw_payload, dict):
             raise ValidationError(
                 "Native quoted observation raw_payload must be an object"
             )
-        quote_payload = raw_payload.get("runtime_price_quote")
-        if not isinstance(quote_payload, dict):
-            raise ValidationError(
-                "Native quoted observation is missing runtime_price_quote"
+
+        session_metadata = deposit_session.metadata or {}
+        candidate_lock = session_metadata.get("native_quoted_lock")
+        if isinstance(candidate_lock, dict):
+            try:
+                locked_raw_amount = int(candidate_lock["raw_amount"])
+                locked_canonical_amount = int(
+                    candidate_lock["canonical_stable_amount"]
+                )
+                locked_detected_block_number = int(
+                    candidate_lock["detected_block_number"]
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValidationError(
+                    "Native quoted session has an invalid valuation lock"
+                ) from exc
+
+            if locked_raw_amount <= 0 or locked_canonical_amount <= 0:
+                raise ValidationError(
+                    "Native quoted session valuation lock must be positive"
+                )
+            if detection_method != "balance_verification":
+                raise ValidationError(
+                    "Locked native quoted observations must use balance verification"
+                )
+            if detected_block_number != locked_detected_block_number:
+                raise ValidationError(
+                    "Native quoted detected block does not match the locked observation"
+                )
+            if route_raw_amount != locked_raw_amount:
+                raise ValidationError(
+                    "Native quoted raw amount does not match the locked observation"
+                )
+
+            canonical_amount = locked_canonical_amount
+            native_quoted_lock = dict(candidate_lock)
+        else:
+            quote_payload = raw_payload.get("runtime_price_quote")
+            if not isinstance(quote_payload, dict):
+                raise ValidationError(
+                    "Native quoted observation is missing runtime_price_quote"
+                )
+            quote = normalize_native_usd_quote(
+                quote_payload,
+                asset_code=asset_code,
+                require_current=True,
             )
-        quote = normalize_native_usd_quote(
-            quote_payload,
-            asset_code=asset_code,
-            require_current=True,
-        )
-        canonical_amount = native_units_to_canonical_usd(
-            route_raw_amount,
-            quote,
-            asset_code=asset_code,
-        )
-        native_valuation_metadata = build_native_valuation_metadata(
-            raw_amount=route_raw_amount,
-            canonical_amount=canonical_amount,
-            quote=quote,
-            asset_code=asset_code,
-        )
+            canonical_amount = native_units_to_canonical_usd(
+                route_raw_amount,
+                quote,
+                asset_code=asset_code,
+            )
+            native_valuation_metadata = build_native_valuation_metadata(
+                raw_amount=route_raw_amount,
+                canonical_amount=canonical_amount,
+                quote=quote,
+                asset_code=asset_code,
+            )
     else:
         canonical_amount = _normalize_route_amount_to_canonical_stable_units(
             chain=chain,
@@ -2910,6 +2948,22 @@ def record_onchain_observation(
             txid=txid,
             log_index=log_index,
         )
+
+    if native_quoted_lock is not None:
+        locked_event_key = str(
+            native_quoted_lock.get("event_key") or ""
+        ).strip()
+        if not locked_event_key or locked_event_key != event_key:
+            raise ValidationError(
+                "Native quoted event key does not match the locked observation"
+            )
+        if not ObservedOnchainTransfer.objects.filter(
+            event_key=event_key,
+            deposit_session=deposit_session,
+        ).exists():
+            raise ValidationError(
+                "Locked native quoted observation no longer exists"
+            )
 
     if isinstance(raw_payload, dict):
         raw_payload_for_create = dict(raw_payload)
@@ -3044,10 +3098,47 @@ def record_onchain_observation(
         if update_fields:
             observed.save(update_fields=list(dict.fromkeys(update_fields)))
 
+    native_quoted_lock_to_persist = None
     if is_native_quoted_session(deposit_session):
-        # The first accepted quote is immutable for this event. Later watcher
-        # cycles may carry a newer quote, but only confirmations may advance.
+        # The first accepted valuation is immutable for this event. Once it is
+        # locked, later watcher cycles need only the blockchain to advance
+        # confirmations; runtime pricing is no longer part of the path.
         canonical_amount = int(observed.amount)
+
+        if native_quoted_lock is None:
+            observed_payload = (
+                observed.raw_payload
+                if isinstance(observed.raw_payload, dict)
+                else {}
+            )
+            valuation = observed_payload.get("native_quoted_valuation") or {}
+            frozen_quote = (
+                valuation.get("quote")
+                if isinstance(valuation, dict)
+                else None
+            )
+            if not isinstance(frozen_quote, dict):
+                frozen_quote = observed_payload.get("runtime_price_quote")
+            if not isinstance(frozen_quote, dict):
+                raise ValidationError(
+                    "Native quoted observation is missing its frozen quote"
+                )
+            if observed.detected_block_number is None:
+                raise ValidationError(
+                    "Native quoted observation is missing its detected block"
+                )
+            _locked_canonical, locked_observed_raw = (
+                _observed_transfer_amounts(observed)
+            )
+            native_quoted_lock_to_persist = {
+                "event_key": observed.event_key,
+                "raw_amount": str(int(locked_observed_raw)),
+                "canonical_stable_amount": int(observed.amount),
+                "detected_block_number": int(
+                    observed.detected_block_number
+                ),
+                "quote": frozen_quote,
+            }
 
     is_primary_credited_observation = _is_primary_credited_observation(
         deposit_session=deposit_session,
@@ -3118,6 +3209,18 @@ def record_onchain_observation(
         desired_session_status = DepositSession.STATUS_SEEN_ONCHAIN
 
     session_update_fields = []
+
+    if native_quoted_lock_to_persist is not None:
+        updated_metadata = dict(deposit_session.metadata or {})
+        if (
+            updated_metadata.get("native_quoted_lock")
+            != native_quoted_lock_to_persist
+        ):
+            updated_metadata["native_quoted_lock"] = (
+                native_quoted_lock_to_persist
+            )
+            deposit_session.metadata = updated_metadata
+            session_update_fields.append("metadata")
 
     if deposit_session.observed_txid != observed.txid:
         deposit_session.observed_txid = observed.txid
@@ -4132,6 +4235,7 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
         for session in sessions:
             is_residual_watch = session["status"] in RESIDUAL_DEPOSIT_WATCH_STATUSES
             session_metadata = session.get("metadata") or {}
+            native_quoted_lock = None
             if is_native_quoted_metadata(
                 chain=chain,
                 asset_code=asset_code,
@@ -4167,6 +4271,9 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
                     session.get("expected_onchain_raw_amount") or 0
                 )
                 amount_semantics = NATIVE_QUOTED_AMOUNT_SEMANTICS
+                candidate_lock = session_metadata.get("native_quoted_lock")
+                if not is_residual_watch and isinstance(candidate_lock, dict):
+                    native_quoted_lock = candidate_lock
             else:
                 canonical_min_amount, onchain_min_amount = _canonical_and_raw_amounts_from_stored_route_value(
                     chain=chain,
@@ -4198,6 +4305,7 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
                     "amount_unit": "canonical_stable",
                     "onchain_amount_unit": "raw_onchain",
                     "amount_semantics": amount_semantics,
+                    "native_quoted_lock": native_quoted_lock,
                     "status": session["status"],
                     "expires_at": session["expires_at"].isoformat(),
                     "watch_reason": "residual" if is_residual_watch else "active",

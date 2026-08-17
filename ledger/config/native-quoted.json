@@ -1,6 +1,6 @@
 {
   "canonical_stable_decimals": 6,
-  "quote_max_age_seconds": 180,
+  "quote_max_age_seconds": 360,
   "quote_future_skew_seconds": 30,
   "assets": {
     "ETH": {

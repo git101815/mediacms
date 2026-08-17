@@ -191,7 +191,7 @@ def load_config() -> ServiceConfig:
         raise RuntimeError("Deposit service runtime_prices config must be an object")
 
     runtime_prices_timeout_seconds = float(runtime_prices.get("timeout_seconds", 5))
-    runtime_prices_max_age_seconds = int(runtime_prices.get("max_age_seconds", 180))
+    runtime_prices_max_age_seconds = int(runtime_prices.get("max_age_seconds", 360))
     runtime_prices_future_skew_seconds = int(runtime_prices.get("future_skew_seconds", 30))
     if runtime_prices_timeout_seconds <= 0:
         raise RuntimeError("runtime_prices.timeout_seconds must be > 0")
