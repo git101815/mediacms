@@ -149,14 +149,21 @@ def load_config() -> ServiceConfig:
 
     options: list[SweepOptionConfig] = []
     for item in raw_options:
-        funding_private_key = _normalize_private_key(
-            _read_secret_file(item["funding_private_key_file"])
+        funding_private_key_file = str(item.get("funding_private_key_file") or "").strip()
+        funding_private_key = (
+            _normalize_private_key(_read_secret_file(funding_private_key_file))
+            if funding_private_key_file
+            else ""
         )
 
         destination_address = str(
             _resolve_env_placeholder(item.get("destination_address", ""))
         ).strip().lower()
         if not destination_address:
+            if not funding_private_key:
+                raise RuntimeError(
+                    f"Option {item.get('key', '')} requires destination_address when no funding key is configured"
+                )
             destination_address = Account.from_key(funding_private_key).address.lower()
 
         raw_max_gas_funding_amount_wei = item.get("max_gas_funding_amount_wei")
@@ -188,8 +195,13 @@ def load_config() -> ServiceConfig:
             raise RuntimeError(f"funding_confirmations must be > 0 for option {option.key}")
         if option.sweep_confirmations <= 0:
             raise RuntimeError(f"sweep_confirmations must be > 0 for option {option.key}")
-        if option.max_gas_funding_amount_wei <= 0:
-            raise RuntimeError(f"max_gas_funding_amount_wei must be > 0 for option {option.key}")
+        if option.token_contract_address:
+            if not option.funding_private_key:
+                raise RuntimeError(f"ERC20 option {option.key} requires funding_private_key_file")
+            if option.max_gas_funding_amount_wei <= 0:
+                raise RuntimeError(f"max_gas_funding_amount_wei must be > 0 for option {option.key}")
+        elif option.max_gas_funding_amount_wei < 0:
+            raise RuntimeError(f"max_gas_funding_amount_wei cannot be negative for option {option.key}")
         if option.erc20_transfer_gas_limit <= 0:
             raise RuntimeError(f"erc20_transfer_gas_limit must be > 0 for option {option.key}")
         if option.gas_limit_multiplier_bps < 10000:

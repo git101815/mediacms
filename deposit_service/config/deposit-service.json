@@ -132,6 +132,27 @@
       "poll_interval_seconds": 15,
       "lookback_blocks": 400,
       "poa_compatible": false
+    },
+    {
+      "key": "polygon-pol-paygate",
+      "chain": "polygon",
+      "asset_code": "POL",
+      "token_contract_address": "",
+      "display_label": "Polygon · POL (PayGate settlement)",
+      "rpc_urls": [
+        "${POLYGON_RPC_URL}",
+        "${POLYGON_RPC_URL_FALLBACK_1}",
+        "${POLYGON_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 64,
+      "min_amount": 1,
+      "observation_min_amount": 1000000000000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 1000,
+      "poa_compatible": true,
+      "amount_semantics": "native_quoted",
+      "provision_addresses": false
     }
   ]
 }

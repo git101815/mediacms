@@ -38,6 +38,20 @@ from datetime import timedelta
 import os
 from bip_utils import Bip44, Bip44Changes, Bip44Coins
 from django.conf import settings
+from ledger.paygate_polygon import (
+    PAYGATE_POLYGON_AMOUNT_SEMANTICS,
+    PAYGATE_POLYGON_ASSET,
+    PAYGATE_POLYGON_CHAIN,
+    build_pol_valuation_metadata,
+    canonical_usd_to_required_pol_wei,
+    get_fresh_pol_usd_quote,
+    get_paygate_polygon_credit_minimum_canonical,
+    get_paygate_polygon_policy,
+    is_paygate_polygon_metadata,
+    is_paygate_polygon_route,
+    is_paygate_polygon_session,
+    pol_wei_to_canonical_usd,
+)
 ACTIVE_DEPOSIT_SESSION_STATUSES = {
     DepositSession.STATUS_AWAITING_PAYMENT,
     DepositSession.STATUS_SEEN_ONCHAIN,
@@ -881,6 +895,7 @@ NETWORK_DISPLAY_LABELS = {
     "arbitrum": "Arbitrum One",
     "base": "Base",
     "bsc": "BNB Chain",
+    "polygon": "Polygon",
 }
 
 DISPLAY_DECIMALS_BY_ROUTE = {
@@ -913,6 +928,7 @@ SUPPORTED_EVM_DEPOSIT_CHAINS = {
     "bsc",
     "arbitrum",
     "base",
+    "polygon",
 }
 GLOBAL_EVM_COUNTER_ROUTE_KEY = "__global_evm_derivation__"
 GLOBAL_EVM_COUNTER_CHAIN = "ethereum"
@@ -1077,6 +1093,12 @@ def _get_route_onchain_decimals(*, chain: str, asset_code: str) -> int:
             f"Unsupported deposit asset decimals for {normalized_chain}/{normalized_asset}"
         )
     return int(decimals)
+
+
+def _get_route_metadata_decimals(*, chain: str, asset_code: str) -> int:
+    if is_paygate_polygon_route(chain=chain, asset_code=asset_code):
+        return int(get_paygate_polygon_policy()["native_decimals"])
+    return _get_route_onchain_decimals(chain=chain, asset_code=asset_code)
 
 
 def _normalize_route_amount_to_canonical_stable_units(
@@ -1280,6 +1302,16 @@ def _deposit_address_min_amounts(address: DepositAddress) -> tuple[int, int]:
 
 
 def _deposit_session_min_amounts(session: DepositSession) -> tuple[int, int]:
+    if is_paygate_polygon_session(session):
+        token_pack_snapshot = (session.metadata or {}).get("token_pack") or {}
+        canonical_minimum = get_paygate_polygon_credit_minimum_canonical(token_pack_snapshot)
+        quote = get_fresh_pol_usd_quote(required=False)
+        if quote is None:
+            return int(canonical_minimum), 0
+        return int(canonical_minimum), int(
+            canonical_usd_to_required_pol_wei(canonical_minimum, quote)
+        )
+
     return _canonical_and_raw_amounts_from_stored_route_value(
         chain=session.chain,
         asset_code=session.asset_code,
@@ -1327,7 +1359,7 @@ def _amount_metadata(
         "canonical_stable_amount": int(canonical_amount),
         "onchain_raw_amount": str(int(raw_amount)),
         "route_onchain_decimals": int(
-            _get_route_onchain_decimals(chain=chain, asset_code=asset_code)
+            _get_route_metadata_decimals(chain=chain, asset_code=asset_code)
         ),
         "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
     }
@@ -2777,11 +2809,21 @@ def record_onchain_observation(
     to_address = _normalize_evm_address(to_address)
     asset_code = (asset_code or "").strip().upper()
     route_raw_amount = _normalize_positive_int(amount, field_name="Observed raw on-chain amount")
-    canonical_amount = _normalize_route_amount_to_canonical_stable_units(
-        chain=chain,
-        asset_code=asset_code,
-        raw_amount=route_raw_amount,
-    )
+    pol_valuation_metadata = None
+    if is_paygate_polygon_session(deposit_session):
+        quote = get_fresh_pol_usd_quote(required=True)
+        canonical_amount = pol_wei_to_canonical_usd(route_raw_amount, quote)
+        pol_valuation_metadata = build_pol_valuation_metadata(
+            raw_amount_wei=route_raw_amount,
+            canonical_amount=canonical_amount,
+            quote=quote,
+        )
+    else:
+        canonical_amount = _normalize_route_amount_to_canonical_stable_units(
+            chain=chain,
+            asset_code=asset_code,
+            raw_amount=route_raw_amount,
+        )
     canonical_amount = _normalize_positive_int(canonical_amount, field_name="Observed canonical stable amount")
     confirmations = int(confirmations)
 
@@ -2839,6 +2881,9 @@ def record_onchain_observation(
             raw_amount=route_raw_amount,
         )
     )
+    if pol_valuation_metadata is not None:
+        raw_payload_for_create["paygate_polygon_valuation"] = pol_valuation_metadata
+        raw_payload_for_create["amount_semantics"] = PAYGATE_POLYGON_AMOUNT_SEMANTICS
 
     if _is_residual_deposit_recording_context(deposit_session):
         raw_payload_for_create = _build_residual_observation_payload(
@@ -3147,11 +3192,16 @@ def credit_confirmed_deposit_session(
             token_pack_snapshot
         )
     )
-    credit_minimum_canonical_amount = (
-        token_pack_net_amount
-        if token_pack_net_amount is not None
-        else int(session_min_canonical_amount)
-    )
+    if is_paygate_polygon_session(deposit_session):
+        credit_minimum_canonical_amount = get_paygate_polygon_credit_minimum_canonical(
+            token_pack_snapshot
+        )
+    else:
+        credit_minimum_canonical_amount = (
+            token_pack_net_amount
+            if token_pack_net_amount is not None
+            else int(session_min_canonical_amount)
+        )
 
     if (
         observed_canonical_stable_amount
@@ -3234,7 +3284,7 @@ def credit_confirmed_deposit_session(
                 "payment_method": (deposit_session.metadata or {}).get("payment_method") or {},
                 "amount_unit": "canonical_stable",
                 "route_onchain_decimals": int(
-                    _get_route_onchain_decimals(
+                    _get_route_metadata_decimals(
                         chain=deposit_session.chain,
                         asset_code=deposit_session.asset_code,
                     )
@@ -3278,7 +3328,7 @@ def credit_confirmed_deposit_session(
                 "ledger_credit_amount": int(ledger_credit_amount),
                 "amount_unit": "canonical_stable",
                 "route_onchain_decimals": int(
-                    _get_route_onchain_decimals(
+                    _get_route_metadata_decimals(
                         chain=deposit_session.chain,
                         asset_code=deposit_session.asset_code,
                     )
@@ -3819,16 +3869,18 @@ def ingest_deposit_observation_event(
     ledger_txn = None
     observed_canonical_amount, _observed_raw_amount = _observed_transfer_amounts(observed_transfer)
     session_min_canonical_amount, _session_min_raw_amount = _deposit_session_min_amounts(deposit_session)
-    token_pack_net_amount = (
-        _token_pack_credit_required_canonical_amount(
-            (deposit_session.metadata or {}).get("token_pack") or {}
+    token_pack_snapshot = (deposit_session.metadata or {}).get("token_pack") or {}
+    token_pack_net_amount = _token_pack_credit_required_canonical_amount(token_pack_snapshot)
+    if is_paygate_polygon_session(deposit_session):
+        credit_minimum_canonical_amount = get_paygate_polygon_credit_minimum_canonical(
+            token_pack_snapshot
         )
-    )
-    credit_minimum_canonical_amount = (
-        token_pack_net_amount
-        if token_pack_net_amount is not None
-        else int(session_min_canonical_amount)
-    )
+    else:
+        credit_minimum_canonical_amount = (
+            token_pack_net_amount
+            if token_pack_net_amount is not None
+            else int(session_min_canonical_amount)
+        )
     should_credit = (
         observed_transfer.status != ObservedOnchainTransfer.STATUS_CREDITED
         and not _is_residual_observed_transfer(observed_transfer)
@@ -3876,6 +3928,11 @@ def get_deposit_stats(*, actor, option_rows):
         )
 
         counter = DepositRouteCounter.objects.filter(route_key=route_key).first()
+        global_evm_counter = (
+            DepositRouteCounter.objects.filter(route_key=GLOBAL_EVM_COUNTER_ROUTE_KEY).first()
+            if chain in SUPPORTED_EVM_DEPOSIT_CHAINS
+            else None
+        )
 
         address_qs = DepositAddress.objects.filter(
             chain=chain,
@@ -3899,7 +3956,10 @@ def get_deposit_stats(*, actor, option_rows):
                 "asset_code": asset_code,
                 "token_contract_address": token_contract_address,
                 "route_key": route_key,
-                "next_derivation_index": int(counter.next_derivation_index) if counter is not None else 0,
+                "next_derivation_index": max(
+                    int(counter.next_derivation_index) if counter is not None else 0,
+                    int(global_evm_counter.next_derivation_index) if global_evm_counter is not None else 0,
+                ),
                 "provisioned_address_count": int(address_qs.count()),
                 "max_derivation_index": None if max_derivation_index is None else int(max_derivation_index),
                 "active_session_count": active_sessions,
@@ -3967,29 +4027,43 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
         for session in sessions:
             is_residual_watch = session["status"] in RESIDUAL_DEPOSIT_WATCH_STATUSES
             session_metadata = session.get("metadata") or {}
-            canonical_min_amount, onchain_min_amount = _canonical_and_raw_amounts_from_stored_route_value(
+            if is_paygate_polygon_metadata(
                 chain=chain,
                 asset_code=asset_code,
-                stored_amount=session["min_amount"],
-                raw_amount=session.get("expected_onchain_raw_amount"),
+                token_contract_address=token_contract_address,
                 metadata=session_metadata,
-                canonical_metadata_keys=("expected_canonical_stable_amount", "canonical_min_amount"),
-                raw_metadata_keys=("expected_route_raw_amount", "expected_onchain_raw_amount", "onchain_min_amount"),
-            )
-            token_pack_net_amount = (
-                _token_pack_credit_required_canonical_amount(
+            ):
+                canonical_min_amount = get_paygate_polygon_credit_minimum_canonical(
                     session_metadata.get("token_pack") or {}
                 )
-            )
-            if token_pack_net_amount is not None:
-                canonical_min_amount = int(token_pack_net_amount)
+                quote = get_fresh_pol_usd_quote(required=False)
                 onchain_min_amount = (
-                    _convert_canonical_stable_to_route_raw_amount(
+                    canonical_usd_to_required_pol_wei(canonical_min_amount, quote)
+                    if quote is not None
+                    else 0
+                )
+                amount_semantics = PAYGATE_POLYGON_AMOUNT_SEMANTICS
+            else:
+                canonical_min_amount, onchain_min_amount = _canonical_and_raw_amounts_from_stored_route_value(
+                    chain=chain,
+                    asset_code=asset_code,
+                    stored_amount=session["min_amount"],
+                    raw_amount=session.get("expected_onchain_raw_amount"),
+                    metadata=session_metadata,
+                    canonical_metadata_keys=("expected_canonical_stable_amount", "canonical_min_amount"),
+                    raw_metadata_keys=("expected_route_raw_amount", "expected_onchain_raw_amount", "onchain_min_amount"),
+                )
+                token_pack_net_amount = _token_pack_credit_required_canonical_amount(
+                    session_metadata.get("token_pack") or {}
+                )
+                if token_pack_net_amount is not None:
+                    canonical_min_amount = int(token_pack_net_amount)
+                    onchain_min_amount = _convert_canonical_stable_to_route_raw_amount(
                         chain=chain,
                         asset_code=asset_code,
                         canonical_amount=canonical_min_amount,
                     )
-                )
+                amount_semantics = "canonical_stable"
             targets.append(
                 {
                     "session_public_id": str(session["public_id"]),
@@ -3999,6 +4073,7 @@ def list_active_deposit_watch_targets(*, actor, option_rows):
                     "onchain_min_amount": str(onchain_min_amount),
                     "amount_unit": "canonical_stable",
                     "onchain_amount_unit": "raw_onchain",
+                    "amount_semantics": amount_semantics,
                     "status": session["status"],
                     "expires_at": session["expires_at"].isoformat(),
                     "watch_reason": "residual" if is_residual_watch else "active",
@@ -4158,7 +4233,7 @@ def _get_or_create_sweep_job_for_observed_transfer(
                 "canonical_stable_amount": int(observed_canonical_amount),
                 "onchain_raw_amount": str(int(observed_raw_amount)),
                 "route_onchain_decimals": int(
-                    _get_route_onchain_decimals(
+                    _get_route_metadata_decimals(
                         chain=deposit_session.chain,
                         asset_code=deposit_session.asset_code,
                     )

@@ -154,6 +154,10 @@ from ledger.fiat import (
 )
 from ledger.providers.malum import MALUM_CHAIN, MALUM_PROVIDER_KEY
 from ledger.providers.paygate import PAYGATE_CHAIN, PAYGATE_PROVIDER_KEY
+from ledger.paygate_polygon import (
+    store_pol_usd_quote,
+    validate_pol_price_push_secret,
+)
 from ledger.providers.dfx import DFX_PROVIDER_KEY
 from ledger.providers.mtpelerin import MTPERELIN_PROVIDER_KEY
 from ledger.providers.banxa import BANXA_PROVIDER_KEY
@@ -204,6 +208,25 @@ from .upload_limits import (
     uploaded_file_is_video,
 )
 from .tasks import save_user_action, video_trim_task
+
+@csrf_exempt
+@require_POST
+def internal_paygate_pol_price(request):
+    try:
+        validate_pol_price_push_secret(
+            request.headers.get("X-Internal-Shared-Secret") or ""
+        )
+        try:
+            payload = json.loads((request.body or b"{}").decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise DjangoValidationError("Request body must be valid JSON") from exc
+        quote = store_pol_usd_quote(payload)
+        return JsonResponse({"ok": True, "quote": quote})
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except (DjangoValidationError, ImproperlyConfigured) as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
 
 VALID_USER_ACTIONS = [action for action, name in USER_MEDIA_ACTIONS]
 cutoff = timezone.now() - timedelta(minutes=4)

@@ -33,6 +33,8 @@ class DepositOptionConfig:
     poll_interval_seconds: int
     lookback_blocks: int
     poa_compatible: bool
+    amount_semantics: str
+    provision_addresses: bool
 
 
 @dataclass(frozen=True)
@@ -199,6 +201,8 @@ def load_config() -> ServiceConfig:
             poll_interval_seconds=int(item.get("poll_interval_seconds", 15)),
             lookback_blocks=int(item.get("lookback_blocks", 2000)),
             poa_compatible=bool(item.get("poa_compatible", False)),
+            amount_semantics=str(item.get("amount_semantics", "canonical_stable")).strip().lower(),
+            provision_addresses=bool(item.get("provision_addresses", True)),
         )
 
         if option.required_confirmations <= 0:
@@ -208,15 +212,29 @@ def load_config() -> ServiceConfig:
         if option.observation_min_amount < 0:
             raise RuntimeError(f"observation_min_amount must be >= 0 for option {option.key}")
 
-        route_min_amount_raw = _canonical_min_amount_to_onchain_raw_amount(
-            chain=option.chain,
-            asset_code=option.asset_code,
-            canonical_amount=option.min_amount,
-        )
-        if option.observation_min_amount > route_min_amount_raw:
+        if option.amount_semantics == "canonical_stable":
+            route_min_amount_raw = _canonical_min_amount_to_onchain_raw_amount(
+                chain=option.chain,
+                asset_code=option.asset_code,
+                canonical_amount=option.min_amount,
+            )
+            if option.observation_min_amount > route_min_amount_raw:
+                raise RuntimeError(
+                    "observation_min_amount cannot be greater than the on-chain equivalent "
+                    f"of min_amount for option {option.key}"
+                )
+        elif option.amount_semantics == "native_quoted":
+            if str(option.token_contract_address or "").strip():
+                raise RuntimeError(
+                    f"native_quoted option {option.key} must use a native asset"
+                )
+            if option.observation_min_amount <= 0:
+                raise RuntimeError(
+                    f"native_quoted option {option.key} requires a positive raw observation floor"
+                )
+        else:
             raise RuntimeError(
-                "observation_min_amount cannot be greater than the on-chain equivalent "
-                f"of min_amount for option {option.key}"
+                f"Unsupported amount_semantics for option {option.key}: {option.amount_semantics}"
             )
 
         if option.session_ttl_seconds <= 0:

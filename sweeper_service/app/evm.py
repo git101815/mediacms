@@ -67,6 +67,7 @@ def build_native_transfer_transaction(
     to_address: str,
     amount_wei: int,
     gas_price_multiplier_bps: int,
+    gas_price_wei: int | None = None,
 ) -> dict:
     funding_address = address_from_private_key(funding_private_key)
     return {
@@ -79,6 +80,7 @@ def build_native_transfer_transaction(
         **_build_fee_params(
             w3=w3,
             gas_price_multiplier_bps=gas_price_multiplier_bps,
+            gas_price_wei=gas_price_wei,
         ),
     }
 

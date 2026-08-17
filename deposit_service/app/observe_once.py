@@ -266,7 +266,23 @@ def _observe_token_option(
             min_amount = int(target["min_amount"])
             onchain_min_amount = int(target.get("onchain_min_amount", min_amount))
             option_observation_min_amount = int(option.observation_min_amount)
-            observation_min_amount = option_observation_min_amount
+            amount_semantics = str(
+                target.get("amount_semantics") or option.amount_semantics or "canonical_stable"
+            ).strip().lower()
+            if amount_semantics == "native_quoted":
+                if onchain_min_amount <= 0:
+                    logging.info(
+                        "native quoted target skipped without fresh quote option=%s session=%s",
+                        option.key,
+                        session_public_id,
+                    )
+                    continue
+                observation_min_amount = max(
+                    option_observation_min_amount,
+                    onchain_min_amount,
+                )
+            else:
+                observation_min_amount = option_observation_min_amount
 
             try:
                 checksum_deposit_address = Web3.to_checksum_address(deposit_address)

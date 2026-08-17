@@ -223,7 +223,6 @@ def paygate_enabled() -> bool:
     if not _setting_bool("PAYGATE_ENABLED", False):
         return False
     try:
-        get_paygate_usdc_polygon_wallet()
         get_paygate_public_base_url()
         provider_ids = get_paygate_provider_ids() or [""]
         for provider_id in provider_ids:

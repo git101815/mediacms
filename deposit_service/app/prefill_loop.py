@@ -56,6 +56,8 @@ def provision_deposit_addresses_once(*, client, options, batch_size: int) -> dic
     address_rows = []
 
     for option, stats in zip(options, stats_rows):
+        if not option.provision_addresses:
+            continue
         route_next_index = _get_int(stats.get("next_derivation_index"), 0)
         provisioned_address_count = _get_int(stats.get("provisioned_address_count"), 0)
 

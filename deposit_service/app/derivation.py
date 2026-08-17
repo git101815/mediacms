@@ -6,6 +6,7 @@ SUPPORTED_EVM_CHAINS = {
     "bsc",
     "arbitrum",
     "base",
+    "polygon",
 }
 
 

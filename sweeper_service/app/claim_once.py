@@ -71,6 +71,10 @@ def _build_option_selector(option) -> dict:
     }
 
 
+def _is_native_option(option) -> bool:
+    return not str(option.token_contract_address or "").strip()
+
+
 def _option_key(*, chain: str, asset_code: str, token_contract_address: str) -> tuple[str, str, str]:
     return (
         (chain or "").strip().lower(),
@@ -794,6 +798,115 @@ def _send_native_transfer_with_sender_lock(
         raise
 
 
+def _send_native_sweep_with_sender_lock(
+    *,
+    client: MediaCMSInternalClient,
+    config,
+    w3,
+    option,
+    public_id: str,
+    claim_token: str,
+    source_private_key: str,
+    destination_address: str,
+    amount_wei: int,
+    gas_price_wei: int,
+) -> str:
+    source_address = address_from_private_key(source_private_key)
+    sender_lock = None
+    backend_recorded = False
+    txid = ""
+
+    try:
+        sender_lock = _reserve_sender_nonce(
+            client=client,
+            config=config,
+            option=option,
+            w3=w3,
+            address=source_address,
+        )
+        tx = build_native_transfer_transaction(
+            w3=w3,
+            nonce=sender_lock["nonce"],
+            funding_private_key=source_private_key,
+            to_address=destination_address,
+            amount_wei=amount_wei,
+            gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+            gas_price_wei=gas_price_wei,
+        )
+        signed = sign_transaction(tx=tx, private_key=source_private_key)
+        txid = signed["txid"]
+
+        client.mark_sweep_broadcasted(
+            public_id=public_id,
+            claim_token=claim_token,
+            sweep_txid=txid,
+            destination_address=destination_address,
+            last_sweep_gas_limit=21000,
+            sender_address=source_address,
+            nonce=sender_lock["nonce"],
+            amount=amount_wei,
+        )
+        backend_recorded = True
+
+        send_signed_transaction(
+            w3=w3,
+            raw_transaction=signed["raw_transaction"],
+            expected_txid=txid,
+        )
+        client.confirm_evm_sender_nonce_used(
+            chain=option.chain,
+            address=source_address,
+            lock_token=sender_lock["lock_token"],
+            nonce=sender_lock["nonce"],
+            txid=txid,
+        )
+        return txid
+    except Exception as exc:
+        if backend_recorded and _is_rpc_insufficient_funds_error(exc):
+            error_message = _truncate_error(str(exc))
+            try:
+                client.mark_sweep_broadcast_missing(
+                    public_id=public_id,
+                    claim_token=claim_token,
+                    sweep_txid=txid,
+                    next_retry_in_seconds=_default_retry_delay_seconds(config),
+                    error=error_message,
+                )
+            except Exception as recovery_exc:
+                _release_sender_lock_safely(
+                    client=client,
+                    option=option,
+                    sender_lock=sender_lock,
+                )
+                _raise_structured_error(
+                    code="SWEEP_NATIVE_RPC_REJECT_RECOVERY_UNCERTAIN",
+                    message="Native sweep RPC rejected transaction and backend recovery is uncertain",
+                    retryable=True,
+                    details={
+                        "job_public_id": public_id,
+                        "txid": txid,
+                        "rpc_error": error_message,
+                        "recovery_error": _truncate_error(str(recovery_exc)),
+                    },
+                )
+            _release_sender_lock_safely(
+                client=client,
+                option=option,
+                sender_lock=sender_lock,
+            )
+            raise _BroadcastRejectedAndRescheduled(
+                f"Native sweep RPC rejected transaction; job rescheduled public_id={public_id} txid={txid}"
+            ) from exc
+
+        if not backend_recorded:
+            _release_sender_lock_safely(
+                client=client,
+                option=option,
+                sender_lock=sender_lock,
+            )
+        raise
+
+
 def _send_erc20_transfer_with_sender_lock(
     *,
     client: MediaCMSInternalClient,
@@ -1211,6 +1324,18 @@ def _process_claimed_job(
             )
             return
 
+        if _is_native_option(option):
+            _raise_structured_error(
+                code="SWEEP_NATIVE_REVERTED",
+                message="Native sweep transaction reverted",
+                retryable=False,
+                details={
+                    "job_public_id": public_id,
+                    "sweep_txid": sweep_txid,
+                    "receipt_status": int(receipt.get("status", 0) or 0),
+                },
+            )
+
         attempted_gas_limit = int(
             job.get("last_sweep_gas_limit")
             or receipt.get("gasUsed")
@@ -1381,6 +1506,65 @@ def _process_claimed_job(
 
     elif status not in {"pending", "ready_to_sweep"}:
         raise RuntimeError(f"Unsupported claimed job status for job={public_id}: {status}")
+
+    if _is_native_option(option):
+        if status == "funding_broadcasted":
+            _raise_structured_error(
+                code="SWEEP_NATIVE_INVALID_FUNDING_STATE",
+                message="Native sweep job must never require gas funding",
+                retryable=False,
+                details={"job_public_id": public_id},
+            )
+
+        source_native_balance = int(get_native_balance(w3=w3, address=source_address))
+        gas_price_wei = _compute_effective_gas_price_wei(w3=w3, option=option)
+        gas_limit = 21000
+        fee_wei = int(gas_limit) * int(gas_price_wei)
+        sweep_amount_wei = source_native_balance - fee_wei
+        if sweep_amount_wei <= 0:
+            _raise_structured_error(
+                code="SWEEP_NATIVE_BALANCE_TOO_LOW",
+                message="Native source balance does not cover its own sweep gas",
+                retryable=True,
+                details={
+                    "job_public_id": public_id,
+                    "source_balance_wei": source_native_balance,
+                    "required_fee_wei": fee_wei,
+                    "chain": option.chain,
+                    "asset_code": option.asset_code,
+                },
+            )
+
+        client.mark_ready_to_sweep(public_id=public_id, claim_token=claim_token)
+        sweep_txid = _send_native_sweep_with_sender_lock(
+            client=client,
+            config=config,
+            w3=w3,
+            option=option,
+            public_id=public_id,
+            claim_token=claim_token,
+            source_private_key=source_private_key,
+            destination_address=option.destination_address,
+            amount_wei=sweep_amount_wei,
+            gas_price_wei=gas_price_wei,
+        )
+        client.mark_rescheduled(
+            public_id=public_id,
+            claim_token=claim_token,
+            next_retry_in_seconds=retry_delay_seconds,
+        )
+        logging.info(
+            "sweeper_service action=native-sweep-broadcasted public_id=%s chain=%s asset=%s "
+            "source_balance=%s fee=%s amount=%s sweep_txid=%s",
+            public_id,
+            option.chain,
+            option.asset_code,
+            source_native_balance,
+            fee_wei,
+            sweep_amount_wei,
+            sweep_txid,
+        )
+        return
 
     token_balance = _read_current_token_balance_or_raise(
         w3=w3,
