@@ -1,4 +1,3 @@
-ARG FFMPEG_BUILDER_IMAGE=aad7xppz4fd4r8emr/cf-encoder:av1nvenc-cuda12.4-ffmpeg7.1.1
 FROM python:3.13.5-bookworm AS build-image
 
 # Install system dependencies needed for Bento4
@@ -21,7 +20,6 @@ RUN mkdir -p /home/mediacms.io/bento4 && \
     rm -rf /home/mediacms.io/bento4/docs && \
     rm -f "/tmp/${BENTO4_ZIP}"
 
-FROM ${FFMPEG_BUILDER_IMAGE} AS ffmpeg_builder
 ############ RUNTIME IMAGE ############
 FROM python:3.13.5-bookworm AS runtime_image
 
@@ -31,15 +29,13 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV CELERY_APP='cms'
 ENV VIRTUAL_ENV=/home/mediacms.io
-ENV PATH="/opt/ffmpeg/bin:$VIRTUAL_ENV/bin:$PATH"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install runtime system dependencies
 RUN apt-get update -y && \
-    apt-get -y upgrade && \
     apt-get install --no-install-recommends -y \
         ca-certificates \
         curl \
-        gnupg \
         supervisor \
         nginx \
         imagemagick \
@@ -47,10 +43,7 @@ RUN apt-get update -y && \
         pkg-config \
         libxml2-dev \
         libxmlsec1-dev \
-        libxmlsec1-openssl \
-        libx264-164 \
-        libx265-199 \
-        libnuma1 && \
+        libxmlsec1-openssl && \
     install -d /usr/share/postgresql-common/pgdg && \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc && \
@@ -61,8 +54,7 @@ RUN apt-get update -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get purge --auto-remove -y && \
     apt-get clean
-# Reuse the prebuilt encoder toolchain and add Bento4
-COPY --from=ffmpeg_builder /opt/ffmpeg /opt/ffmpeg
+# Add Bento4
 COPY --from=build-image /home/mediacms.io/bento4 /home/mediacms.io/bento4
 
 # Set up virtualenv
@@ -84,8 +76,6 @@ RUN pip install --no-cache-dir --no-binary lxml,xmlsec -r requirements.txt && \
 # Copy application files
 COPY . /home/mediacms.io/mediacms
 WORKDIR /home/mediacms.io/mediacms
-
-# required for sprite thumbnail generation for large video files
 
 COPY deploy/docker/policy.xml /etc/ImageMagick-6/policy.xml
 

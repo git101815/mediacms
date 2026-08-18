@@ -193,7 +193,13 @@ jobs:
       - name: Verify production runtime
         run: |
           docker run --rm --entrypoint python mediacms-ci:production --version
-          docker run --rm --entrypoint ffprobe mediacms-ci:production -hide_banner -version
+          docker run --rm --entrypoint /bin/sh mediacms-ci:production -c '
+            test -x /home/mediacms.io/bento4/bin/mp4hls &&
+            test -x /home/mediacms.io/bento4/bin/mp4dash &&
+            test -x /home/mediacms.io/bento4/bin/mp4fragment &&
+            ! command -v ffmpeg >/dev/null 2>&1 &&
+            ! command -v ffprobe >/dev/null 2>&1
+          '
 
   required:
     name: CI / required
