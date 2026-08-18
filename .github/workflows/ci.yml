@@ -80,12 +80,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build MediaCMS test image from production Dockerfile
-        run: |
-          docker build \
-            --build-arg DEVELOPMENT_MODE=True \
-            --tag mediacms-ci:test \
-            .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mediacms-ci:test
+          build-args: |
+            DEVELOPMENT_MODE=True
+          cache-from: type=gha,scope=mediacms-backend
+          cache-to: type=gha,mode=max,scope=mediacms-backend,ignore-error=true
 
       - name: Validate CI compose
         run: docker compose -f docker-compose-ci.yaml config >/dev/null
@@ -183,12 +190,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build production image
-        run: |
-          docker build \
-            --build-arg DEVELOPMENT_MODE=False \
-            --tag mediacms-ci:production \
-            .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mediacms-ci:production
+          build-args: |
+            DEVELOPMENT_MODE=False
+          cache-from: type=gha,scope=mediacms-production
+          cache-to: type=gha,mode=max,scope=mediacms-production,ignore-error=true
 
       - name: Verify production runtime
         run: |
