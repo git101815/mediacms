@@ -6,12 +6,34 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 from . import helpers
 from .models import DailyVideoUploadQuota
 
 
 DAILY_VIDEO_UPLOAD_LIMIT_CODE = "daily_video_upload_limit_reached"
+UNSUPPORTED_MEDIA_TYPE_CODE = "unsupported_media_type"
+UNSUPPORTED_MEDIA_TYPE_MESSAGE = (
+    "Unsupported or unrecognized media format."
+)
+
+
+class UnsupportedMediaUpload(ValidationError):
+    def __init__(self):
+        self.message = UNSUPPORTED_MEDIA_TYPE_MESSAGE
+        super().__init__(
+            {"media_file": self.message},
+            code=UNSUPPORTED_MEDIA_TYPE_CODE,
+        )
+
+    def as_payload(self):
+        return {
+            "success": False,
+            "preventRetry": True,
+            "code": UNSUPPORTED_MEDIA_TYPE_CODE,
+            "error": self.message,
+        }
 
 
 class DailyVideoUploadLimitReached(Exception):
@@ -93,7 +115,7 @@ def get_daily_video_upload_status(user):
 
 
 def media_path_is_video(media_file_path):
-    """Use the same file inspection path as Media.media_init()."""
+    """Classify supported media without invoking external probes."""
     kind = helpers.get_file_type(media_file_path)
 
     if kind == "video":
@@ -102,10 +124,7 @@ def media_path_is_video(media_file_path):
     if kind in {"audio", "image", "pdf"}:
         return False
 
-    # filetype cannot identify every valid container. Fall back to ffprobe,
-    # matching the fallback used by Media.set_media_type().
-    media_info = helpers.media_file_info(media_file_path)
-    return bool(media_info.get("is_video"))
+    raise UnsupportedMediaUpload()
 
 
 def uploaded_file_is_video(uploaded_file):
