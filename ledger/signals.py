@@ -14,7 +14,6 @@ from .models import (
     LedgerOutbox,
     LedgerSaga,
     LedgerTransaction,
-    ObservedOnchainTransfer,
     TokenWallet,
     WalletRequest,
 )
@@ -36,17 +35,6 @@ def _remember_previous_value(model, instance, field_name, attr_name):
         .first()
     )
     setattr(instance, attr_name, value)
-
-
-def _is_residual_payload(payload):
-    payload = payload or {}
-    if not isinstance(payload, dict):
-        return False
-    return bool(
-        payload.get("ledger_residual_deposit")
-        or payload.get("residual_deposit")
-        or payload.get("auto_credit") is False
-    )
 
 
 def _format_scaled_amount(value):
@@ -199,102 +187,6 @@ def wallet_request_review_requested(
     )
 
 
-@receiver(pre_save, sender=ObservedOnchainTransfer)
-def observed_transfer_before_save(sender, instance, **kwargs):
-    if not instance.pk:
-        instance._notification_previous_residual = False
-        return
-    previous = (
-        ObservedOnchainTransfer.objects
-        .filter(pk=instance.pk)
-        .values_list("raw_payload", flat=True)
-        .first()
-    )
-    instance._notification_previous_residual = (
-        _is_residual_payload(previous)
-    )
-
-
-@receiver(post_save, sender=ObservedOnchainTransfer)
-def residual_deposit_review_requested(
-    sender,
-    instance,
-    created=False,
-    **kwargs,
-):
-    is_residual = _is_residual_payload(instance.raw_payload)
-    was_residual = bool(
-        getattr(
-            instance,
-            "_notification_previous_residual",
-            False,
-        )
-    )
-    if not is_residual or (not created and was_residual):
-        return
-
-    try:
-        session = instance.deposit_session
-        user = session.user
-    except Exception:
-        session = None
-        user = None
-
-    raw_payload = (
-        instance.raw_payload
-        if isinstance(instance.raw_payload, dict)
-        else {}
-    )
-    amount_display = _format_scaled_amount(instance.amount)
-    if amount_display:
-        amount_display = (
-            f"{amount_display} {instance.asset_code}"
-        )
-
-    _queue_admin_notification(
-        "deposit.residual_review_requested",
-        {
-            "severity": "review",
-            "title": "Residual deposit needs review",
-            "object_type": "observed_onchain_transfer",
-            "object_id": instance.pk,
-            "event_key": instance.event_key,
-            "chain": instance.chain,
-            "asset_code": instance.asset_code,
-            "amount": int(instance.amount),
-            "amount_display": amount_display,
-            "txid": instance.txid,
-            "log_index": instance.log_index,
-            "confirmations": int(instance.confirmations or 0),
-            "deposit_address": (
-                getattr(session, "deposit_address", "")
-                if session is not None
-                else instance.to_address
-            ),
-            "deposit_session_id": (
-                getattr(session, "pk", None)
-                if session is not None
-                else None
-            ),
-            "deposit_session_public_id": (
-                str(getattr(session, "public_id", "") or "")
-                if session is not None
-                else ""
-            ),
-            "reason": str(
-                raw_payload.get("residual_reason")
-                or "post-finalized-session transfer"
-            ),
-            "user": _user_payload(user),
-            "admin_url": (
-                f"/admin/ledger/depositsession/{session.pk}/change/"
-                if session is not None
-                else ""
-            ),
-        },
-    )
-
-
 @receiver(pre_save, sender=LedgerOutbox)
 def ledger_outbox_before_save(sender, instance, **kwargs):
     _remember_previous_value(
@@ -414,6 +306,93 @@ def deposit_sweep_job_before_save(sender, instance, **kwargs):
         instance,
         "status",
         "_notification_previous_status",
+    )
+
+
+@receiver(post_save, sender=DepositSweepJob)
+def residual_deposit_review_requested(
+    sender,
+    instance,
+    created=False,
+    **kwargs,
+):
+    # Balance-verification residual observations can be coalesced into an
+    # already-active sweep. Only a distinct residual sweep job needs review.
+    metadata = (
+        instance.metadata
+        if isinstance(instance.metadata, dict)
+        else {}
+    )
+    if not created or metadata.get("source") != "residual_deposit":
+        return
+
+    try:
+        session = instance.deposit_session
+        user = session.user
+    except Exception:
+        session = None
+        user = None
+
+    try:
+        observed = instance.observed_transfer
+    except Exception:
+        observed = None
+
+    raw_payload = (
+        observed.raw_payload
+        if observed is not None
+        and isinstance(observed.raw_payload, dict)
+        else {}
+    )
+    amount_display = _format_scaled_amount(instance.amount)
+    if amount_display:
+        amount_display = (
+            f"{amount_display} {instance.asset_code}"
+        )
+
+    _queue_admin_notification(
+        "deposit.residual_review_requested",
+        {
+            "severity": "review",
+            "title": "Residual deposit needs review",
+            "object_type": "observed_onchain_transfer",
+            "object_id": getattr(observed, "pk", None),
+            "event_key": getattr(observed, "event_key", ""),
+            "chain": instance.chain,
+            "asset_code": instance.asset_code,
+            "amount": int(instance.amount),
+            "amount_display": amount_display,
+            "txid": getattr(observed, "txid", ""),
+            "log_index": getattr(observed, "log_index", None),
+            "confirmations": int(
+                getattr(observed, "confirmations", 0) or 0
+            ),
+            "deposit_address": (
+                getattr(session, "deposit_address", "")
+                if session is not None
+                else instance.source_address
+            ),
+            "deposit_session_id": (
+                getattr(session, "pk", None)
+                if session is not None
+                else None
+            ),
+            "deposit_session_public_id": (
+                str(getattr(session, "public_id", "") or "")
+                if session is not None
+                else ""
+            ),
+            "reason": str(
+                raw_payload.get("residual_reason")
+                or "post-finalized-session transfer"
+            ),
+            "user": _user_payload(user),
+            "admin_url": (
+                f"/admin/ledger/depositsession/{session.pk}/change/"
+                if session is not None
+                else ""
+            ),
+        },
     )
 
 

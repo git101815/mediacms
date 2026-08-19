@@ -3088,6 +3088,10 @@ def record_onchain_observation(
             update_fields.append("raw_payload")
         elif (
             not is_native_quoted_session(deposit_session)
+            and not _is_primary_credited_observation(
+                deposit_session=deposit_session,
+                observed_transfer=observed,
+            )
             and raw_payload_for_create
             and not _is_residual_observed_transfer(observed)
             and observed.raw_payload != raw_payload_for_create

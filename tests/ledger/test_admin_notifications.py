@@ -10,7 +10,6 @@ from ledger.models import (
     DepositSweepJob,
     LedgerOutbox,
     LedgerSaga,
-    ObservedOnchainTransfer,
     WalletRequest,
 )
 
@@ -133,7 +132,7 @@ def test_wallet_review_notification_only_on_pending_transition(
     assert len(queued) == 1
 
 
-def test_residual_deposit_notification_only_on_first_residual_transition(
+def test_residual_deposit_notification_only_for_new_residual_sweep_job(
     monkeypatch,
 ):
     queued = _capture_notifications(monkeypatch)
@@ -143,28 +142,33 @@ def test_residual_deposit_notification_only_on_first_residual_transition(
         user=_user(),
         deposit_address="0xdeposit",
     )
-    instance = SimpleNamespace(
+    observed = SimpleNamespace(
         pk=22,
         event_key="event-key",
-        chain="ethereum",
-        asset_code="USDT",
-        amount=2_500_000,
         txid="0xtx",
         log_index=1,
         confirmations=12,
-        to_address="0xdeposit",
         raw_payload={
             "ledger_residual_deposit": True,
             "residual_reason": "post_finalized_session_transfer",
         },
+    )
+    instance = SimpleNamespace(
+        pk=23,
+        public_id="sweep-public",
+        chain="ethereum",
+        asset_code="USDT",
+        amount=2_500_000,
+        source_address="0xdeposit",
+        metadata={"source": "residual_deposit"},
+        observed_transfer=observed,
         deposit_session=session,
     )
-    instance._notification_previous_residual = False
 
     signals.residual_deposit_review_requested(
-        sender=ObservedOnchainTransfer,
+        sender=DepositSweepJob,
         instance=instance,
-        created=False,
+        created=True,
     )
 
     assert len(queued) == 1
@@ -172,13 +176,26 @@ def test_residual_deposit_notification_only_on_first_residual_transition(
     assert event == "deposit.residual_review_requested"
     assert payload["amount_display"] == "2.5 USDT"
     assert payload["deposit_session_id"] == 21
+    assert payload["object_id"] == 22
+    assert payload["event_key"] == "event-key"
     assert payload["txid"] == "0xtx"
+    assert payload["reason"] == "post_finalized_session_transfer"
 
-    instance._notification_previous_residual = True
     signals.residual_deposit_review_requested(
-        sender=ObservedOnchainTransfer,
+        sender=DepositSweepJob,
         instance=instance,
         created=False,
+    )
+    assert len(queued) == 1
+
+    instance.metadata = {
+        "source": "credited_deposit",
+        "has_coalesced_residual_balance_observations": True,
+    }
+    signals.residual_deposit_review_requested(
+        sender=DepositSweepJob,
+        instance=instance,
+        created=True,
     )
     assert len(queued) == 1
 
