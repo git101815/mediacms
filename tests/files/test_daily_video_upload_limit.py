@@ -8,7 +8,9 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from files.models import DailyVideoUploadQuota, Media
 from files.upload_limits import (
     DailyVideoUploadLimitReached,
+    UnsupportedMediaUpload,
     get_daily_video_upload_status,
+    media_path_is_video,
     release_daily_video_upload,
     reserve_daily_video_upload,
 )
@@ -169,6 +171,56 @@ def test_daily_video_upload_quota_endpoint(
     assert response.json()["remaining"] == 1
 
 
+def test_unrecognized_media_is_rejected_without_ffprobe():
+    with (
+        patch(
+            "files.upload_limits.helpers.get_file_type",
+            return_value=None,
+        ),
+        patch(
+            "files.upload_limits.helpers.media_file_info",
+            side_effect=AssertionError("ffprobe fallback must not run"),
+        ) as media_file_info,
+    ):
+        with pytest.raises(UnsupportedMediaUpload):
+            media_path_is_video("unknown-media.bin")
+
+    media_file_info.assert_not_called()
+
+
+def test_set_media_type_rejects_unknown_without_ffprobe():
+    media = Media(media_file="unknown-media.bin")
+
+    with (
+        patch(
+            "files.models.helpers.get_file_type",
+            return_value=None,
+        ),
+        patch(
+            "files.models.helpers.media_file_info",
+            side_effect=AssertionError("ffprobe fallback must not run"),
+        ) as media_file_info,
+    ):
+        media.set_media_type(save=False)
+
+    assert media.media_type == ""
+    assert media.encoding_status == "fail"
+    media_file_info.assert_not_called()
+
+
+def test_set_media_type_accepts_recognized_video_without_ffprobe():
+    media = Media(media_file="recognized-video.mp4")
+
+    with (
+        patch("files.models.helpers.get_file_type", return_value="video"),
+        patch("files.models.helpers.media_file_info") as media_file_info,
+    ):
+        media.set_media_type(save=False)
+
+    assert media.media_type == "video"
+    media_file_info.assert_not_called()
+
+
 def _mock_media_side_effects():
     return (
         patch("files.models.Media.media_init"),
@@ -233,6 +285,39 @@ def test_media_api_returns_429_after_daily_video_limit(
 
 
 @pytest.mark.django_db
+def test_media_api_rejects_unrecognized_media(
+    django_user_model,
+    client,
+    settings,
+):
+    settings.CAN_ADD_MEDIA = "all"
+    user = django_user_model.objects.create_user(
+        username="unrecognized_media_api",
+    )
+    client.force_login(user)
+
+    with patch(
+        "files.views.uploaded_file_is_video",
+        side_effect=UnsupportedMediaUpload(),
+    ):
+        response = client.post(
+            "/api/v1/media",
+            {
+                "title": "Unknown media",
+                "media_file": SimpleUploadedFile(
+                    "unknown.mp4",
+                    b"not-a-recognized-media-file",
+                    content_type="video/mp4",
+                ),
+            },
+        )
+
+    assert response.status_code == 400
+    assert "media_file" in response.json()
+    assert Media.objects.filter(user=user).count() == 0
+
+
+@pytest.mark.django_db
 def test_fine_uploader_returns_429_after_daily_video_limit(
     django_user_model,
     client,
@@ -292,3 +377,40 @@ def test_fine_uploader_returns_429_after_daily_video_limit(
         == 0
     )
     assert Media.objects.filter(user=user).count() == 1
+
+
+@pytest.mark.django_db
+def test_fine_uploader_rejects_unrecognized_media(
+    django_user_model,
+    client,
+    settings,
+    tmp_path,
+):
+    settings.CAN_ADD_MEDIA = "all"
+    settings.MEDIA_ROOT = str(tmp_path)
+    user = django_user_model.objects.create_user(
+        username="unrecognized_media_fine_uploader",
+    )
+    client.force_login(user)
+
+    with patch(
+        "uploader.views.media_path_is_video",
+        side_effect=UnsupportedMediaUpload(),
+    ):
+        response = client.post(
+            "/fu/upload/",
+            {
+                "qquuid": str(uuid.uuid4()),
+                "qqfilename": "unknown.mp4",
+                "qqfile": SimpleUploadedFile(
+                    "unknown.mp4",
+                    b"not-a-recognized-media-file",
+                    content_type="video/mp4",
+                ),
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "unsupported_media_type"
+    assert response.json()["preventRetry"] is True
+    assert Media.objects.filter(user=user).count() == 0

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import sweeper_service.app.claim_once as claim_once
+import sweeper_service.app.evm as evm
 
 
 USDT_ETH = "0xdac17f958d2ee523a2206206994597c13d831ec7"
@@ -232,13 +233,14 @@ def test_run_once_resumes_funding_broadcasted_job_without_refunding():
          patch.object(claim_once, "address_from_private_key", side_effect=fake_address_from_private_key), \
          patch.object(claim_once, "get_native_balance", return_value=option.max_gas_funding_amount_wei), \
          patch.object(claim_once, "build_native_transfer_transaction") as build_native_transfer_transaction, \
-         patch.object(claim_once, "build_erc20_transfer_transaction", return_value={"kind": "erc20"}), \
+         patch.object(claim_once, "build_erc20_transfer_transaction", return_value={"kind": "erc20"}) as build_erc20_transfer_transaction, \
          patch.object(claim_once, "sign_transaction", return_value=_signed_tx("0xsweep")), \
          patch.object(claim_once, "send_signed_transaction", return_value="0xsweep"), \
          patch.object(claim_once, "get_erc20_balance", return_value=job["amount"]):
         claim_once.run_once(client=client, config=config)
 
     build_native_transfer_transaction.assert_not_called()
+    assert build_erc20_transfer_transaction.call_args.kwargs["gas_price_wei"] == 1
     client.mark_funding_broadcasted.assert_not_called()
     client.mark_ready_to_sweep.assert_called_once_with(
         public_id="job-1",
@@ -408,3 +410,224 @@ def test_run_once_reschedules_when_token_balance_is_insufficient():
         retryable=True,
         increment_retry_count=True,
     )
+
+
+def test_base_sweep_budget_includes_l1_and_operator_fees():
+    option = _make_option()
+    option.chain = "base"
+    w3 = Mock()
+    w3.eth.gas_price = 6_000_000
+    oracle = Mock()
+    w3.eth.contract.return_value = oracle
+    oracle.functions.getL1FeeUpperBound.return_value.call.return_value = 400_000_000
+    oracle.functions.getOperatorFee.return_value.call.return_value = 10_000_000
+
+    with patch.object(
+        claim_once,
+        "build_erc20_transfer_transaction",
+        return_value={"kind": "erc20-sizing"},
+    ), patch.object(
+        claim_once,
+        "sign_transaction",
+        return_value={
+            "txid": "0xsizing",
+            "raw_transaction": b"x" * 168,
+        },
+    ):
+        gas_price_wei, required_native = claim_once._compute_sweep_native_budget(
+            w3=w3,
+            option=option,
+            source_private_key="0x" + "33" * 32,
+            amount=250,
+            gas_limit=54_788,
+        )
+
+    assert gas_price_wei == 7_200_000
+    assert required_native == (
+        54_788 * gas_price_wei
+        + 410_000_000
+    )
+    oracle.functions.getL1FeeUpperBound.assert_called_once_with(100)
+    oracle.functions.getOperatorFee.assert_called_once_with(54_788)
+
+
+def test_explicit_gas_price_does_not_refresh_rpc_gas_price():
+    class ExplodingEth:
+        @property
+        def gas_price(self):
+            raise AssertionError(
+                "RPC gas_price must not be read when an explicit price is supplied"
+            )
+
+    w3 = SimpleNamespace(eth=ExplodingEth())
+
+    assert evm._build_fee_params(
+        w3=w3,
+        gas_price_multiplier_bps=12000,
+        gas_price_wei=7_200_000,
+    ) == {"gasPrice": 7_200_000}
+
+
+def test_run_once_recovers_rpc_insufficient_funds_without_failing_job():
+    option = _make_option()
+    config = _make_config(option)
+    job = _make_job(status="ready_to_sweep")
+    client = Mock()
+    client.claim_jobs.return_value = [job]
+    client.acquire_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "next_nonce": 0,
+        "lock_token": "sender-lock-token-1",
+        "lock_expires_at": None,
+    }
+    client.release_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": job["source_address"],
+        "released": True,
+    }
+
+    deriver = Mock()
+    deriver.derive_address.return_value = job["source_address"]
+    deriver.derive_private_key.return_value = "0x" + "33" * 32
+
+    w3 = Mock()
+    rpc_error = (
+        "{'code': -32003, 'message': "
+        "'insufficient funds for gas * price + value: have 50000 want 51000'}"
+    )
+
+    with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
+         patch.object(claim_once, "_build_option_web3", return_value=w3), \
+         patch.object(claim_once, "_pending_nonce", return_value=0), \
+         patch.object(claim_once, "_estimate_erc20_transfer_gas", return_value=50000), \
+         patch.object(claim_once, "_compute_sweep_native_budget", return_value=(1, 50000)), \
+         patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
+         patch.object(claim_once, "get_native_balance", return_value=50000), \
+         patch.object(claim_once, "get_erc20_balance", return_value=job["amount"]), \
+         patch.object(claim_once, "build_erc20_transfer_transaction", return_value={"kind": "erc20"}), \
+         patch.object(claim_once, "sign_transaction", return_value=_signed_tx("0xsweep")), \
+         patch.object(claim_once, "send_signed_transaction", side_effect=RuntimeError(rpc_error)):
+        claim_once.run_once(client=client, config=config)
+
+    client.mark_sweep_broadcasted.assert_called_once_with(
+        public_id=job["public_id"],
+        claim_token=job["claim_token"],
+        sweep_txid="0xsweep",
+        destination_address=option.destination_address,
+        last_sweep_gas_limit=50000,
+        sender_address=job["source_address"],
+        nonce=0,
+        amount=job["amount"],
+    )
+    client.mark_sweep_broadcast_missing.assert_called_once_with(
+        public_id=job["public_id"],
+        claim_token=job["claim_token"],
+        sweep_txid="0xsweep",
+        next_retry_in_seconds=config.poll_interval_seconds,
+        error=rpc_error,
+    )
+    client.release_evm_sender_lock.assert_called_once_with(
+        chain=option.chain,
+        address=job["source_address"],
+        lock_token="sender-lock-token-1",
+    )
+    client.confirm_evm_sender_nonce_used.assert_not_called()
+    client.mark_failed.assert_not_called()
+    client.mark_rescheduled.assert_not_called()
+
+
+def test_run_once_reschedules_sender_lock_contention_instead_of_failing_job():
+    option = _make_option()
+    config = _make_config(option)
+    job = _make_job(status="ready_to_sweep")
+    client = Mock()
+    client.claim_jobs.return_value = [job]
+    client.acquire_evm_sender_lock.side_effect = RuntimeError(
+        'Internal API error 400 for /api/internal/ledger/evm-sender-locks/acquire: '
+        '{"error": "[\'EVM sender is already locked\']"}'
+    )
+
+    deriver = Mock()
+    deriver.derive_address.return_value = job["source_address"]
+    deriver.derive_private_key.return_value = "0x" + "33" * 32
+
+    w3 = Mock()
+
+    with patch.object(claim_once, "EvmDeriver", return_value=deriver), \
+         patch.object(claim_once, "_build_option_web3", return_value=w3), \
+         patch.object(claim_once, "_estimate_erc20_transfer_gas", return_value=50000), \
+         patch.object(claim_once, "_compute_sweep_native_budget", return_value=(1, 50000)), \
+         patch.object(claim_once, "address_from_private_key", return_value=job["source_address"]), \
+         patch.object(claim_once, "get_native_balance", return_value=50000), \
+         patch.object(claim_once, "get_erc20_balance", return_value=job["amount"]):
+        claim_once.run_once(client=client, config=config)
+
+    client.mark_failed.assert_not_called()
+    client.mark_sweep_broadcasted.assert_not_called()
+    client.mark_rescheduled.assert_called_once_with(
+        public_id=job["public_id"],
+        claim_token=job["claim_token"],
+        next_retry_in_seconds=config.poll_interval_seconds,
+        error="EVM sender is already locked",
+        error_code="SWEEP_SENDER_LOCK_BUSY",
+        retryable=True,
+        increment_retry_count=True,
+    )
+
+
+def test_native_funding_rpc_insufficient_funds_rewinds_and_releases_lock():
+    option = _make_option()
+    config = _make_config(option)
+    client = Mock()
+    funding_address = "0x" + "22" * 20
+    client.acquire_evm_sender_lock.return_value = {
+        "chain": option.chain,
+        "address": funding_address,
+        "next_nonce": 3,
+        "lock_token": "funding-lock-token",
+        "lock_expires_at": None,
+    }
+
+    w3 = Mock()
+    rpc_error = (
+        "{'code': -32003, 'message': "
+        "'insufficient funds for gas * price + value: have 100 want 101'}"
+    )
+
+    caught = None
+    with patch.object(claim_once, "_pending_nonce", return_value=3), \
+         patch.object(claim_once, "address_from_private_key", return_value=funding_address), \
+         patch.object(claim_once, "build_native_transfer_transaction", return_value={"kind": "native"}), \
+         patch.object(claim_once, "sign_transaction", return_value=_signed_tx("0xgas")), \
+         patch.object(claim_once, "send_signed_transaction", side_effect=RuntimeError(rpc_error)):
+        try:
+            claim_once._send_native_transfer_with_sender_lock(
+                client=client,
+                config=config,
+                w3=w3,
+                option=option,
+                public_id="job-1",
+                claim_token="claim-token-1",
+                funding_private_key=option.funding_private_key,
+                to_address="0x" + "11" * 20,
+                amount_wei=123,
+                last_sweep_gas_limit=50000,
+            )
+        except claim_once._BroadcastRejectedAndRescheduled as exc:
+            caught = exc
+
+    assert caught is not None
+    client.mark_funding_broadcast_missing.assert_called_once_with(
+        public_id="job-1",
+        claim_token="claim-token-1",
+        gas_funding_txid="0xgas",
+        next_retry_in_seconds=config.poll_interval_seconds,
+        error=rpc_error,
+    )
+    client.release_evm_sender_lock.assert_called_once_with(
+        chain=option.chain,
+        address=funding_address,
+        lock_token="funding-lock-token",
+    )
+    client.confirm_evm_sender_nonce_used.assert_not_called()

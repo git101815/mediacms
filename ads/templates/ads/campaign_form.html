@@ -1,0 +1,127 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>{{ title }} · {{ portal_name }} Ads</title>
+  <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'ads/ads.css' %}">
+</head>
+<body>
+<div id="app">
+
+<div class="navbar">
+  <a class="navbar__logo-link" href="/"><span class="clickaine-logo"><span class="clickaine-logo__mark"></span><span class="clickaine-logo__text">{{ portal_name }} Ads</span></span></a>
+  <span class="navbar-right">
+    <div id="navbar-info"><a id="navbar-amount" href="/finance/">{{ balance_usd }}</a></div>
+    <a id="logout" href="/logout/" aria-label="Logout"><svg class="icon icon--logout" viewBox="0 0 20 17"><path d="M13.5 11.3a.53.53 0 0 0 .75 0l3.5-3.45a.5.5 0 0 0 0-.72l-3.5-3.45a.53.53 0 0 0-.75.74L16.1 7H7.8a.52.52 0 1 0 0 1.05h8.3l-2.6 2.56a.5.5 0 0 0 0 .69zM9.4 14.9a.52.52 0 0 0 .52-.52v-2.56a.52.52 0 1 0-1.04 0v2.04H1.14V1.12h7.69v2.04a.52.52 0 1 0 1.04 0V.6a.52.52 0 0 0-.52-.52H.6A.52.52 0 0 0 .08.6v13.79c0 .29.23.52.52.52h8.8z"/></svg></a>
+  </span>
+</div>
+
+<div class="sidebar">
+  <a class="sidebar-item active" title="Campaigns" href="/">
+    <div><span class="sidebar-item--icon"><svg class="icon" viewBox="0 0 24 24"><path d="M3 3h18v5H3V3zm0 7h18v5H3v-5zm0 7h18v4H3v-4z"/></svg></span><span class="item--heading">Campaigns</span></div>
+  </a>
+  <a class="sidebar-item" title="Creatives" href="/creatives/">
+    <div><span class="sidebar-item--icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm2 2v9l3-3 2 2 4-5 3 4V6H6z"/></svg></span><span class="item--heading">Creatives</span></div>
+  </a>
+  <a class="sidebar-item" title="Finance" href="/finance/">
+    <div><span class="sidebar-item--icon"><svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18v13H3V6zm2 3v8h14V9H5zm2 2h5v2H7v-2zM5 3h14v2H5V3z"/></svg></span><span class="item--heading">Finance</span></div>
+  </a>
+</div>
+<button class="toggle-sidebar-button" type="button" aria-label="Toggle sidebar"><svg viewBox="0 0 12 12"><path d="M8.5 1.5 4 6l4.5 4.5-1.4 1.4L1.2 6l5.9-5.9z"/></svg></button>
+
+<div class="active-page campaign-container">
+  <div class="active-page__top-space">
+    <div class="active-page--container">
+      <header class="page-header"><h1 class="active-page--title">{% if campaign %}Edit campaign{% else %}Add campaign{% endif %}</h1></header>
+      <div class="campaign-actions-wrapper">
+        <a href="/" class="btn cancel">cancel</a>
+        <button class="btn success" type="submit" form="campaign-form">{% if campaign %}save{% else %}create campaign{% endif %}</button>
+      </div>
+      <section class="active-page--add-zone"><ul class="active-page--add-zone--choice"><li><a class="active" href="#">General</a></li></ul></section>
+
+      {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+
+      <form id="campaign-form" class="general-form campaign-library-form" method="post">
+        {% csrf_token %}
+
+        <div class="general-form-section">
+          <h2 class="general-form-section__title">General</h2>
+          <div class="group">{{ form.name }}<span class="title">Campaign name</span>{{ form.name.errors }}</div>
+          <div class="group" data-campaign-target-url>
+            {{ form.target_url }}
+            <span class="title">Destination URL</span>
+            {{ form.target_url.errors }}
+            <div class="group-help">Banner landing page. VAST and popunder destinations are defined by their creative.</div>
+          </div>
+        </div>
+
+        <div class="general-form-section">
+          <h2 class="general-form-section__title">Ad format</h2>
+          <div class="group select-group">
+            <label class="select-field-title" for="{{ form.placement.id_for_label }}">Format</label>
+            {{ form.placement }}
+            {{ form.placement.errors }}
+            <div class="group-help">Banner 728×90 / 300×250, in-video preroll / midroll / postroll, or popunder.</div>
+          </div>
+        </div>
+
+        <div class="general-form-section">
+          <h2 class="general-form-section__title">Pricing</h2>
+          <div class="group select-group">
+            <label class="select-field-title" for="{{ form.pricing_model.id_for_label }}">Pay type</label>
+            {{ form.pricing_model }}
+            {{ form.pricing_model.errors }}
+          </div>
+          <div class="group">{{ form.bid_usd }}<span class="title">Bid, $</span>{{ form.bid_usd.errors }}<div class="group-help">CPM: $ per 1,000 impressions. CPC: $ per valid click.</div></div>
+        </div>
+
+        <div class="general-form-section">
+          <div class="creative-section-header">
+            <div>
+              <h2 class="general-form-section__title">Creatives</h2>
+              <div class="group-help creative-section-help">Select one or more compatible creatives. With two or more selected, delivery rotates evenly for A/B testing.</div>
+            </div>
+            <a class="table-btn creative-add-link" href="/creatives/new/">+ add creative</a>
+          </div>
+
+          {% if form.creative_ids.errors %}<div class="form-errors creative-picker-errors">{{ form.creative_ids.errors }}</div>{% endif %}
+
+          <div class="creative-picker" data-creative-picker>
+            {% for row in creative_library %}
+            <label class="creative-picker__item" data-creative-format="{{ row.creative.placement }}">
+              <input type="checkbox" name="creative_ids" value="{{ row.creative.id }}" {% if row.selected %}checked{% endif %}>
+              <span class="creative-picker__check"></span>
+              <span class="creative-picker__preview">
+                {% if row.creative.is_banner and row.creative.image %}
+                  <img src="{{ row.creative.image.url }}" alt="{{ row.creative.name }}">
+                {% elif row.creative.is_in_video %}
+                  <span class="creative-picker__preview-label">VAST</span>
+                {% elif row.creative.is_popunder %}
+                  <span class="creative-picker__preview-label">URL</span>
+                {% else %}
+                  <span class="creative-picker__preview-label">—</span>
+                {% endif %}
+              </span>
+              <span class="creative-picker__body">
+                <strong>{{ row.creative.name }}</strong>
+                <small>{{ row.creative.get_placement_display }}</small>
+                <small><span class="status-dot {{ row.status_class }}"></span>{{ row.status_label }}</small>
+              </span>
+            </label>
+            {% empty %}
+            <div class="creative-picker__empty">No reusable creatives yet. Create one first.</div>
+            {% endfor %}
+          </div>
+          <div class="creative-picker__empty" data-creative-picker-empty hidden>No creatives in your library match this campaign format.</div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+</div>
+<script src="{% static 'ads/ads.js' %}"></script>
+</body>
+</html>

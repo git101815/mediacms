@@ -37,6 +37,7 @@ body {
 @import './includes/form_controls/_form_controls.scss';
 @import './WalletPage.scss';
 @import './DownloadPage.scss';
+@import './DirectAds.scss';
 
 a {
   color: var(--theme-color, var(--default-theme-color));

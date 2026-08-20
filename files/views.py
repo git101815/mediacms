@@ -1083,6 +1083,10 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
     payment_method = metadata.get("payment_method") or {}
     provider = metadata.get("payment_provider") or {}
     is_provider_checkout = _is_provider_checkout_session(session)
+    amount_semantics = str(
+        metadata.get("amount_semantics") or "canonical_stable"
+    ).strip().lower()
+    is_native_quoted = amount_semantics == "native_quoted"
 
     if is_provider_checkout:
         network_display = provider.get("network_display") or "Hosted checkout"
@@ -1112,13 +1116,11 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         ).strip()
         if checkout_amount:
             token_pack_price_label = f"{get_fiat_currency_symbol(checkout_currency)}{checkout_amount}"
-        if provider.get("key") == PAYGATE_PROVIDER_KEY:
-            observed_asset_code = "USDC"
 
     expected_raw_amount = session.expected_onchain_raw_amount
     if expected_raw_amount in (None, ""):
         expected_raw_amount = metadata.get("expected_route_raw_amount")
-    if expected_raw_amount in (None, ""):
+    if expected_raw_amount in (None, "") and not is_native_quoted:
         expected_raw_amount = session.min_amount
 
     token_pack_label = ""
@@ -1134,7 +1136,7 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
             f"{token_pack_price_label}"
         )
 
-    if is_provider_checkout:
+    if is_provider_checkout or is_native_quoted:
         min_amount_display = _format_canonical_stable_amount(session.min_amount)
     else:
         min_amount_display = _format_route_amount(
@@ -1144,7 +1146,9 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         )
 
     expected_payment_amount_display = min_amount_display
-    expected_payment_currency = session.asset_code
+    expected_payment_currency = (
+        "USD" if is_native_quoted else session.asset_code
+    )
     if is_provider_checkout and checkout_amount:
         expected_payment_amount_display = checkout_amount
         expected_payment_currency = checkout_currency
@@ -1168,6 +1172,11 @@ def _build_deposit_session_payload(session: DepositSession) -> dict:
         "expected_payment_amount_display": expected_payment_amount_display,
         "expected_payment_currency": expected_payment_currency,
         "observed_asset_code": observed_asset_code,
+        "observed_value_currency": (
+            "USD" if is_native_quoted else observed_asset_code
+        ),
+        "amount_semantics": amount_semantics,
+        "is_native_quoted": is_native_quoted,
         "observed_txid": session.observed_txid or "",
         "observed_amount": session.observed_amount,
         "observed_amount_display": (
@@ -1465,10 +1474,22 @@ def wallet_dfx_launch(request, public_id):
         raise Http404
 
     try:
-        launch = prepare_dfx_browser_launch(
-            session=session,
-            actor=request.user,
-        )
+        dfx_kwargs = {
+            "session": session,
+            "actor": request.user,
+        }
+        ads_host = str(getattr(settings, "ADS_HOST", "") or "").strip().lower()
+        request_host = request.get_host().split(":", 1)[0].lower()
+        if ads_host and request_host == ads_host:
+            ads_scheme = str(getattr(settings, "ADS_SCHEME", "https") or "https")
+            dfx_kwargs["redirect_uri"] = (
+                f"{ads_scheme}://{request.get_host()}"
+                + reverse(
+                    "wallet_dfx_return",
+                    kwargs={"public_id": session.public_id},
+                )
+            )
+        launch = prepare_dfx_browser_launch(**dfx_kwargs)
 
         auth_origin = _dfx_auth_origin(
             launch.get("auth_url")
@@ -1607,10 +1628,22 @@ def wallet_banxa_launch(request, public_id):
         raise Http404
 
     try:
-        launch = prepare_banxa_browser_launch(
-            session=session,
-            actor=request.user,
-        )
+        banxa_kwargs = {
+            "session": session,
+            "actor": request.user,
+        }
+        ads_host = str(getattr(settings, "ADS_HOST", "") or "").strip().lower()
+        request_host = request.get_host().split(":", 1)[0].lower()
+        if ads_host and request_host == ads_host:
+            ads_scheme = str(getattr(settings, "ADS_SCHEME", "https") or "https")
+            banxa_kwargs["return_url"] = (
+                f"{ads_scheme}://{request.get_host()}"
+                + reverse(
+                    "wallet_deposit_session",
+                    kwargs={"public_id": session.public_id},
+                )
+            )
+        launch = prepare_banxa_browser_launch(**banxa_kwargs)
         checkout_url = str(launch.get("checkout_url") or "").strip()
         parsed_checkout_url = urlparse(checkout_url)
         if (
@@ -3144,11 +3177,20 @@ class MediaSearch(APIView):
         if query:
             # move this processing to a prepare_query function
             query = clean_query(query)
-            q_parts = [q_part.rstrip("y") for q_part in query.split() if q_part not in STOP_WORDS]
+            q_parts = []
+            for q_part in query.split():
+                if q_part in STOP_WORDS:
+                    continue
+                q_part = q_part.rstrip("y")
+                if q_part:
+                    q_parts.append(q_part)
+
             if q_parts:
                 query = SearchQuery(q_parts[0] + ":*", search_type="raw")
                 for part in q_parts[1:]:
                     query &= SearchQuery(part + ":*", search_type="raw")
+            elif not (category or tag or celebrity):
+                return Response({}, status=status.HTTP_200_OK)
             else:
                 query = None
         if query:

@@ -1788,6 +1788,172 @@ def submit_remote_encoding(self, friendly_token):
             max_retries=max_retries,
         )
 
+
+
+def _mark_remote_fill_missing_failed(media, profile_ids, message):
+    if not profile_ids:
+        return
+
+    Encoding.objects.filter(
+        media=media,
+        profile_id__in=profile_ids,
+        worker="runpod",
+    ).exclude(status="success").update(
+        status="fail",
+        logs=message,
+    )
+
+
+@task(
+    name="submit_remote_fill_missing_encoding",
+    bind=True,
+    queue="short_tasks",
+    max_retries=15,
+)
+def submit_remote_fill_missing_encoding(self, friendly_token):
+    """
+    Encode only missing remote MP4 profiles and rebuild incomplete HLS.
+
+    Existing successful MP4s are packaging inputs only: they are never
+    re-encoded. An already-published media item remains available while the
+    repair runs.
+    """
+    try:
+        media = Media.objects.get(friendly_token=friendly_token)
+    except Media.DoesNotExist:
+        logger.error(
+            "Remote fill-missing encoding: media not found token=%s",
+            friendly_token,
+        )
+        return False
+
+    max_retries = int(
+        getattr(settings, "REMOTE_ENCODING_STORJ_WAIT_MAX_RETRIES", 15)
+    )
+    retry_seconds = int(
+        getattr(settings, "REMOTE_ENCODING_STORJ_WAIT_RETRY_SECONDS", 60)
+    )
+
+    try:
+        source_exists = _remote_source_exists_on_storj(media)
+    except Exception as exc:
+        source_exists = False
+        logger.warning(
+            "Remote fill-missing encoding: Storj source check failed "
+            "token=%s key=%s error=%s",
+            friendly_token,
+            media.media_file.name,
+            exc,
+        )
+
+    if not source_exists:
+        message = (
+            "Remote fill-missing encoding source not available on Storj yet: "
+            f"{media.media_file.name}"
+        )
+
+        if self.request.retries >= max_retries:
+            logger.error(message)
+            return False
+
+        logger.info(
+            "Remote fill-missing encoding: waiting for Storj source "
+            "token=%s key=%s retry=%s/%s",
+            friendly_token,
+            media.media_file.name,
+            self.request.retries + 1,
+            max_retries,
+        )
+
+        raise self.retry(
+            exc=RuntimeError(message),
+            countdown=retry_seconds,
+            max_retries=max_retries,
+        )
+
+    profile_ids = []
+
+    try:
+        from files.remote_encoding import (
+            get_missing_remote_profiles,
+            get_unpackaged_remote_profiles,
+            submit_runpod_fill_missing_job,
+        )
+
+        unpackaged_profiles = get_unpackaged_remote_profiles(media)
+        missing_profiles = get_missing_remote_profiles(media)
+
+        if not missing_profiles and not unpackaged_profiles:
+            logger.info(
+                "Remote fill-missing encoding: nothing missing token=%s",
+                friendly_token,
+            )
+            return {
+                "skipped": True,
+                "reason": "no_missing_profiles",
+            }
+
+        profile_ids = [profile.id for profile in missing_profiles]
+
+        if unpackaged_profiles:
+            logger.info(
+                "Remote fill-missing encoding: packaging existing MP4s "
+                "token=%s profiles=%s",
+                friendly_token,
+                [
+                    (
+                        profile.id,
+                        profile.codec,
+                        int(profile.resolution or 0),
+                    )
+                    for profile in unpackaged_profiles
+                ],
+            )
+
+        response = submit_runpod_fill_missing_job(media)
+
+        runpod_job_id = (
+            response.get("id")
+            or response.get("job_id")
+            or response.get("runpod_job_id")
+            or ""
+        )
+
+        if runpod_job_id and profile_ids:
+            Encoding.objects.filter(
+                media=media,
+                profile_id__in=profile_ids,
+                worker="runpod",
+                status="running",
+            ).update(task_id=runpod_job_id)
+
+        return response
+
+    except Exception as exc:
+        logger.exception(
+            "Remote fill-missing encoding submit failed "
+            "token=%s retry=%s/%s profiles=%s error=%s",
+            friendly_token,
+            self.request.retries,
+            max_retries,
+            profile_ids,
+            exc,
+        )
+
+        if self.request.retries >= max_retries:
+            _mark_remote_fill_missing_failed(
+                media,
+                profile_ids,
+                str(exc),
+            )
+            return False
+
+        raise self.retry(
+            exc=exc,
+            countdown=30,
+            max_retries=max_retries,
+        )
+
 # TODO LIST
 # 1 chunks are deleted from original server when file is fully encoded.
 # however need to enter this logic in cases of fail as well

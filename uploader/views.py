@@ -14,6 +14,7 @@ from files.helpers import rm_file
 from files.models import Media
 from files.upload_limits import (
     DailyVideoUploadLimitReached,
+    UnsupportedMediaUpload,
     get_daily_video_upload_status,
     media_path_is_video,
     release_daily_video_upload,
@@ -82,7 +83,23 @@ class FineUploaderView(generic.FormView):
         media_file = os.path.join(settings.MEDIA_ROOT, self.upload.real_path)
         reservation = None
 
-        if media_path_is_video(media_file):
+        try:
+            is_video = media_path_is_video(media_file)
+        except UnsupportedMediaUpload as exc:
+            rm_file(media_file)
+            shutil.rmtree(
+                os.path.join(
+                    settings.MEDIA_ROOT,
+                    self.upload.file_path,
+                ),
+                ignore_errors=True,
+            )
+            return self.make_response(
+                exc.as_payload(),
+                status=400,
+            )
+
+        if is_video:
             try:
                 reservation = reserve_daily_video_upload(
                     self.request.user

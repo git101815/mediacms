@@ -48,6 +48,27 @@
       "poa_compatible": false
     },
     {
+      "key": "ethereum-eth",
+      "chain": "ethereum",
+      "asset_code": "ETH",
+      "token_contract_address": "",
+      "rpc_urls": [
+        "${ETHEREUM_RPC_URL}",
+        "${ETHEREUM_RPC_URL_FALLBACK_1}",
+        "${ETHEREUM_RPC_URL_FALLBACK_2}"
+      ],
+      "destination_address": "${ETHEREUM_SWEEP_DESTINATION_ADDRESS}",
+      "funding_confirmations": 1,
+      "sweep_confirmations": 1,
+      "max_gas_funding_amount_wei": 0,
+      "erc20_transfer_gas_limit": 21000,
+      "gas_limit_multiplier_bps": 12000,
+      "gas_limit_retry_multiplier_bps": 15000,
+      "tx_timeout_seconds": 300,
+      "gas_price_multiplier_bps": 12000,
+      "poa_compatible": false
+    },
+    {
       "key": "bsc-usdt",
       "chain": "bsc",
       "asset_code": "USDT",
@@ -85,6 +106,27 @@
       "sweep_confirmations": 1,
       "max_gas_funding_amount_wei": "300000000000000",
       "erc20_transfer_gas_limit": 100000,
+      "gas_limit_multiplier_bps": 12000,
+      "gas_limit_retry_multiplier_bps": 15000,
+      "tx_timeout_seconds": 300,
+      "gas_price_multiplier_bps": 12000,
+      "poa_compatible": true
+    },
+    {
+      "key": "bsc-bnb",
+      "chain": "bsc",
+      "asset_code": "BNB",
+      "token_contract_address": "",
+      "rpc_urls": [
+        "${BSC_RPC_URL}",
+        "${BSC_RPC_URL_FALLBACK_1}",
+        "${BSC_RPC_URL_FALLBACK_2}"
+      ],
+      "destination_address": "${BSC_SWEEP_DESTINATION_ADDRESS}",
+      "funding_confirmations": 1,
+      "sweep_confirmations": 1,
+      "max_gas_funding_amount_wei": 0,
+      "erc20_transfer_gas_limit": 21000,
       "gas_limit_multiplier_bps": 12000,
       "gas_limit_retry_multiplier_bps": 15000,
       "tx_timeout_seconds": 300,
@@ -136,6 +178,27 @@
       "poa_compatible": false
     },
     {
+      "key": "arbitrum-eth",
+      "chain": "arbitrum",
+      "asset_code": "ETH",
+      "token_contract_address": "",
+      "rpc_urls": [
+        "${ARBITRUM_RPC_URL}",
+        "${ARBITRUM_RPC_URL_FALLBACK_1}",
+        "${ARBITRUM_RPC_URL_FALLBACK_2}"
+      ],
+      "destination_address": "${ARBITRUM_SWEEP_DESTINATION_ADDRESS}",
+      "funding_confirmations": 1,
+      "sweep_confirmations": 1,
+      "max_gas_funding_amount_wei": 0,
+      "erc20_transfer_gas_limit": 21000,
+      "gas_limit_multiplier_bps": 12000,
+      "gas_limit_retry_multiplier_bps": 15000,
+      "tx_timeout_seconds": 300,
+      "gas_price_multiplier_bps": 12000,
+      "poa_compatible": false
+    },
+    {
       "key": "base-usdc",
       "chain": "base",
       "asset_code": "USDC",
@@ -156,6 +219,92 @@
       "tx_timeout_seconds": 300,
       "gas_price_multiplier_bps": 12000,
       "poa_compatible": false
+    },
+    {
+      "key": "base-eth",
+      "chain": "base",
+      "asset_code": "ETH",
+      "token_contract_address": "",
+      "rpc_urls": [
+        "${BASE_RPC_URL}",
+        "${BASE_RPC_URL_FALLBACK_1}",
+        "${BASE_RPC_URL_FALLBACK_2}"
+      ],
+      "destination_address": "${BASE_SWEEP_DESTINATION_ADDRESS}",
+      "funding_confirmations": 1,
+      "sweep_confirmations": 1,
+      "max_gas_funding_amount_wei": 0,
+      "erc20_transfer_gas_limit": 21000,
+      "gas_limit_multiplier_bps": 12000,
+      "gas_limit_retry_multiplier_bps": 15000,
+      "tx_timeout_seconds": 300,
+      "gas_price_multiplier_bps": 12000,
+      "poa_compatible": false
+    },
+    {
+      "key": "polygon-usdc",
+      "chain": "polygon",
+      "asset_code": "USDC",
+      "token_contract_address": "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+      "rpc_urls": [
+        "${POLYGON_RPC_URL}",
+        "${POLYGON_RPC_URL_FALLBACK_1}",
+        "${POLYGON_RPC_URL_FALLBACK_2}"
+      ],
+      "funding_private_key_file": "/run/secrets/polygon_sweeper_funding_private_key",
+      "destination_address": "${POLYGON_SWEEP_DESTINATION_ADDRESS}",
+      "funding_confirmations": 1,
+      "sweep_confirmations": 64,
+      "max_gas_funding_amount_wei": "100000000000000000",
+      "erc20_transfer_gas_limit": 120000,
+      "gas_limit_multiplier_bps": 12000,
+      "gas_limit_retry_multiplier_bps": 15000,
+      "tx_timeout_seconds": 600,
+      "gas_price_multiplier_bps": 12000,
+      "poa_compatible": true
+    },
+    {
+      "key": "polygon-usdt",
+      "chain": "polygon",
+      "asset_code": "USDT",
+      "token_contract_address": "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
+      "rpc_urls": [
+        "${POLYGON_RPC_URL}",
+        "${POLYGON_RPC_URL_FALLBACK_1}",
+        "${POLYGON_RPC_URL_FALLBACK_2}"
+      ],
+      "funding_private_key_file": "/run/secrets/polygon_sweeper_funding_private_key",
+      "destination_address": "${POLYGON_SWEEP_DESTINATION_ADDRESS}",
+      "funding_confirmations": 1,
+      "sweep_confirmations": 64,
+      "max_gas_funding_amount_wei": "100000000000000000",
+      "erc20_transfer_gas_limit": 120000,
+      "gas_limit_multiplier_bps": 12000,
+      "gas_limit_retry_multiplier_bps": 15000,
+      "tx_timeout_seconds": 600,
+      "gas_price_multiplier_bps": 12000,
+      "poa_compatible": true
+    },
+    {
+      "key": "polygon-pol",
+      "chain": "polygon",
+      "asset_code": "POL",
+      "token_contract_address": "",
+      "rpc_urls": [
+        "${POLYGON_RPC_URL}",
+        "${POLYGON_RPC_URL_FALLBACK_1}",
+        "${POLYGON_RPC_URL_FALLBACK_2}"
+      ],
+      "destination_address": "${POLYGON_SWEEP_DESTINATION_ADDRESS}",
+      "funding_confirmations": 1,
+      "sweep_confirmations": 64,
+      "max_gas_funding_amount_wei": 0,
+      "erc20_transfer_gas_limit": 21000,
+      "gas_limit_multiplier_bps": 12000,
+      "gas_limit_retry_multiplier_bps": 15000,
+      "tx_timeout_seconds": 600,
+      "gas_price_multiplier_bps": 12000,
+      "poa_compatible": true
     }
   ]
 }

@@ -5,6 +5,10 @@ from web3 import Web3
 from .evm_rpc import build_web3
 from .reference_head import get_reference_head
 from .rpc_pool import choose_best_rpc_url
+from .runtime_price import (
+    canonical_usd_to_required_native_units,
+    fetch_native_usd_quote,
+)
 
 
 ERC20_ABI = [
@@ -234,6 +238,11 @@ def _observe_token_option(
     reference_heads_shared_secret: str,
     reference_heads_timeout_seconds: float,
     reference_heads_max_age_seconds: int,
+    runtime_prices_base_url: str,
+    runtime_prices_shared_secret: str,
+    runtime_prices_timeout_seconds: float,
+    runtime_prices_max_age_seconds: int,
+    runtime_prices_future_skew_seconds: int,
     rpc_max_lag_blocks: int,
     rpc_max_reference_lag_blocks: int,
 ):
@@ -259,6 +268,41 @@ def _observe_token_option(
     latest_block = int(w3.eth.block_number)
 
     if _is_native_option(option):
+        runtime_price_quote = None
+        native_option_is_quoted = (
+            str(option.amount_semantics or "").strip().lower()
+            == "native_quoted"
+        )
+        native_targets_need_price = any(
+            str(
+                target.get("amount_semantics")
+                or option.amount_semantics
+                or "canonical_stable"
+            ).strip().lower()
+            == "native_quoted"
+            and not isinstance(target.get("native_quoted_lock"), dict)
+            for target in targets
+        )
+        if native_option_is_quoted and native_targets_need_price:
+            try:
+                runtime_price_quote = fetch_native_usd_quote(
+                    asset_code=option.asset_code,
+                    base_url=runtime_prices_base_url,
+                    shared_secret=runtime_prices_shared_secret,
+                    timeout_seconds=runtime_prices_timeout_seconds,
+                    max_age_seconds=runtime_prices_max_age_seconds,
+                    future_skew_seconds=runtime_prices_future_skew_seconds,
+                )
+            except Exception:
+                # Undetected deposits fail closed without a quote, but already
+                # detected/locked deposits must keep advancing confirmations.
+                logging.exception(
+                    "native quoted runtime price unavailable option=%s chain=%s asset=%s action=skip_undetected_only",
+                    option.key,
+                    option.chain,
+                    option.asset_code,
+                )
+
         for target in targets:
             session_public_id = target["session_public_id"]
             deposit_address = target["deposit_address"]
@@ -266,7 +310,69 @@ def _observe_token_option(
             min_amount = int(target["min_amount"])
             onchain_min_amount = int(target.get("onchain_min_amount", min_amount))
             option_observation_min_amount = int(option.observation_min_amount)
-            observation_min_amount = option_observation_min_amount
+            amount_semantics = str(
+                target.get("amount_semantics") or option.amount_semantics or "canonical_stable"
+            ).strip().lower()
+            native_quoted_lock = (
+                target.get("native_quoted_lock")
+                if isinstance(target.get("native_quoted_lock"), dict)
+                else None
+            )
+            locked_raw_amount = None
+            locked_detected_block_number = None
+
+            if amount_semantics == "native_quoted":
+                if native_quoted_lock is not None:
+                    try:
+                        locked_raw_amount = int(
+                            native_quoted_lock["raw_amount"]
+                        )
+                        locked_detected_block_number = int(
+                            native_quoted_lock["detected_block_number"]
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        logging.exception(
+                            "invalid native quoted lock option=%s session=%s",
+                            option.key,
+                            session_public_id,
+                        )
+                        continue
+                    if (
+                        locked_raw_amount <= 0
+                        or locked_detected_block_number < 0
+                        or onchain_min_amount <= 0
+                    ):
+                        logging.error(
+                            "invalid native quoted lock values option=%s session=%s raw=%s block=%s threshold=%s",
+                            option.key,
+                            session_public_id,
+                            locked_raw_amount,
+                            locked_detected_block_number,
+                            onchain_min_amount,
+                        )
+                        continue
+                else:
+                    if runtime_price_quote is None:
+                        logging.warning(
+                            "undetected native quoted target skipped without runtime quote option=%s session=%s",
+                            option.key,
+                            session_public_id,
+                        )
+                        continue
+                    if onchain_min_amount <= 0:
+                        onchain_min_amount = (
+                            canonical_usd_to_required_native_units(
+                                min_amount,
+                                runtime_price_quote,
+                                asset_code=option.asset_code,
+                            )
+                        )
+                observation_min_amount = max(
+                    option_observation_min_amount,
+                    onchain_min_amount,
+                )
+            else:
+                observation_min_amount = option_observation_min_amount
 
             try:
                 checksum_deposit_address = Web3.to_checksum_address(deposit_address)
@@ -293,24 +399,44 @@ def _observe_token_option(
             if current_balance < observation_min_amount:
                 continue
 
-            from_block = max(0, int(latest_block) - int(option.lookback_blocks))
-            detected_block_number = _find_first_block_with_native_balance_above(
-                w3=w3,
-                deposit_address=checksum_deposit_address,
-                threshold_amount=observation_min_amount,
-                from_block=from_block,
-                to_block=latest_block,
-            )
-            if detected_block_number is None:
-                logging.warning(
-                    "native balance threshold crossed but detection block not found option=%s session=%s address=%s balance=%s threshold=%s",
-                    option.key,
-                    session_public_id,
-                    checksum_deposit_address,
-                    current_balance,
-                    observation_min_amount,
+            if native_quoted_lock is not None:
+                if current_balance < int(locked_raw_amount):
+                    logging.warning(
+                        "locked native balance fell below first observed amount option=%s session=%s address=%s balance=%s locked_raw=%s",
+                        option.key,
+                        session_public_id,
+                        checksum_deposit_address,
+                        current_balance,
+                        locked_raw_amount,
+                    )
+                    continue
+                detected_block_number = int(
+                    locked_detected_block_number
                 )
-                continue
+                observation_raw_amount = int(locked_raw_amount)
+            else:
+                from_block = max(
+                    0,
+                    int(latest_block) - int(option.lookback_blocks),
+                )
+                detected_block_number = _find_first_block_with_native_balance_above(
+                    w3=w3,
+                    deposit_address=checksum_deposit_address,
+                    threshold_amount=observation_min_amount,
+                    from_block=from_block,
+                    to_block=latest_block,
+                )
+                if detected_block_number is None:
+                    logging.warning(
+                        "native balance threshold crossed but detection block not found option=%s session=%s address=%s balance=%s threshold=%s",
+                        option.key,
+                        session_public_id,
+                        checksum_deposit_address,
+                        current_balance,
+                        observation_min_amount,
+                    )
+                    continue
+                observation_raw_amount = int(current_balance)
 
             confirmations = int(latest_block - int(detected_block_number) + 1)
 
@@ -323,7 +449,7 @@ def _observe_token_option(
                 block_number=int(detected_block_number),
                 detected_block_number=int(detected_block_number),
                 from_address="",
-                amount=current_balance,
+                amount=observation_raw_amount,
                 confirmations=confirmations,
                 required_confirmations=required_confirmations,
                 detection_method="balance_verification",
@@ -338,6 +464,17 @@ def _observe_token_option(
                     "min_amount": str(min_amount),
                     "onchain_min_amount": str(onchain_min_amount),
                     "target_amount_unit": target.get("amount_unit", "canonical_stable"),
+                    "runtime_price_quote": (
+                        runtime_price_quote
+                        if (
+                            amount_semantics == "native_quoted"
+                            and native_quoted_lock is None
+                        )
+                        else None
+                    ),
+                    "native_quoted_lock_refresh": (
+                        native_quoted_lock is not None
+                    ),
                 },
                 log_index=None,
             )
@@ -348,7 +485,7 @@ def _observe_token_option(
                 session_public_id,
                 detected_block_number,
                 confirmations,
-                current_balance,
+                observation_raw_amount,
                 observation_min_amount,
                 current_balance >= onchain_min_amount,
             )
@@ -462,6 +599,11 @@ def observe_once(
     reference_heads_shared_secret: str,
     reference_heads_timeout_seconds: float,
     reference_heads_max_age_seconds: int,
+    runtime_prices_base_url: str,
+    runtime_prices_shared_secret: str,
+    runtime_prices_timeout_seconds: float,
+    runtime_prices_max_age_seconds: int,
+    runtime_prices_future_skew_seconds: int,
     rpc_max_lag_blocks: int,
     rpc_max_reference_lag_blocks: int,
 ):
@@ -486,6 +628,11 @@ def observe_once(
                 reference_heads_shared_secret=reference_heads_shared_secret,
                 reference_heads_timeout_seconds=reference_heads_timeout_seconds,
                 reference_heads_max_age_seconds=reference_heads_max_age_seconds,
+                runtime_prices_base_url=runtime_prices_base_url,
+                runtime_prices_shared_secret=runtime_prices_shared_secret,
+                runtime_prices_timeout_seconds=runtime_prices_timeout_seconds,
+                runtime_prices_max_age_seconds=runtime_prices_max_age_seconds,
+                runtime_prices_future_skew_seconds=runtime_prices_future_skew_seconds,
                 rpc_max_lag_blocks=rpc_max_lag_blocks,
                 rpc_max_reference_lag_blocks=rpc_max_reference_lag_blocks,
             )

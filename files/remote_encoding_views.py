@@ -273,6 +273,18 @@ def remote_encoding_callback(request, friendly_token):
                 payload.get("encodings") or [],
             )
 
+            nonfatal_skipped = [
+                item
+                for item in payload.get("skipped") or []
+                if (
+                    payload.get("mode") == "fill_missing_profiles"
+                    and item.get("reason")
+                    == "source_below_target_resolution"
+                )
+            ]
+            if nonfatal_skipped:
+                _delete_skipped_encodings(media, nonfatal_skipped)
+
             if requested_encoding_ids:
                 Encoding.objects.filter(
                     media=media,
@@ -292,11 +304,16 @@ def remote_encoding_callback(request, friendly_token):
                     logs=payload.get("error", ""),
                 )
 
+            media_update = _media_update_from_payload(
+                payload.get("media") or {}
+            )
+
             if payload.get("preserve_media_on_fail") is not True:
-                Media.objects.filter(pk=media.pk).update(
-                    encoding_status="fail",
-                    listable=False,
-                )
+                media_update["encoding_status"] = "fail"
+                media_update["listable"] = False
+
+            if media_update:
+                Media.objects.filter(pk=media.pk).update(**media_update)
 
         return JsonResponse({"ok": True, "status": "fail"})
 

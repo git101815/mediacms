@@ -11,7 +11,6 @@ from django.urls import reverse
 from django.utils import timezone
 
 from ledger.fiat import get_fiat_usd_rate
-from ledger.internal_api import _get_internal_deposit_service_actor
 from ledger.models import DepositSession, LEDGER_METADATA_VERSION, TokenPack, TokenWallet
 from ledger.providers.paygate import (
     PAYGATE_CHAIN,
@@ -21,6 +20,7 @@ from ledger.providers.paygate import (
     PAYGATE_PAYMENT_METHOD_TYPE,
     PAYGATE_PROVIDER_KEY,
     PAYGATE_STATUS_PAID,
+    PAYGATE_STATUS_UNPAID,
     build_paygate_checkout_url,
     canonical_stable_to_paygate_amount,
     check_paygate_payment,
@@ -32,10 +32,17 @@ from ledger.providers.paygate import (
     get_paygate_provider_label,
     get_paygate_provider_min_canonical_stable_amount,
     get_paygate_public_base_url,
-    get_paygate_usdc_polygon_wallet,
-    paygate_amount_to_canonical_stable_units,
     paygate_enabled,
     paygate_route_key,
+)
+from ledger.native_quoted import (
+    NATIVE_QUOTED_AMOUNT_SEMANTICS,
+    get_native_asset_decimals,
+)
+from ledger.paygate_polygon import (
+    PAYGATE_POLYGON_ASSET,
+    PAYGATE_POLYGON_CHAIN,
+    get_paygate_polygon_policy,
 )
 from ledger.services import (
     LEDGER_OPERATION_FLAG_CREDITING,
@@ -43,6 +50,7 @@ from ledger.services import (
     PLATFORM_TOKEN_DECIMALS,
     PLATFORM_TOKENS_PER_STABLECOIN,
     STABLECOIN_CANONICAL_DECIMALS,
+    _allocate_session_address,
     _build_token_pack_snapshot,
     _convert_canonical_stable_to_platform_tokens,
     _token_pack_credit_required_canonical_amount,
@@ -203,7 +211,7 @@ def _find_reusable_paygate_session(
         DepositSession.objects.select_for_update()
         .filter(
             wallet=wallet,
-            chain=PAYGATE_CHAIN,
+            chain=PAYGATE_POLYGON_CHAIN,
             route_key=paygate_route_key(
                 currency=checkout_currency or normalized_checkout_currency,
                 provider_id=normalized_provider_id,
@@ -235,7 +243,6 @@ def _find_reusable_paygate_session(
 
     return None
 
-@transaction.atomic
 def open_paygate_deposit_session(
     *,
     actor,
@@ -251,128 +258,143 @@ def open_paygate_deposit_session(
     if not paygate_enabled():
         raise ValidationError("PayGate payments are temporarily unavailable")
 
-    wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
-    _require_wallet_not_blocked(wallet)
-
-    if wallet.wallet_type != TokenWallet.TYPE_USER:
-        raise ValidationError("Deposit sessions can only target user wallets")
-
-    if wallet.user_id != actor.id:
-        raise PermissionDenied("Cannot open a deposit session for another user's wallet")
-
     customer_email = (getattr(actor, "email", "") or "").strip()
     if not customer_email:
         raise ValidationError("A verified email address is required for PayGate payments")
 
-    token_pack_snapshot = _build_token_pack_snapshot(
-        token_pack=token_pack,
-        payment_price_bps=payment_price_bps,
-        payment_price_fixed_canonical=payment_price_fixed_canonical,
-    )
-    expected_canonical_amount = int(token_pack_snapshot["gross_stable_amount"])
-    provider_id = (provider_id or get_paygate_provider_id() or "").strip().lower()
-    currency = get_paygate_provider_currency(provider_id)
-    provider_display_label = (
-        get_paygate_provider_label(provider_id)
-        if provider_id
-        else PAYGATE_PAYMENT_METHOD_LABEL
-    )
-    min_amount = get_paygate_provider_min_canonical_stable_amount(provider_id)
+    with transaction.atomic():
+        wallet = TokenWallet.objects.select_for_update().get(id=wallet.id)
+        _require_wallet_not_blocked(wallet)
 
-    if expected_canonical_amount < min_amount:
-        raise ValidationError(
-            f"Selected token pack is below {provider_display_label}'s minimum payment amount"
+        if wallet.wallet_type != TokenWallet.TYPE_USER:
+            raise ValidationError("Deposit sessions can only target user wallets")
+        if wallet.user_id != actor.id:
+            raise PermissionDenied("Cannot open a deposit session for another user's wallet")
+
+        token_pack_snapshot = _build_token_pack_snapshot(
+            token_pack=token_pack,
+            payment_price_bps=payment_price_bps,
+            payment_price_fixed_canonical=payment_price_fixed_canonical,
+        )
+        expected_canonical_amount = int(token_pack_snapshot["gross_stable_amount"])
+        provider_id = (provider_id or get_paygate_provider_id() or "").strip().lower()
+        currency = get_paygate_provider_currency(provider_id)
+        provider_display_label = (
+            get_paygate_provider_label(provider_id)
+            if provider_id
+            else PAYGATE_PAYMENT_METHOD_LABEL
+        )
+        min_amount = get_paygate_provider_min_canonical_stable_amount(provider_id)
+        if expected_canonical_amount < min_amount:
+            raise ValidationError(
+                f"Selected token pack is below {provider_display_label}'s minimum payment amount"
+            )
+
+        currency_usd_rate = format(get_fiat_usd_rate(currency), "f")
+        checkout_amount = canonical_stable_to_paygate_amount(
+            expected_canonical_amount,
+            currency=currency,
         )
 
-    currency_usd_rate = format(get_fiat_usd_rate(currency), "f")
-    checkout_amount = canonical_stable_to_paygate_amount(
-        expected_canonical_amount,
-        currency=currency,
-    )
-
-    existing_session = _find_reusable_paygate_session(
-        wallet=wallet,
-        token_pack_code=token_pack_snapshot["code"],
-        provider_id=provider_id,
-        expected_canonical_amount=expected_canonical_amount,
-        checkout_currency=currency,
-    )
-    if existing_session is not None:
-        return existing_session
-
-    _enforce_deposit_open_cooldown(user=wallet.user)
-
-    public_id = uuid.uuid4()
-    route_key = paygate_route_key(currency, provider_id)
-    synthetic_ref = f"paygate:{public_id.hex}"
-    now = timezone.now()
-    expires_at = now + timedelta(seconds=get_paygate_payment_ttl_seconds())
-
-    callback_path = f"{reverse('paygate_callback')}?{urlencode({'number': str(public_id)})}"
-    callback_url = _build_absolute_url(callback_path)
-
-    metadata = {
-        "display_label": provider_display_label,
-        "allocation_source": "provider_checkout",
-        "chain_family": "provider",
-        "token_pack": token_pack_snapshot,
-        "payment_method": {
-            "key": f"{PAYGATE_PAYMENT_METHOD_KEY}:{provider_id}",
-            "type": PAYGATE_PAYMENT_METHOD_TYPE,
-            "label": provider_display_label,
-            "show_network_step": False,
-        },
-        "payment_provider": _provider_metadata_for_session(
-            session_public_id=public_id,
+        existing_session = _find_reusable_paygate_session(
+            wallet=wallet,
+            token_pack_code=token_pack_snapshot["code"],
             provider_id=provider_id,
+            expected_canonical_amount=expected_canonical_amount,
             checkout_currency=currency,
-            checkout_amount=checkout_amount,
-            checkout_currency_usd_rate=currency_usd_rate,
-        ),
-        "amount_unit": "canonical_stable",
-        "expected_canonical_stable_amount": int(expected_canonical_amount),
-        "canonical_currency": "USD",
-        "checkout_currency": currency,
-        "checkout_amount": checkout_amount,
-        "checkout_currency_usd_rate": currency_usd_rate,
-        "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
-        "platform_token_decimals": PLATFORM_TOKEN_DECIMALS,
-        "platform_tokens_per_stablecoin": PLATFORM_TOKENS_PER_STABLECOIN,
-    }
+        )
+        if existing_session is not None:
+            return existing_session
 
-    deposit_session = DepositSession.objects.create(
-        public_id=public_id,
-        user=wallet.user,
-        wallet=wallet,
-        chain=PAYGATE_CHAIN,
-        asset_code=currency,
-        token_contract_address="",
-        route_key=route_key,
-        display_label=provider_display_label,
-        deposit_address=synthetic_ref,
-        address_derivation_ref=synthetic_ref,
-        derivation_index=None,
-        derivation_path="",
-        status=DepositSession.STATUS_AWAITING_PAYMENT,
-        min_amount=int(expected_canonical_amount),
-        expected_onchain_raw_amount=int(expected_canonical_amount),
-        required_confirmations=1,
-        expires_at=expires_at,
-        created_by=actor,
-        metadata=metadata,
-        metadata_version=LEDGER_METADATA_VERSION,
-    )
+        _enforce_deposit_open_cooldown(user=wallet.user)
+
+        public_id = uuid.uuid4()
+        route_key = paygate_route_key(currency, provider_id)
+        deposit_address, derivation_index, derivation_path = _allocate_session_address(
+            chain=PAYGATE_POLYGON_CHAIN,
+            asset_code=PAYGATE_POLYGON_ASSET,
+            token_contract_address="",
+        )
+        policy = get_paygate_polygon_policy()
+        now = timezone.now()
+        expires_at = now + timedelta(seconds=get_paygate_payment_ttl_seconds())
+
+        callback_path = f"{reverse('paygate_callback')}?{urlencode({'number': str(public_id)})}"
+        callback_url = _build_absolute_url(callback_path)
+
+        metadata = {
+            "display_label": provider_display_label,
+            "allocation_source": "session_derivation",
+            "chain_family": "evm",
+            "amount_semantics": NATIVE_QUOTED_AMOUNT_SEMANTICS,
+            "settlement": {
+                "provider": PAYGATE_PROVIDER_KEY,
+                "chain": PAYGATE_POLYGON_CHAIN,
+                "asset_code": PAYGATE_POLYGON_ASSET,
+                "token_contract_address": "",
+                "native_decimals": get_native_asset_decimals(
+                    PAYGATE_POLYGON_ASSET
+                ),
+                "required_confirmations": int(policy["required_confirmations"]),
+            },
+            "token_pack": token_pack_snapshot,
+            "payment_method": {
+                "key": f"{PAYGATE_PAYMENT_METHOD_KEY}:{provider_id}",
+                "type": PAYGATE_PAYMENT_METHOD_TYPE,
+                "label": provider_display_label,
+                "show_network_step": False,
+            },
+            "payment_provider": _provider_metadata_for_session(
+                session_public_id=public_id,
+                status="CREATING",
+                provider_id=provider_id,
+                checkout_currency=currency,
+                checkout_amount=checkout_amount,
+                checkout_currency_usd_rate=currency_usd_rate,
+            ),
+            "amount_unit": "canonical_stable",
+            "expected_canonical_stable_amount": int(expected_canonical_amount),
+            "canonical_currency": "USD",
+            "checkout_currency": currency,
+            "checkout_amount": checkout_amount,
+            "checkout_currency_usd_rate": currency_usd_rate,
+            "stablecoin_canonical_decimals": STABLECOIN_CANONICAL_DECIMALS,
+            "platform_token_decimals": PLATFORM_TOKEN_DECIMALS,
+            "platform_tokens_per_stablecoin": PLATFORM_TOKENS_PER_STABLECOIN,
+            "paygate_callback_url": callback_url,
+        }
+
+        deposit_session = DepositSession.objects.create(
+            public_id=public_id,
+            user=wallet.user,
+            wallet=wallet,
+            chain=PAYGATE_POLYGON_CHAIN,
+            asset_code=PAYGATE_POLYGON_ASSET,
+            token_contract_address="",
+            route_key=route_key,
+            display_label=provider_display_label,
+            deposit_address=deposit_address,
+            address_derivation_ref=derivation_path,
+            derivation_index=derivation_index,
+            derivation_path=derivation_path,
+            status=DepositSession.STATUS_AWAITING_PAYMENT,
+            min_amount=int(expected_canonical_amount),
+            expected_onchain_raw_amount=None,
+            required_confirmations=int(policy["required_confirmations"]),
+            expires_at=expires_at,
+            created_by=actor,
+            metadata=metadata,
+            metadata_version=LEDGER_METADATA_VERSION,
+        )
 
     try:
         wallet_response = create_paygate_wallet(
-            payout_wallet=get_paygate_usdc_polygon_wallet(),
+            payout_wallet=deposit_address,
             callback_url=callback_url,
         )
-
         address_in = str(wallet_response["address_in"]).strip()
         polygon_address_in = str(wallet_response["polygon_address_in"]).strip()
         ipn_token = str(wallet_response["ipn_token"]).strip()
-
         checkout_url = build_paygate_checkout_url(
             address_in=address_in,
             amount=checkout_amount,
@@ -381,38 +403,43 @@ def open_paygate_deposit_session(
             provider_id=provider_id,
         )
     except Exception as exc:
-        failed_metadata = dict(deposit_session.metadata or {})
-        provider = dict(failed_metadata.get("payment_provider") or {})
-        provider.update(
-            {
-                "status": "CREATE_FAILED",
-                "last_error": str(exc)[:1000],
-                "last_error_at": timezone.now().isoformat(),
-            }
-        )
-        failed_metadata["payment_provider"] = provider
-        deposit_session.status = DepositSession.STATUS_FAILED
-        deposit_session.metadata = failed_metadata
-        deposit_session.save(update_fields=["status", "metadata", "updated_at"])
+        with transaction.atomic():
+            failed_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
+            failed_metadata = dict(failed_session.metadata or {})
+            provider = dict(failed_metadata.get("payment_provider") or {})
+            provider.update(
+                {
+                    "status": "CREATE_FAILED",
+                    "last_error": str(exc)[:1000],
+                    "last_error_at": timezone.now().isoformat(),
+                }
+            )
+            failed_metadata["payment_provider"] = provider
+            failed_session.status = DepositSession.STATUS_FAILED
+            failed_session.metadata = failed_metadata
+            failed_session.save(update_fields=["status", "metadata", "updated_at"])
         raise
 
-    metadata = dict(deposit_session.metadata or {})
-    metadata["payment_provider"] = _provider_metadata_for_session(
-        session_public_id=deposit_session.public_id,
-        address_in=address_in,
-        polygon_address_in=polygon_address_in,
-        ipn_token=ipn_token,
-        checkout_url=checkout_url,
-        status="CREATED",
-        provider_id=provider_id,
-        checkout_currency=currency,
-        checkout_amount=checkout_amount,
-        checkout_currency_usd_rate=currency_usd_rate,
-        raw_payload=wallet_response,
-    )
-    metadata["paygate_callback_url"] = callback_url
-    deposit_session.metadata = metadata
-    deposit_session.save(update_fields=["metadata", "updated_at"])
+    with transaction.atomic():
+        deposit_session = DepositSession.objects.select_for_update().get(id=deposit_session.id)
+        metadata = dict(deposit_session.metadata or {})
+        metadata["payment_provider"] = _provider_metadata_for_session(
+            session_public_id=deposit_session.public_id,
+            address_in=address_in,
+            polygon_address_in=polygon_address_in,
+            ipn_token=ipn_token,
+            checkout_url=checkout_url,
+            status="CREATED",
+            provider_id=provider_id,
+            checkout_currency=currency,
+            checkout_amount=checkout_amount,
+            checkout_currency_usd_rate=currency_usd_rate,
+            raw_payload=wallet_response,
+        )
+        metadata["paygate_callback_url"] = callback_url
+        deposit_session.metadata = metadata
+        deposit_session.save(update_fields=["metadata", "updated_at"])
+
     return deposit_session
 
 
@@ -421,19 +448,19 @@ def _get_paygate_session_from_payload(payload: dict) -> DepositSession:
     address_in = str(payload.get("address_in") or "").strip()
     ipn_token = str(payload.get("ipn_token") or "").strip()
 
+    base_qs = DepositSession.objects.filter(
+        metadata__payment_provider__key=PAYGATE_PROVIDER_KEY,
+    )
+
     if public_id:
-        try:
-            return DepositSession.objects.get(public_id=public_id, chain=PAYGATE_CHAIN)
-        except DepositSession.DoesNotExist as exc:
-            raise ValidationError("Unknown PayGate deposit session") from exc
+        session = base_qs.filter(public_id=public_id).first()
+        if session is None:
+            raise ValidationError("Unknown PayGate deposit session")
+        return session
 
     if address_in:
         session = (
-            DepositSession.objects.filter(
-                chain=PAYGATE_CHAIN,
-                metadata__payment_provider__key=PAYGATE_PROVIDER_KEY,
-                metadata__payment_provider__address_in=address_in,
-            )
+            base_qs.filter(metadata__payment_provider__address_in=address_in)
             .order_by("-created_at")
             .first()
         )
@@ -442,18 +469,14 @@ def _get_paygate_session_from_payload(payload: dict) -> DepositSession:
 
     if ipn_token:
         session = (
-            DepositSession.objects.filter(
-                chain=PAYGATE_CHAIN,
-                metadata__payment_provider__key=PAYGATE_PROVIDER_KEY,
-                metadata__payment_provider__ipn_token=ipn_token,
-            )
+            base_qs.filter(metadata__payment_provider__ipn_token=ipn_token)
             .order_by("-created_at")
             .first()
         )
         if session is not None:
             return session
 
-    raise ValidationError("PayGate callback cannot be matched to a deposit session")
+    raise ValidationError("Unable to resolve PayGate deposit session")
 
 
 def _update_paygate_provider_metadata(
@@ -677,7 +700,6 @@ def process_paygate_callback(payload: dict) -> dict:
         raise ValidationError("Invalid PayGate callback payload")
 
     deposit_session = _get_paygate_session_from_payload(payload)
-
     provider = (deposit_session.metadata or {}).get("payment_provider") or {}
     expected_address_in = str(provider.get("address_in") or "").strip()
     callback_address_in = str(payload.get("address_in") or "").strip()
@@ -691,30 +713,20 @@ def process_paygate_callback(payload: dict) -> dict:
 
     status_response = check_paygate_payment(ipn_token=ipn_token)
     status = str(status_response.get("status") or "").strip().lower()
+    raw_payload = {**payload, "status_response": status_response}
 
-    if status != PAYGATE_STATUS_PAID:
-        _update_paygate_provider_metadata(
-            deposit_session=deposit_session,
-            status=status.upper() or PAYGATE_STATUS_UNPAID.upper(),
-            raw_payload={**payload, "status_response": status_response},
-        )
+    _update_paygate_provider_metadata(
+        deposit_session=deposit_session,
+        status=status.upper() or PAYGATE_STATUS_UNPAID.upper(),
+        raw_payload=raw_payload,
+    )
+
+    # Never let a provider callback downgrade an already credited/swept on-chain session.
+    if deposit_session.status in PAYGATE_ACTIVE_STATUSES:
         deposit_session.status = DepositSession.STATUS_CONFIRMING
         deposit_session.save(update_fields=["status", "metadata", "updated_at"])
-        return {
-            "provider": PAYGATE_PROVIDER_KEY,
-            "provider_reference": ipn_token,
-            "status": status or PAYGATE_STATUS_UNPAID,
-            "deposit_session_public_id": str(deposit_session.public_id),
-            "ledger_txn_id": None,
-            "credited": False,
-        }
-
-    paid_value = (
-        status_response.get("value_coin")
-        or payload.get("value_coin")
-        or payload.get("value_forwarded_coin")
-    )
-    paid_canonical_amount = paygate_amount_to_canonical_stable_units(paid_value)
+    else:
+        deposit_session.save(update_fields=["metadata", "updated_at"])
 
     provider_reference = (
         str(status_response.get("txid_out") or "").strip()
@@ -722,25 +734,18 @@ def process_paygate_callback(payload: dict) -> dict:
         or str(payload.get("txid_in") or "").strip()
         or ipn_token
     )
-
-    actor = _get_internal_deposit_service_actor()
-    raw_payload = {**payload, "status_response": status_response}
-
-    txn = credit_paygate_deposit_session(
-        actor=actor,
-        deposit_session=deposit_session,
-        provider_reference=provider_reference,
-        paid_canonical_stable_amount=paid_canonical_amount,
-        raw_payload=raw_payload,
-    )
-
+    credited = deposit_session.status in {
+        DepositSession.STATUS_CREDITED,
+        getattr(DepositSession, "STATUS_SWEPT", "swept"),
+    }
     return {
         "provider": PAYGATE_PROVIDER_KEY,
         "provider_reference": provider_reference,
-        "status": PAYGATE_STATUS_PAID,
+        "status": status or PAYGATE_STATUS_UNPAID,
         "deposit_session_public_id": str(deposit_session.public_id),
-        "ledger_txn_id": txn.id,
-        "credited": True,
+        "ledger_txn_id": deposit_session.credited_ledger_txn_id,
+        "credited": bool(credited),
+        "source_of_truth": "polygon_onchain",
     }
 
 

@@ -1,0 +1,31 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>Sign in · {{ portal_name }} Ads</title>
+  <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'ads/ads.css' %}">
+</head>
+<body>
+<div id="app" class="auth-page">
+  <div class="navbar auth-navbar">
+    <a class="navbar__logo-link" href="/login/"><span class="clickaine-logo"><span class="clickaine-logo__mark"></span><span class="clickaine-logo__text">{{ portal_name }} Ads</span></span></a>
+  </div>
+  <main class="auth-panel">
+    <h1>Advertiser sign in</h1>
+    <p class="auth-panel__subtitle">Sign in to manage campaigns and advertising funds.</p>
+    {% if denied %}<div class="auth-error">This account does not have advertiser access.</div>{% endif %}
+    {% if form.non_field_errors %}<div class="auth-error">{{ form.non_field_errors }}</div>{% endif %}
+    <form method="post" action="/login/">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next_path }}">
+      <div class="auth-field"><label for="{{ form.username.id_for_label }}">Username or email</label>{{ form.username }}{% if form.username.errors %}<div class="auth-error">{{ form.username.errors }}</div>{% endif %}</div>
+      <div class="auth-field"><label for="{{ form.password.id_for_label }}">Password</label>{{ form.password }}{% if form.password.errors %}<div class="auth-error">{{ form.password.errors }}</div>{% endif %}</div>
+      <button class="auth-submit" type="submit">sign in</button>
+    </form>
+  </main>
+</div>
+</body>
+</html>

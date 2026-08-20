@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500" role="img" aria-labelledby="title">
+  <title id="title">Polygon icon</title>
+  <circle cx="250" cy="250" r="250" fill="#6C00F6"/>
+  <path fill="#FFFFFF" d="M373 178 L304 139 L235 178 L235 303 L194 326 L155 302 L155 259 L195 235 L219 249 L219 215 L195 201 L126 241 L126 320 L195 360 L262 322 L264 196 L302 173 L343 196 L343 241 L304 264 L279 250 L279 283 L305 297 L372 259 Z"/>
+</svg>

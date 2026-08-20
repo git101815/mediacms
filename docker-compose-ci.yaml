@@ -1,0 +1,60 @@
+name: mediacms-ci
+
+x-test-environment: &test_environment
+  TESTING: "True"
+  TEST_DATABASE_NAME: test_mediacms
+  TEST_REDIS_DB: "15"
+
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: mediacms
+  POSTGRES_NAME: mediacms
+  POSTGRES_PASSWORD: mediacms-ci
+  REDIS_LOCATION: redis://redis:6379/1
+
+  SECRET_KEY: ci-only-not-a-secret
+  BUNNY_DOWNLOAD_BASE_URL: https://ci.invalid
+  BUNNY_DOWNLOAD_TOKEN_KEY: ci-only-not-a-secret
+  REMOTE_ENCODING_CALLBACK_SECRET: ci-only-not-a-secret
+  RUNPOD_API_KEY: ci-only-not-a-secret
+  LEDGER_INTERNAL_GATEWAY_SECRET: ci-only-not-a-secret
+  MEDIACMS_INTERNAL_GATEWAY_SECRET: ci-only-not-a-secret
+  LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service-ci
+  LEDGER_INTERNAL_DEPOSIT_SERVICE_SHARED_SECRET: ci-only-not-a-secret
+  LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME: sweeper-service-ci
+  LEDGER_INTERNAL_SWEEPER_SERVICE_SHARED_SECRET: ci-only-not-a-secret
+
+services:
+  tests:
+    image: mediacms-ci:test
+    pull_policy: never
+    working_dir: /home/mediacms.io/mediacms
+    environment:
+      <<: *test_environment
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  db:
+    image: postgres:17.2-alpine
+    environment:
+      POSTGRES_USER: mediacms
+      POSTGRES_PASSWORD: mediacms-ci
+      POSTGRES_DB: mediacms
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 15

@@ -31,6 +31,7 @@ celerybeat-schedule-wal
 .idea/
 deposit_service/data/state.json
 # Django collectstatic/vendor outputs
+/static/ads/
 static/admin/
 static/ckeditor/
 static/debug_toolbar/

@@ -343,3 +343,117 @@ class TestResidualDepositWatchActivity(BaseLedgerTestCase):
         self.assertTrue(raw_payload.get("residual_coalesced_into_active_sweep_job"))
         self.assertEqual(raw_payload.get("coalesced_sweep_job_public_id"), str(primary_job.public_id))
 
+
+    def test_primary_balance_observation_is_not_reclassified_as_residual_after_sweep(self):
+        session = create_deposit_session(
+            actor=self.u1,
+            wallet=self.w1,
+            chain="ethereum",
+            asset_code="USDT",
+            token_contract_address=(
+                "0xdac17f958d2ee523a2206206994597c13d831ec7"
+            ),
+            deposit_address=(
+                "0xdddddddddddddddddddddddddddddddddddddddd"
+            ),
+            address_derivation_ref="m/44'/60'/0'/0/701",
+            expires_at=timezone.now() + timedelta(hours=1),
+            required_confirmations=12,
+            min_amount=100,
+        )
+
+        observed = record_onchain_observation(
+            actor=self.operator,
+            deposit_session=session,
+            chain="ethereum",
+            txid="",
+            log_index=None,
+            block_number=None,
+            detected_block_number=500,
+            detection_method="balance_verification",
+            from_address="",
+            to_address=session.deposit_address,
+            token_contract_address=(
+                "0xdac17f958d2ee523a2206206994597c13d831ec7"
+            ),
+            asset_code="USDT",
+            amount=250,
+            confirmations=12,
+            raw_payload={
+                "source": "primary-balance-test",
+                "detected_block_number": 500,
+                "amount": 250,
+            },
+        )
+
+        credit_confirmed_deposit_session(
+            actor=self.operator,
+            deposit_session=session,
+            observed_transfer=observed,
+            created_by=self.u1,
+        )
+        observed.refresh_from_db()
+        primary_job = DepositSweepJob.objects.get(
+            observed_transfer=observed,
+        )
+        self._confirm_sweep_job(
+            job=primary_job,
+            service_name="primary-balance-recheck-sweeper",
+            sweep_txid="0xprimarybalance",
+        )
+        session.refresh_from_db()
+        observed.refresh_from_db()
+
+        self.assertEqual(session.status, DepositSession.STATUS_SWEPT)
+        self.assertEqual(
+            observed.status,
+            ObservedOnchainTransfer.STATUS_CREDITED,
+        )
+        self.assertFalse(
+            (observed.raw_payload or {}).get("ledger_residual_deposit")
+        )
+
+        replayed = record_onchain_observation(
+            actor=self.operator,
+            deposit_session=session,
+            chain="ethereum",
+            txid="",
+            log_index=None,
+            block_number=None,
+            detected_block_number=500,
+            detection_method="balance_verification",
+            from_address="",
+            to_address=session.deposit_address,
+            token_contract_address=(
+                "0xdac17f958d2ee523a2206206994597c13d831ec7"
+            ),
+            asset_code="USDT",
+            amount=250,
+            confirmations=12,
+            raw_payload={
+                "source": "primary-balance-recheck",
+                "detected_block_number": 500,
+                "amount": 250,
+            },
+        )
+        replayed.refresh_from_db()
+
+        payload = replayed.raw_payload or {}
+        self.assertEqual(replayed.id, observed.id)
+        self.assertEqual(
+            replayed.status,
+            ObservedOnchainTransfer.STATUS_CREDITED,
+        )
+        self.assertFalse(payload.get("ledger_residual_deposit"))
+        self.assertFalse(payload.get("residual_deposit"))
+        self.assertNotEqual(payload.get("auto_credit"), False)
+
+        jobs = DepositSweepJob.objects.filter(
+            observed_transfer=replayed,
+        )
+        self.assertEqual(jobs.count(), 1)
+        self.assertEqual(
+            (jobs.get().metadata or {}).get("source"),
+            "credited_deposit",
+        )
+

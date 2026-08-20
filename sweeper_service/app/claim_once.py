@@ -30,12 +30,49 @@ logging.basicConfig(
 )
 
 
+BASE_GAS_PRICE_ORACLE_ADDRESS = "0x420000000000000000000000000000000000000F"
+BASE_SIGNATURE_SIZE_BYTES = 68
+
+class _BroadcastRejectedAndRescheduled(RuntimeError):
+    pass
+
+
+def _is_rpc_insufficient_funds_error(exc: Exception) -> bool:
+    message = str(exc or "").strip().lower()
+    return (
+        "insufficient funds for gas" in message
+        and "price" in message
+    )
+
+
+BASE_GAS_PRICE_ORACLE_ABI = [
+    {
+        "inputs": [{"internalType": "uint256", "name": "_unsignedTxSize", "type": "uint256"}],
+        "name": "getL1FeeUpperBound",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "_gasUsed", "type": "uint256"}],
+        "name": "getOperatorFee",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+]
+
+
 def _build_option_selector(option) -> dict:
     return {
         "chain": option.chain,
         "asset_code": option.asset_code,
         "token_contract_address": option.token_contract_address,
     }
+
+
+def _is_native_option(option) -> bool:
+    return not str(option.token_contract_address or "").strip()
 
 
 def _option_key(*, chain: str, asset_code: str, token_contract_address: str) -> tuple[str, str, str]:
@@ -238,6 +275,95 @@ def _compute_effective_gas_price_wei(*, w3, option) -> int:
     return effective_gas_price
 
 
+def _estimate_base_sweep_extra_fee_wei(
+    *,
+    w3,
+    option,
+    source_private_key: str,
+    amount: int,
+    gas_limit: int,
+    gas_price_wei: int,
+) -> int:
+    if str(option.chain or "").strip().lower() != "base":
+        return 0
+
+    # getL1FeeUpperBound() wants the unsigned transaction size and internally
+    # adds 68 bytes for the signature. Build a representative signed sweep
+    # only to derive its size. A large dummy nonce makes this conservative for
+    # deposit addresses whose nonce is normally very small.
+    sizing_tx = build_erc20_transfer_transaction(
+        w3=w3,
+        nonce=(1 << 64) - 1,
+        token_contract_address=option.token_contract_address,
+        source_private_key=source_private_key,
+        destination_address=option.destination_address,
+        amount=amount,
+        gas_limit=gas_limit,
+        gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+        gas_price_wei=gas_price_wei,
+    )
+    sizing_signed = sign_transaction(
+        tx=sizing_tx,
+        private_key=source_private_key,
+    )
+    signed_tx_size = len(sizing_signed["raw_transaction"])
+    unsigned_tx_size = max(
+        1,
+        signed_tx_size - BASE_SIGNATURE_SIZE_BYTES,
+    )
+
+    oracle = w3.eth.contract(
+        address=Web3.to_checksum_address(BASE_GAS_PRICE_ORACLE_ADDRESS),
+        abi=BASE_GAS_PRICE_ORACLE_ABI,
+    )
+    l1_fee_upper_bound = int(
+        oracle.functions.getL1FeeUpperBound(unsigned_tx_size).call()
+    )
+    operator_fee_upper_bound = int(
+        oracle.functions.getOperatorFee(int(gas_limit)).call()
+    )
+
+    extra_fee = max(0, l1_fee_upper_bound) + max(0, operator_fee_upper_bound)
+
+    logging.info(
+        "sweeper_service action=base-extra-fee-budget chain=%s asset=%s "
+        "unsigned_tx_size=%s l1_fee_upper_bound=%s operator_fee_upper_bound=%s "
+        "extra_fee=%s",
+        option.chain,
+        option.asset_code,
+        unsigned_tx_size,
+        l1_fee_upper_bound,
+        operator_fee_upper_bound,
+        extra_fee,
+    )
+    return int(extra_fee)
+
+
+def _compute_sweep_native_budget(
+    *,
+    w3,
+    option,
+    source_private_key: str,
+    amount: int,
+    gas_limit: int,
+) -> tuple[int, int]:
+    gas_price_wei = _compute_effective_gas_price_wei(
+        w3=w3,
+        option=option,
+    )
+    l2_execution_budget = int(gas_limit) * int(gas_price_wei)
+    extra_fee_budget = _estimate_base_sweep_extra_fee_wei(
+        w3=w3,
+        option=option,
+        source_private_key=source_private_key,
+        amount=amount,
+        gas_limit=gas_limit,
+        gas_price_wei=gas_price_wei,
+    )
+    required_native = int(l2_execution_budget) + int(extra_fee_budget)
+    return int(gas_price_wei), int(required_native)
+
+
 def _compute_required_native_wei(*, w3, option, source_address: str, amount: int) -> tuple[int, int]:
     gas_limit = _estimate_erc20_transfer_gas(
         w3=w3,
@@ -294,13 +420,20 @@ def _compute_retry_budget(
     w3,
     option,
     source_address: str,
+    source_private_key: str,
+    amount: int,
     retry_gas_limit: int,
-) -> tuple[int, int]:
-    effective_gas_price = _compute_effective_gas_price_wei(w3=w3, option=option)
-    required_native = int(retry_gas_limit) * int(effective_gas_price)
+) -> tuple[int, int, int]:
+    gas_price_wei, required_native = _compute_sweep_native_budget(
+        w3=w3,
+        option=option,
+        source_private_key=source_private_key,
+        amount=amount,
+        gas_limit=retry_gas_limit,
+    )
     source_native_balance = int(get_native_balance(w3=w3, address=source_address))
     extra_topup_needed = max(0, required_native - source_native_balance)
-    return required_native, extra_topup_needed
+    return gas_price_wei, required_native, extra_topup_needed
 
 
 
@@ -497,11 +630,24 @@ def _reserve_sender_nonce(
     if not normalized_address:
         raise RuntimeError("Cannot reserve nonce for an empty address")
 
-    lock = client.acquire_evm_sender_lock(
-        chain=option.chain,
-        address=normalized_address,
-        lock_seconds=_sender_lock_seconds(config),
-    )
+    try:
+        lock = client.acquire_evm_sender_lock(
+            chain=option.chain,
+            address=normalized_address,
+            lock_seconds=_sender_lock_seconds(config),
+        )
+    except Exception as exc:
+        if "evm sender is already locked" in str(exc or "").strip().lower():
+            _raise_structured_error(
+                code="SWEEP_SENDER_LOCK_BUSY",
+                message="EVM sender is already locked",
+                retryable=True,
+                details={
+                    "chain": option.chain,
+                    "address": normalized_address,
+                },
+            )
+        raise
 
     rpc_pending_nonce = _pending_nonce(w3=w3, address=normalized_address)
     backend_next_nonce = lock.get("next_nonce")
@@ -601,7 +747,157 @@ def _send_native_transfer_with_sender_lock(
             txid=txid,
         )
         return txid
-    except Exception:
+    except Exception as exc:
+        if backend_recorded and _is_rpc_insufficient_funds_error(exc):
+            error_message = _truncate_error(str(exc))
+            try:
+                client.mark_funding_broadcast_missing(
+                    public_id=public_id,
+                    claim_token=claim_token,
+                    gas_funding_txid=txid,
+                    next_retry_in_seconds=_default_retry_delay_seconds(config),
+                    error=error_message,
+                )
+            except Exception as recovery_exc:
+                _release_sender_lock_safely(
+                    client=client,
+                    option=option,
+                    sender_lock=sender_lock,
+                )
+                _raise_structured_error(
+                    code="SWEEP_FUNDING_RPC_REJECT_RECOVERY_UNCERTAIN",
+                    message=(
+                        "Funding RPC rejected the transaction for insufficient "
+                        "native balance and backend recovery could not be confirmed"
+                    ),
+                    retryable=True,
+                    details={
+                        "job_public_id": public_id,
+                        "txid": txid,
+                        "rpc_error": error_message,
+                        "recovery_error": _truncate_error(str(recovery_exc)),
+                    },
+                )
+
+            _release_sender_lock_safely(
+                client=client,
+                option=option,
+                sender_lock=sender_lock,
+            )
+            raise _BroadcastRejectedAndRescheduled(
+                "Funding RPC rejected transaction for insufficient native "
+                f"balance; same job rescheduled public_id={public_id} txid={txid}"
+            ) from exc
+
+        if not backend_recorded:
+            _release_sender_lock_safely(
+                client=client,
+                option=option,
+                sender_lock=sender_lock,
+            )
+        raise
+
+
+def _send_native_sweep_with_sender_lock(
+    *,
+    client: MediaCMSInternalClient,
+    config,
+    w3,
+    option,
+    public_id: str,
+    claim_token: str,
+    source_private_key: str,
+    destination_address: str,
+    amount_wei: int,
+    gas_price_wei: int,
+) -> str:
+    source_address = address_from_private_key(source_private_key)
+    sender_lock = None
+    backend_recorded = False
+    txid = ""
+
+    try:
+        sender_lock = _reserve_sender_nonce(
+            client=client,
+            config=config,
+            option=option,
+            w3=w3,
+            address=source_address,
+        )
+        tx = build_native_transfer_transaction(
+            w3=w3,
+            nonce=sender_lock["nonce"],
+            funding_private_key=source_private_key,
+            to_address=destination_address,
+            amount_wei=amount_wei,
+            gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+            gas_price_wei=gas_price_wei,
+        )
+        signed = sign_transaction(tx=tx, private_key=source_private_key)
+        txid = signed["txid"]
+
+        client.mark_sweep_broadcasted(
+            public_id=public_id,
+            claim_token=claim_token,
+            sweep_txid=txid,
+            destination_address=destination_address,
+            last_sweep_gas_limit=21000,
+            sender_address=source_address,
+            nonce=sender_lock["nonce"],
+            amount=amount_wei,
+        )
+        backend_recorded = True
+
+        send_signed_transaction(
+            w3=w3,
+            raw_transaction=signed["raw_transaction"],
+            expected_txid=txid,
+        )
+        client.confirm_evm_sender_nonce_used(
+            chain=option.chain,
+            address=source_address,
+            lock_token=sender_lock["lock_token"],
+            nonce=sender_lock["nonce"],
+            txid=txid,
+        )
+        return txid
+    except Exception as exc:
+        if backend_recorded and _is_rpc_insufficient_funds_error(exc):
+            error_message = _truncate_error(str(exc))
+            try:
+                client.mark_sweep_broadcast_missing(
+                    public_id=public_id,
+                    claim_token=claim_token,
+                    sweep_txid=txid,
+                    next_retry_in_seconds=_default_retry_delay_seconds(config),
+                    error=error_message,
+                )
+            except Exception as recovery_exc:
+                _release_sender_lock_safely(
+                    client=client,
+                    option=option,
+                    sender_lock=sender_lock,
+                )
+                _raise_structured_error(
+                    code="SWEEP_NATIVE_RPC_REJECT_RECOVERY_UNCERTAIN",
+                    message="Native sweep RPC rejected transaction and backend recovery is uncertain",
+                    retryable=True,
+                    details={
+                        "job_public_id": public_id,
+                        "txid": txid,
+                        "rpc_error": error_message,
+                        "recovery_error": _truncate_error(str(recovery_exc)),
+                    },
+                )
+            _release_sender_lock_safely(
+                client=client,
+                option=option,
+                sender_lock=sender_lock,
+            )
+            raise _BroadcastRejectedAndRescheduled(
+                f"Native sweep RPC rejected transaction; job rescheduled public_id={public_id} txid={txid}"
+            ) from exc
+
         if not backend_recorded:
             _release_sender_lock_safely(
                 client=client,
@@ -624,6 +920,7 @@ def _send_erc20_transfer_with_sender_lock(
     destination_address: str,
     amount: int,
     gas_limit: int,
+    gas_price_wei: int | None = None,
 ) -> str:
     source_address = address_from_private_key(source_private_key)
     sender_lock = None
@@ -646,6 +943,7 @@ def _send_erc20_transfer_with_sender_lock(
             amount=amount,
             gas_limit=gas_limit,
             gas_price_multiplier_bps=option.gas_price_multiplier_bps,
+            gas_price_wei=gas_price_wei,
         )
         signed = sign_transaction(tx=tx, private_key=source_private_key)
         txid = signed["txid"]
@@ -675,7 +973,48 @@ def _send_erc20_transfer_with_sender_lock(
             txid=txid,
         )
         return txid
-    except Exception:
+    except Exception as exc:
+        if backend_recorded and _is_rpc_insufficient_funds_error(exc):
+            error_message = _truncate_error(str(exc))
+            try:
+                client.mark_sweep_broadcast_missing(
+                    public_id=public_id,
+                    claim_token=claim_token,
+                    sweep_txid=txid,
+                    next_retry_in_seconds=_default_retry_delay_seconds(config),
+                    error=error_message,
+                )
+            except Exception as recovery_exc:
+                _release_sender_lock_safely(
+                    client=client,
+                    option=option,
+                    sender_lock=sender_lock,
+                )
+                _raise_structured_error(
+                    code="SWEEP_RPC_REJECT_RECOVERY_UNCERTAIN",
+                    message=(
+                        "Sweep RPC rejected the transaction for insufficient "
+                        "native balance and backend recovery could not be confirmed"
+                    ),
+                    retryable=True,
+                    details={
+                        "job_public_id": public_id,
+                        "txid": txid,
+                        "rpc_error": error_message,
+                        "recovery_error": _truncate_error(str(recovery_exc)),
+                    },
+                )
+
+            _release_sender_lock_safely(
+                client=client,
+                option=option,
+                sender_lock=sender_lock,
+            )
+            raise _BroadcastRejectedAndRescheduled(
+                "Sweep RPC rejected transaction for insufficient native "
+                f"balance; same job rescheduled public_id={public_id} txid={txid}"
+            ) from exc
+
         if not backend_recorded:
             _release_sender_lock_safely(
                 client=client,
@@ -749,6 +1088,7 @@ def _run_single_sweep_attempt(
     source_private_key: str,
     amount: int,
     gas_limit: int,
+    gas_price_wei: int | None = None,
 ) -> tuple[str, dict]:
     sweep_txid = _send_erc20_transfer_with_sender_lock(
         client=client,
@@ -762,6 +1102,7 @@ def _run_single_sweep_attempt(
         destination_address=option.destination_address,
         amount=amount,
         gas_limit=gas_limit,
+        gas_price_wei=gas_price_wei,
     )
     wait_for_confirmations(
         w3=w3,
@@ -817,10 +1158,12 @@ def _finalize_sweep_with_single_retry(
         attempted_gas_limit=initial_gas_limit,
         gas_used=first_gas_used,
     )
-    required_native, extra_topup_needed = _compute_retry_budget(
+    retry_gas_price_wei, required_native, extra_topup_needed = _compute_retry_budget(
         w3=w3,
         option=option,
         source_address=source_address,
+        source_private_key=source_private_key,
+        amount=amount,
         retry_gas_limit=retry_gas_limit,
     )
 
@@ -857,6 +1200,7 @@ def _finalize_sweep_with_single_retry(
         source_private_key=source_private_key,
         amount=amount,
         gas_limit=retry_gas_limit,
+        gas_price_wei=retry_gas_price_wei,
     )
 
     if int(second_receipt.get("status", 0) or 0) == 1:
@@ -980,6 +1324,18 @@ def _process_claimed_job(
             )
             return
 
+        if _is_native_option(option):
+            _raise_structured_error(
+                code="SWEEP_NATIVE_REVERTED",
+                message="Native sweep transaction reverted",
+                retryable=False,
+                details={
+                    "job_public_id": public_id,
+                    "sweep_txid": sweep_txid,
+                    "receipt_status": int(receipt.get("status", 0) or 0),
+                },
+            )
+
         attempted_gas_limit = int(
             job.get("last_sweep_gas_limit")
             or receipt.get("gasUsed")
@@ -1008,10 +1364,12 @@ def _process_claimed_job(
             attempted_gas_limit=attempted_gas_limit,
             gas_used=int(receipt.get("gasUsed", 0) or 0),
         )
-        required_native, extra_topup_needed = _compute_retry_budget(
+        _retry_gas_price_wei, required_native, extra_topup_needed = _compute_retry_budget(
             w3=w3,
             option=option,
             source_address=source_address,
+            source_private_key=source_private_key,
+            amount=amount,
             retry_gas_limit=retry_gas_limit,
         )
 
@@ -1149,6 +1507,65 @@ def _process_claimed_job(
     elif status not in {"pending", "ready_to_sweep"}:
         raise RuntimeError(f"Unsupported claimed job status for job={public_id}: {status}")
 
+    if _is_native_option(option):
+        if status == "funding_broadcasted":
+            _raise_structured_error(
+                code="SWEEP_NATIVE_INVALID_FUNDING_STATE",
+                message="Native sweep job must never require gas funding",
+                retryable=False,
+                details={"job_public_id": public_id},
+            )
+
+        source_native_balance = int(get_native_balance(w3=w3, address=source_address))
+        gas_price_wei = _compute_effective_gas_price_wei(w3=w3, option=option)
+        gas_limit = 21000
+        fee_wei = int(gas_limit) * int(gas_price_wei)
+        sweep_amount_wei = source_native_balance - fee_wei
+        if sweep_amount_wei <= 0:
+            _raise_structured_error(
+                code="SWEEP_NATIVE_BALANCE_TOO_LOW",
+                message="Native source balance does not cover its own sweep gas",
+                retryable=True,
+                details={
+                    "job_public_id": public_id,
+                    "source_balance_wei": source_native_balance,
+                    "required_fee_wei": fee_wei,
+                    "chain": option.chain,
+                    "asset_code": option.asset_code,
+                },
+            )
+
+        client.mark_ready_to_sweep(public_id=public_id, claim_token=claim_token)
+        sweep_txid = _send_native_sweep_with_sender_lock(
+            client=client,
+            config=config,
+            w3=w3,
+            option=option,
+            public_id=public_id,
+            claim_token=claim_token,
+            source_private_key=source_private_key,
+            destination_address=option.destination_address,
+            amount_wei=sweep_amount_wei,
+            gas_price_wei=gas_price_wei,
+        )
+        client.mark_rescheduled(
+            public_id=public_id,
+            claim_token=claim_token,
+            next_retry_in_seconds=retry_delay_seconds,
+        )
+        logging.info(
+            "sweeper_service action=native-sweep-broadcasted public_id=%s chain=%s asset=%s "
+            "source_balance=%s fee=%s amount=%s sweep_txid=%s",
+            public_id,
+            option.chain,
+            option.asset_code,
+            source_native_balance,
+            fee_wei,
+            sweep_amount_wei,
+            sweep_txid,
+        )
+        return
+
     token_balance = _read_current_token_balance_or_raise(
         w3=w3,
         option=option,
@@ -1159,7 +1576,7 @@ def _process_claimed_job(
     )
 
     source_native_balance = int(get_native_balance(w3=w3, address=source_address))
-    estimated_gas_limit, estimated_required_native = _compute_required_native_wei(
+    estimated_gas_limit = _estimate_erc20_transfer_gas(
         w3=w3,
         option=option,
         source_address=source_address,
@@ -1171,25 +1588,25 @@ def _process_claimed_job(
         or job.get("last_sweep_gas_limit")
         or estimated_gas_limit
     )
-    if chosen_gas_limit == int(estimated_gas_limit):
-        required_native = int(estimated_required_native)
-    else:
-        required_native = _compute_required_native_for_gas_limit(
-            w3=w3,
-            option=option,
-            gas_limit=chosen_gas_limit,
-        )
 
+    sweep_gas_price_wei, required_native = _compute_sweep_native_budget(
+        w3=w3,
+        option=option,
+        source_private_key=source_private_key,
+        amount=amount,
+        gas_limit=chosen_gas_limit,
+    )
     topup_needed = max(0, required_native - source_native_balance)
 
     logging.info(
-        "sweeper_service action=native-budget public_id=%s source=%s native_balance=%s required_native=%s topup_needed=%s gas_limit=%s",
+        "sweeper_service action=native-budget public_id=%s source=%s native_balance=%s required_native=%s topup_needed=%s gas_limit=%s gas_price_wei=%s",
         public_id,
         source_address,
         source_native_balance,
         required_native,
         topup_needed,
         chosen_gas_limit,
+        sweep_gas_price_wei,
     )
 
     if topup_needed > 0:
@@ -1254,6 +1671,7 @@ def _process_claimed_job(
         destination_address=option.destination_address,
         amount=amount,
         gas_limit=chosen_gas_limit,
+        gas_price_wei=sweep_gas_price_wei,
     )
     client.mark_rescheduled(
         public_id=public_id,
@@ -1342,6 +1760,14 @@ def run_once(*, client: MediaCMSInternalClient, config) -> None:
                 job=job,
                 w3=w3,
             )
+        except _BroadcastRejectedAndRescheduled as exc:
+            logging.warning(
+                "sweeper_service action=rpc-broadcast-rejected-recovered "
+                "public_id=%s error=%s",
+                public_id,
+                exc,
+            )
+            continue
         except Exception as exc:
             structured_error = _extract_structured_error(exc)
 

@@ -42,6 +42,11 @@ class FakeEth:
     def contract(self, address, abi):
         return FakeContract(self.amount_by_block)
 
+    def get_balance(self, address, block_identifier=None):
+        if block_identifier is None:
+            return self.amount_by_block["latest"]
+        return self.amount_by_block.get(int(block_identifier), 0)
+
 
 class FakeWeb3:
     def __init__(self, amount_by_block):
@@ -99,6 +104,11 @@ def test_erc20_observer_detects_partial_payment_above_observation_minimum(monkey
         reference_heads_shared_secret="",
         reference_heads_timeout_seconds=1,
         reference_heads_max_age_seconds=60,
+        runtime_prices_base_url="",
+        runtime_prices_shared_secret="",
+        runtime_prices_timeout_seconds=1,
+        runtime_prices_max_age_seconds=180,
+        runtime_prices_future_skew_seconds=30,
         rpc_max_lag_blocks=64,
         rpc_max_reference_lag_blocks=64,
     )
@@ -164,8 +174,104 @@ def test_erc20_observer_ignores_dust_below_observation_minimum(monkeypatch):
         reference_heads_shared_secret="",
         reference_heads_timeout_seconds=1,
         reference_heads_max_age_seconds=60,
+        runtime_prices_base_url="",
+        runtime_prices_shared_secret="",
+        runtime_prices_timeout_seconds=1,
+        runtime_prices_max_age_seconds=180,
+        runtime_prices_future_skew_seconds=30,
         rpc_max_lag_blocks=64,
         rpc_max_reference_lag_blocks=64,
     )
 
     assert client.payloads == []
+
+def test_locked_native_observer_advances_without_runtime_price(monkeypatch):
+    locked_raw = 5 * 10**15
+    threshold_raw = 4 * 10**15
+    amount_by_block = {"latest": 7 * 10**15}
+    for block_number in range(0, 201):
+        amount_by_block[block_number] = (
+            0 if block_number < 120 else 7 * 10**15
+        )
+
+    monkeypatch.setattr(
+        observe_once,
+        "_build_option_web3",
+        lambda **kwargs: FakeWeb3(amount_by_block),
+    )
+
+    def forbidden_price_fetch(**kwargs):
+        raise AssertionError(
+            "runtime price must not be fetched for a locked observation"
+        )
+
+    monkeypatch.setattr(
+        observe_once,
+        "fetch_native_usd_quote",
+        forbidden_price_fetch,
+    )
+
+    client = FakeObservationClient()
+    option = SimpleNamespace(
+        key="ethereum-eth",
+        chain="ethereum",
+        asset_code="ETH",
+        token_contract_address="",
+        observation_min_amount=10**12,
+        lookback_blocks=200,
+        rpc_urls=["http://fake-rpc"],
+        poa_compatible=False,
+        amount_semantics="native_quoted",
+    )
+    watch = {
+        "targets": [
+            {
+                "session_public_id": "session-locked-eth",
+                "deposit_address": (
+                    "0x1111111111111111111111111111111111111111"
+                ),
+                "required_confirmations": 12,
+                "min_amount": 10_000_000,
+                "onchain_min_amount": threshold_raw,
+                "amount_unit": "canonical_stable",
+                "amount_semantics": "native_quoted",
+                "native_quoted_lock": {
+                    "event_key": "ethereum:balance:test",
+                    "raw_amount": str(locked_raw),
+                    "canonical_stable_amount": 12_500_000,
+                    "detected_block_number": 120,
+                    "quote": {
+                        "asset": "ETH",
+                        "currency": "USD",
+                        "price": "2500",
+                    },
+                },
+            }
+        ]
+    }
+
+    observe_once._observe_token_option(
+        client=client,
+        option=option,
+        watch=watch,
+        reference_heads_base_url="",
+        reference_heads_shared_secret="",
+        reference_heads_timeout_seconds=1,
+        reference_heads_max_age_seconds=60,
+        runtime_prices_base_url="",
+        runtime_prices_shared_secret="",
+        runtime_prices_timeout_seconds=1,
+        runtime_prices_max_age_seconds=360,
+        runtime_prices_future_skew_seconds=30,
+        rpc_max_lag_blocks=64,
+        rpc_max_reference_lag_blocks=64,
+    )
+
+    assert len(client.payloads) == 1
+    _path, payload = client.payloads[0]
+    assert payload["amount"] == locked_raw
+    assert payload["detected_block_number"] == 120
+    assert payload["confirmations"] == 81
+    assert payload["raw_payload"]["runtime_price_quote"] is None
+    assert payload["raw_payload"]["native_quoted_lock_refresh"] is True
+

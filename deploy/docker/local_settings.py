@@ -2,14 +2,18 @@ import os
 from celery.schedules import crontab
 from datetime import timedelta
 FRONTEND_HOST = "https://celebfakes.ru"
+ADS_HOST = "ads.celebfakes.ru"
+ADS_SCHEME = "https"
 TIME_ZONE = "Europe/Moscow"
 ALLOWED_HOSTS = [
     "www.celebfakes.ru",
     "celebfakes.ru",
+    "ads.celebfakes.ru",
     "medias.celebfakes.ru",
     "mediapull.ru",
     "127.0.0.1",
     "localhost",
+    "ads.localhost",
     "testserver",
     "web",
 ]
@@ -20,8 +24,29 @@ PORTAL_DESCRIPTION = "CelebFakes gathers the best creators to offer it's users h
 DFANS_REF_CODE = "A14Q9C"
 DEPOSIT_EVM_ACCOUNT_XPUB = os.getenv("DEPOSIT_EVM_ACCOUNT_XPUB", "").strip()
 LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
-TABUNDER_COOLDOWN_SECONDS = 0
-PREROLLS_COOLDOWN_SECONDS = 0
+TABUNDER_COOLDOWN_SECONDS = 60
+PREROLLS_COOLDOWN_SECONDS = 10
+
+# ads-min-bids-by-type-v3
+# Human USD amounts. Keep strings to avoid float rounding.
+# "banner" applies to both 728x90 and 300x250.
+# "preroll" applies to all existing IMA/VAST in-video positions:
+# preroll, midroll and postroll.
+# "popunder" applies to the existing tabunder/popunder engine.
+ADS_MIN_BID_USD_BY_AD_TYPE = {
+    "banner": {
+        "cpm": "0.01",
+        "cpc": "0.0001", #even on 1% CTR
+    },
+    "preroll": {
+        "cpm": "0.6",
+        "cpc": "0.03", #even on 5% CTR
+    },
+    "popunder": {
+        "cpm": "2.0",
+        "cpc": "0.002", #even because each popunder is a click (100% CTR)
+    },
+}
 
 CAN_ADD_MEDIA = "advancedUser"
 MAX_VIDEO_UPLOADS_PER_DAY = 2
@@ -212,6 +237,15 @@ DATABASES = {
         "PORT": os.getenv("POSTGRES_PORT", "5432"),
         "USER": os.getenv("POSTGRES_USER", "mediacms"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "mediacms"),
+        "OPTIONS": {
+            "pool": {
+                "min_size": 0,
+                "max_size": 2,
+                "timeout": 10,
+                "max_lifetime": 30 * 60,
+                "max_idle": 10 * 60,
+            },
+        },
     }
 }
 
@@ -248,6 +282,16 @@ CELERY_BEAT_SCHEDULE = {
     "update_listings_thumbnails": {
         "task": "update_listings_thumbnails",
         "schedule": crontab(minute=2, hour="*/30"),
+    },
+    "ads_refresh_runtime": {
+        "task": "ads.refresh_runtime_state",
+        "schedule": 10.0,
+        "options": {"queue": "short_tasks"},
+    },
+    "ads_settle_runtime": {
+        "task": "ads.settle_runtime",
+        "schedule": 15.0,
+        "options": {"queue": "short_tasks"},
     },
     "push_all_media_to_storj": {
         "task": "push_all_media_to_storj",
@@ -321,6 +365,7 @@ REMOTE_ENCODING_SOURCE_BASE_URL = "https://medias.celebfakes.ru/mediafiles"
 REMOTE_ENCODING_PUBLIC_BASE_URL = "https://medias.celebfakes.ru/mediafiles"
 REMOTE_ENCODING_OUTPUT_PREFIX = "hls"
 REMOTE_ENCODING_HLS_SEGMENT_SECONDS = 4
+REMOTE_ENCODING_UPLOAD_CONCURRENCY = 8
 REMOTE_ENCODING_SUBMIT_DELAY_SECONDS = 1 * 60
 REMOTE_ENCODING_STORJ_WAIT_RETRY_SECONDS = 60
 REMOTE_ENCODING_STORJ_WAIT_MAX_RETRIES = 15

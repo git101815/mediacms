@@ -1,26 +1,17 @@
-ARG FFMPEG_CPU_BUILDER_IMAGE=cf-ffmpeg-cpu:ffmpeg7.1.1-svtav1-2.3.0
 FROM python:3.13.5-bookworm AS build-image
 
-# Install system dependencies needed for downloading and extracting
+# Install system dependencies needed for Bento4
 ARG BENTO4_VERSION=1-6-0-641
 ARG BENTO4_ZIP=Bento4-SDK-${BENTO4_VERSION}.x86_64-unknown-linux.zip
 ARG BENTO4_URL=https://www.bok.net/Bento4/binaries/${BENTO4_ZIP}
 
 RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends ca-certificates curl xz-utils unzip && \
+    apt-get install -y --no-install-recommends ca-certificates curl unzip && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get purge --auto-remove && \
     apt-get clean
 
-RUN curl -fsSL --retry 5 --retry-delay 3 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
-    -o /tmp/ffmpeg-release-amd64-static.tar.xz
-
-RUN mkdir -p /tmp/ffmpeg-tmp && \
-    tar -xf /tmp/ffmpeg-release-amd64-static.tar.xz --strip-components 1 -C /tmp/ffmpeg-tmp && \
-    cp -v /tmp/ffmpeg-tmp/ffmpeg /tmp/ffmpeg-tmp/ffprobe /tmp/ffmpeg-tmp/qt-faststart /usr/local/bin && \
-    rm -rf /tmp/ffmpeg-tmp /tmp/ffmpeg-release-amd64-static.tar.xz
-
-    # Install Bento4 in the specified location
+# Install Bento4 in the specified location
 RUN mkdir -p /home/mediacms.io/bento4 && \
     curl -fsSL --retry 5 --retry-delay 3 "${BENTO4_URL}" -o "/tmp/${BENTO4_ZIP}" && \
     unzip -q "/tmp/${BENTO4_ZIP}" -d /home/mediacms.io/bento4 && \
@@ -29,7 +20,6 @@ RUN mkdir -p /home/mediacms.io/bento4 && \
     rm -rf /home/mediacms.io/bento4/docs && \
     rm -f "/tmp/${BENTO4_ZIP}"
 
-FROM ${FFMPEG_CPU_BUILDER_IMAGE} AS ffmpeg_cpu_builder
 ############ RUNTIME IMAGE ############
 FROM python:3.13.5-bookworm AS runtime_image
 
@@ -39,16 +29,13 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV CELERY_APP='cms'
 ENV VIRTUAL_ENV=/home/mediacms.io
-ENV PATH="/opt/ffmpeg/bin:$VIRTUAL_ENV/bin:$PATH"
-ENV LD_LIBRARY_PATH="/opt/svt-av1/lib:${LD_LIBRARY_PATH}"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install runtime system dependencies
 RUN apt-get update -y && \
-    apt-get -y upgrade && \
     apt-get install --no-install-recommends -y \
         ca-certificates \
         curl \
-        gnupg \
         supervisor \
         nginx \
         imagemagick \
@@ -56,10 +43,7 @@ RUN apt-get update -y && \
         pkg-config \
         libxml2-dev \
         libxmlsec1-dev \
-        libxmlsec1-openssl \
-        libx264-164 \
-        libx265-199 \
-        libnuma1 && \
+        libxmlsec1-openssl && \
     install -d /usr/share/postgresql-common/pgdg && \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc && \
@@ -70,10 +54,7 @@ RUN apt-get update -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get purge --auto-remove -y && \
     apt-get clean
-# Copy ffmpeg and Bento4 from build image
-COPY --from=ffmpeg_cpu_builder /opt/ffmpeg /opt/ffmpeg
-COPY --from=ffmpeg_cpu_builder /opt/svt-av1 /opt/svt-av1
-COPY --from=build-image /usr/local/bin/qt-faststart /usr/local/bin/qt-faststart
+# Add Bento4
 COPY --from=build-image /home/mediacms.io/bento4 /home/mediacms.io/bento4
 
 # Set up virtualenv
@@ -95,8 +76,6 @@ RUN pip install --no-cache-dir --no-binary lxml,xmlsec -r requirements.txt && \
 # Copy application files
 COPY . /home/mediacms.io/mediacms
 WORKDIR /home/mediacms.io/mediacms
-
-# required for sprite thumbnail generation for large video files
 
 COPY deploy/docker/policy.xml /etc/ImageMagick-6/policy.xml
 

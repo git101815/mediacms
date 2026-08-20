@@ -75,7 +75,6 @@ services:
       MALUM_PRIVATE_KEY: ${MALUM_PRIVATE_KEY}
       MALUM_SANDBOX_WEBHOOK_KEY: ${MALUM_SANDBOX_WEBHOOK_KEY}
       MALUM_WEBHOOK_KEY: ${MALUM_WEBHOOK_KEY}
-      PAYGATE_USDC_POLYGON_WALLET: ${PAYGATE_USDC_POLYGON_WALLET}
       LEDGER_INTERNAL_GATEWAY_SECRET: ${LEDGER_INTERNAL_GATEWAY_SECRET}
       MEDIACMS_INTERNAL_GATEWAY_SECRET: ${MEDIACMS_INTERNAL_GATEWAY_SECRET}
       MEDIACMS_INTERNAL_GATEWAY_HEADER: ${MEDIACMS_INTERNAL_GATEWAY_HEADER}
@@ -145,6 +144,8 @@ services:
 
       REFERENCE_HEADS_BASE_URL: ${REFERENCE_HEADS_BASE_URL}
       REFERENCE_HEADS_SHARED_SECRET: ${REFERENCE_HEADS_SHARED_SECRET}
+      RUNTIME_PRICES_BASE_URL: ${RUNTIME_PRICES_BASE_URL}
+      RUNTIME_PRICES_SHARED_SECRET: ${RUNTIME_PRICES_SHARED_SECRET}
 
       ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
       ETHEREUM_RPC_URL_FALLBACK_1: ${ETHEREUM_RPC_URL_FALLBACK_1}
@@ -161,6 +162,10 @@ services:
       BSC_RPC_URL: ${BSC_RPC_URL}
       BSC_RPC_URL_FALLBACK_1: ${BSC_RPC_URL_FALLBACK_1}
       BSC_RPC_URL_FALLBACK_2: ${BSC_RPC_URL_FALLBACK_2}
+
+      POLYGON_RPC_URL: ${POLYGON_RPC_URL}
+      POLYGON_RPC_URL_FALLBACK_1: ${POLYGON_RPC_URL_FALLBACK_1}
+      POLYGON_RPC_URL_FALLBACK_2: ${POLYGON_RPC_URL_FALLBACK_2}
     volumes:
       - ./deposit_service/config:/app/config:ro
       - ./deposit_service/data:/data
@@ -235,6 +240,7 @@ services:
       ARBITRUM_SWEEP_DESTINATION_ADDRESS: ${ARBITRUM_SWEEP_DESTINATION_ADDRESS}
       BASE_SWEEP_DESTINATION_ADDRESS: ${BASE_SWEEP_DESTINATION_ADDRESS}
       BSC_SWEEP_DESTINATION_ADDRESS: ${BSC_SWEEP_DESTINATION_ADDRESS}
+      POLYGON_SWEEP_DESTINATION_ADDRESS: ${POLYGON_SWEEP_DESTINATION_ADDRESS}
       SWEEPER_RPC_MAX_LAG_BLOCKS: 64
       SWEEPER_RPC_MAX_REFERENCE_LAG_BLOCKS: 64
       SWEEPER_REFERENCE_HEADS_TIMEOUT_SECONDS: 5
@@ -251,6 +257,9 @@ services:
       BASE_RPC_URL_FALLBACK_2: ${BASE_RPC_URL_FALLBACK_2}
       BSC_RPC_URL_FALLBACK_1: ${BSC_RPC_URL_FALLBACK_1}
       BSC_RPC_URL_FALLBACK_2: ${BSC_RPC_URL_FALLBACK_2}
+      POLYGON_RPC_URL: ${POLYGON_RPC_URL}
+      POLYGON_RPC_URL_FALLBACK_1: ${POLYGON_RPC_URL_FALLBACK_1}
+      POLYGON_RPC_URL_FALLBACK_2: ${POLYGON_RPC_URL_FALLBACK_2}
     secrets:
       - source: sweeper_evm_mnemonic
         target: sweeper_evm_mnemonic
@@ -264,6 +273,8 @@ services:
         target: base_sweeper_funding_private_key
       - source: bsc_sweeper_funding_private_key
         target: bsc_sweeper_funding_private_key
+      - source: polygon_sweeper_funding_private_key
+        target: polygon_sweeper_funding_private_key
     volumes:
       - ./sweeper_service/config:/app/config:ro
       - ./sweeper_service/data:/data
@@ -334,6 +345,8 @@ services:
       RUNPOD_API_KEY: ${RUNPOD_API_KEY}
       DFX_WALLET_POOL_JSON: ${DFX_WALLET_POOL_JSON}
 
+      NOTIFICATION_WEBHOOK_URL: ${NOTIFICATION_WEBHOOK_URL}
+      NOTIFICATION_WEBHOOK_SECRET: ${NOTIFICATION_WEBHOOK_SECRET}
     depends_on:
       redis:
         condition: service_healthy
@@ -381,3 +394,5 @@ secrets:
     file: ../mediacms-secrets/sweeper/base_funding_private_key.txt
   bsc_sweeper_funding_private_key:
     file: ../mediacms-secrets/sweeper/bsc_funding_private_key.txt
+  polygon_sweeper_funding_private_key:
+    file: ../mediacms-secrets/sweeper/polygon_funding_private_key.txt

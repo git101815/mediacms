@@ -8,12 +8,19 @@ STABLECOIN_CANONICAL_DECIMALS = 6
 ROUTE_ONCHAIN_DECIMALS = {
     ("ethereum", "USDT"): 6,
     ("ethereum", "USDC"): 6,
+    ("ethereum", "ETH"): 18,
     ("arbitrum", "USDT"): 6,
     ("arbitrum", "USDC"): 6,
+    ("arbitrum", "ETH"): 18,
     ("base", "USDT"): 6,
     ("base", "USDC"): 6,
+    ("base", "ETH"): 18,
     ("bsc", "USDT"): 18,
     ("bsc", "USDC"): 18,
+    ("bsc", "BNB"): 18,
+    ("polygon", "USDC"): 6,
+    ("polygon", "USDT"): 6,
+    ("polygon", "POL"): 18,
 }
 
 
@@ -33,6 +40,8 @@ class DepositOptionConfig:
     poll_interval_seconds: int
     lookback_blocks: int
     poa_compatible: bool
+    amount_semantics: str
+    provision_addresses: bool
 
 
 @dataclass(frozen=True)
@@ -50,6 +59,11 @@ class ServiceConfig:
     reference_heads_shared_secret: str
     reference_heads_timeout_seconds: float
     reference_heads_max_age_seconds: int
+    runtime_prices_base_url: str
+    runtime_prices_shared_secret: str
+    runtime_prices_timeout_seconds: float
+    runtime_prices_max_age_seconds: int
+    runtime_prices_future_skew_seconds: int
     options: list[DepositOptionConfig]
 
 
@@ -172,6 +186,20 @@ def load_config() -> ServiceConfig:
     if not isinstance(raw_options, list) or not raw_options:
         raise RuntimeError("Deposit service config must contain a non-empty 'options' list")
 
+    runtime_prices = raw.get("runtime_prices") or {}
+    if not isinstance(runtime_prices, dict):
+        raise RuntimeError("Deposit service runtime_prices config must be an object")
+
+    runtime_prices_timeout_seconds = float(runtime_prices.get("timeout_seconds", 5))
+    runtime_prices_max_age_seconds = int(runtime_prices.get("max_age_seconds", 360))
+    runtime_prices_future_skew_seconds = int(runtime_prices.get("future_skew_seconds", 30))
+    if runtime_prices_timeout_seconds <= 0:
+        raise RuntimeError("runtime_prices.timeout_seconds must be > 0")
+    if runtime_prices_max_age_seconds <= 0:
+        raise RuntimeError("runtime_prices.max_age_seconds must be > 0")
+    if runtime_prices_future_skew_seconds < 0:
+        raise RuntimeError("runtime_prices.future_skew_seconds must be >= 0")
+
     evm_account_xpub = _require_env("DEPOSIT_EVM_ACCOUNT_XPUB")
 
     options: list[DepositOptionConfig] = []
@@ -199,6 +227,8 @@ def load_config() -> ServiceConfig:
             poll_interval_seconds=int(item.get("poll_interval_seconds", 15)),
             lookback_blocks=int(item.get("lookback_blocks", 2000)),
             poa_compatible=bool(item.get("poa_compatible", False)),
+            amount_semantics=str(item.get("amount_semantics", "canonical_stable")).strip().lower(),
+            provision_addresses=bool(item.get("provision_addresses", True)),
         )
 
         if option.required_confirmations <= 0:
@@ -208,15 +238,29 @@ def load_config() -> ServiceConfig:
         if option.observation_min_amount < 0:
             raise RuntimeError(f"observation_min_amount must be >= 0 for option {option.key}")
 
-        route_min_amount_raw = _canonical_min_amount_to_onchain_raw_amount(
-            chain=option.chain,
-            asset_code=option.asset_code,
-            canonical_amount=option.min_amount,
-        )
-        if option.observation_min_amount > route_min_amount_raw:
+        if option.amount_semantics == "canonical_stable":
+            route_min_amount_raw = _canonical_min_amount_to_onchain_raw_amount(
+                chain=option.chain,
+                asset_code=option.asset_code,
+                canonical_amount=option.min_amount,
+            )
+            if option.observation_min_amount > route_min_amount_raw:
+                raise RuntimeError(
+                    "observation_min_amount cannot be greater than the on-chain equivalent "
+                    f"of min_amount for option {option.key}"
+                )
+        elif option.amount_semantics == "native_quoted":
+            if str(option.token_contract_address or "").strip():
+                raise RuntimeError(
+                    f"native_quoted option {option.key} must use a native asset"
+                )
+            if option.observation_min_amount <= 0:
+                raise RuntimeError(
+                    f"native_quoted option {option.key} requires a positive raw observation floor"
+                )
+        else:
             raise RuntimeError(
-                "observation_min_amount cannot be greater than the on-chain equivalent "
-                f"of min_amount for option {option.key}"
+                f"Unsupported amount_semantics for option {option.key}: {option.amount_semantics}"
             )
 
         if option.session_ttl_seconds <= 0:
@@ -272,5 +316,10 @@ def load_config() -> ServiceConfig:
         reference_heads_shared_secret=_require_env("REFERENCE_HEADS_SHARED_SECRET"),
         reference_heads_timeout_seconds=reference_heads_timeout_seconds,
         reference_heads_max_age_seconds=reference_heads_max_age_seconds,
+        runtime_prices_base_url=_require_env("RUNTIME_PRICES_BASE_URL").rstrip("/"),
+        runtime_prices_shared_secret=_require_env("RUNTIME_PRICES_SHARED_SECRET"),
+        runtime_prices_timeout_seconds=runtime_prices_timeout_seconds,
+        runtime_prices_max_age_seconds=runtime_prices_max_age_seconds,
+        runtime_prices_future_skew_seconds=runtime_prices_future_skew_seconds,
         options=options,
     )

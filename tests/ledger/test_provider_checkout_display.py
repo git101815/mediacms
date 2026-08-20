@@ -13,17 +13,18 @@ class TestProviderCheckoutDisplay(SimpleTestCase):
         session = SimpleNamespace(
             public_id=uuid.uuid4(),
             status="awaiting_payment",
-            chain="paygate",
-            asset_code="EUR",
-            deposit_address="paygate:reference",
-            required_confirmations=1,
+            chain="polygon",
+            asset_code="POL",
+            deposit_address="0x1111111111111111111111111111111111111111",
+            required_confirmations=64,
             confirmations=0,
             min_amount=13_000_000,
-            expected_onchain_raw_amount=13_000_000,
+            expected_onchain_raw_amount=None,
             observed_txid="",
             observed_amount=13_000_000,
             expires_at=timezone.now(),
             metadata={
+                "amount_semantics": "native_quoted",
                 "display_label": "Revolut (EU only)",
                 "token_pack": {
                     "name": "Starter",
@@ -55,6 +56,7 @@ class TestProviderCheckoutDisplay(SimpleTestCase):
         self.assertEqual(payload["expected_payment_amount_display"], "11.61")
         self.assertEqual(payload["expected_payment_currency"], "EUR")
         self.assertEqual(payload["observed_amount_display"], "13")
-        self.assertEqual(payload["observed_asset_code"], "USDC")
+        self.assertEqual(payload["observed_asset_code"], "POL")
+        self.assertEqual(payload["observed_value_currency"], "USD")
         self.assertIn("€11.61", payload["token_pack_label"])
-        self.assertEqual(payload["asset_code"], "EUR")
+        self.assertEqual(payload["asset_code"], "POL")

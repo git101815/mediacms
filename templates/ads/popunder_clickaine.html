@@ -4,26 +4,28 @@
     return;
   }
 
-  if (window.mcPopAdsRuntime.chosenProvider !== "clickaine") {
-    return;
-  }
+  Promise.resolve(window.mcPopAdsRuntime.ready).then(function (provider) {
+    if (provider !== "clickaine") {
+      return;
+    }
 
-  if (window.__mcClickaineBooted) {
-    return;
-  }
-  window.__mcClickaineBooted = true;
+    if (window.__mcClickaineBooted) {
+      return;
+    }
+    window.__mcClickaineBooted = true;
 
-  window.mcPopLastAttempt = {
-    provider: "clickaine",
-    offer: "clickaine",
-    mode: "third_party",
-    ts: Date.now()
-  };
+    window.mcPopLastAttempt = {
+      provider: "clickaine",
+      offer: "clickaine",
+      mode: "third_party",
+      ts: Date.now()
+    };
 
-  var script = document.createElement("script");
-  script.src = "https://36707.phidonatome.com/4/js/259141";
-  script.async = true;
-  script.dataset.mcProvider = "clickaine";
-  document.body.appendChild(script);
+    var script = document.createElement("script");
+    script.src = "https://36707.phidonatome.com/4/js/259141";
+    script.async = true;
+    script.dataset.mcProvider = "clickaine";
+    document.body.appendChild(script);
+  });
 })();
 </script>

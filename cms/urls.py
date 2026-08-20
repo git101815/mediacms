@@ -23,8 +23,7 @@ urlpatterns = [
         "robots.txt",
         TemplateView.as_view(template_name="robots.txt", content_type="text/plain"),
     ),
-    # AI_GENERATION_FEATURE_V1
-    re_path(r"^", include("ai_generation.urls")),
+    re_path(r"^", include("ads.urls")),
     re_path(r"^", include("files.urls")),
     re_path(r"^", include("users.urls")),
     re_path(r"^accounts/", include("allauth.urls")),

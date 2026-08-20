@@ -1,0 +1,193 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>Finance · {{ portal_name }} Ads</title>
+  <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'ads/ads.css' %}">
+</head>
+<body>
+<div id="app">
+
+<div class="navbar">
+  <a class="navbar__logo-link" href="/"><span class="clickaine-logo"><span class="clickaine-logo__mark"></span><span class="clickaine-logo__text">{{ portal_name }} Ads</span></span></a>
+  <span class="navbar-right">
+    <div id="navbar-info"><a id="navbar-amount" href="/finance/">{{ balance_usd }}</a></div>
+    <a id="logout" href="/logout/" aria-label="Logout"><svg class="icon icon--logout" viewBox="0 0 20 17"><path d="M13.5 11.3a.53.53 0 0 0 .75 0l3.5-3.45a.5.5 0 0 0 0-.72l-3.5-3.45a.53.53 0 0 0-.75.74L16.1 7H7.8a.52.52 0 1 0 0 1.05h8.3l-2.6 2.56a.5.5 0 0 0 0 .69zM9.4 14.9a.52.52 0 0 0 .52-.52v-2.56a.52.52 0 1 0-1.04 0v2.04H1.14V1.12h7.69v2.04a.52.52 0 1 0 1.04 0V.6a.52.52 0 0 0-.52-.52H.6A.52.52 0 0 0 .08.6v13.79c0 .29.23.52.52.52h8.8z"/></svg></a>
+  </span>
+</div>
+
+<div class="sidebar">
+  <a class="sidebar-item" title="Campaigns" href="/">
+    <div><span class="sidebar-item--icon"><svg class="icon" viewBox="0 0 24 24"><path d="M3 3h18v5H3V3zm0 7h18v5H3v-5zm0 7h18v4H3v-4z"/></svg></span><span class="item--heading">Campaigns</span></div>
+  </a>
+  <a class="sidebar-item" title="Creatives" href="/creatives/">
+    <div><span class="sidebar-item--icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm2 2v9l3-3 2 2 4-5 3 4V6H6z"/></svg></span><span class="item--heading">Creatives</span></div>
+  </a>
+  <a class="sidebar-item active" title="Finance" href="/finance/">
+    <div><span class="sidebar-item--icon"><svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18v13H3V6zm2 3v8h14V9H5zm2 2h5v2H7v-2zM5 3h14v2H5V3z"/></svg></span><span class="item--heading">Finance</span></div>
+  </a>
+</div>
+<button class="toggle-sidebar-button" type="button" aria-label="Toggle sidebar"><svg viewBox="0 0 12 12"><path d="M8.5 1.5 4 6l4.5 4.5-1.4 1.4L1.2 6l5.9-5.9z"/></svg></button>
+
+<div class="active-page">
+  <div class="active-page__top-space">
+    <div class="active-page--container">
+      <header class="page-header"><h1 class="active-page--title">Finance</h1></header>
+
+      <div class="finance-content">
+        {% if messages %}{% for message in messages %}<div class="finance-message">{{ message }}</div>{% endfor %}{% endif %}
+
+        <section class="finance-section">
+          <h2>Balance</h2>
+          <div class="finance-balance"><span class="finance-balance__amount">{{ balance_usd }}</span></div>
+        </section>
+
+        <section class="finance-section">
+          <h2>Add funds</h2>
+          <p class="finance-section__hint">Choose the amount, payment method and route without leaving the Ads interface. External checkouts open in a new tab.</p>
+
+          {% if deposit_options and token_pack_rows %}
+          <form class="finance-form finance-buy-flow" method="post" action="/finance/deposit-request/" data-finance-buy-form>
+            {% csrf_token %}
+            <input type="hidden" name="token_pack_key" value="" data-finance-selected-pack>
+            <input type="hidden" name="deposit_option_key" value="" data-finance-selected-route>
+            <input type="hidden" name="return_tab" value="all">
+            <input type="hidden" name="return_status" value="all">
+
+            <div class="finance-stepper">
+              <span class="finance-stepper__item is-active" data-finance-step-indicator="1"><b>1</b>Amount</span>
+              <span class="finance-stepper__item" data-finance-step-indicator="2"><b>2</b>Payment</span>
+              <span class="finance-stepper__item finance-stepper__route" data-finance-step-indicator="3"><b>3</b>Asset</span>
+              <span class="finance-stepper__item finance-stepper__route" data-finance-step-indicator="4"><b>4</b>Network</span>
+              <span class="finance-stepper__item" data-finance-step-indicator="5"><b>5</b>Review</span>
+            </div>
+
+            <section class="finance-flow-panel" data-finance-step-panel="1">
+              <h3>Choose amount</h3>
+              <div class="finance-pack-radio-list">
+                {% for pack in token_pack_rows %}
+                <label class="finance-pack-radio">
+                  <input type="radio"
+                         name="finance_pack_choice"
+                         value="{{ pack.code }}"
+                         data-finance-pack
+                         data-pack-code="{{ pack.code }}"
+                         data-pack-label="${{ pack.price_display }}"
+                         data-pack-gross-canonical="{{ pack.gross_stable_amount }}"
+                         {% if forloop.first %}checked{% endif %}>
+                  <span class="finance-pack-radio__control"></span>
+                  <span class="finance-pack-radio__body">
+                    <strong>${{ pack.price_display }}</strong>
+                  </span>
+                </label>
+                {% endfor %}
+              </div>
+              <div class="finance-actions finance-pack-actions">
+                <button class="btn success" type="button" data-finance-pack-continue>
+                  continue
+                </button>
+              </div>
+            </section>
+
+            <section class="finance-flow-panel" data-finance-step-panel="2" hidden>
+              <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-back="1">← back</button><h3>Choose payment method</h3></div>
+              <div class="finance-choice-grid" data-finance-payment-methods></div>
+              <div class="finance-actions finance-flow-continue">
+                <button class="btn success" type="button" data-finance-payment-continue disabled>continue</button>
+              </div>
+            </section>
+
+            <section class="finance-flow-panel" data-finance-step-panel="3" hidden>
+              <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-back="2">← back</button><h3>Choose asset</h3></div>
+              <div class="finance-choice-grid" data-finance-assets></div>
+              <div class="finance-actions finance-flow-continue">
+                <button class="btn success" type="button" data-finance-asset-continue disabled>continue</button>
+              </div>
+            </section>
+
+            <section class="finance-flow-panel" data-finance-step-panel="4" hidden>
+              <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-back="3">← back</button><h3>Choose network</h3></div>
+              <div class="finance-choice-grid" data-finance-networks></div>
+              <div class="finance-actions finance-flow-continue">
+                <button class="btn success" type="button" data-finance-network-continue disabled>continue</button>
+              </div>
+            </section>
+
+            <section class="finance-flow-panel" data-finance-step-panel="5" hidden>
+              <div class="finance-flow-head"><button type="button" class="table-btn" data-finance-review-back>← back</button><h3>Review</h3></div>
+              <div class="finance-review">
+                <div><span>Amount</span><strong data-finance-review-pack>—</strong></div>
+                <div><span>Payment</span><strong data-finance-review-payment>—</strong></div>
+                <div data-finance-review-route-row><span>Route</span><strong data-finance-review-route>—</strong></div>
+              </div>
+              <div class="finance-actions"><button class="btn success --big" type="submit">continue to payment</button></div>
+            </section>
+
+            <div class="finance-route-data" hidden>
+              {% for option in deposit_options %}
+              <span data-finance-route-option
+                    data-option-key="{{ option.key }}"
+                    data-payment-method-key="{{ option.payment_method_key }}"
+                    data-payment-method-label="{{ option.payment_method_label }}"
+                    data-payment-method-type="{{ option.payment_method_type }}"
+                    data-payment-group-key="{{ option.payment_group_key }}"
+                    data-payment-group-label="{{ option.payment_group_label }}"
+                    data-payment-group-icon="{{ option.payment_group_icon }}"
+                    data-payment-group-icon-url="{% if option.payment_group_icon_path %}{% static option.payment_group_icon_path %}{% endif %}"
+                    data-payment-price-bps="{{ option.payment_price_bps|default:0 }}"
+                    data-payment-price-fixed-canonical="{{ option.payment_price_fixed_canonical|default:0 }}"
+                    data-payment-currency="{{ option.payment_currency|default:'USD' }}"
+                    data-payment-currency-symbol="{{ option.payment_currency_symbol|default:'$' }}"
+                    data-payment-currency-usd-rate="{{ option.payment_currency_usd_rate|default:'1' }}"
+                    data-payment-requires-route-selection="{% if option.payment_requires_route_selection %}true{% else %}false{% endif %}"
+                    data-payment-open-new-tab="{% if option.payment_open_new_tab %}true{% else %}false{% endif %}"
+                    data-asset-code="{{ option.asset_code }}"
+                    data-asset-group-key="{{ option.asset_group_key }}"
+                    data-asset-group-label="{{ option.asset_group_label }}"
+                    data-asset-group-icon-url="{% if option.asset_group_icon_path %}{% static option.asset_group_icon_path %}{% endif %}"
+                    data-asset-group-order="{{ option.asset_group_order|default:100 }}"
+                    data-chain="{{ option.chain }}"
+                    data-network-label="{{ option.network_display }}"
+                    data-network-group-key="{{ option.network_group_key }}"
+                    data-network-group-label="{{ option.network_group_label }}"
+                    data-network-group-icon-url="{% if option.network_group_icon_path %}{% static option.network_group_icon_path %}{% endif %}"
+                    data-network-group-order="{{ option.network_group_order|default:100 }}"
+                    data-min-amount-canonical="{{ option.min_amount|default:0 }}"></span>
+              {% endfor %}
+            </div>
+          </form>
+          {% else %}
+          <div class="finance-message">Top-ups are currently unavailable.</div>
+          {% endif %}
+        </section>
+
+        <section class="finance-section">
+          <h2>Recent deposits</h2>
+          {% if recent_deposit_sessions %}
+          <table class="active-page--content--table">
+            <thead><tr><th>Date</th><th>Method</th><th>Status</th><th>Amount</th><th></th></tr></thead>
+            <tbody>
+              {% for row in recent_deposit_sessions %}
+              <tr>
+                <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
+                <td>{{ row.display_label }}</td>
+                <td>{{ row.status_label }}</td>
+                <td>{% if row.amount_usd %}{{ row.amount_usd }}{% else %}—{% endif %}</td>
+                <td>{% if row.show_view %}<a class="table-btn" href="/finance/deposits/{{ row.public_id }}/">view</a>{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}<p class="finance-section__hint" style="margin-top:0">No deposits yet.</p>{% endif %}
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<script src="{% static 'ads/ads.js' %}"></script>
+</body>
+</html>

@@ -492,55 +492,15 @@ class Media(models.Model):
         content since all listings filter for encoding_status success
         """
         kind = helpers.get_file_type(self.media_file.path)
-        if kind is not None:
-            if kind == "image":
-                self.media_type = "image"
-            elif kind == "pdf":
-                self.media_type = "pdf"
-            elif kind == "audio":
-                self.media_type = "audio"
-            elif kind == "video":
-                self.media_type = "video"
-            else:
-                self.media_type = None
+
+        if kind in {"image", "pdf", "audio", "video"}:
+            self.media_type = kind
+        else:
+            self.media_type = ""
+            self.encoding_status = "fail"
 
         if self.media_type in ["audio", "image", "pdf"]:
             self.encoding_status = "success"
-        else:
-            ret = helpers.media_file_info(self.media_file.path)
-            if ret.get("fail"):
-                self.media_type = ""
-                self.encoding_status = "fail"
-            elif ret.get("is_video") or ret.get("is_audio"):
-                try:
-                    self.media_info = json.dumps(ret)
-                except TypeError:
-                    self.media_info = ""
-                self.md5sum = ret.get("md5sum")
-                self.size = helpers.show_file_size(ret.get("file_size"))
-            else:
-                self.media_type = ""
-                self.encoding_status = "fail"
-
-            audio_file_with_thumb = False
-            # handle case where a file identified as video is actually an
-            # audio file with thumbnail
-            if ret.get("is_video"):
-                # case where Media is video. try to set useful
-                # metadata as duration/height
-                self.media_type = "video"
-                self.duration = int(round(float(ret.get("video_duration", 0))))
-                self.video_height = int(ret.get("video_height"))
-                if ret.get("video_info", {}).get("codec_name", {}) in ["mjpeg"]:
-                    # best guess that this is an audio file with a thumbnail
-                    # in other cases, it is not (eg it can be an AVI file)
-                    if ret.get("video_info", {}).get("avg_frame_rate", "") == '0/0':
-                        audio_file_with_thumb = True
-
-            if ret.get("is_audio") or audio_file_with_thumb:
-                self.media_type = "audio"
-                self.duration = int(float(ret.get("audio_info", {}).get("duration", 0)))
-                self.encoding_status = "success"
 
         if save:
             self.save(
@@ -624,7 +584,9 @@ class Media(models.Model):
 
         from . import tasks
 
-        tasks.produce_sprite_from_video.delay(self.friendly_token)
+        transaction.on_commit(
+            lambda token=self.friendly_token: tasks.produce_sprite_from_video.delay(token)
+        )
         return True
 
     def encode(self, profiles=[], force=True, chunkize=True):
@@ -637,9 +599,14 @@ class Media(models.Model):
         if remote_encoding_enabled():
             from . import tasks
 
-            self.encoding_status = "running"
-            self.save(update_fields=["encoding_status", "listable"])
-            tasks.submit_remote_encoding.apply_async(
+            if force is False:
+                submit_task = tasks.submit_remote_fill_missing_encoding
+            else:
+                self.encoding_status = "running"
+                self.save(update_fields=["encoding_status", "listable"])
+                submit_task = tasks.submit_remote_encoding
+
+            submit_task.apply_async(
                 args=[self.friendly_token],
                 countdown=int(getattr(settings, "REMOTE_ENCODING_SUBMIT_DELAY_SECONDS", 600)),
             )

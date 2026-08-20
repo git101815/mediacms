@@ -1,0 +1,16 @@
+{
+  "canonical_stable_decimals": 6,
+  "quote_max_age_seconds": 360,
+  "quote_future_skew_seconds": 30,
+  "assets": {
+    "ETH": {
+      "native_decimals": 18
+    },
+    "BNB": {
+      "native_decimals": 18
+    },
+    "POL": {
+      "native_decimals": 18
+    }
+  }
+}

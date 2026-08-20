@@ -283,6 +283,9 @@ def build_runpod_payload(media):
             media.uid.hex,
         ),
         "segment_seconds": int(settings.REMOTE_ENCODING_HLS_SEGMENT_SECONDS),
+        "upload_concurrency": int(
+            getattr(settings, "REMOTE_ENCODING_UPLOAD_CONCURRENCY", 8)
+        ),
         "sprite_seconds": int(getattr(settings, "SPRITE_NUM_SECS", 10)),
         "assets": _asset_keys(media),
         "encoding_policy": build_encoding_policy(),
@@ -405,24 +408,103 @@ def get_missing_remote_profiles(media):
     return profiles
 
 
-def build_runpod_fill_missing_payload(media):
-    unpackaged = get_unpackaged_remote_profiles(media)
 
-    if unpackaged:
-        labels = [
-            f"{profile.id}:{profile.codec}:{profile.extension}:{int(profile.resolution or 0)}"
-            for profile in unpackaged
-        ]
+def _build_fill_missing_packaging_inputs(
+    media,
+    missing_profiles,
+    unpackaged_profiles,
+):
+    # Return successful MP4s used only to rebuild complete HLS masters.
+    # For every codec touched by fill-missing, packaging must include every
+    # already-indexed HLS resolution of that codec. Successful MP4s lacking
+    # HLS are also included so they are packaged without being re-encoded.
+    from files.models import Encoding
 
-        raise ValidationError(
-            "Existing encoded MP4 missing HLS rows; package HLS locally before RunPod: "
-            + ", ".join(labels)
+    impacted_codecs = {
+        profile.codec
+        for profile in [*missing_profiles, *unpackaged_profiles]
+        if profile.extension == "mp4"
+    }
+
+    if not impacted_codecs:
+        return []
+
+    required_pairs = {}
+
+    for rendition in media.hls_renditions.filter(
+        codec__in=impacted_codecs
+    ).order_by("codec", "resolution", "id"):
+        resolution = int(rendition.resolution or 0)
+        if resolution:
+            required_pairs.setdefault(
+                (rendition.codec, resolution),
+                None,
+            )
+
+    for profile in unpackaged_profiles:
+        resolution = int(profile.resolution or 0)
+        if resolution:
+            required_pairs[(profile.codec, resolution)] = profile.id
+
+    source_template = build_source_object(media)
+    packaging_inputs = []
+
+    for (codec, resolution), profile_id in sorted(required_pairs.items()):
+        qs = (
+            Encoding.objects.filter(
+                media=media,
+                profile__codec=codec,
+                profile__extension="mp4",
+                profile__resolution=resolution,
+                chunk=False,
+                status="success",
+            )
+            .exclude(media_file="")
+            .select_related("profile")
+            .order_by("id")
         )
 
+        if profile_id:
+            qs = qs.filter(profile_id=profile_id)
+
+        encoding = qs.first()
+
+        if encoding is None:
+            raise ValidationError(
+                "Cannot safely rebuild partial HLS because an existing "
+                "rendition has no successful MP4 backing file: "
+                f"codec={codec} resolution={resolution}"
+            )
+
+        source = dict(source_template)
+        source["key"] = encoding.media_file.name
+
+        packaging_inputs.append(
+            {
+                "encoding_id": encoding.id,
+                "profile_id": encoding.profile_id,
+                "codec": codec,
+                "extension": "mp4",
+                "resolution": resolution,
+                "source": source,
+            }
+        )
+
+    return packaging_inputs
+
+def build_runpod_fill_missing_payload(media):
+    unpackaged = get_unpackaged_remote_profiles(media)
     profiles = get_missing_remote_profiles(media)
 
-    if not profiles:
+    if not profiles and not unpackaged:
         raise ValidationError("No missing remote encoding profiles available")
+
+    work_profiles = [*profiles, *unpackaged]
+    packaging_inputs = _build_fill_missing_packaging_inputs(
+        media,
+        missing_profiles=profiles,
+        unpackaged_profiles=unpackaged,
+    )
 
     jobs = []
     requested_encoding_ids = []
@@ -449,15 +531,18 @@ def build_runpod_fill_missing_payload(media):
         "version": 3,
         "mode": "fill_missing_profiles",
         "requested_encoding_ids": requested_encoding_ids,
-        "requested_profile_ids": [profile.id for profile in profiles],
+        "requested_profile_ids": sorted(
+            {profile.id for profile in work_profiles}
+        ),
         "require_h264": any(
             profile.codec == "h264" and profile.extension == "mp4"
-            for profile in profiles
+            for profile in work_profiles
         ),
         "strict_requested_jobs": True,
         "merge_outputs": True,
         "preserve_media_on_fail": True,
         "skip_assets": True,
+        "packaging_inputs": packaging_inputs,
         "media_id": media.id,
         "media_uid": media.uid.hex,
         "friendly_token": media.friendly_token,
@@ -472,6 +557,9 @@ def build_runpod_fill_missing_payload(media):
             media.uid.hex,
         ),
         "segment_seconds": int(settings.REMOTE_ENCODING_HLS_SEGMENT_SECONDS),
+        "upload_concurrency": int(
+            getattr(settings, "REMOTE_ENCODING_UPLOAD_CONCURRENCY", 8)
+        ),
         "sprite_seconds": int(getattr(settings, "SPRITE_NUM_SECS", 10)),
         "assets": _asset_keys(media),
         "encoding_policy": build_encoding_policy(),

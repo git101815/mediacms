@@ -3,6 +3,7 @@ import { ApiUrlConsumer, LinksConsumer } from '../utils/contexts/';
 import { PageStore } from '../utils/stores/';
 import { MediaListRow } from '../components/MediaListRow';
 import { MediaMultiListWrapper } from '../components/MediaMultiListWrapper';
+import { DirectAd } from '../components/ads/DirectAd';
 import { ItemListAsync } from '../components/item-list/ItemListAsync.jsx';
 import { InlineSliderItemListAsync } from '../components/item-list/InlineSliderItemListAsync.jsx';
 import { Page } from './Page';
@@ -104,6 +105,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                       />
                     </MediaListRow>
                   )}
+
+                <DirectAd slot="home_leaderboard" />
 
                 <MediaListRow
                   title={latest_title}

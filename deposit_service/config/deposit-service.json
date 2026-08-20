@@ -1,11 +1,16 @@
 {
+  "runtime_prices": {
+    "timeout_seconds": 5,
+    "max_age_seconds": 360,
+    "future_skew_seconds": 30
+  },
   "options": [
     {
       "key": "ethereum-usdt",
       "chain": "ethereum",
       "asset_code": "USDT",
       "token_contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
-      "display_label": "Ethereum · USDT",
+      "display_label": "Ethereum \u00b7 USDT",
       "rpc_urls": [
         "${ETHEREUM_RPC_URL}",
         "${ETHEREUM_RPC_URL_FALLBACK_1}",
@@ -24,7 +29,7 @@
       "chain": "ethereum",
       "asset_code": "USDC",
       "token_contract_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-      "display_label": "Ethereum · USDC",
+      "display_label": "Ethereum \u00b7 USDC",
       "rpc_urls": [
         "${ETHEREUM_RPC_URL}",
         "${ETHEREUM_RPC_URL_FALLBACK_1}",
@@ -39,11 +44,32 @@
       "poa_compatible": false
     },
     {
+      "key": "ethereum-eth",
+      "chain": "ethereum",
+      "asset_code": "ETH",
+      "token_contract_address": "",
+      "display_label": "Ethereum \u00b7 ETH",
+      "rpc_urls": [
+        "${ETHEREUM_RPC_URL}",
+        "${ETHEREUM_RPC_URL_FALLBACK_1}",
+        "${ETHEREUM_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 12,
+      "min_amount": 1000000,
+      "observation_min_amount": 1000000000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 200,
+      "poa_compatible": false,
+      "amount_semantics": "native_quoted",
+      "provision_addresses": true
+    },
+    {
       "key": "bsc-usdt",
       "chain": "bsc",
       "asset_code": "USDT",
       "token_contract_address": "0x55d398326f99059ff775485246999027b3197955",
-      "display_label": "BNB Chain · USDT",
+      "display_label": "BNB Chain \u00b7 USDT",
       "rpc_urls": [
         "${BSC_RPC_URL}",
         "${BSC_RPC_URL_FALLBACK_1}",
@@ -62,7 +88,7 @@
       "chain": "bsc",
       "asset_code": "USDC",
       "token_contract_address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-      "display_label": "BNB Chain · USDC",
+      "display_label": "BNB Chain \u00b7 USDC",
       "rpc_urls": [
         "${BSC_RPC_URL}",
         "${BSC_RPC_URL_FALLBACK_1}",
@@ -77,11 +103,32 @@
       "poa_compatible": true
     },
     {
+      "key": "bsc-bnb",
+      "chain": "bsc",
+      "asset_code": "BNB",
+      "token_contract_address": "",
+      "display_label": "BNB Chain \u00b7 BNB",
+      "rpc_urls": [
+        "${BSC_RPC_URL}",
+        "${BSC_RPC_URL_FALLBACK_1}",
+        "${BSC_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 12,
+      "min_amount": 1000000,
+      "observation_min_amount": 1000000000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 200,
+      "poa_compatible": true,
+      "amount_semantics": "native_quoted",
+      "provision_addresses": true
+    },
+    {
       "key": "arbitrum-usdt",
       "chain": "arbitrum",
       "asset_code": "USDT",
       "token_contract_address": "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
-      "display_label": "Arbitrum One · USDT",
+      "display_label": "Arbitrum One \u00b7 USDT",
       "rpc_urls": [
         "${ARBITRUM_RPC_URL}",
         "${ARBITRUM_RPC_URL_FALLBACK_1}",
@@ -100,7 +147,7 @@
       "chain": "arbitrum",
       "asset_code": "USDC",
       "token_contract_address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
-      "display_label": "Arbitrum One · USDC",
+      "display_label": "Arbitrum One \u00b7 USDC",
       "rpc_urls": [
         "${ARBITRUM_RPC_URL}",
         "${ARBITRUM_RPC_URL_FALLBACK_1}",
@@ -115,11 +162,32 @@
       "poa_compatible": false
     },
     {
+      "key": "arbitrum-eth",
+      "chain": "arbitrum",
+      "asset_code": "ETH",
+      "token_contract_address": "",
+      "display_label": "Arbitrum One \u00b7 ETH",
+      "rpc_urls": [
+        "${ARBITRUM_RPC_URL}",
+        "${ARBITRUM_RPC_URL_FALLBACK_1}",
+        "${ARBITRUM_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 20,
+      "min_amount": 1000000,
+      "observation_min_amount": 1000000000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 400,
+      "poa_compatible": false,
+      "amount_semantics": "native_quoted",
+      "provision_addresses": true
+    },
+    {
       "key": "base-usdc",
       "chain": "base",
       "asset_code": "USDC",
       "token_contract_address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "display_label": "Base · USDC",
+      "display_label": "Base \u00b7 USDC",
       "rpc_urls": [
         "${BASE_RPC_URL}",
         "${BASE_RPC_URL_FALLBACK_1}",
@@ -132,6 +200,88 @@
       "poll_interval_seconds": 15,
       "lookback_blocks": 400,
       "poa_compatible": false
+    },
+    {
+      "key": "base-eth",
+      "chain": "base",
+      "asset_code": "ETH",
+      "token_contract_address": "",
+      "display_label": "Base \u00b7 ETH",
+      "rpc_urls": [
+        "${BASE_RPC_URL}",
+        "${BASE_RPC_URL_FALLBACK_1}",
+        "${BASE_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 20,
+      "min_amount": 1000000,
+      "observation_min_amount": 1000000000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 400,
+      "poa_compatible": false,
+      "amount_semantics": "native_quoted",
+      "provision_addresses": true
+    },
+    {
+      "key": "polygon-usdc",
+      "chain": "polygon",
+      "rpc_urls": [
+        "${POLYGON_RPC_URL}",
+        "${POLYGON_RPC_URL_FALLBACK_1}",
+        "${POLYGON_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 64,
+      "min_amount": 1000000,
+      "observation_min_amount": 1000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 1000,
+      "poa_compatible": true,
+      "provision_addresses": true,
+      "asset_code": "USDC",
+      "token_contract_address": "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+      "display_label": "Polygon \u00b7 USDC"
+    },
+    {
+      "key": "polygon-usdt",
+      "chain": "polygon",
+      "rpc_urls": [
+        "${POLYGON_RPC_URL}",
+        "${POLYGON_RPC_URL_FALLBACK_1}",
+        "${POLYGON_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 64,
+      "min_amount": 1000000,
+      "observation_min_amount": 1000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 1000,
+      "poa_compatible": true,
+      "provision_addresses": true,
+      "asset_code": "USDT",
+      "token_contract_address": "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
+      "display_label": "Polygon \u00b7 USDT"
+    },
+    {
+      "key": "polygon-pol",
+      "chain": "polygon",
+      "asset_code": "POL",
+      "token_contract_address": "",
+      "display_label": "Polygon \u00b7 POL",
+      "rpc_urls": [
+        "${POLYGON_RPC_URL}",
+        "${POLYGON_RPC_URL_FALLBACK_1}",
+        "${POLYGON_RPC_URL_FALLBACK_2}"
+      ],
+      "required_confirmations": 64,
+      "min_amount": 1000000,
+      "observation_min_amount": 1000000000000000,
+      "session_ttl_seconds": 3600,
+      "poll_interval_seconds": 15,
+      "lookback_blocks": 1000,
+      "poa_compatible": true,
+      "amount_semantics": "native_quoted",
+      "provision_addresses": true
     }
   ]
 }
