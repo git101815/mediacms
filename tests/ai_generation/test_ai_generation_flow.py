@@ -268,7 +268,7 @@ class AIGenerationFlowTests(TestCase):
 
         User = get_user_model()
         other = User.objects.create_user(
-            username="ai-generation-other",
+            username="ai_generation_other",
             password="test-password",
         )
         self.client.force_login(other)

@@ -772,6 +772,15 @@ if TESTING:
     MEDIA_ROOT = os.path.join(TESTING_ROOT, "media")
     HLS_DIR = os.path.join(MEDIA_ROOT, "hls")
     STATIC_ROOT = os.path.join(TESTING_ROOT, "static_collected")
+
+    # BASE_DIR/static is a canonical source directory in this fork (for
+    # example static/ads/ads.css). In production nginx serves it directly.
+    # During tests STATIC_ROOT is redirected to TESTING_ROOT, so expose the
+    # repository static directory to Django's FileSystemFinder explicitly.
+    STATICFILES_DIRS = [
+        os.path.join(BASE_DIR, "static"),
+    ]
+
     TEMP_DIRECTORY = os.path.join(TESTING_ROOT, "tmp")
     DB_BACKUP_DIR = os.path.join(TESTING_ROOT, "backup")
     LOGS_DIR = os.path.join(TESTING_ROOT, "logs")
