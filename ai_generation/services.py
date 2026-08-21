@@ -140,7 +140,7 @@ def moderate_prompt(raw_prompt) -> tuple[str, dict]:
     }
 
 
-def validate_provider_config(*, resolution, guidance_scale) -> dict:
+def validate_provider_config(*, resolution) -> dict:
     allowed_resolutions = {"512x512", "768x512", "512x768"}
 
     selected_resolution = str(
@@ -187,7 +187,7 @@ def _clear_runtime_state_for_generation(generation: AIGenerationRequest) -> None
 
 
 @transaction.atomic
-def create_generation_request(*, actor, prompt, resolution=None, guidance_scale=None) -> AIGenerationRequest:
+def create_generation_request(*, actor, prompt, resolution=None) -> AIGenerationRequest:
     if not setting_enabled("AI_GENERATION_ENABLED", True):
         raise ValidationError("AI image generation is temporarily unavailable")
 
@@ -197,7 +197,6 @@ def create_generation_request(*, actor, prompt, resolution=None, guidance_scale=
     prompt, moderation = moderate_prompt(prompt)
     requested_provider_config = validate_provider_config(
         resolution=resolution,
-        guidance_scale=guidance_scale,
     )
     moderation = dict(moderation)
     moderation["requested_provider_config"] = requested_provider_config
@@ -666,6 +665,7 @@ def complete_generation(
     return generation
 
 
+@transaction.atomic
 def complete_generation_from_url(
     *,
     public_id,
@@ -675,26 +675,54 @@ def complete_generation_from_url(
     provider_request_id: str = "",
     provider_metadata: dict | None = None,
 ) -> AIGenerationRequest:
-    # Do not make a provider-side HTTP request for an expired/foreign claim.
-    # complete_generation() checks the lease again after the download.
-    with transaction.atomic():
-        _get_claimed_generation_for_update(
-            public_id=public_id,
-            service_name=service_name,
-            claim_token=claim_token,
-        )
+    # The active one-way provider flow is intentionally diskless. Persist only
+    # the validated provider URL/metadata. The image itself is fetched on demand
+    # by generation_image() and streamed to the browser without touching
+    # MEDIA_ROOT.
+    _validate_result_url(result_url)
 
-    image_bytes, content_type, extension = download_provider_image(result_url)
-    return complete_generation(
+    generation = _get_claimed_generation_for_update(
         public_id=public_id,
         service_name=service_name,
         claim_token=claim_token,
-        image_bytes=image_bytes,
-        content_type=content_type,
-        extension=extension,
-        provider_request_id=provider_request_id,
-        provider_metadata=provider_metadata,
     )
+
+    metadata = (
+        dict(provider_metadata)
+        if isinstance(provider_metadata, dict)
+        else {}
+    )
+    metadata["image_download_url"] = str(result_url)
+
+    generation.result_file = ""
+    generation.result_content_type = ""
+    generation.result_metadata = metadata
+    generation.provider_request_id = str(provider_request_id or "")[:255]
+    generation.status = AIGenerationRequest.STATUS_SUCCESS
+    generation.completed_at = timezone.now()
+    generation.claimed_by_service = ""
+    generation.claim_token = ""
+    generation.claim_expires_at = None
+    generation.error_code = ""
+    generation.error_message = ""
+    generation.save(
+        update_fields=[
+            "result_file",
+            "result_content_type",
+            "result_metadata",
+            "provider_request_id",
+            "status",
+            "completed_at",
+            "claimed_by_service",
+            "claim_token",
+            "claim_expires_at",
+            "error_code",
+            "error_message",
+            "updated_at",
+        ]
+    )
+    _clear_runtime_state_for_generation(generation)
+    return generation
 
 
 def generation_provider_payload(generation: AIGenerationRequest) -> dict:
@@ -704,7 +732,6 @@ def generation_provider_payload(generation: AIGenerationRequest) -> dict:
 
     provider_config = validate_provider_config(
         resolution=requested.get("resolution"),
-        guidance_scale=requested.get("guidance_scale"),
     )
 
     return {
@@ -718,7 +745,16 @@ def generation_provider_payload(generation: AIGenerationRequest) -> dict:
 
 def serialize_generation(generation: AIGenerationRequest, *, request=None) -> dict:
     image_url = ""
-    if generation.status == AIGenerationRequest.STATUS_SUCCESS and generation.result_file:
+    provider_result_url = ""
+    if isinstance(generation.result_metadata, dict):
+        provider_result_url = str(
+            generation.result_metadata.get("image_download_url", "") or ""
+        ).strip()
+
+    if (
+        generation.status == AIGenerationRequest.STATUS_SUCCESS
+        and (provider_result_url or generation.result_file)
+    ):
         path = reverse(
             "ai_generation_image",
             kwargs={"public_id": generation.public_id},
@@ -744,12 +780,7 @@ def serialize_generation(generation: AIGenerationRequest, *, request=None) -> di
                 getattr(settings, "AI_GENERATION_PROVIDER_RESOLUTION", "512x768"),
             )
         ),
-        "guidance_scale": int(
-            requested.get(
-                "guidance_scale",
-                getattr(settings, "AI_GENERATION_PROVIDER_GUIDANCE_SCALE", 7),
-            )
-        ),
+        "guidance_scale": 30,
         "created_at": generation.created_at.isoformat(),
         "completed_at": (
             generation.completed_at.isoformat()

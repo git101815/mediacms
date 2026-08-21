@@ -1406,6 +1406,7 @@ def push_all_media_to_storj():
     root = settings.MEDIA_ROOT
     push_cutoff = time.time() - 60
     chunk_dir = os.path.join(root, settings.CHUNKS_DIR)  # ignore old chunks
+    ai_generation_dir = os.path.join(root, "ai_generations")
     StorageClass = import_string(settings.STORJ_STORAGE)
     storj_storage = StorageClass()
 
@@ -1414,6 +1415,13 @@ def push_all_media_to_storj():
 
     for dirpath, _, filenames in os.walk(root):
         if dirpath.startswith(chunk_dir):
+            continue
+        if (
+            dirpath == ai_generation_dir
+            or dirpath.startswith(ai_generation_dir + os.sep)
+        ):
+            # AI provider results are ephemeral and must never be mirrored to
+            # Storj. The active provider flow is diskless.
             continue
 
         for fname in filenames:

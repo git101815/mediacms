@@ -301,6 +301,12 @@
     line-height: 1.3;
   }
 
+  .ai-studio-preview-actions {
+    margin-top: 12px;
+    display: flex;
+    justify-content: flex-end;
+  }
+
   .ai-studio-download {
     display: none;
     min-height: 42px;
@@ -530,17 +536,6 @@
             <span id="ai-generation-status" class="ai-studio-badge">ready</span>
             <span id="ai-generation-meta" class="ai-studio-preview-text">No active generation</span>
           </div>
-
-          <a
-            id="ai-generation-download"
-            class="btn ai-studio-download"
-            href="#"
-            download="generated-image"
-            target="_blank"
-            rel="noopener"
-          >
-            Download image
-          </a>
         </div>
 
         <div id="ai-generation-preview" class="ai-studio-canvas">
@@ -548,6 +543,18 @@
             <h3>Image preview</h3>
             <p>Your generated image will appear here.</p>
           </div>
+        </div>
+
+        <div class="ai-studio-preview-actions">
+          <a
+            id="ai-generation-download"
+            class="btn ai-studio-download"
+            href="#"
+            download="generated-image"
+            rel="noopener"
+          >
+            Download image
+          </a>
         </div>
       </section>
     </div>
@@ -568,6 +575,8 @@
   const csrfInput = form ? form.querySelector("[name=csrfmiddlewaretoken]") : null;
 
   let currentGeneration = null;
+  let currentImageObjectUrl = null;
+  let imageLoadVersion = 0;
 
   function escapeHtml(value) {
     const div = document.createElement("div");
@@ -601,17 +610,88 @@
     metaBox.textContent = text || "";
   }
 
+  function revokeCurrentImageObjectUrl() {
+    if (currentImageObjectUrl) {
+      URL.revokeObjectURL(currentImageObjectUrl);
+      currentImageObjectUrl = null;
+    }
+  }
+
   function hideDownload() {
     downloadButton.style.display = "none";
     downloadButton.removeAttribute("href");
   }
 
-  function showDownload(url) {
+  function showDownload(url, item, contentType) {
+    const extensions = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp"
+    };
+    const extension = extensions[contentType] || "img";
+
     downloadButton.href = url;
+    downloadButton.download =
+      "generated-" + String(item.id || "image") + "." + extension;
     downloadButton.style.display = "inline-flex";
   }
 
+  async function loadSuccessfulImage(item, version) {
+    previewBox.innerHTML =
+      '<div class="ai-studio-progress">' +
+        '<div class="ai-studio-spinner"></div>' +
+        '<h3>Loading image...</h3>' +
+      '</div>';
+
+    try {
+      const response = await fetch(item.image_url, {
+        credentials: "same-origin",
+        cache: "no-store"
+      });
+
+      if (!response.ok) {
+        throw new Error("Generated image is unavailable.");
+      }
+
+      const blob = await response.blob();
+
+      if (
+        version !== imageLoadVersion ||
+        !currentGeneration ||
+        currentGeneration.id !== item.id
+      ) {
+        return;
+      }
+
+      revokeCurrentImageObjectUrl();
+      currentImageObjectUrl = URL.createObjectURL(blob);
+
+      previewBox.innerHTML =
+        '<img src="' +
+        escapeHtml(currentImageObjectUrl) +
+        '" alt="Generated image">';
+
+      showDownload(
+        currentImageObjectUrl,
+        item,
+        blob.type
+      );
+    } catch (error) {
+      if (version !== imageLoadVersion) return;
+
+      previewBox.innerHTML =
+        '<div class="ai-studio-failure">' +
+          '<h3>Image unavailable</h3>' +
+          '<p>' +
+            escapeHtml(error.message || "Generated image is unavailable.") +
+          '</p>' +
+        '</div>';
+    }
+  }
+
   function renderEmpty() {
+    imageLoadVersion += 1;
+    revokeCurrentImageObjectUrl();
     currentGeneration = null;
     setStatus("ready");
     setMeta("No active generation");
@@ -625,21 +705,25 @@
   }
 
   function renderGeneration(item) {
-    currentGeneration = item;
-
     if (!item) {
       renderEmpty();
       return;
     }
 
+    const previousId = currentGeneration ? currentGeneration.id : null;
+    if (previousId !== item.id) {
+      imageLoadVersion += 1;
+      revokeCurrentImageObjectUrl();
+    }
+
+    currentGeneration = item;
     setStatus(item.status);
     setMeta(item.resolution || "Generation in progress");
     hideDownload();
 
     if (item.status === "success" && item.image_url) {
-      previewBox.innerHTML =
-        '<img src="' + escapeHtml(item.image_url) + '" alt="Generated image">';
-      showDownload(item.image_url);
+      const version = ++imageLoadVersion;
+      loadSuccessfulImage(item, version);
       return;
     }
 
@@ -755,6 +839,11 @@
       }
     });
   }
+
+  window.addEventListener("pagehide", function () {
+    imageLoadVersion += 1;
+    revokeCurrentImageObjectUrl();
+  });
 
   renderEmpty();
   window.setInterval(refreshActive, 3000);

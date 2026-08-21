@@ -11,7 +11,7 @@ from django.core.exceptions import (
     PermissionDenied,
     ValidationError,
 )
-from django.http import FileResponse, JsonResponse
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
@@ -24,6 +24,7 @@ from .services import (
     complete_generation_from_url,
     create_generation_request,
     decode_provider_image_base64,
+    download_provider_image,
     format_token_amount,
     generation_price_tokens,
     generation_provider_payload,
@@ -73,9 +74,6 @@ def _internal_error_response(exc: Exception):
 @require_GET
 def generation_page(request):
     wallet = get_user_wallet(request.user)
-    generations = AIGenerationRequest.objects.filter(user=request.user).order_by(
-        "-created_at"
-    )[:20]
     return render(
         request,
         "ai_generation/generate.html",
@@ -89,13 +87,9 @@ def generation_page(request):
                 "AI_GENERATION_ENABLED",
                 True,
             ),
-            "ai_generation_default_guidance_scale": int(
-                getattr(settings, "AI_GENERATION_PROVIDER_GUIDANCE_SCALE", 7)
-            ),
             "ai_generation_default_resolution": str(
                 getattr(settings, "AI_GENERATION_PROVIDER_RESOLUTION", "512x768")
             ),
-            "ai_generation_initial": [],
         },
     )
 
@@ -109,7 +103,6 @@ def generation_create_api(request):
             actor=request.user,
             prompt=payload.get("prompt", ""),
             resolution=payload.get("resolution", ""),
-            guidance_scale=payload.get("guidance_scale", None),
         )
         wallet = get_user_wallet(request.user)
         wallet.refresh_from_db(fields=["balance"])
@@ -174,22 +167,59 @@ def generation_image(request, public_id):
         user=request.user,
         status=AIGenerationRequest.STATUS_SUCCESS,
     )
-    if not generation.result_file:
-        return JsonResponse(
-            {"success": False, "error": "Generated image is unavailable"},
-            status=404,
-        )
 
-    handle = generation.result_file.open("rb")
-    response = FileResponse(
-        handle,
-        content_type=generation.result_content_type or "application/octet-stream",
+    provider_result_url = ""
+    if isinstance(generation.result_metadata, dict):
+        provider_result_url = str(
+            generation.result_metadata.get("image_download_url", "") or ""
+        ).strip()
+
+    if provider_result_url:
+        try:
+            image_bytes, content_type, extension = download_provider_image(
+                provider_result_url
+            )
+        except ValidationError as exc:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": _validation_message(exc),
+                },
+                status=502,
+            )
+
+        response = HttpResponse(
+            image_bytes,
+            content_type=content_type,
+        )
+        response["Content-Disposition"] = (
+            f'inline; filename="{generation.public_id}.{extension}"'
+        )
+        response["Content-Length"] = str(len(image_bytes))
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+    # Compatibility for pre-diskless generations that already have a local
+    # result_file. New n8n/Perchance generations never enter this branch.
+    if generation.result_file:
+        handle = generation.result_file.open("rb")
+        response = FileResponse(
+            handle,
+            content_type=(
+                generation.result_content_type
+                or "application/octet-stream"
+            ),
+        )
+        response["Content-Disposition"] = (
+            f'inline; filename="{generation.public_id}"'
+        )
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+    return JsonResponse(
+        {"success": False, "error": "Generated image is unavailable"},
+        status=404,
     )
-    response["Content-Disposition"] = (
-        f'inline; filename="{generation.public_id}"'
-    )
-    response["Cache-Control"] = "private, max-age=3600"
-    return response
 
 
 @csrf_exempt
