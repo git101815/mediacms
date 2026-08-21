@@ -19,6 +19,7 @@ schema_view = get_schema_view(
 
 urlpatterns = [
     re_path(r"^__debug__/", include(debug_toolbar.urls)),
+    path("", include("ai_generation.urls")),
     path(
         "robots.txt",
         TemplateView.as_view(template_name="robots.txt", content_type="text/plain"),

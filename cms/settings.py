@@ -308,6 +308,7 @@ INSTALLED_APPS = [
     "ledger.apps.LedgerConfig",
     "ads.apps.AdsConfig",
     "premium.apps.PremiumConfig",
+    "ai_generation.apps.AIGenerationConfig",
     "files.apps.FilesConfig",
     "users.apps.UsersConfig",
     "actions.apps.ActionsConfig",
@@ -497,6 +498,17 @@ CELERY_BEAT_SCHEDULE = {
         "task": "clear_sessions",
         "schedule": crontab(hour=1, minute=1, day_of_week=6),
     },
+    # AI_GENERATION_FEATURE_V1 periodic recovery/nudge
+    "ai_generation_fail_stale": {
+        "task": "ai_generation.tasks.fail_stale_ai_generations",
+        "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
+    },
+    "ai_generation_nudge_worker": {
+        "task": "ai_generation.tasks.nudge_ai_generation_worker",
+        "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
+    },
     "get_list_of_popular_media": {
         "task": "get_list_of_popular_media",
         "schedule": crontab(minute=1, hour="*/10"),
@@ -561,6 +573,25 @@ REMOTE_ENCODING_SOURCE_ENDPOINT_URL = "eu-1"
 REMOTE_ENCODING_SOURCE_REGION_NAME = "auto"
 REMOTE_ENCODING_SOURCE_ADDRESSING_STYLE = "path"
 DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+
+AI_GENERATION_ENABLED=1
+AI_GENERATION_PRICE_TOKENS=10000000
+AI_GENERATION_MAX_PROMPT_CHARS=1200
+AI_GENERATION_MAX_PENDING_PER_USER=3
+AI_GENERATION_PROVIDER="perchance"
+AI_GENERATION_PROVIDER_RESOLUTION="512x768"
+AI_GENERATION_FORBIDDEN_TERMS=""
+AI_GENERATION_CLAIM_LEASE_SECONDS=300
+AI_GENERATION_QUEUE_TIMEOUT_SECONDS=1800
+AI_GENERATION_RESULT_DOWNLOAD_TIMEOUT_SECONDS=30
+AI_GENERATION_RESULT_MAX_BYTES=20971520
+AI_GENERATION_ALLOWED_RESULT_HOSTS="image-generation.perchance.org"
+AI_GENERATION_INTERNAL_SERVICE_USERNAME="ai-generation-service"
+AI_GENERATION_INTERNAL_SERVICE_SHARED_SECRET=""
+AI_GENERATION_N8N_WAKE_WEBHOOK_URL=""
+AI_GENERATION_N8N_WAKE_SECRET=""
+AI_GENERATION_N8N_PROVIDER_TIMEOUT_SECONDS=240
+
 
 LANGUAGES = [
     ('ar', _('Arabic')),
@@ -741,6 +772,15 @@ if TESTING:
     MEDIA_ROOT = os.path.join(TESTING_ROOT, "media")
     HLS_DIR = os.path.join(MEDIA_ROOT, "hls")
     STATIC_ROOT = os.path.join(TESTING_ROOT, "static_collected")
+
+    # BASE_DIR/static is a canonical source directory in this fork (for
+    # example static/ads/ads.css). In production nginx serves it directly.
+    # During tests STATIC_ROOT is redirected to TESTING_ROOT, so expose the
+    # repository static directory to Django's FileSystemFinder explicitly.
+    STATICFILES_DIRS = [
+        os.path.join(BASE_DIR, "static"),
+    ]
+
     TEMP_DIRECTORY = os.path.join(TESTING_ROOT, "tmp")
     DB_BACKUP_DIR = os.path.join(TESTING_ROOT, "backup")
     LOGS_DIR = os.path.join(TESTING_ROOT, "logs")

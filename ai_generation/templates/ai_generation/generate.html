@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block headtitle %}AI Image Generator - {{PORTAL_NAME}}{% endblock headtitle %}
+
+{% block topimports %}
+{{ block.super }}
+<link href="{% static "css/ai-generation.css" %}" rel="preload" as="style">
+<link href="{% static "css/ai-generation.css" %}" rel="stylesheet">
+{% endblock topimports %}
+
+
+{% block innercontent %}
+<div
+  class="ai-studio-page"
+  data-ai-generation-root
+  data-create-url="{% url 'ai_generation_create_api' %}"
+  data-detail-base-url="{% url 'ai_generation_list_api' %}"
+>
+  {% if not ai_generation_enabled %}
+    <div class="alert alert-warning">AI image generation is temporarily unavailable.</div>
+  {% else %}
+    <div class="ai-studio-shell">
+      <section class="ai-studio-sidebar">
+        <h1 class="ai-studio-title">Create an image from text prompt</h1>
+
+        <form id="ai-generation-form" autocomplete="off">
+          {% csrf_token %}
+
+          <div class="ai-studio-field">
+            <label class="ai-studio-label" for="ai-generation-prompt">Prompt</label>
+            <div class="ai-studio-prompt-wrap">
+              <textarea
+                id="ai-generation-prompt"
+                class="form-control ai-studio-prompt"
+                maxlength="{{ ai_generation_max_prompt_chars }}"
+                required
+                placeholder="Describe what you'd like to generate"
+              ></textarea>
+              <div class="ai-studio-counter">
+                <span id="ai-generation-prompt-length">0</span>/{{ ai_generation_max_prompt_chars }}
+              </div>
+            </div>
+          </div>
+
+          <button
+            class="btn ai-studio-generate"
+            type="submit"
+            id="ai-generation-submit"
+            data-default-label="Generate"
+          >
+            Generate
+          </button>
+
+          <p class="ai-studio-cost-note">
+            Image generation costs <strong>{{ ai_generation_price }} tokens</strong>.
+          </p>
+
+          <div class="ai-studio-section">
+            <div class="ai-studio-section-title">Choose shape</div>
+
+            <div class="ai-studio-shapes">
+              <label class="ai-studio-shape">
+                <input type="radio" name="resolution" value="512x512"{% if ai_generation_default_resolution == "512x512" %} checked{% endif %}>
+                <span class="ai-studio-shape-card">
+                  <span class="ai-studio-shape-top">
+                    <span class="ai-studio-shape-visual ai-studio-shape-square"></span>
+                  </span>
+                  <span class="ai-studio-shape-name">Square</span>
+                  <span class="ai-studio-shape-size">512×512</span>
+                </span>
+              </label>
+
+              <label class="ai-studio-shape">
+                <input type="radio" name="resolution" value="768x512"{% if ai_generation_default_resolution == "768x512" %} checked{% endif %}>
+                <span class="ai-studio-shape-card">
+                  <span class="ai-studio-shape-top">
+                    <span class="ai-studio-shape-visual ai-studio-shape-landscape"></span>
+                  </span>
+                  <span class="ai-studio-shape-name">Landscape</span>
+                  <span class="ai-studio-shape-size">768×512</span>
+                </span>
+              </label>
+
+              <label class="ai-studio-shape">
+                <input type="radio" name="resolution" value="512x768"{% if ai_generation_default_resolution == "512x768" %} checked{% endif %}>
+                <span class="ai-studio-shape-card">
+                  <span class="ai-studio-shape-top">
+                    <span class="ai-studio-shape-visual ai-studio-shape-portrait"></span>
+                  </span>
+                  <span class="ai-studio-shape-name">Portrait</span>
+                  <span class="ai-studio-shape-size">512×768</span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div id="ai-generation-error" class="alert alert-danger ai-studio-error" hidden></div>
+        </form>
+      </section>
+
+      <section class="ai-studio-preview-shell">
+        <div class="ai-studio-preview-toolbar">
+          <div class="ai-studio-preview-meta">
+            <span id="ai-generation-status" class="ai-studio-badge">ready</span>
+            <span id="ai-generation-meta" class="ai-studio-preview-text">No active generation</span>
+          </div>
+        </div>
+
+        <div id="ai-generation-preview" class="ai-studio-canvas">
+          <div class="ai-studio-empty">
+            <h3>Image preview</h3>
+            <p>Your generated image will appear here.</p>
+          </div>
+        </div>
+
+        <div class="ai-studio-preview-actions">
+          <a
+            id="ai-generation-download"
+            class="btn ai-studio-download"
+            href="#"
+            hidden
+            download="generated-image"
+            rel="noopener"
+          >
+            Download image
+          </a>
+        </div>
+      </section>
+    </div>
+  {% endif %}
+</div>
+{% endblock innercontent %}
+
+{% block bottomimports %}
+{{ block.super }}
+<script src="{% static "js/ai-generation.js" %}"></script>
+{% endblock bottomimports %}

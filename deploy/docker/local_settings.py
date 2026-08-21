@@ -23,6 +23,38 @@ PORTAL_NAME = "CelebFakes"
 PORTAL_DESCRIPTION = "CelebFakes gathers the best creators to offer it's users high quality celebrity deepfake porn videos"
 DFANS_REF_CODE = "A14Q9C"
 DEPOSIT_EVM_ACCOUNT_XPUB = os.getenv("DEPOSIT_EVM_ACCOUNT_XPUB", "").strip()
+
+# AI image generation overrides.
+#
+# Business controls: these are the values normally changed by the operator.
+AI_GENERATION_ENABLED = True
+# Ledger values use 6 decimal places: 10_000_000 = 10 tokens.
+AI_GENERATION_PRICE_TOKENS = 10_000_000
+AI_GENERATION_MAX_PROMPT_CHARS = 1200
+AI_GENERATION_MAX_PENDING_PER_USER = 3
+# Default selected resolution. The UI also allows 512x512 and 768x512.
+AI_GENERATION_PROVIDER_RESOLUTION = "512x768"
+# Optional pipe-separated extra blocked terms, e.g. "term one|term two".
+AI_GENERATION_FORBIDDEN_TERMS = ""
+
+# Operational limits. Normally leave these unchanged unless the provider or
+# infrastructure latency changes.
+AI_GENERATION_CLAIM_LEASE_SECONDS = 300
+AI_GENERATION_QUEUE_TIMEOUT_SECONDS = 1800
+AI_GENERATION_RESULT_DOWNLOAD_TIMEOUT_SECONDS = 30
+AI_GENERATION_RESULT_MAX_BYTES = 20 * 1024 * 1024
+AI_GENERATION_N8N_PROVIDER_TIMEOUT_SECONDS = 240
+
+# n8n connection. Values/secrets come from the project .env file.
+AI_GENERATION_N8N_WAKE_WEBHOOK_URL = os.getenv(
+    "AI_GENERATION_N8N_WAKE_WEBHOOK_URL",
+    "",
+).strip()
+AI_GENERATION_N8N_WAKE_SECRET = os.getenv(
+    "AI_GENERATION_N8N_WAKE_SECRET",
+    "",
+).strip()
+
 LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
 TABUNDER_COOLDOWN_SECONDS = 60
 PREROLLS_COOLDOWN_SECONDS = 10
@@ -291,6 +323,16 @@ CELERY_BEAT_SCHEDULE = {
     "ads_settle_runtime": {
         "task": "ads.settle_runtime",
         "schedule": 15.0,
+        "options": {"queue": "short_tasks"},
+    },
+    "ai_generation_fail_stale": {
+        "task": "ai_generation.tasks.fail_stale_ai_generations",
+        "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
+    },
+    "ai_generation_nudge_worker": {
+        "task": "ai_generation.tasks.nudge_ai_generation_worker",
+        "schedule": 60.0,
         "options": {"queue": "short_tasks"},
     },
     "push_all_media_to_storj": {

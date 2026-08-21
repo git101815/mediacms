@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "ledger.apps.LedgerConfig",
     "ads.apps.AdsConfig",
     "premium.apps.PremiumConfig",
+    "ai_generation.apps.AIGenerationConfig",
     "files.apps.FilesConfig",
     "users.apps.UsersConfig",
     "actions.apps.ActionsConfig",

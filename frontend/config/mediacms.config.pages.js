@@ -111,6 +111,11 @@ const PAGES = {
     snippet: templates.htmlBodySnippetEmbedPage({ id: 'page-embed' }),
     global: { mediaId: DEV_SAMPLE_DATA.media.videoId },
   },
+  'ai-generation': {
+    id: 'ai-generation',
+    title: 'AI Image Generator',
+    renderer: templates.renderAIGenerationPageContent(),
+  },
   wallet: {
       id: 'wallet',
       title: 'Wallet',
