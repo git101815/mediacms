@@ -149,23 +149,11 @@ def validate_provider_config(*, resolution, guidance_scale) -> dict:
     if selected_resolution not in allowed_resolutions:
         raise ValidationError("Resolution must be 512x512, 768x512 or 512x768")
 
-    if guidance_scale in ("", None):
-        selected_guidance = int(
-            getattr(settings, "AI_GENERATION_PROVIDER_GUIDANCE_SCALE", 7)
-        )
-    else:
-        try:
-            selected_guidance = int(guidance_scale)
-        except (TypeError, ValueError) as exc:
-            raise ValidationError("Guidance scale must be an integer between 1 and 30") from exc
-
-    if selected_guidance < 1 or selected_guidance > 30:
-        raise ValidationError("Guidance scale must be between 1 and 30")
-
     return {
         "resolution": selected_resolution,
-        "guidance_scale": selected_guidance,
+        "guidance_scale": 30,
     }
+
 
 
 def _request_hash(payload: dict) -> str:

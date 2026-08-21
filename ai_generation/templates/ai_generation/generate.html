@@ -4,325 +4,514 @@
 
 {% block innercontent %}
 <style>
-  .ai-page {
-    max-width: 1400px;
+  .ai-studio-page {
+    max-width: 1500px;
     margin: 0 auto;
-    padding: 18px 16px 36px;
+    padding: 10px 12px 24px;
   }
 
-  .ai-header {
-    margin-bottom: 18px;
+  .ai-studio-shell {
+    display: grid;
+    grid-template-columns: 420px minmax(0, 1fr);
+    gap: 22px;
+    align-items: stretch;
+    min-height: calc(100vh - 120px);
   }
 
-  .ai-header h1 {
-    margin: 0 0 6px;
-    font-size: 30px;
+  .ai-studio-sidebar,
+  .ai-studio-preview-shell {
+    background: linear-gradient(180deg, rgba(18, 10, 52, 0.98), rgba(10, 7, 34, 0.98));
+    border: 1px solid rgba(138, 102, 255, 0.18);
+    border-radius: 26px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  }
+
+  .ai-studio-sidebar {
+    padding: 26px 26px 24px;
+  }
+
+  .ai-studio-title {
+    margin: 0 0 18px;
+    font-size: 25px;
     font-weight: 700;
+    color: #ffffff;
     line-height: 1.2;
   }
 
-  .ai-header p {
-    margin: 0;
-    opacity: .72;
+  .ai-studio-field {
+    margin-bottom: 20px;
   }
 
-  .ai-toolbar {
-    display: grid;
-    grid-template-columns: 1fr auto auto auto;
-    gap: 14px;
-    align-items: end;
-    margin-bottom: 18px;
-  }
-
-  .ai-field label {
+  .ai-studio-label {
     display: block;
-    margin-bottom: 7px;
+    margin-bottom: 10px;
+    font-size: 15px;
     font-weight: 600;
-    font-size: 14px;
+    color: rgba(255, 255, 255, 0.96);
   }
 
-  .ai-prompt-wrap {
+  .ai-studio-prompt-wrap {
     position: relative;
   }
 
-  .ai-prompt-counter {
+  .ai-studio-prompt {
+    width: 100%;
+    min-height: 136px;
+    resize: vertical;
+    border: 1px solid rgba(255, 255, 255, 0.10) !important;
+    border-radius: 18px !important;
+    background: rgba(255, 255, 255, 0.14) !important;
+    color: #ffffff !important;
+    padding: 16px 16px 36px !important;
+    font-size: 15px;
+    line-height: 1.5;
+    box-shadow: none !important;
+  }
+
+  .ai-studio-prompt::placeholder {
+    color: rgba(255, 255, 255, 0.62);
+  }
+
+  .ai-studio-counter {
     position: absolute;
     right: 12px;
     bottom: 10px;
     font-size: 12px;
-    opacity: .58;
-    background: rgba(255,255,255,.85);
-    padding: 2px 6px;
+    color: rgba(255, 255, 255, 0.62);
+  }
+
+  .ai-studio-generate {
+    width: 100%;
+    height: 50px;
+    border: 0;
     border-radius: 999px;
-  }
-
-  .ai-prompt {
-    width: 100%;
-    min-height: 180px;
-    resize: vertical;
-    border-radius: 12px !important;
-    padding: 14px !important;
-    line-height: 1.5;
-    font-size: 15px;
-  }
-
-  .ai-control-card {
-    min-width: 210px;
-    border: 1px solid rgba(127,127,127,.18);
-    border-radius: 14px;
-    padding: 14px;
-    background: rgba(127,127,127,.04);
-  }
-
-  .ai-range-value {
+    color: #ffffff;
+    font-size: 18px;
     font-weight: 700;
-    font-size: 20px;
-    margin-bottom: 8px;
+    background: linear-gradient(90deg, #8b35f2 0%, #b149ff 52%, #8a2cff 100%);
+    box-shadow: 0 10px 22px rgba(140, 53, 242, 0.28);
   }
 
-  .ai-range {
-    width: 100%;
+  .ai-studio-generate[disabled] {
+    opacity: .7;
+    cursor: wait;
   }
 
-  .ai-select {
-    min-width: 180px;
-    height: 44px;
-    border-radius: 10px !important;
+  .ai-studio-section {
+    margin-top: 20px;
   }
 
-  .ai-submit-wrap {
-    min-width: 240px;
-  }
-
-  .ai-submit {
-    width: 100%;
-    height: 44px;
-    border-radius: 10px !important;
-    font-weight: 700;
-  }
-
-  .ai-note {
-    margin-top: 8px;
-    font-size: 12px;
-    opacity: .65;
-    line-height: 1.4;
-  }
-
-  .ai-error {
-    margin-bottom: 16px;
-  }
-
-  .ai-stage {
-    border: 1px solid rgba(127,127,127,.18);
-    border-radius: 18px;
-    background: rgba(127,127,127,.03);
-    padding: 16px;
-  }
-
-  .ai-stage-meta {
+  .ai-studio-section-title {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 14px;
+    gap: 10px;
+    margin: 0 0 12px;
+    font-size: 17px;
+    font-weight: 600;
+    color: #ffffff;
   }
 
-  .ai-meta-left,
-  .ai-meta-right {
+  .ai-studio-pill-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .ai-studio-pill {
+    border-radius: 18px;
+    padding: 16px 14px;
+    background: rgba(255, 255, 255, 0.11);
+    color: rgba(255, 255, 255, 0.86);
+  }
+
+  .ai-studio-pill span {
+    display: block;
+    font-size: 11px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    opacity: .66;
+    margin-bottom: 6px;
+  }
+
+  .ai-studio-pill strong {
+    display: block;
+    font-size: 18px;
+    line-height: 1.15;
+    color: #ffffff;
+  }
+
+  .ai-studio-shapes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .ai-studio-shape {
+    position: relative;
+  }
+
+  .ai-studio-shape input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .ai-studio-shape-card {
+    display: block;
+    border-radius: 18px;
+    padding: 14px 12px;
+    background: rgba(255, 255, 255, 0.10);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: .18s ease;
+    min-height: 106px;
+  }
+
+  .ai-studio-shape-card:hover {
+    border-color: rgba(177, 73, 255, 0.55);
+  }
+
+  .ai-studio-shape input:checked + .ai-studio-shape-card {
+    background: rgba(142, 58, 246, 0.24);
+    border-color: #a145ff;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.04);
+  }
+
+  .ai-studio-shape-top {
+    height: 42px;
     display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+  }
+
+  .ai-studio-shape-visual {
+    background: rgba(255,255,255,.14);
+    border-radius: 6px;
+  }
+
+  .ai-studio-shape-square { width: 40px; height: 40px; }
+  .ai-studio-shape-landscape { width: 56px; height: 36px; }
+  .ai-studio-shape-portrait { width: 30px; height: 48px; }
+
+  .ai-studio-shape-name {
+    display: block;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .ai-studio-shape-size {
+    display: block;
+    color: rgba(255, 255, 255, 0.66);
+    font-size: 12px;
+  }
+
+  .ai-studio-fixed {
+    margin-top: 6px;
+    font-size: 13px;
+    color: rgba(255,255,255,.68);
+    line-height: 1.45;
+  }
+
+  .ai-studio-fixed strong {
+    color: #ffffff;
+  }
+
+  .ai-studio-error {
+    margin-top: 16px;
+    border-radius: 14px;
+  }
+
+  .ai-studio-preview-shell {
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ai-studio-preview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 14px;
     flex-wrap: wrap;
+  }
+
+  .ai-studio-preview-meta {
+    display: flex;
     align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
   }
 
-  .ai-badge {
+  .ai-studio-badge {
     display: inline-flex;
     align-items: center;
     border-radius: 999px;
-    padding: 5px 10px;
+    padding: 6px 11px;
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
-    background: rgba(127,127,127,.13);
+    background: rgba(255,255,255,.12);
+    color: #ffffff;
   }
 
-  .ai-badge-queued { background: rgba(255, 193, 7, .16); }
-  .ai-badge-running { background: rgba(0, 123, 255, .14); }
-  .ai-badge-success { background: rgba(40, 167, 69, .14); }
-  .ai-badge-failed { background: rgba(220, 53, 69, .14); }
+  .ai-studio-badge-ready { background: rgba(255,255,255,.10); }
+  .ai-studio-badge-queued { background: rgba(255, 193, 7, .16); }
+  .ai-studio-badge-running { background: rgba(0, 123, 255, .18); }
+  .ai-studio-badge-success { background: rgba(40, 167, 69, .18); }
+  .ai-studio-badge-failed { background: rgba(220, 53, 69, .18); }
 
-  .ai-muted {
+  .ai-studio-preview-text {
+    color: rgba(255,255,255,.72);
     font-size: 13px;
-    opacity: .68;
   }
 
-  .ai-download {
+  .ai-studio-download {
     display: none;
+    border-radius: 999px !important;
+    padding: 10px 18px !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255,255,255,.18) !important;
+    background: rgba(255,255,255,.09) !important;
+    font-weight: 600;
   }
 
-  .ai-preview {
-    width: 100%;
-    min-height: 72vh;
-    border-radius: 16px;
-    background: rgba(127,127,127,.06);
-    border: 1px dashed rgba(127,127,127,.22);
+  .ai-studio-canvas {
+    flex: 1;
+    min-height: 78vh;
+    border-radius: 22px;
+    background: rgba(7, 5, 25, 0.92);
+    border: 1px solid rgba(255,255,255,.08);
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    padding: 14px;
+    padding: 16px;
   }
 
-  .ai-preview img {
+  .ai-studio-canvas img {
+    display: block;
     max-width: 100%;
-    max-height: 70vh;
+    max-height: 74vh;
     width: auto;
     height: auto;
     object-fit: contain;
-    display: block;
-    border-radius: 12px;
+    border-radius: 14px;
   }
 
-  .ai-empty,
-  .ai-progress,
-  .ai-failure {
+  .ai-studio-empty,
+  .ai-studio-progress,
+  .ai-studio-failure {
+    max-width: 720px;
     text-align: center;
-    max-width: 640px;
-    padding: 20px;
+    color: #ffffff;
+    padding: 24px;
   }
 
-  .ai-empty h3,
-  .ai-progress h3,
-  .ai-failure h3 {
+  .ai-studio-empty h3,
+  .ai-studio-progress h3,
+  .ai-studio-failure h3 {
     margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 28px;
+    line-height: 1.2;
+    color: #ffffff;
   }
 
-  .ai-spinner {
-    width: 34px;
-    height: 34px;
-    margin: 0 auto 14px;
-    border-radius: 50%;
-    border: 3px solid rgba(127,127,127,.22);
-    border-top-color: currentColor;
-    animation: ai-spin .8s linear infinite;
+  .ai-studio-empty p,
+  .ai-studio-progress p,
+  .ai-studio-failure p {
+    margin: 0;
+    color: rgba(255,255,255,.72);
+    line-height: 1.5;
+    font-size: 15px;
   }
 
-  .ai-prompt-echo {
-    margin-top: 12px;
-    font-size: 14px;
-    line-height: 1.45;
-    opacity: .82;
+  .ai-studio-prompt-echo {
+    margin-top: 14px !important;
+    font-size: 15px !important;
+    color: rgba(255,255,255,.86) !important;
     overflow-wrap: anywhere;
   }
 
-  @keyframes ai-spin {
+  .ai-studio-spinner {
+    width: 70px;
+    height: 70px;
+    margin: 0 auto 18px;
+    border-radius: 50%;
+    border: 6px solid rgba(255,255,255,.18);
+    border-top-color: #ffffff;
+    animation: ai-studio-spin 0.95s linear infinite;
+  }
+
+  @keyframes ai-studio-spin {
     to { transform: rotate(360deg); }
   }
 
-  @media (max-width: 1150px) {
-    .ai-toolbar {
+  @media (max-width: 1180px) {
+    .ai-studio-shell {
+      grid-template-columns: 1fr;
+      min-height: auto;
+    }
+
+    .ai-studio-canvas {
+      min-height: 58vh;
+    }
+
+    .ai-studio-canvas img {
+      max-height: 54vh;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .ai-studio-page {
+      padding: 8px 8px 16px;
+    }
+
+    .ai-studio-sidebar,
+    .ai-studio-preview-shell {
+      border-radius: 20px;
+    }
+
+    .ai-studio-sidebar {
+      padding: 18px;
+    }
+
+    .ai-studio-title {
+      font-size: 22px;
+    }
+
+    .ai-studio-shapes {
       grid-template-columns: 1fr;
     }
 
-    .ai-control-card,
-    .ai-submit-wrap {
-      min-width: 0;
+    .ai-studio-pill-row {
+      grid-template-columns: 1fr;
     }
 
-    .ai-preview {
-      min-height: 55vh;
+    .ai-studio-canvas {
+      min-height: 48vh;
     }
 
-    .ai-preview img {
-      max-height: 52vh;
+    .ai-studio-empty h3,
+    .ai-studio-progress h3,
+    .ai-studio-failure h3 {
+      font-size: 22px;
     }
   }
 </style>
 
-<div class="ai-page">
-  <div class="ai-header">
-    <h1>AI Image Generator</h1>
-    <p>
-      Cost: <strong>{{ ai_generation_price }} tokens</strong> per generation.
-      Balance: <strong id="ai-generation-balance">{{ ai_generation_balance }}</strong> tokens.
-    </p>
-  </div>
-
+<div class="ai-studio-page">
   {% if not ai_generation_enabled %}
     <div class="alert alert-warning">AI image generation is temporarily unavailable.</div>
   {% else %}
-    <form id="ai-generation-form" autocomplete="off">
-      {% csrf_token %}
+    <div class="ai-studio-shell">
+      <section class="ai-studio-sidebar">
+        <h1 class="ai-studio-title">Create an image from text prompt</h1>
 
-      <div class="ai-toolbar">
-        <div class="ai-field">
-          <label for="ai-generation-prompt">Prompt</label>
-          <div class="ai-prompt-wrap">
-            <textarea
-              id="ai-generation-prompt"
-              class="form-control ai-prompt"
-              maxlength="{{ ai_generation_max_prompt_chars }}"
-              required
-              placeholder="Describe the image you want..."
-            ></textarea>
-            <div class="ai-prompt-counter">
-              <span id="ai-generation-prompt-length">0</span>/{{ ai_generation_max_prompt_chars }}
+        <form id="ai-generation-form" autocomplete="off">
+          {% csrf_token %}
+
+          <div class="ai-studio-field">
+            <label class="ai-studio-label" for="ai-generation-prompt">Prompt</label>
+            <div class="ai-studio-prompt-wrap">
+              <textarea
+                id="ai-generation-prompt"
+                class="form-control ai-studio-prompt"
+                maxlength="{{ ai_generation_max_prompt_chars }}"
+                required
+                placeholder="Describe what you'd like to generate"
+              ></textarea>
+              <div class="ai-studio-counter">
+                <span id="ai-generation-prompt-length">0</span>/{{ ai_generation_max_prompt_chars }}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="ai-control-card">
-          <label for="ai-generation-guidance">Guidance Scale</label>
-          <div class="ai-range-value"><span id="ai-generation-guidance-value">{{ ai_generation_default_guidance_scale }}</span></div>
-          <input
-            id="ai-generation-guidance"
-            class="ai-range"
-            type="range"
-            min="1"
-            max="30"
-            step="1"
-            value="{{ ai_generation_default_guidance_scale }}"
-          >
-        </div>
-
-        <div class="ai-control-card">
-          <label for="ai-generation-resolution">Resolution</label>
-          <select id="ai-generation-resolution" class="form-control ai-select">
-            <option value="512x512"{% if ai_generation_default_resolution == "512x512" %} selected{% endif %}>512×512</option>
-            <option value="768x512"{% if ai_generation_default_resolution == "768x512" %} selected{% endif %}>768×512</option>
-            <option value="512x768"{% if ai_generation_default_resolution == "512x768" %} selected{% endif %}>512×768</option>
-          </select>
-        </div>
-
-        <div class="ai-submit-wrap">
           <button
-            class="btn btn-primary ai-submit"
+            class="btn ai-studio-generate"
             type="submit"
             id="ai-generation-submit"
-            data-default-label="Generate image - {{ ai_generation_price }} tokens"
+            data-default-label="Generate"
           >
-            Generate image - {{ ai_generation_price }} tokens
+            Generate
           </button>
-          <div class="ai-note">
-            Each prompt is handled independently.
+
+          <div class="ai-studio-section">
+            <div class="ai-studio-section-title">Project info</div>
+            <div class="ai-studio-pill-row">
+              <div class="ai-studio-pill">
+                <span>Cost</span>
+                <strong>{{ ai_generation_price }} tokens</strong>
+              </div>
+              <div class="ai-studio-pill">
+                <span>Balance</span>
+                <strong><span id="ai-generation-balance">{{ ai_generation_balance }}</span> tokens</strong>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-      <div id="ai-generation-error" class="alert alert-danger ai-error" style="display:none;"></div>
-    </form>
+          <div class="ai-studio-section">
+            <div class="ai-studio-section-title">Choose shape</div>
 
-    <div class="ai-stage">
-      <div class="ai-stage-meta">
-        <div class="ai-meta-left">
-          <span id="ai-generation-status" class="ai-badge">ready</span>
-          <span id="ai-generation-meta" class="ai-muted">No active generation</span>
-        </div>
-        <div class="ai-meta-right">
+            <div class="ai-studio-shapes">
+              <label class="ai-studio-shape">
+                <input type="radio" name="resolution" value="512x512"{% if ai_generation_default_resolution == "512x512" %} checked{% endif %}>
+                <span class="ai-studio-shape-card">
+                  <span class="ai-studio-shape-top">
+                    <span class="ai-studio-shape-visual ai-studio-shape-square"></span>
+                  </span>
+                  <span class="ai-studio-shape-name">Square</span>
+                  <span class="ai-studio-shape-size">512×512</span>
+                </span>
+              </label>
+
+              <label class="ai-studio-shape">
+                <input type="radio" name="resolution" value="768x512"{% if ai_generation_default_resolution == "768x512" %} checked{% endif %}>
+                <span class="ai-studio-shape-card">
+                  <span class="ai-studio-shape-top">
+                    <span class="ai-studio-shape-visual ai-studio-shape-landscape"></span>
+                  </span>
+                  <span class="ai-studio-shape-name">Landscape</span>
+                  <span class="ai-studio-shape-size">768×512</span>
+                </span>
+              </label>
+
+              <label class="ai-studio-shape">
+                <input type="radio" name="resolution" value="512x768"{% if ai_generation_default_resolution == "512x768" %} checked{% endif %}>
+                <span class="ai-studio-shape-card">
+                  <span class="ai-studio-shape-top">
+                    <span class="ai-studio-shape-visual ai-studio-shape-portrait"></span>
+                  </span>
+                  <span class="ai-studio-shape-name">Portrait</span>
+                  <span class="ai-studio-shape-size">512×768</span>
+                </span>
+              </label>
+            </div>
+
+            <div class="ai-studio-fixed">
+              Guidance scale is fixed at <strong>30</strong>.
+            </div>
+          </div>
+
+          <div id="ai-generation-error" class="alert alert-danger ai-studio-error" style="display:none;"></div>
+        </form>
+      </section>
+
+      <section class="ai-studio-preview-shell">
+        <div class="ai-studio-preview-toolbar">
+          <div class="ai-studio-preview-meta">
+            <span id="ai-generation-status" class="ai-studio-badge ai-studio-badge-ready">ready</span>
+            <span id="ai-generation-meta" class="ai-studio-preview-text">No active generation</span>
+          </div>
+
           <a
             id="ai-generation-download"
-            class="btn btn-default ai-download"
+            class="btn ai-studio-download"
             href="#"
             download="generated-image"
             target="_blank"
@@ -331,14 +520,14 @@
             Download image
           </a>
         </div>
-      </div>
 
-      <div id="ai-generation-preview" class="ai-preview">
-        <div class="ai-empty">
-          <h3>Ready to generate</h3>
-          <p>Write a prompt, choose a guidance scale and resolution, then click generate.</p>
+        <div id="ai-generation-preview" class="ai-studio-canvas">
+          <div class="ai-studio-empty">
+            <h3>Image preview</h3>
+            <p>Your generated image will appear here and use as much space as possible on the page.</p>
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   {% endif %}
 </div>
@@ -348,9 +537,6 @@
   const form = document.getElementById("ai-generation-form");
   const promptInput = document.getElementById("ai-generation-prompt");
   const promptLength = document.getElementById("ai-generation-prompt-length");
-  const guidanceInput = document.getElementById("ai-generation-guidance");
-  const guidanceValue = document.getElementById("ai-generation-guidance-value");
-  const resolutionInput = document.getElementById("ai-generation-resolution");
   const submit = document.getElementById("ai-generation-submit");
   const balance = document.getElementById("ai-generation-balance");
   const errorBox = document.getElementById("ai-generation-error");
@@ -368,24 +554,24 @@
     return div.innerHTML;
   }
 
+  function currentResolutionValue() {
+    const selected = document.querySelector('input[name="resolution"]:checked');
+    return selected ? selected.value : "512x768";
+  }
+
   function updatePromptLength() {
     if (promptInput && promptLength) {
       promptLength.textContent = String(promptInput.value.length);
     }
   }
 
-  function updateGuidanceValue() {
-    if (guidanceInput && guidanceValue) {
-      guidanceValue.textContent = String(guidanceInput.value);
-    }
-  }
-
   function setStatus(status) {
     const value = status || "ready";
-    statusBox.className = "ai-badge";
-    if (["queued", "running", "success", "failed"].includes(value)) {
-      statusBox.className += " ai-badge-" + value;
-    }
+    statusBox.className = "ai-studio-badge ai-studio-badge-" + (
+      ["ready", "queued", "running", "success", "failed"].includes(value)
+        ? value
+        : "ready"
+    );
     statusBox.textContent = value;
   }
 
@@ -404,13 +590,14 @@
   }
 
   function renderEmpty() {
+    currentGeneration = null;
     setStatus("ready");
     setMeta("No active generation");
     hideDownload();
     previewBox.innerHTML =
-      '<div class="ai-empty">' +
-        '<h3>Ready to generate</h3>' +
-        '<p>Write a prompt, choose a guidance scale and resolution, then click generate.</p>' +
+      '<div class="ai-studio-empty">' +
+        '<h3>Image preview</h3>' +
+        '<p>Your generated image will appear here and use as much space as possible on the page.</p>' +
       '</div>';
   }
 
@@ -426,10 +613,11 @@
 
     const details = [];
     if (item.resolution) details.push(item.resolution);
-    if (item.guidance_scale != null) details.push("Guidance " + item.guidance_scale);
 
     if (details.length) {
       setMeta(details.join(" • "));
+    } else if (item.status === "success") {
+      setMeta("Generation complete");
     } else {
       setMeta("Generation in progress");
     }
@@ -445,20 +633,21 @@
 
     if (item.status === "failed") {
       previewBox.innerHTML =
-        '<div class="ai-failure">' +
+        '<div class="ai-studio-failure">' +
           '<h3>Generation failed</h3>' +
           '<p>' + escapeHtml(item.error_message || "Generation failed.") + '</p>' +
-          '<div class="ai-prompt-echo">' + escapeHtml(item.prompt || "") + '</div>' +
+          '<p class="ai-studio-prompt-echo">' + escapeHtml(item.prompt || "") + '</p>' +
         '</div>';
       return;
     }
 
     const statusText = item.status === "running" ? "Generating image..." : "Waiting in queue...";
     previewBox.innerHTML =
-      '<div class="ai-progress">' +
-        '<div class="ai-spinner"></div>' +
+      '<div class="ai-studio-progress">' +
+        '<div class="ai-studio-spinner"></div>' +
         '<h3>' + escapeHtml(statusText) + '</h3>' +
-        '<div class="ai-prompt-echo">' + escapeHtml(item.prompt || "") + '</div>' +
+        '<p>Prompt is being processed.</p>' +
+        '<p class="ai-studio-prompt-echo">' + escapeHtml(item.prompt || "") + '</p>' +
       '</div>';
   }
 
@@ -471,8 +660,11 @@
         "/api/v1/ai/generations/" + encodeURIComponent(currentGeneration.id),
         { credentials: "same-origin" }
       );
+
       if (!response.ok) return;
+
       const payload = await response.json();
+
       if (payload && payload.generation) {
         renderGeneration(payload.generation);
       }
@@ -485,33 +677,23 @@
     updatePromptLength();
   }
 
-  if (guidanceInput) {
-    guidanceInput.addEventListener("input", updateGuidanceValue);
-    updateGuidanceValue();
-  }
-
   if (form) {
     form.addEventListener("submit", async function (event) {
       event.preventDefault();
 
       errorBox.style.display = "none";
       submit.disabled = true;
-      submit.textContent = "Creating generation...";
-
-      currentGeneration = null;
-      hideDownload();
+      submit.textContent = "Generating...";
 
       const outgoing = {
         prompt: promptInput.value,
-        guidance_scale: Number(guidanceInput.value),
-        resolution: resolutionInput.value
+        resolution: currentResolutionValue()
       };
 
       renderGeneration({
         id: "",
         status: "queued",
         prompt: outgoing.prompt,
-        guidance_scale: outgoing.guidance_scale,
         resolution: outgoing.resolution,
         error_message: "",
         image_url: ""
@@ -548,7 +730,7 @@
         errorBox.style.display = "block";
       } finally {
         submit.disabled = false;
-        submit.textContent = submit.dataset.defaultLabel || "Generate image";
+        submit.textContent = submit.dataset.defaultLabel || "Generate";
       }
     });
   }
