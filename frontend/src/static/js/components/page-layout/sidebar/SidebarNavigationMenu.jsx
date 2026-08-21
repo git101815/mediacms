@@ -47,14 +47,13 @@ export function SidebarNavigationMenu() {
       });
     }
 
-    if (PageStore.get('config-enabled').pages.featured && PageStore.get('config-enabled').pages.featured.enabled) {
-      items.push({
-        link: links.featured,
-        icon: 'star',
-        text: translateString('Featured'),
-        className: 'nav-item-featured',
-      });
-    }
+    items.push({
+      link: (links.home || '').replace(/\/+$/, '') + '/ai/generate/',
+      icon: 'auto_awesome',
+      text: translateString('AI Generator'),
+      className: 'nav-item-ai-generator',
+    });
+
 
     if (
       PageStore.get('config-enabled').pages.recommended &&
@@ -76,7 +75,14 @@ export function SidebarNavigationMenu() {
         className: 'nav-item-latest',
       });
     }
-
+    if (PageStore.get('config-enabled').pages.featured && PageStore.get('config-enabled').pages.featured.enabled) {
+      items.push({
+        link: links.featured,
+        icon: 'star',
+        text: translateString('Featured'),
+        className: 'nav-item-featured',
+      });
+    }
     if (
       PageStore.get('config-enabled').taxonomies.celebrities &&
       PageStore.get('config-enabled').taxonomies.celebrities.enabled
