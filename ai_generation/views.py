@@ -19,11 +19,10 @@ from django.views.decorators.http import require_GET, require_POST
 from .internal_auth import authenticate_ai_generation_service
 from .models import AIGenerationRequest
 from .services import (
+    ai_generation_available,
     claim_next_generation,
-    complete_generation,
     complete_generation_from_url,
     create_generation_request,
-    decode_provider_image_base64,
     download_provider_image,
     format_token_amount,
     generation_price_tokens,
@@ -32,7 +31,6 @@ from .services import (
     heartbeat_generation,
     fail_generation,
     serialize_generation,
-    setting_enabled,
 )
 
 
@@ -83,10 +81,7 @@ def generation_page(request):
             "ai_generation_max_prompt_chars": int(
                 getattr(settings, "AI_GENERATION_MAX_PROMPT_CHARS", 1200)
             ),
-            "ai_generation_enabled": setting_enabled(
-                "AI_GENERATION_ENABLED",
-                True,
-            ),
+            "ai_generation_enabled": ai_generation_available(),
             "ai_generation_default_resolution": str(
                 getattr(settings, "AI_GENERATION_PROVIDER_RESOLUTION", "512x768")
             ),
@@ -277,31 +272,23 @@ def internal_generation_success(request, public_id):
             else {}
         )
 
-        image_base64 = str(payload.get("image_base64", "") or "").strip()
-        if image_base64:
-            image_bytes, extension = decode_provider_image_base64(
-                image_base64,
-                str(payload.get("content_type", "") or ""),
+        if str(payload.get("image_base64", "") or "").strip():
+            raise ValidationError(
+                "Inline image results are no longer supported; provide a result URL"
             )
-            generation = complete_generation(
-                public_id=public_id,
-                service_name=service_name,
-                claim_token=claim_token,
-                image_bytes=image_bytes,
-                content_type=str(payload.get("content_type", "") or ""),
-                extension=extension,
-                provider_request_id=provider_request_id,
-                provider_metadata=provider_metadata,
-            )
-        else:
-            generation = complete_generation_from_url(
-                public_id=public_id,
-                service_name=service_name,
-                claim_token=claim_token,
-                result_url=str(payload.get("result_url", "") or ""),
-                provider_request_id=provider_request_id,
-                provider_metadata=provider_metadata,
-            )
+
+        result_url = str(payload.get("result_url", "") or "").strip()
+        if not result_url:
+            raise ValidationError("Provider result URL is required")
+
+        generation = complete_generation_from_url(
+            public_id=public_id,
+            service_name=service_name,
+            claim_token=claim_token,
+            result_url=result_url,
+            provider_request_id=provider_request_id,
+            provider_metadata=provider_metadata,
+        )
         return JsonResponse(
             {
                 "success": True,

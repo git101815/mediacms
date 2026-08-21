@@ -28,14 +28,10 @@ def _provider_timeout_seconds() -> int:
         1,
         int(getattr(settings, "AI_GENERATION_CLAIM_LEASE_SECONDS", 300)),
     )
-    download_timeout = max(
-        1,
-        int(getattr(settings, "AI_GENERATION_RESULT_DOWNLOAD_TIMEOUT_SECONDS", 30)),
-    )
 
-    # Keep enough lease time for MediaCMS to download/store the image after n8n
-    # returns. This avoids accepting a provider result after its claim expired.
-    safe_max = max(1, lease_seconds - download_timeout - 30)
+    # The one-way provider flow is diskless after n8n returns. Keep only a
+    # small lease margin for validating/finalizing the provider URL.
+    safe_max = max(1, lease_seconds - 30)
     return min(configured, safe_max)
 
 
@@ -106,8 +102,6 @@ def wake_ai_generation_worker(generation_id: str = ""):
     url = str(
         getattr(settings, "AI_GENERATION_N8N_WAKE_WEBHOOK_URL", "") or ""
     ).strip()
-    if not url:
-        return {"processed": False, "reason": "not_configured"}
 
     service_name = _provider_service_name()
     generation = claim_next_generation(service_name=service_name)
@@ -120,13 +114,13 @@ def wake_ai_generation_worker(generation_id: str = ""):
     ).strip()
 
     try:
-        if not secret:
+        if not url or not secret:
             _fail_claimed_generation(
                 generation,
                 service_name=service_name,
                 claim_token=claim_token,
                 error_code="provider_not_configured",
-                error_message="AI generation provider secret is not configured.",
+                error_message="AI generation provider is not configured.",
             )
             return {
                 "processed": True,

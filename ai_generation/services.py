@@ -13,7 +13,6 @@ from urllib.parse import urlparse
 import requests
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.files.base import ContentFile
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -63,6 +62,28 @@ def setting_enabled(name: str, default: bool = False) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def ai_generation_provider_configured() -> bool:
+    url = str(
+        getattr(settings, "AI_GENERATION_N8N_WAKE_WEBHOOK_URL", "") or ""
+    ).strip()
+    secret = str(
+        getattr(settings, "AI_GENERATION_N8N_WAKE_SECRET", "") or ""
+    ).strip()
+
+    if not url or not secret:
+        return False
+
+    parsed = urlparse(url)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def ai_generation_available() -> bool:
+    return (
+        setting_enabled("AI_GENERATION_ENABLED", True)
+        and ai_generation_provider_configured()
+    )
 
 
 def generation_price_tokens() -> int:
@@ -188,7 +209,10 @@ def _clear_runtime_state_for_generation(generation: AIGenerationRequest) -> None
 
 @transaction.atomic
 def create_generation_request(*, actor, prompt, resolution=None) -> AIGenerationRequest:
-    if not setting_enabled("AI_GENERATION_ENABLED", True):
+    # Provider readiness is checked before creating a generation, touching
+    # wallets, or recording a ledger transaction. A missing n8n URL/secret must
+    # never charge a user for a job that cannot be submitted.
+    if not ai_generation_available():
         raise ValidationError("AI image generation is temporarily unavailable")
 
     if not getattr(actor, "is_authenticated", False) or not getattr(actor, "is_active", False):
@@ -606,7 +630,6 @@ def decode_provider_image_base64(
     return image_bytes, extension
 
 
-@transaction.atomic
 def complete_generation(
     *,
     public_id,
@@ -618,51 +641,13 @@ def complete_generation(
     provider_request_id: str = "",
     provider_metadata: dict | None = None,
 ) -> AIGenerationRequest:
-    generation = _get_claimed_generation_for_update(
-        public_id=public_id,
-        service_name=service_name,
-        claim_token=claim_token,
+    # Inline/base64 completion used to persist files under MEDIA_ROOT. The
+    # production one-way provider contract is URL-only and intentionally
+    # diskless, so inline image completion is no longer accepted.
+    raise ValidationError(
+        "Inline image results are no longer supported; provide a result URL"
     )
 
-    if not image_bytes:
-        raise ValidationError("Generated image is empty")
-
-    filename = f"{generation.public_id}.{extension}"
-    generation.result_file.save(
-        filename,
-        ContentFile(image_bytes),
-        save=False,
-    )
-    generation.result_content_type = content_type
-    generation.result_metadata = (
-        provider_metadata if isinstance(provider_metadata, dict) else {}
-    )
-    generation.provider_request_id = str(provider_request_id or "")[:255]
-    generation.status = AIGenerationRequest.STATUS_SUCCESS
-    generation.completed_at = timezone.now()
-    generation.claimed_by_service = ""
-    generation.claim_token = ""
-    generation.claim_expires_at = None
-    generation.error_code = ""
-    generation.error_message = ""
-    generation.save(
-        update_fields=[
-            "result_file",
-            "result_content_type",
-            "result_metadata",
-            "provider_request_id",
-            "status",
-            "completed_at",
-            "claimed_by_service",
-            "claim_token",
-            "claim_expires_at",
-            "error_code",
-            "error_message",
-            "updated_at",
-        ]
-    )
-    _clear_runtime_state_for_generation(generation)
-    return generation
 
 
 @transaction.atomic

@@ -325,6 +325,16 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 15.0,
         "options": {"queue": "short_tasks"},
     },
+    "ai_generation_fail_stale": {
+        "task": "ai_generation.tasks.fail_stale_ai_generations",
+        "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
+    },
+    "ai_generation_nudge_worker": {
+        "task": "ai_generation.tasks.nudge_ai_generation_worker",
+        "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
+    },
     "push_all_media_to_storj": {
         "task": "push_all_media_to_storj",
         "schedule": timedelta(minutes=5),
