@@ -23,6 +23,13 @@ PORTAL_NAME = "CelebFakes"
 PORTAL_DESCRIPTION = "CelebFakes gathers the best creators to offer it's users high quality celebrity deepfake porn videos"
 DFANS_REF_CODE = "A14Q9C"
 DEPOSIT_EVM_ACCOUNT_XPUB = os.getenv("DEPOSIT_EVM_ACCOUNT_XPUB", "").strip()
+
+# AI image generation provider (n8n).
+# Values are injected into the container from the project .env file.
+AI_GENERATION_N8N_WAKE_WEBHOOK_URL = os.getenv("AI_GENERATION_N8N_WAKE_WEBHOOK_URL", "").strip()
+AI_GENERATION_N8N_WAKE_SECRET = os.getenv("AI_GENERATION_N8N_WAKE_SECRET", "").strip()
+AI_GENERATION_N8N_PROVIDER_TIMEOUT_SECONDS = 240
+
 LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
 TABUNDER_COOLDOWN_SECONDS = 60
 PREROLLS_COOLDOWN_SECONDS = 10
