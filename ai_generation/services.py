@@ -140,6 +140,34 @@ def moderate_prompt(raw_prompt) -> tuple[str, dict]:
     }
 
 
+def validate_provider_config(*, resolution, guidance_scale) -> dict:
+    allowed_resolutions = {"512x512", "768x512", "512x768"}
+
+    selected_resolution = str(
+        resolution or getattr(settings, "AI_GENERATION_PROVIDER_RESOLUTION", "512x768")
+    ).strip()
+    if selected_resolution not in allowed_resolutions:
+        raise ValidationError("Resolution must be 512x512, 768x512 or 512x768")
+
+    if guidance_scale in ("", None):
+        selected_guidance = int(
+            getattr(settings, "AI_GENERATION_PROVIDER_GUIDANCE_SCALE", 7)
+        )
+    else:
+        try:
+            selected_guidance = int(guidance_scale)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Guidance scale must be an integer between 1 and 30") from exc
+
+    if selected_guidance < 1 or selected_guidance > 30:
+        raise ValidationError("Guidance scale must be between 1 and 30")
+
+    return {
+        "resolution": selected_resolution,
+        "guidance_scale": selected_guidance,
+    }
+
+
 def _request_hash(payload: dict) -> str:
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -171,7 +199,7 @@ def _clear_runtime_state_for_generation(generation: AIGenerationRequest) -> None
 
 
 @transaction.atomic
-def create_generation_request(*, actor, prompt) -> AIGenerationRequest:
+def create_generation_request(*, actor, prompt, resolution=None, guidance_scale=None) -> AIGenerationRequest:
     if not setting_enabled("AI_GENERATION_ENABLED", True):
         raise ValidationError("AI image generation is temporarily unavailable")
 
@@ -179,6 +207,12 @@ def create_generation_request(*, actor, prompt) -> AIGenerationRequest:
         raise ValidationError("Authentication required")
 
     prompt, moderation = moderate_prompt(prompt)
+    requested_provider_config = validate_provider_config(
+        resolution=resolution,
+        guidance_scale=guidance_scale,
+    )
+    moderation = dict(moderation)
+    moderation["requested_provider_config"] = requested_provider_config
 
     user_model = actor.__class__
     user = user_model.objects.select_for_update().get(pk=actor.pk)
@@ -676,19 +710,21 @@ def complete_generation_from_url(
 
 
 def generation_provider_payload(generation: AIGenerationRequest) -> dict:
+    requested = generation.moderation.get("requested_provider_config", {})
+    if not isinstance(requested, dict):
+        requested = {}
+
+    provider_config = validate_provider_config(
+        resolution=requested.get("resolution"),
+        guidance_scale=requested.get("guidance_scale"),
+    )
+
     return {
         "public_id": str(generation.public_id),
         "claim_token": generation.claim_token,
         "prompt": generation.prompt,
         "provider": generation.provider,
-        "provider_config": {
-            "resolution": str(
-                getattr(settings, "AI_GENERATION_PROVIDER_RESOLUTION", "512x768")
-            ),
-            "guidance_scale": int(
-                getattr(settings, "AI_GENERATION_PROVIDER_GUIDANCE_SCALE", 7)
-            ),
-        },
+        "provider_config": provider_config,
     }
 
 
@@ -701,6 +737,10 @@ def serialize_generation(generation: AIGenerationRequest, *, request=None) -> di
         )
         image_url = request.build_absolute_uri(path) if request is not None else path
 
+    requested = generation.moderation.get("requested_provider_config", {})
+    if not isinstance(requested, dict):
+        requested = {}
+
     return {
         "id": str(generation.public_id),
         "status": generation.status,
@@ -710,6 +750,18 @@ def serialize_generation(generation: AIGenerationRequest, *, request=None) -> di
         "image_url": image_url,
         "error_code": generation.error_code,
         "error_message": generation.error_message,
+        "resolution": str(
+            requested.get(
+                "resolution",
+                getattr(settings, "AI_GENERATION_PROVIDER_RESOLUTION", "512x768"),
+            )
+        ),
+        "guidance_scale": int(
+            requested.get(
+                "guidance_scale",
+                getattr(settings, "AI_GENERATION_PROVIDER_GUIDANCE_SCALE", 7),
+            )
+        ),
         "created_at": generation.created_at.isoformat(),
         "completed_at": (
             generation.completed_at.isoformat()

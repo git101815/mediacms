@@ -89,10 +89,13 @@ def generation_page(request):
                 "AI_GENERATION_ENABLED",
                 True,
             ),
-            "ai_generation_initial": [
-                serialize_generation(item, request=request)
-                for item in generations
-            ],
+            "ai_generation_default_guidance_scale": int(
+                getattr(settings, "AI_GENERATION_PROVIDER_GUIDANCE_SCALE", 7)
+            ),
+            "ai_generation_default_resolution": str(
+                getattr(settings, "AI_GENERATION_PROVIDER_RESOLUTION", "512x768")
+            ),
+            "ai_generation_initial": [],
         },
     )
 
@@ -105,6 +108,8 @@ def generation_create_api(request):
         generation = create_generation_request(
             actor=request.user,
             prompt=payload.get("prompt", ""),
+            resolution=payload.get("resolution", ""),
+            guidance_scale=payload.get("guidance_scale", None),
         )
         wallet = get_user_wallet(request.user)
         wallet.refresh_from_db(fields=["balance"])

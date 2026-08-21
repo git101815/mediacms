@@ -1,67 +1,366 @@
-
 {% extends "base.html" %}
 
 {% block headtitle %}AI Image Generator - {{PORTAL_NAME}}{% endblock headtitle %}
 
 {% block innercontent %}
-<div class="custom-page-wrapper" style="max-width: 980px; margin: 0 auto;">
-  <h2>AI Image Generator</h2>
-  <p>
-    Cost: <strong>{{ ai_generation_price }} tokens</strong> per generation.
-    Balance: <strong id="ai-generation-balance">{{ ai_generation_balance }}</strong> tokens.
-  </p>
+<style>
+  .ai-page {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 18px 16px 36px;
+  }
+
+  .ai-header {
+    margin-bottom: 18px;
+  }
+
+  .ai-header h1 {
+    margin: 0 0 6px;
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .ai-header p {
+    margin: 0;
+    opacity: .72;
+  }
+
+  .ai-toolbar {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 14px;
+    align-items: end;
+    margin-bottom: 18px;
+  }
+
+  .ai-field label {
+    display: block;
+    margin-bottom: 7px;
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .ai-prompt-wrap {
+    position: relative;
+  }
+
+  .ai-prompt-counter {
+    position: absolute;
+    right: 12px;
+    bottom: 10px;
+    font-size: 12px;
+    opacity: .58;
+    background: rgba(255,255,255,.85);
+    padding: 2px 6px;
+    border-radius: 999px;
+  }
+
+  .ai-prompt {
+    width: 100%;
+    min-height: 180px;
+    resize: vertical;
+    border-radius: 12px !important;
+    padding: 14px !important;
+    line-height: 1.5;
+    font-size: 15px;
+  }
+
+  .ai-control-card {
+    min-width: 210px;
+    border: 1px solid rgba(127,127,127,.18);
+    border-radius: 14px;
+    padding: 14px;
+    background: rgba(127,127,127,.04);
+  }
+
+  .ai-range-value {
+    font-weight: 700;
+    font-size: 20px;
+    margin-bottom: 8px;
+  }
+
+  .ai-range {
+    width: 100%;
+  }
+
+  .ai-select {
+    min-width: 180px;
+    height: 44px;
+    border-radius: 10px !important;
+  }
+
+  .ai-submit-wrap {
+    min-width: 240px;
+  }
+
+  .ai-submit {
+    width: 100%;
+    height: 44px;
+    border-radius: 10px !important;
+    font-weight: 700;
+  }
+
+  .ai-note {
+    margin-top: 8px;
+    font-size: 12px;
+    opacity: .65;
+    line-height: 1.4;
+  }
+
+  .ai-error {
+    margin-bottom: 16px;
+  }
+
+  .ai-stage {
+    border: 1px solid rgba(127,127,127,.18);
+    border-radius: 18px;
+    background: rgba(127,127,127,.03);
+    padding: 16px;
+  }
+
+  .ai-stage-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .ai-meta-left,
+  .ai-meta-right {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .ai-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: rgba(127,127,127,.13);
+  }
+
+  .ai-badge-queued { background: rgba(255, 193, 7, .16); }
+  .ai-badge-running { background: rgba(0, 123, 255, .14); }
+  .ai-badge-success { background: rgba(40, 167, 69, .14); }
+  .ai-badge-failed { background: rgba(220, 53, 69, .14); }
+
+  .ai-muted {
+    font-size: 13px;
+    opacity: .68;
+  }
+
+  .ai-download {
+    display: none;
+  }
+
+  .ai-preview {
+    width: 100%;
+    min-height: 72vh;
+    border-radius: 16px;
+    background: rgba(127,127,127,.06);
+    border: 1px dashed rgba(127,127,127,.22);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: 14px;
+  }
+
+  .ai-preview img {
+    max-width: 100%;
+    max-height: 70vh;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    display: block;
+    border-radius: 12px;
+  }
+
+  .ai-empty,
+  .ai-progress,
+  .ai-failure {
+    text-align: center;
+    max-width: 640px;
+    padding: 20px;
+  }
+
+  .ai-empty h3,
+  .ai-progress h3,
+  .ai-failure h3 {
+    margin-top: 0;
+  }
+
+  .ai-spinner {
+    width: 34px;
+    height: 34px;
+    margin: 0 auto 14px;
+    border-radius: 50%;
+    border: 3px solid rgba(127,127,127,.22);
+    border-top-color: currentColor;
+    animation: ai-spin .8s linear infinite;
+  }
+
+  .ai-prompt-echo {
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 1.45;
+    opacity: .82;
+    overflow-wrap: anywhere;
+  }
+
+  @keyframes ai-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @media (max-width: 1150px) {
+    .ai-toolbar {
+      grid-template-columns: 1fr;
+    }
+
+    .ai-control-card,
+    .ai-submit-wrap {
+      min-width: 0;
+    }
+
+    .ai-preview {
+      min-height: 55vh;
+    }
+
+    .ai-preview img {
+      max-height: 52vh;
+    }
+  }
+</style>
+
+<div class="ai-page">
+  <div class="ai-header">
+    <h1>AI Image Generator</h1>
+    <p>
+      Cost: <strong>{{ ai_generation_price }} tokens</strong> per generation.
+      Balance: <strong id="ai-generation-balance">{{ ai_generation_balance }}</strong> tokens.
+    </p>
+  </div>
 
   {% if not ai_generation_enabled %}
     <div class="alert alert-warning">AI image generation is temporarily unavailable.</div>
   {% else %}
-    <form id="ai-generation-form">
+    <form id="ai-generation-form" autocomplete="off">
       {% csrf_token %}
-      <div class="form-group">
-        <label for="ai-generation-prompt">Prompt</label>
-        <textarea
-          id="ai-generation-prompt"
-          class="form-control"
-          rows="5"
-          maxlength="{{ ai_generation_max_prompt_chars }}"
-          required
-          placeholder="Describe the image you want to generate"
-        ></textarea>
+
+      <div class="ai-toolbar">
+        <div class="ai-field">
+          <label for="ai-generation-prompt">Prompt</label>
+          <div class="ai-prompt-wrap">
+            <textarea
+              id="ai-generation-prompt"
+              class="form-control ai-prompt"
+              maxlength="{{ ai_generation_max_prompt_chars }}"
+              required
+              placeholder="Describe the image you want..."
+            ></textarea>
+            <div class="ai-prompt-counter">
+              <span id="ai-generation-prompt-length">0</span>/{{ ai_generation_max_prompt_chars }}
+            </div>
+          </div>
+        </div>
+
+        <div class="ai-control-card">
+          <label for="ai-generation-guidance">Guidance Scale</label>
+          <div class="ai-range-value"><span id="ai-generation-guidance-value">{{ ai_generation_default_guidance_scale }}</span></div>
+          <input
+            id="ai-generation-guidance"
+            class="ai-range"
+            type="range"
+            min="1"
+            max="30"
+            step="1"
+            value="{{ ai_generation_default_guidance_scale }}"
+          >
+        </div>
+
+        <div class="ai-control-card">
+          <label for="ai-generation-resolution">Resolution</label>
+          <select id="ai-generation-resolution" class="form-control ai-select">
+            <option value="512x512"{% if ai_generation_default_resolution == "512x512" %} selected{% endif %}>512×512</option>
+            <option value="768x512"{% if ai_generation_default_resolution == "768x512" %} selected{% endif %}>768×512</option>
+            <option value="512x768"{% if ai_generation_default_resolution == "512x768" %} selected{% endif %}>512×768</option>
+          </select>
+        </div>
+
+        <div class="ai-submit-wrap">
+          <button
+            class="btn btn-primary ai-submit"
+            type="submit"
+            id="ai-generation-submit"
+            data-default-label="Generate image - {{ ai_generation_price }} tokens"
+          >
+            Generate image - {{ ai_generation_price }} tokens
+          </button>
+          <div class="ai-note">
+            Each prompt is handled independently.
+          </div>
+        </div>
       </div>
-      <div style="margin-top: 12px;">
-        <button class="btn btn-primary" type="submit" id="ai-generation-submit">
-          Generate - {{ ai_generation_price }} tokens
-        </button>
-      </div>
-      <div id="ai-generation-error" class="alert alert-danger" style="display:none; margin-top:12px;"></div>
+
+      <div id="ai-generation-error" class="alert alert-danger ai-error" style="display:none;"></div>
     </form>
+
+    <div class="ai-stage">
+      <div class="ai-stage-meta">
+        <div class="ai-meta-left">
+          <span id="ai-generation-status" class="ai-badge">ready</span>
+          <span id="ai-generation-meta" class="ai-muted">No active generation</span>
+        </div>
+        <div class="ai-meta-right">
+          <a
+            id="ai-generation-download"
+            class="btn btn-default ai-download"
+            href="#"
+            download="generated-image"
+            target="_blank"
+            rel="noopener"
+          >
+            Download image
+          </a>
+        </div>
+      </div>
+
+      <div id="ai-generation-preview" class="ai-preview">
+        <div class="ai-empty">
+          <h3>Ready to generate</h3>
+          <p>Write a prompt, choose a guidance scale and resolution, then click generate.</p>
+        </div>
+      </div>
+    </div>
   {% endif %}
-
-  <hr/>
-  <h3>Your generations</h3>
-  <div id="ai-generation-list"></div>
 </div>
-
-{{ ai_generation_initial|json_script:"ai-generation-initial-data" }}
 
 <script>
 (function () {
   const form = document.getElementById("ai-generation-form");
-  const list = document.getElementById("ai-generation-list");
+  const promptInput = document.getElementById("ai-generation-prompt");
+  const promptLength = document.getElementById("ai-generation-prompt-length");
+  const guidanceInput = document.getElementById("ai-generation-guidance");
+  const guidanceValue = document.getElementById("ai-generation-guidance-value");
+  const resolutionInput = document.getElementById("ai-generation-resolution");
+  const submit = document.getElementById("ai-generation-submit");
   const balance = document.getElementById("ai-generation-balance");
   const errorBox = document.getElementById("ai-generation-error");
-  const submit = document.getElementById("ai-generation-submit");
-  const promptInput = document.getElementById("ai-generation-prompt");
+  const statusBox = document.getElementById("ai-generation-status");
+  const metaBox = document.getElementById("ai-generation-meta");
+  const previewBox = document.getElementById("ai-generation-preview");
+  const downloadButton = document.getElementById("ai-generation-download");
   const csrfInput = form ? form.querySelector("[name=csrfmiddlewaretoken]") : null;
 
-  let generations = [];
-  const initialNode = document.getElementById("ai-generation-initial-data");
-  if (initialNode) {
-    try {
-      generations = JSON.parse(initialNode.textContent || "[]");
-    } catch (_error) {
-      generations = [];
-    }
-  }
+  let currentGeneration = null;
 
   function escapeHtml(value) {
     const div = document.createElement("div");
@@ -69,67 +368,154 @@
     return div.innerHTML;
   }
 
-  function render() {
-    if (!list) return;
-    if (!generations.length) {
-      list.innerHTML = "<p>No generations yet.</p>";
+  function updatePromptLength() {
+    if (promptInput && promptLength) {
+      promptLength.textContent = String(promptInput.value.length);
+    }
+  }
+
+  function updateGuidanceValue() {
+    if (guidanceInput && guidanceValue) {
+      guidanceValue.textContent = String(guidanceInput.value);
+    }
+  }
+
+  function setStatus(status) {
+    const value = status || "ready";
+    statusBox.className = "ai-badge";
+    if (["queued", "running", "success", "failed"].includes(value)) {
+      statusBox.className += " ai-badge-" + value;
+    }
+    statusBox.textContent = value;
+  }
+
+  function setMeta(text) {
+    metaBox.textContent = text || "";
+  }
+
+  function hideDownload() {
+    downloadButton.style.display = "none";
+    downloadButton.removeAttribute("href");
+  }
+
+  function showDownload(url) {
+    downloadButton.href = url;
+    downloadButton.style.display = "inline-flex";
+  }
+
+  function renderEmpty() {
+    setStatus("ready");
+    setMeta("No active generation");
+    hideDownload();
+    previewBox.innerHTML =
+      '<div class="ai-empty">' +
+        '<h3>Ready to generate</h3>' +
+        '<p>Write a prompt, choose a guidance scale and resolution, then click generate.</p>' +
+      '</div>';
+  }
+
+  function renderGeneration(item) {
+    currentGeneration = item;
+
+    if (!item) {
+      renderEmpty();
       return;
     }
 
-    list.innerHTML = generations.map(function (item) {
-      let body = "";
-      if (item.status === "success" && item.image_url) {
-        body = '<img src="' + escapeHtml(item.image_url) + '" alt="Generated image" style="max-width:100%; max-height:720px; display:block; margin-top:10px;">';
-      } else if (item.status === "failed") {
-        body = '<p style="margin-top:8px;">' +
-          escapeHtml(item.error_message || "Generation failed.") +
-          "</p>";
-      } else {
-        body = '<p style="margin-top:8px;">Status: <strong>' +
-          escapeHtml(item.status) + "</strong></p>";
-      }
+    setStatus(item.status);
 
-      return '<div class="card" style="padding:14px; margin-bottom:14px;">' +
-        '<div><strong>' + escapeHtml(item.prompt) + "</strong></div>" +
-        '<div style="opacity:.75; margin-top:4px;">' +
-          escapeHtml(item.price_display) + " tokens - " +
-          escapeHtml(item.status) +
-        "</div>" +
-        body +
-      "</div>";
-    }).join("");
-  }
+    const details = [];
+    if (item.resolution) details.push(item.resolution);
+    if (item.guidance_scale != null) details.push("Guidance " + item.guidance_scale);
 
-  function upsert(item) {
-    const index = generations.findIndex(function (row) { return row.id === item.id; });
-    if (index >= 0) generations[index] = item;
-    else generations.unshift(item);
-    render();
+    if (details.length) {
+      setMeta(details.join(" • "));
+    } else {
+      setMeta("Generation in progress");
+    }
+
+    hideDownload();
+
+    if (item.status === "success" && item.image_url) {
+      previewBox.innerHTML =
+        '<img src="' + escapeHtml(item.image_url) + '" alt="Generated image">';
+      showDownload(item.image_url);
+      return;
+    }
+
+    if (item.status === "failed") {
+      previewBox.innerHTML =
+        '<div class="ai-failure">' +
+          '<h3>Generation failed</h3>' +
+          '<p>' + escapeHtml(item.error_message || "Generation failed.") + '</p>' +
+          '<div class="ai-prompt-echo">' + escapeHtml(item.prompt || "") + '</div>' +
+        '</div>';
+      return;
+    }
+
+    const statusText = item.status === "running" ? "Generating image..." : "Waiting in queue...";
+    previewBox.innerHTML =
+      '<div class="ai-progress">' +
+        '<div class="ai-spinner"></div>' +
+        '<h3>' + escapeHtml(statusText) + '</h3>' +
+        '<div class="ai-prompt-echo">' + escapeHtml(item.prompt || "") + '</div>' +
+      '</div>';
   }
 
   async function refreshActive() {
-    const active = generations.filter(function (row) {
-      return row.status === "queued" || row.status === "running";
-    });
+    if (!currentGeneration) return;
+    if (!(currentGeneration.status === "queued" || currentGeneration.status === "running")) return;
 
-    await Promise.all(active.map(async function (row) {
-      try {
-        const response = await fetch("/api/v1/ai/generations/" + encodeURIComponent(row.id), {
-          credentials: "same-origin"
-        });
-        if (!response.ok) return;
-        const payload = await response.json();
-        if (payload && payload.generation) upsert(payload.generation);
-      } catch (_error) {
+    try {
+      const response = await fetch(
+        "/api/v1/ai/generations/" + encodeURIComponent(currentGeneration.id),
+        { credentials: "same-origin" }
+      );
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (payload && payload.generation) {
+        renderGeneration(payload.generation);
       }
-    }));
+    } catch (_error) {
+    }
+  }
+
+  if (promptInput) {
+    promptInput.addEventListener("input", updatePromptLength);
+    updatePromptLength();
+  }
+
+  if (guidanceInput) {
+    guidanceInput.addEventListener("input", updateGuidanceValue);
+    updateGuidanceValue();
   }
 
   if (form) {
     form.addEventListener("submit", async function (event) {
       event.preventDefault();
+
       errorBox.style.display = "none";
       submit.disabled = true;
+      submit.textContent = "Creating generation...";
+
+      currentGeneration = null;
+      hideDownload();
+
+      const outgoing = {
+        prompt: promptInput.value,
+        guidance_scale: Number(guidanceInput.value),
+        resolution: resolutionInput.value
+      };
+
+      renderGeneration({
+        id: "",
+        status: "queued",
+        prompt: outgoing.prompt,
+        guidance_scale: outgoing.guidance_scale,
+        resolution: outgoing.resolution,
+        error_message: "",
+        image_url: ""
+      });
 
       try {
         const response = await fetch("/api/v1/ai/generations", {
@@ -139,28 +525,35 @@
             "Content-Type": "application/json",
             "X-CSRFToken": csrfInput ? csrfInput.value : ""
           },
-          body: JSON.stringify({prompt: promptInput.value})
+          body: JSON.stringify(outgoing)
         });
+
         const payload = await response.json();
+
         if (!response.ok || !payload.success) {
           throw new Error(payload.error || "Could not create generation.");
         }
 
-        upsert(payload.generation);
+        renderGeneration(payload.generation);
+
         if (balance && payload.balance_display != null) {
           balance.textContent = payload.balance_display;
         }
+
         promptInput.value = "";
+        updatePromptLength();
       } catch (error) {
+        renderEmpty();
         errorBox.textContent = error.message || "Could not create generation.";
         errorBox.style.display = "block";
       } finally {
         submit.disabled = false;
+        submit.textContent = submit.dataset.defaultLabel || "Generate image";
       }
     });
   }
 
-  render();
+  renderEmpty();
   window.setInterval(refreshActive, 3000);
 })();
 </script>
