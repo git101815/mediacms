@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -33,6 +34,8 @@ from .services import (
     serialize_generation,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _json_body(request) -> dict:
     try:
@@ -54,7 +57,8 @@ def _internal_error_response(exc: Exception):
     if isinstance(exc, ObjectDoesNotExist):
         return JsonResponse({"success": False, "error": "Generation not found"}, status=404)
     if isinstance(exc, PermissionDenied):
-        return JsonResponse({"success": False, "error": str(exc)}, status=403)
+        logger.warning("Permission denied in internal AI generation endpoint", exc_info=exc)
+        return JsonResponse({"success": False, "error": "Permission denied"}, status=403)
     if isinstance(exc, ImproperlyConfigured):
         return JsonResponse(
             {"success": False, "error": "Internal AI service is not configured"},
