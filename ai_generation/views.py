@@ -114,11 +114,11 @@ def generation_create_api(request):
             },
             status=201,
         )
-    except ValidationError as exc:
+    except ValidationError:
         return JsonResponse(
             {
                 "success": False,
-                "error": _validation_message(exc),
+                "error": "Invalid request payload",
             },
             status=400,
         )
