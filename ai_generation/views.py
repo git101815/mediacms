@@ -178,11 +178,11 @@ def generation_image(request, public_id):
             image_bytes, content_type, extension = download_provider_image(
                 provider_result_url
             )
-        except ValidationError as exc:
+        except ValidationError:
             return JsonResponse(
                 {
                     "success": False,
-                    "error": _validation_message(exc),
+                    "error": "Failed to fetch generated image",
                 },
                 status=502,
             )
