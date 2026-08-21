@@ -97,10 +97,10 @@ def _queue_next_generation() -> None:
     if AIGenerationRequest.objects.filter(
         status=AIGenerationRequest.STATUS_QUEUED
     ).exists():
-        wake_ai_generation_worker.delay()
+        wake_ai_generation_worker.apply_async(queue="long_tasks")
 
 
-@shared_task
+@shared_task(queue="long_tasks")
 def wake_ai_generation_worker(generation_id: str = ""):
     """Claim one job locally, send it to n8n, then finalize it locally."""
     url = str(
@@ -327,7 +327,7 @@ def wake_ai_generation_worker(generation_id: str = ""):
         _queue_next_generation()
 
 
-@shared_task
+@shared_task(queue="short_tasks")
 def nudge_ai_generation_worker():
     pending = (
         AIGenerationRequest.objects.filter(
@@ -339,11 +339,14 @@ def nudge_ai_generation_worker():
     )
     if pending is None:
         return {"queued": False}
-    wake_ai_generation_worker.delay(str(pending))
+    wake_ai_generation_worker.apply_async(
+        args=[str(pending)],
+        queue="long_tasks",
+    )
     return {"queued": True, "generation_id": str(pending)}
 
 
-@shared_task
+@shared_task(queue="short_tasks")
 def fail_stale_ai_generations():
     result = fail_stale_generations()
     if result["failed_running"] or result["failed_queued"]:

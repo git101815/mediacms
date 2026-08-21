@@ -502,10 +502,12 @@ CELERY_BEAT_SCHEDULE = {
     "ai_generation_fail_stale": {
         "task": "ai_generation.tasks.fail_stale_ai_generations",
         "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
     },
     "ai_generation_nudge_worker": {
         "task": "ai_generation.tasks.nudge_ai_generation_worker",
         "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
     },
     "get_list_of_popular_media": {
         "task": "get_list_of_popular_media",

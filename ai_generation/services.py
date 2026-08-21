@@ -293,8 +293,9 @@ def create_generation_request(*, actor, prompt) -> AIGenerationRequest:
         from .tasks import wake_ai_generation_worker
 
         transaction.on_commit(
-            lambda generation_id=str(generation.public_id): wake_ai_generation_worker.delay(
-                generation_id
+            lambda generation_id=str(generation.public_id): wake_ai_generation_worker.apply_async(
+                args=[generation_id],
+                queue="long_tasks",
             )
         )
     return generation
