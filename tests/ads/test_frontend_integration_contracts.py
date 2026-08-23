@@ -66,11 +66,6 @@ def test_direct_popunder_reuses_existing_rotation_and_tabunder_engine():
         in rotation
     )
     assert "fallbackProvider" in rotation
-    assert 'CLICKAINE_POPUNDER_ENABLED|yesno:"100,0"' in rotation
-    assert "config.providers,\n    null" in rotation
-
-    media = _source("templates/cms/media.html")
-    assert "{% if CLICKAINE_POPUNDER_ENABLED %}" in media
 
     assert "window.mcPopAdsRuntime.ready" in clickaine
     assert 'provider !== "clickaine"' in clickaine

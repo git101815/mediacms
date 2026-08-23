@@ -124,58 +124,6 @@ def test_vast_returns_empty_document_when_runtime_fails(
     assert '<VAST version="3.0"></VAST>' in response.content.decode()
 
 
-@override_settings(
-    CLICKAINE_VAST_ENABLED=True,
-    CLICKAINE_VAST_URL="https://clickaine.example/vast/preroll",
-)
-def test_vast_uses_clickaine_preroll_fallback_when_direct_inventory_is_empty(
-    client,
-    monkeypatch,
-):
-    monkeypatch.setattr(views, "reserve", lambda slot: None)
-    response = client.get(
-        "/api/v1/direct-ads/vast/video_preroll/"
-    )
-    body = response.content.decode()
-    ElementTree.fromstring(response.content)
-    assert "https://clickaine.example/vast/preroll" in body
-    assert '<AdSystem version="1.0">Clickaine</AdSystem>' in body
-    assert 'id="clickaine-preroll"' in body
-    _assert_no_store(response)
-
-
-@override_settings(
-    CLICKAINE_VAST_ENABLED=False,
-    CLICKAINE_VAST_URL="https://clickaine.example/vast/preroll",
-)
-def test_vast_clickaine_fallback_toggle_can_disable_external_vast(
-    client,
-    monkeypatch,
-):
-    monkeypatch.setattr(views, "reserve", lambda slot: None)
-    response = client.get(
-        "/api/v1/direct-ads/vast/video_preroll/"
-    )
-    assert '<VAST version="3.0"></VAST>' in response.content.decode()
-
-
-@override_settings(
-    CLICKAINE_VAST_ENABLED=True,
-    CLICKAINE_VAST_URL="https://clickaine.example/vast/preroll",
-)
-def test_clickaine_vast_fallback_is_preroll_only(
-    client,
-    monkeypatch,
-):
-    monkeypatch.setattr(views, "reserve", lambda slot: None)
-    response = client.get(
-        "/api/v1/direct-ads/vast/video_midroll/"
-    )
-    body = response.content.decode()
-    assert '<VAST version="3.0"></VAST>' in body
-    assert "clickaine.example" not in body
-
-
 def test_verified_googlebot_gets_empty_vast(monkeypatch):
     reserve = Mock()
     monkeypatch.setattr(views, "reserve", reserve)

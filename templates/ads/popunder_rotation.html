@@ -10,7 +10,7 @@
 
     providers: {
       clickaine: {
-        weight: {{ CLICKAINE_POPUNDER_ENABLED|yesno:"100,0" }}
+        weight: 100
       },
       partner: {
         weight: 0
@@ -315,7 +315,7 @@
 
   var fallbackProvider = chooseWeightedKey(
     config.providers,
-    null
+    "clickaine"
   );
 
   window.mcPopAdsRuntime = {

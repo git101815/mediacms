@@ -72,7 +72,6 @@ def ads_flags(request):
             "IS_AD_FREE_USER": False,
             "SHOW_PREROLL": False,
             "SHOW_TABUNDER": False,
-            "CLICKAINE_POPUNDER_ENABLED": False,
         }
 
     if is_adv or is_ad_free:
@@ -81,7 +80,6 @@ def ads_flags(request):
             "IS_AD_FREE_USER": is_ad_free,
             "SHOW_PREROLL": False,
             "SHOW_TABUNDER": False,
-            "CLICKAINE_POPUNDER_ENABLED": False,
         }
 
     # 2) Cooldowns
@@ -126,7 +124,4 @@ def ads_flags(request):
         "IS_AD_FREE_USER": False,
         "SHOW_PREROLL": show_preroll,
         "SHOW_TABUNDER": show_tabunder,
-        "CLICKAINE_POPUNDER_ENABLED": bool(
-            getattr(settings, "CLICKAINE_POPUNDER_ENABLED", False)
-        ),
     }

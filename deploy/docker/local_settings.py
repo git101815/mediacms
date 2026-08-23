@@ -59,10 +59,6 @@ LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
 TABUNDER_COOLDOWN_SECONDS = 60
 PREROLLS_COOLDOWN_SECONDS = 10
 
-CLICKAINE_POPUNDER_ENABLED=True
-CLICKAINE_VAST_ENABLED=False
-CLICKAINE_VAST_URL="https://36707.badylenicesist.com/v2/a/prl/vst/261578"
-
 # ads-min-bids-by-type-v3
 # Human USD amounts. Keep strings to avoid float rounding.
 # "banner" applies to both 728x90 and 300x250.
