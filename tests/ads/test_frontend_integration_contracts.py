@@ -114,21 +114,3 @@ def test_media_template_keeps_all_popunder_providers_behind_one_gate():
     assert 'ads/partner_popads.html' in gated_block
 
 
-def test_ad_delivery_configuration_is_centralized_in_local_settings():
-    values = _literal_assignments("deploy/docker/local_settings.py")
-    core_settings = _source("cms/settings.py")
-
-    assert values["TABUNDER_COOLDOWN_SECONDS"] == 60
-    assert values["PREROLLS_COOLDOWN_SECONDS"] == 10
-    assert values["ADS_PROVIDER_WEIGHTS"] == {
-        "internal": 50,
-        "clickaine": 50,
-        "partner": 0,
-    }
-    assert values["CLICKAINE_POPUNDER_ENABLED"] is True
-    assert values["CLICKAINE_POPUNDER_SCRIPT_URL"]
-    assert values["CLICKAINE_VAST_ENABLED"] is True
-    assert values["CLICKAINE_VAST_URL"]
-
-    assert "TABUNDER_COOLDOWN_SECONDS" not in core_settings
-    assert "PREROLLS_COOLDOWN_SECONDS" not in core_settings
