@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 from django.conf import settings
@@ -7,6 +8,22 @@ def _source(rel):
     return (
         Path(settings.BASE_DIR) / rel
     ).read_text(encoding="utf-8")
+
+
+def _literal_assignments(rel):
+    tree = ast.parse(_source(rel))
+    values = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        try:
+            values[target.id] = ast.literal_eval(node.value)
+        except (TypeError, ValueError):
+            continue
+    return values
 
 
 def test_banner_inventory_is_wired_to_both_real_frontend_slots():
@@ -98,19 +115,20 @@ def test_media_template_keeps_all_popunder_providers_behind_one_gate():
 
 
 def test_ad_delivery_configuration_is_centralized_in_local_settings():
-    local_settings = _source("deploy/docker/local_settings.py")
+    values = _literal_assignments("deploy/docker/local_settings.py")
     core_settings = _source("cms/settings.py")
 
-    assert 'TABUNDER_COOLDOWN_SECONDS = 60' in local_settings
-    assert 'PREROLLS_COOLDOWN_SECONDS = 10' in local_settings
-    assert 'ADS_PROVIDER_WEIGHTS = {' in local_settings
-    assert '"internal": 50' in local_settings
-    assert '"clickaine": 50' in local_settings
-    assert '"partner": 0' in local_settings
-    assert 'CLICKAINE_POPUNDER_ENABLED = True' in local_settings
-    assert 'CLICKAINE_POPUNDER_SCRIPT_URL = (' in local_settings
-    assert 'CLICKAINE_VAST_ENABLED = True' in local_settings
-    assert 'CLICKAINE_VAST_URL = (' in local_settings
+    assert values["TABUNDER_COOLDOWN_SECONDS"] == 60
+    assert values["PREROLLS_COOLDOWN_SECONDS"] == 10
+    assert values["ADS_PROVIDER_WEIGHTS"] == {
+        "internal": 50,
+        "clickaine": 50,
+        "partner": 0,
+    }
+    assert values["CLICKAINE_POPUNDER_ENABLED"] is True
+    assert values["CLICKAINE_POPUNDER_SCRIPT_URL"]
+    assert values["CLICKAINE_VAST_ENABLED"] is True
+    assert values["CLICKAINE_VAST_URL"]
 
-    assert 'TABUNDER_COOLDOWN_SECONDS =' not in core_settings
-    assert 'PREROLLS_COOLDOWN_SECONDS =' not in core_settings
+    assert "TABUNDER_COOLDOWN_SECONDS" not in core_settings
+    assert "PREROLLS_COOLDOWN_SECONDS" not in core_settings

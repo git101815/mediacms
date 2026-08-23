@@ -102,21 +102,23 @@ def test_direct_ad_serve_runtime_failure_fails_closed_without_500(client, monkey
     assert "no-store" in response["Cache-Control"]
 
 
-def test_direct_ad_reserve_non_popunder_slot_is_no_content(client):
-    response = client.get(f"/api/v1/direct-ads/reserve/{AdCampaign.PLACEMENT_HOME}/")
+def test_ads_popunder_no_fill_is_no_content_and_no_store(client, monkeypatch):
+    monkeypatch.setattr(ads_views, "weighted_provider_order", lambda _format: [])
+
+    response = client.get("/api/v1/ads/popunder/")
 
     assert response.status_code == 204
     assert "no-store" in response["Cache-Control"]
 
 
-def test_direct_ad_vast_rejects_non_video_slot(client):
-    response = client.get(f"/api/v1/direct-ads/vast/{AdCampaign.PLACEMENT_HOME}/")
+def test_ads_vast_rejects_non_video_slot(client):
+    response = client.get(f"/api/v1/ads/vast/{AdCampaign.PLACEMENT_HOME}/")
 
     assert response.status_code == 404
 
 
-def test_direct_ad_vmap_has_no_store_cache_header(client):
-    response = client.get("/api/v1/direct-ads/vmap/")
+def test_ads_vmap_has_no_store_cache_header(client):
+    response = client.get("/api/v1/ads/vmap/")
 
     assert response.status_code == 200
     assert response["Content-Type"].startswith("application/xml")
