@@ -1,4 +1,3 @@
-import ast
 from pathlib import Path
 
 from django.conf import settings
@@ -8,22 +7,6 @@ def _source(rel):
     return (
         Path(settings.BASE_DIR) / rel
     ).read_text(encoding="utf-8")
-
-
-def _literal_assignments(rel):
-    tree = ast.parse(_source(rel))
-    values = {}
-    for node in tree.body:
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if not isinstance(target, ast.Name):
-            continue
-        try:
-            values[target.id] = ast.literal_eval(node.value)
-        except (TypeError, ValueError):
-            continue
-    return values
 
 
 def test_banner_inventory_is_wired_to_both_real_frontend_slots():
