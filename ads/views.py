@@ -762,6 +762,33 @@ def _empty_vast():
     )
 
 
+def _clickaine_vast_fallback(slot):
+    if slot != AdCampaign.PLACEMENT_PREROLL:
+        return None
+    if not bool(getattr(settings, "CLICKAINE_VAST_ENABLED", False)):
+        return None
+
+    vast_url = str(getattr(settings, "CLICKAINE_VAST_URL", "") or "").strip()
+    if not vast_url.startswith(("http://", "https://")):
+        return None
+
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<VAST version="3.0"><Ad id="clickaine-preroll"><Wrapper>'
+        '<AdSystem version="1.0">Clickaine</AdSystem>'
+        '<VASTAdTagURI><![CDATA['
+        + _cdata(vast_url)
+        + ']]></VASTAdTagURI>'
+        '</Wrapper></Ad></VAST>'
+    )
+    return _no_store(
+        HttpResponse(
+            body,
+            content_type="application/xml",
+        )
+    )
+
+
 @never_cache
 @require_GET
 def direct_ads_vmap(request):
@@ -843,14 +870,14 @@ def direct_ads_vast(request, slot):
     try:
         candidate = reserve(slot)
     except Exception:
-        return _empty_vast()
+        candidate = None
 
     if not candidate:
-        return _empty_vast()
+        return _clickaine_vast_fallback(slot) or _empty_vast()
 
     vast_url = str(candidate.get("vast_url") or "")
     if not vast_url.startswith(("http://", "https://")):
-        return _empty_vast()
+        return _clickaine_vast_fallback(slot) or _empty_vast()
 
     token = candidate["event_token"]
     impression_url = request.build_absolute_uri(

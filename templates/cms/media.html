@@ -150,7 +150,9 @@
   {% if SHOW_TABUNDER %}
     {% include "ads/popunder_rotation.html" %}
     {% include "ads/popunder_tracking.html" %}
-    {% include "ads/popunder_clickaine.html" %}
+    {% if CLICKAINE_POPUNDER_ENABLED %}
+      {% include "ads/popunder_clickaine.html" %}
+    {% endif %}
     {% include "ads/partner_popads.html" %}
   {% endif %}
 {% endif %}
