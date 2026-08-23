@@ -13,6 +13,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.postgres.search import SearchQuery
 from django.core.mail import EmailMessage
 from django.db.models import Prefetch, Q
+from django.db.models.deletion import ProtectedError
 from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render, resolve_url
 from django.templatetags.static import static
@@ -3009,6 +3010,7 @@ class MediaDetail(APIView):
         operation_description='Delete a Media, for MediaCMS editors and managers',
         responses={
             204: 'no content',
+            409: 'media is referenced by protected application data',
         },
     )
     def delete(self, request, friendly_token, format=None):
@@ -3016,7 +3018,18 @@ class MediaDetail(APIView):
         media = self.get_object(friendly_token)
         if isinstance(media, Response):
             return media
-        media.delete()
+        try:
+            media.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": (
+                        "This media cannot be deleted because it is still referenced "
+                        "by protected application data."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

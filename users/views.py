@@ -1,7 +1,11 @@
+import uuid
 from allauth.account.views import SignupView
+from allauth.account.models import EmailAddress
+from allauth.socialaccount.models import SocialAccount
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.mail import EmailMessage
+from django.db import IntegrityError, transaction
 from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -32,10 +36,32 @@ from .serializers import LoginSerializer, UserDetailSerializer, UserSerializer
 INTERNAL_SERVICE_USERNAMES = {
     "deposit-service",
     "sweeper-service",
+    "ai_generation_service",
 }
 
 
-class ReferralSignupView(SignupView):
+class SafeSignupView(SignupView):
+    template_name = "account/signup.html"
+
+    def form_valid(self, form):
+        try:
+            with transaction.atomic():
+                return super().form_valid(form)
+        except IntegrityError:
+            username = form.cleaned_data.get("username")
+            if (
+                username
+                and User.objects.filter(username=username).exists()
+            ):
+                form.add_error(
+                    "username",
+                    "Username already exists.",
+                )
+                return self.form_invalid(form)
+            raise
+
+
+class ReferralSignupView(SafeSignupView):
     template_name = "account/signup.html"
 
     def dispatch(self, request, *args, **kwargs):
@@ -352,12 +378,80 @@ class UserDetail(APIView):
         operation_summary='to_be_written',
         operation_description='to_be_written',
     )
+    @transaction.atomic
     def delete(self, request, username, format=None):
         user = self.get_user(username)
         if isinstance(user, Response):
             return user
 
-        user.delete()
+        # DELETE means deactivate + anonymize. Keep the User row so ledger,
+        # reward and accounting foreign keys remain valid.
+        deleted_username = (
+            f"deleted_{user.pk}_{uuid.uuid4().hex[:12]}"
+        )[:150]
+
+        # Remove authentication/profile identifiers that are not part of
+        # immutable accounting history.
+        Token.objects.filter(user=user).delete()
+        EmailAddress.objects.filter(user=user).delete()
+        SocialAccount.objects.filter(user=user).delete()
+        user.groups.clear()
+        user.user_permissions.clear()
+
+        user.username = deleted_username
+        user.email = ""
+        user.first_name = ""
+        user.last_name = ""
+        user.name = "Deleted user"
+        user.description = ""
+        user.global_media_description = ""
+        user.title = ""
+        user.location = ""
+        user.dfans_url = ""
+        user.logo = "userlogos/user.jpg"
+        user.last_login = None
+        user.referral_code = None
+        user.notification_on_comments = False
+        user.allow_contact = False
+        user.is_active = False
+        user.is_staff = False
+        user.is_superuser = False
+        user.is_featured = False
+        user.advancedUser = False
+        user.adFreeUser = False
+        user.advertiserUser = False
+        user.is_editor = False
+        user.is_manager = False
+        user.set_unusable_password()
+        user.save(
+            update_fields=[
+                "username",
+                "email",
+                "first_name",
+                "last_name",
+                "name",
+                "description",
+                "global_media_description",
+                "title",
+                "location",
+                "dfans_url",
+                "logo",
+                "last_login",
+                "referral_code",
+                "notification_on_comments",
+                "allow_contact",
+                "is_active",
+                "is_staff",
+                "is_superuser",
+                "is_featured",
+                "advancedUser",
+                "adFreeUser",
+                "advertiserUser",
+                "is_editor",
+                "is_manager",
+                "password",
+            ]
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

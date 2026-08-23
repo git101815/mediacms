@@ -34,6 +34,7 @@ SERVICE_USER_SPECS = [
     {
         "setting": "AI_GENERATION_INTERNAL_SERVICE_USERNAME",
         "permissions": [],
+        "legacy_usernames": ["ai-generation-service"],
     },
 ]
 
@@ -49,15 +50,58 @@ class Command(BaseCommand):
             if not username:
                 raise RuntimeError(f"{spec['setting']} is not configured")
 
-            user, _created = user_model.objects.get_or_create(
+            user = user_model.objects.filter(
                 username=username,
-                defaults={
-                    "email": "",
-                    "is_active": True,
-                    "is_staff": False,
-                    "is_superuser": False,
-                },
-            )
+            ).first()
+
+            if user is None:
+                for legacy_username in spec.get("legacy_usernames", []):
+                    legacy_user = user_model.objects.filter(
+                        username=legacy_username,
+                    ).first()
+                    if legacy_user is None:
+                        continue
+
+                    legacy_user.username = username
+                    legacy_user.save(update_fields=["username"])
+                    user = legacy_user
+                    self.stdout.write(
+                        self.style.WARNING(
+                            "Renamed internal service user "
+                            f"{legacy_username} -> {username}"
+                        )
+                    )
+                    break
+
+            if user is None:
+                user = user_model.objects.create(
+                    username=username,
+                    email="",
+                    is_active=True,
+                    is_staff=False,
+                    is_superuser=False,
+                )
+
+            # If both the old and new users existed before this patch, retain
+            # the configured account and make every legacy duplicate inert.
+            for legacy_username in spec.get("legacy_usernames", []):
+                legacy_users = user_model.objects.filter(
+                    username=legacy_username,
+                ).exclude(pk=user.pk)
+                for legacy_user in legacy_users:
+                    legacy_user.is_active = False
+                    legacy_user.is_staff = False
+                    legacy_user.is_superuser = False
+                    legacy_user.set_unusable_password()
+                    legacy_user.user_permissions.clear()
+                    legacy_user.save(
+                        update_fields=[
+                            "is_active",
+                            "is_staff",
+                            "is_superuser",
+                            "password",
+                        ]
+                    )
 
             user.is_active = True
             user.is_staff = False

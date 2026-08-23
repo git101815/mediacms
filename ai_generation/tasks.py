@@ -40,9 +40,9 @@ def _provider_service_name() -> str:
         getattr(
             settings,
             "AI_GENERATION_INTERNAL_SERVICE_USERNAME",
-            "ai-generation-service",
+            "ai_generation_service",
         )
-        or "ai-generation-service"
+        or "ai_generation_service"
     )[:64]
 
 

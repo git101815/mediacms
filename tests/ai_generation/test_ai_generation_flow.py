@@ -154,7 +154,7 @@ class AIGenerationFlowTests(TestCase):
             status=AIGenerationRequest.STATUS_RUNNING,
             price_tokens=10_000_000,
             provider="perchance",
-            claimed_by_service="ai-generation-service",
+            claimed_by_service="ai_generation_service",
             claim_token="claim-token",
             claim_expires_at=timezone.now() + timezone.timedelta(minutes=5),
             last_heartbeat_at=timezone.now(),
@@ -174,7 +174,7 @@ class AIGenerationFlowTests(TestCase):
 
         completed = complete_generation_from_url(
             public_id=generation.public_id,
-            service_name="ai-generation-service",
+            service_name="ai_generation_service",
             claim_token="claim-token",
             result_url=result_url,
             provider_request_id="provider-request",
@@ -200,7 +200,7 @@ class AIGenerationFlowTests(TestCase):
         ):
             complete_generation_from_url(
                 public_id=generation.public_id,
-                service_name="ai-generation-service",
+                service_name="ai_generation_service",
                 claim_token="claim-token",
                 result_url="https://example.com/image.jpg",
             )
@@ -215,7 +215,7 @@ class AIGenerationFlowTests(TestCase):
         ):
             complete_generation(
                 public_id="00000000-0000-0000-0000-000000000000",
-                service_name="ai-generation-service",
+                service_name="ai_generation_service",
                 claim_token="unused",
                 image_bytes=b"image-data",
                 content_type="image/jpeg",
