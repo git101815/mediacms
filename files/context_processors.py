@@ -53,14 +53,12 @@ def stuff(request):
     return ret
 
 def ads_flags(request):
-    # Advanced user, paid ad-free user, or Googlebot: no ads
+    # Advanced user, paid ad-free user, or Googlebot: no ads.
     is_gbot = getattr(request, "is_googlebot_verified", False)
-
     is_adv = (
         request.user.is_authenticated
         and getattr(request.user, "advancedUser", False)
     )
-
     is_ad_free = (
         request.user.is_authenticated
         and getattr(request.user, "adFreeUser", False)
@@ -82,38 +80,34 @@ def ads_flags(request):
             "SHOW_TABUNDER": False,
         }
 
-    # 2) Cooldowns
-    cooldown_tab = getattr(settings, "TABUNDER_COOLDOWN_SECONDS", 0)
-    cooldown_pre = getattr(settings, "PREROLLS_COOLDOWN_SECONDS", 0)
-
     now = int(time.time())
+    media_page = bool(getattr(request, "media_page", False))
+    preroll_eligible = bool(
+        getattr(request, "preroll_eligible", False)
+    )
 
-    last_tab = request.session.get("tabunder_last_ts")
-    last_pre = request.session.get("preroll_last_ts")
+    show_tabunder = False
+    if media_page:
+        cooldown_tab = int(settings.TABUNDER_COOLDOWN_SECONDS)
+        last_tab = request.session.get("tabunder_last_ts")
+        if not isinstance(last_tab, int) or last_tab > now:
+            last_tab = None
+        show_tabunder = (
+            last_tab is None
+            or now - last_tab >= cooldown_tab
+        )
 
-    # Normalisation
-    if not isinstance(last_tab, int) or last_tab > now:
-        last_tab = None
-    if not isinstance(last_pre, int) or last_pre > now:
-        last_pre = None
+    show_preroll = False
+    if preroll_eligible:
+        cooldown_pre = int(settings.PREROLLS_COOLDOWN_SECONDS)
+        last_pre = request.session.get("preroll_last_ts")
+        if not isinstance(last_pre, int) or last_pre > now:
+            last_pre = None
+        show_preroll = (
+            last_pre is None
+            or now - last_pre >= cooldown_pre
+        )
 
-    if last_tab is None:
-        cooldown_ok_tab = True
-    else:
-        cooldown_ok_tab = now - last_tab >= cooldown_tab
-
-    if last_pre is None:
-        cooldown_ok_pre = True
-    else:
-        cooldown_ok_pre = now - last_pre >= cooldown_pre
-
-    # only media pages
-    media_page = getattr(request, "media_page", False)
-
-    show_tabunder = media_page and cooldown_ok_tab
-    show_preroll = media_page and cooldown_ok_pre
-
-    #consume if display
     if show_tabunder:
         request.session["tabunder_last_ts"] = now
     if show_preroll:

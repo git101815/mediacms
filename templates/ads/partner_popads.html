@@ -40,11 +40,11 @@
   }
 
   function chooseOffer() {
-    if (runtime.chosenProvider === "direct" && runtime.directAd) {
+    if (runtime.chosenProvider === "internal" && runtime.providerData) {
       return {
-        key: "direct",
-        direct: true,
-        url: runtime.directAd.open_url
+        key: "internal",
+        internal: true,
+        url: runtime.providerData.open_url
       };
     }
 
@@ -56,7 +56,7 @@
   }
 
   function buildAdUrl(offer) {
-    if (offer && offer.direct) {
+    if (offer && offer.internal) {
       return String(offer.url || "");
     }
 
@@ -170,12 +170,6 @@
       ts: Date.now()
     };
 
-    runtime.markOpen({
-      provider: runtime.chosenProvider,
-      offer: offer ? offer.key : null,
-      mode: mode
-    });
-
     plausibleSafe("popunder_open", {
       provider: runtime.chosenProvider,
       offer: offer ? offer.key : "",
@@ -262,7 +256,7 @@
   function handleTrigger(event, triggerEventName) {
     if (
       runtime.chosenProvider !== "partner"
-      && runtime.chosenProvider !== "direct"
+      && runtime.chosenProvider !== "internal"
     ) {
       return;
     }
@@ -279,17 +273,12 @@
       return;
     }
 
-    if (!runtime.canRun()) {
-      return;
-    }
-
-    runtime.clickCount += 1;
-    if (runtime.clickCount <= Number(config.capping.skipClicks || 0)) {
-      return;
-    }
-
     var offer = chooseOffer();
     if (!offer) {
+      var nextProvider = runtime.advanceProvider(runtime.chosenProvider);
+      if (nextProvider === "partner" || nextProvider === "internal") {
+        handleTrigger(event, triggerEventName);
+      }
       return;
     }
 

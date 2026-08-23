@@ -195,10 +195,10 @@ export default class VideoViewer extends React.PureComponent {
     this.playerInstance = null;
 
     this.premiumEndCtaDuration = 5000;
-    this.directInVideoAdsInitialized = false;
+    this.inVideoAdsInitialized = false;
 
     this.onPlayerInit = this.onPlayerInit.bind(this);
-    this.initDirectInVideoAds = this.initDirectInVideoAds.bind(this);
+    this.initInVideoAds = this.initInVideoAds.bind(this);
 
     this.onClickNext = this.onClickNext.bind(this);
     this.onClickPrevious = this.onClickPrevious.bind(this);
@@ -452,13 +452,13 @@ export default class VideoViewer extends React.PureComponent {
     }
   }
 
-  initDirectInVideoAds() {
-    const vmapUrl = window.__mcDirectAdsVmapUrl;
+  initInVideoAds() {
+    const vmapUrl = window.__mcAdsVmapUrl;
     const pluginPromise = window.__vjsPluginsLoadedPromise;
     const sdkPromise = window.__mcImaSdkPromise;
 
     if (
-      this.directInVideoAdsInitialized
+      this.inVideoAdsInitialized
       || !vmapUrl
       || !pluginPromise
       || !sdkPromise
@@ -471,7 +471,7 @@ export default class VideoViewer extends React.PureComponent {
     Promise.all([pluginPromise, sdkPromise])
       .then(() => {
         if (
-          this.directInVideoAdsInitialized
+          this.inVideoAdsInitialized
           || !this.playerInstance
           || !this.playerInstance.player
         ) {
@@ -488,7 +488,7 @@ export default class VideoViewer extends React.PureComponent {
           autoPlayAdBreaks: true,
           preventLateAdStart: true,
         });
-        this.directInVideoAdsInitialized = true;
+        this.inVideoAdsInitialized = true;
 
         const initializeDisplayContainer = () => {
           try {
@@ -536,7 +536,7 @@ export default class VideoViewer extends React.PureComponent {
     }
 
     this.playerInstance.player.one('ended', this.onVideoEnd);
-    this.initDirectInVideoAds();
+    this.initInVideoAds();
   }
 
   onVideoRestart() {

@@ -30,7 +30,7 @@ def test_banner_inventory_is_wired_to_both_real_frontend_slots():
     assert "ad.creative_url && ad.click_url" in direct_ad
 
 
-def test_existing_videojs_ima_pipeline_is_the_direct_in_video_delivery_path():
+def test_existing_videojs_ima_pipeline_uses_generic_ads_vmap():
     viewer = _source(
         "frontend/src/static/js/components/media-viewer/VideoViewer/index.js"
     )
@@ -40,10 +40,10 @@ def test_existing_videojs_ima_pipeline_is_the_direct_in_video_delivery_path():
     assert "videoJsPlayer.ima({" in viewer
     assert "adTagUrl: vmapUrl" in viewer
     assert "initializeAdDisplayContainer" in viewer
+    assert "initInVideoAds" in viewer
 
     assert (
-        'window.__mcDirectAdsVmapUrl = '
-        '"/api/v1/direct-ads/vmap/";'
+        'window.__mcAdsVmapUrl = "/api/v1/ads/vmap/";'
         in prerolls
     )
     assert (
@@ -52,24 +52,65 @@ def test_existing_videojs_ima_pipeline_is_the_direct_in_video_delivery_path():
     )
 
 
-def test_direct_popunder_reuses_existing_rotation_and_tabunder_engine():
+def test_popunder_uses_generic_provider_queue_and_internal_name():
     rotation = _source("templates/ads/popunder_rotation.html")
     clickaine = _source("templates/ads/popunder_clickaine.html")
     partner = _source("templates/ads/partner_popads.html")
 
-    assert (
-        '"/api/v1/direct-ads/reserve/popunder/"'
-        in rotation
-    )
-    assert (
-        'window.mcPopAdsRuntime.chosenProvider = "direct"'
-        in rotation
-    )
-    assert "fallbackProvider" in rotation
+    assert '"/api/v1/ads/popunder/"' in rotation
+    assert "providerQueue" in rotation
+    assert "advanceProvider" in rotation
+    assert "fallbackProvider" not in rotation
+    assert "/api/v1/direct-ads/reserve/popunder/" not in rotation
 
-    assert "window.mcPopAdsRuntime.ready" in clickaine
-    assert 'provider !== "clickaine"' in clickaine
+    assert "runtime.providerData" in clickaine
+    assert "providerData.script_url" in clickaine
+    assert "36707.phidonatome.com" not in clickaine
+    assert 'runtime.advanceProvider("clickaine")' in clickaine
 
-    assert 'runtime.chosenProvider === "direct"' in partner
-    assert 'runtime.chosenProvider !== "direct"' in partner
-    assert "runtime.markOpen({" in partner
+    assert 'runtime.chosenProvider === "internal"' in partner
+    assert 'runtime.chosenProvider !== "internal"' in partner
+    assert "runtime.markOpen" not in partner
+    assert "runtime.canRun" not in partner
+
+
+def test_popunder_runtime_has_no_browser_frequency_state():
+    rotation = _source("templates/ads/popunder_rotation.html")
+    partner = _source("templates/ads/partner_popads.html")
+
+    assert "localStorage" not in rotation
+    assert "sessionStorage" not in rotation
+    assert "providerQueue" in rotation
+    assert "advanceProvider" in rotation
+    assert "markOpen" not in partner
+    assert "canRun" not in partner
+
+
+def test_media_template_keeps_all_popunder_providers_behind_one_gate():
+    media = _source("templates/cms/media.html")
+    gated_block = media.split("{% if SHOW_TABUNDER %}", 1)[1].split(
+        "{% endif %}", 1
+    )[0]
+    assert 'ads/popunder_rotation.html' in gated_block
+    assert 'ads/popunder_tracking.html' in gated_block
+    assert 'ads/popunder_clickaine.html' in gated_block
+    assert 'ads/partner_popads.html' in gated_block
+
+
+def test_ad_delivery_configuration_is_centralized_in_local_settings():
+    local_settings = _source("deploy/docker/local_settings.py")
+    core_settings = _source("cms/settings.py")
+
+    assert 'TABUNDER_COOLDOWN_SECONDS = 60' in local_settings
+    assert 'PREROLLS_COOLDOWN_SECONDS = 10' in local_settings
+    assert 'ADS_PROVIDER_WEIGHTS = {' in local_settings
+    assert '"internal": 50' in local_settings
+    assert '"clickaine": 50' in local_settings
+    assert '"partner": 0' in local_settings
+    assert 'CLICKAINE_POPUNDER_ENABLED = True' in local_settings
+    assert 'CLICKAINE_POPUNDER_SCRIPT_URL = (' in local_settings
+    assert 'CLICKAINE_VAST_ENABLED = True' in local_settings
+    assert 'CLICKAINE_VAST_URL = (' in local_settings
+
+    assert 'TABUNDER_COOLDOWN_SECONDS =' not in core_settings
+    assert 'PREROLLS_COOLDOWN_SECONDS =' not in core_settings

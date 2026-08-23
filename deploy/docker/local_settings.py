@@ -56,8 +56,25 @@ AI_GENERATION_N8N_WAKE_SECRET = os.getenv(
 ).strip()
 
 LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
-TABUNDER_COOLDOWN_SECONDS = 60
-PREROLLS_COOLDOWN_SECONDS = 10
+
+# Advertising delivery controls. This is the single source of truth for
+# provider rotation and ad cooldowns. Provider weights are percentages and
+# must sum to exactly 100.
+TABUNDER_COOLDOWN_SECONDS = 180
+PREROLLS_COOLDOWN_SECONDS = 30
+ADS_PROVIDER_WEIGHTS = {
+    "internal": 50,
+    "clickaine": 50,
+    "partner": 0,
+}
+CLICKAINE_POPUNDER_ENABLED = True
+CLICKAINE_POPUNDER_SCRIPT_URL = (
+    "https://36707.phidonatome.com/4/js/259141"
+)
+CLICKAINE_VAST_ENABLED = True
+CLICKAINE_VAST_URL = (
+    "https://36707.badylenicesist.com/v2/a/prl/vst/261578"
+)
 
 # ads-min-bids-by-type-v3
 # Human USD amounts. Keep strings to avoid float rounding.

@@ -10,8 +10,6 @@ TESTING = (
 )
 
 DEBUG = False
-TABUNDER_COOLDOWN_SECONDS = 300
-PREROLLS_COOLDOWN_SECONDS = 30
 DOWNLOAD_COOLDOWN_SECONDS = 60
 # PORTAL NAME, this is the portal title and
 # is also shown on several places as emails

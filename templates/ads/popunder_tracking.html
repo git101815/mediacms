@@ -79,9 +79,8 @@ addEventListener("pointerdown",function handler(){
 
     var attempt=window.mcPopLastAttempt||{},
         success=window.mcPopLastSuccess||{},
-        consumed=window.mcPopLastConsumedOpen||{},
-        provider=success.provider||consumed.provider||attempt.provider||"",
-        offer=success.offer||consumed.offer||attempt.offer||"",
+        provider=success.provider||attempt.provider||"",
+        offer=success.offer||attempt.offer||"",
         blocked=(beaconDetected||popupDetected) ? "0" : (attempt.provider ? "1" : "");
 
     if(beaconDetected || popupDetected || attempt.provider){

@@ -2719,6 +2719,10 @@ def view_media(request):
         if video_msg:
             messages.add_message(request, messages.INFO, video_msg)
     request.media_page = True
+    request.preroll_eligible = (
+        media.media_type == "video"
+        and media.state != "private"
+    )
     return render(request, "cms/media.html", context)
 
 

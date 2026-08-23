@@ -10,19 +10,24 @@ urlpatterns = [
         name="direct_ad_serve",
     ),
     path(
-        "api/v1/direct-ads/reserve/<slug:slot>/",
-        views.reserve_direct_ad,
-        name="reserve_direct_ad",
+        "api/v1/ads/popunder/",
+        views.ads_popunder,
+        name="ads_popunder",
     ),
     path(
-        "api/v1/direct-ads/vmap/",
-        views.direct_ads_vmap,
-        name="direct_ads_vmap",
+        "api/v1/ads/vmap/",
+        views.ads_vmap,
+        name="ads_vmap",
     ),
     path(
-        "api/v1/direct-ads/vast/<slug:slot>/",
-        views.direct_ads_vast,
-        name="direct_ads_vast",
+        "api/v1/ads/vast/<slug:slot>/",
+        views.ads_vast,
+        name="ads_vast",
+    ),
+    path(
+        "ads/clickaine-vast-impression/",
+        views.clickaine_vast_impression,
+        name="clickaine_vast_impression",
     ),
     path(
         "ads/impression/<str:token>/",

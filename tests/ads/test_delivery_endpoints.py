@@ -45,7 +45,7 @@ def _assert_no_store(response):
 
 
 def test_vmap_is_valid_xml_and_contains_all_three_breaks(client):
-    response = client.get("/api/v1/direct-ads/vmap/")
+    response = client.get("/api/v1/ads/vmap/")
     assert response.status_code == 200
     _assert_no_store(response)
     root = ElementTree.fromstring(response.content)
@@ -57,20 +57,20 @@ def test_vmap_is_valid_xml_and_contains_all_three_breaks(client):
     assert 'breakId="midroll"' in body
     assert 'timeOffset="end"' in body
     assert 'breakId="postroll"' in body
-    assert "/api/v1/direct-ads/vast/video_preroll/" in body
-    assert "/api/v1/direct-ads/vast/video_midroll/" in body
-    assert "/api/v1/direct-ads/vast/video_postroll/" in body
+    assert "/api/v1/ads/vast/video_preroll/" in body
+    assert "/api/v1/ads/vast/video_midroll/" in body
+    assert "/api/v1/ads/vast/video_postroll/" in body
 
 
 @override_settings(ADS_MIDROLL_TIME_OFFSET="33%")
 def test_vmap_uses_configured_midroll_offset(client):
-    response = client.get("/api/v1/direct-ads/vmap/")
+    response = client.get("/api/v1/ads/vmap/")
     assert 'timeOffset="33%"' in response.content.decode()
 
 
 def test_vast_rejects_non_video_slot(client):
     response = client.get(
-        "/api/v1/direct-ads/vast/home_leaderboard/"
+        "/api/v1/ads/vast/home_leaderboard/"
     )
     assert response.status_code == 404
 
@@ -93,14 +93,23 @@ def test_vast_rejects_non_video_slot(client):
         },
     ],
 )
-def test_vast_returns_empty_document_when_no_deliverable_vast(
+@override_settings(
+    ADS_PROVIDER_WEIGHTS={
+        "internal": 100,
+        "clickaine": 0,
+        "partner": 0,
+    },
+    CLICKAINE_VAST_ENABLED=False,
+    CLICKAINE_VAST_URL="https://clickaine.example/vast",
+)
+def test_vast_returns_empty_document_when_internal_has_no_deliverable_vast(
     client,
     monkeypatch,
     candidate,
 ):
     monkeypatch.setattr(views, "reserve", lambda slot: candidate)
     response = client.get(
-        "/api/v1/direct-ads/vast/video_preroll/"
+        "/api/v1/ads/vast/video_preroll/"
     )
     assert response.status_code == 200
     assert response.content.decode().endswith(
@@ -109,38 +118,67 @@ def test_vast_returns_empty_document_when_no_deliverable_vast(
     _assert_no_store(response)
 
 
-def test_vast_returns_empty_document_when_runtime_fails(
+@override_settings(
+    ADS_PROVIDER_WEIGHTS={
+        "internal": 50,
+        "clickaine": 50,
+        "partner": 0,
+    },
+    CLICKAINE_VAST_ENABLED=True,
+    CLICKAINE_VAST_URL="https://clickaine.example/vast",
+)
+def test_vast_skips_internal_runtime_failure_to_clickaine(
     client,
     monkeypatch,
 ):
+    monkeypatch.setattr(
+        views,
+        "weighted_provider_order",
+        lambda ad_format: ["internal", "clickaine"],
+    )
+
     def fail(slot):
         raise RuntimeError("redis unavailable")
 
     monkeypatch.setattr(views, "reserve", fail)
     response = client.get(
-        "/api/v1/direct-ads/vast/video_preroll/"
+        "/api/v1/ads/vast/video_preroll/"
     )
+    body = response.content.decode()
     assert response.status_code == 200
-    assert '<VAST version="3.0"></VAST>' in response.content.decode()
+    assert "https://clickaine.example/vast" in body
+    assert "internal-" not in body
 
 
 def test_verified_googlebot_gets_empty_vast(monkeypatch):
     reserve = Mock()
+    order = Mock()
     monkeypatch.setattr(views, "reserve", reserve)
+    monkeypatch.setattr(views, "weighted_provider_order", order)
     request = RequestFactory().get(
-        "/api/v1/direct-ads/vast/video_preroll/"
+        "/api/v1/ads/vast/video_preroll/"
     )
     request.is_googlebot_verified = True
-    response = views.direct_ads_vast(
+    response = views.ads_vast(
         request,
         AdCampaign.PLACEMENT_PREROLL,
     )
     assert response.status_code == 200
     assert '<VAST version="3.0"></VAST>' in response.content.decode()
     reserve.assert_not_called()
+    order.assert_not_called()
 
 
-def test_vast_wrapper_contains_downstream_tag_and_direct_tracking(
+@override_settings(
+    ADS_PROVIDER_WEIGHTS={
+        "internal": 100,
+        "clickaine": 0,
+        "partner": 0,
+    },
+    CLICKAINE_VAST_ENABLED=False,
+    CLICKAINE_VAST_URL="https://clickaine.example/vast",
+)
+def test_internal_vast_wrapper_contains_downstream_tag_and_tracking(
     client,
     monkeypatch,
 ):
@@ -157,7 +195,7 @@ def test_vast_wrapper_contains_downstream_tag_and_direct_tracking(
     )
 
     response = client.get(
-        "/api/v1/direct-ads/vast/video_midroll/"
+        "/api/v1/ads/vast/video_midroll/"
     )
     assert response.status_code == 200
     body = response.content.decode()
@@ -165,59 +203,70 @@ def test_vast_wrapper_contains_downstream_tag_and_direct_tracking(
     assert "https://ads.example/external-vast.xml" in body
     assert "/ads/impression/signed-event/" in body
     assert "/ads/track-click/signed-event/" in body
-    assert "<Wrapper>" in body
+    assert "MediaCMS Internal Ads" in body
+    assert 'fallbackOnNoAd="true"' not in body
     _assert_no_store(response)
+
+
+@override_settings(
+    ADS_PROVIDER_WEIGHTS={
+        "internal": 50,
+        "clickaine": 50,
+        "partner": 0,
+    },
+    CLICKAINE_VAST_ENABLED=True,
+    CLICKAINE_VAST_URL="https://clickaine.example/vast",
+)
+def test_vast_waterfall_preserves_weighted_provider_order(
+    client,
+    monkeypatch,
+):
+    candidate = {
+        "campaign_id": 10,
+        "creative_id": 20,
+        "event_token": "signed-event",
+        "vast_url": "https://internal.example/vast",
+    }
+    monkeypatch.setattr(views, "reserve", lambda slot: candidate)
+    monkeypatch.setattr(
+        views,
+        "weighted_provider_order",
+        lambda ad_format: ["clickaine", "internal"],
+    )
+
+    response = client.get(
+        "/api/v1/ads/vast/video_preroll/"
+    )
+    body = response.content.decode()
+    ElementTree.fromstring(response.content)
+    assert body.index('id="clickaine"') < body.index('id="internal-10-20"')
+    assert body.count('fallbackOnNoAd="true"') == 1
+    assert "https://clickaine.example/vast" in body
+    assert "https://internal.example/vast" in body
 
 
 def test_cdata_terminator_is_safely_split():
     assert views._cdata("a]]>b") == "a]]]]><![CDATA[>b"
 
 
-@pytest.mark.parametrize(
-    "slot",
-    [
-        AdCampaign.PLACEMENT_HOME,
-        AdCampaign.PLACEMENT_PREROLL,
-        AdCampaign.PLACEMENT_MIDROLL,
-        AdCampaign.PLACEMENT_POSTROLL,
-        "unknown",
-    ],
+@override_settings(
+    ADS_PROVIDER_WEIGHTS={
+        "internal": 50,
+        "clickaine": 50,
+        "partner": 0,
+    },
+    CLICKAINE_POPUNDER_ENABLED=True,
+    CLICKAINE_POPUNDER_SCRIPT_URL="https://clickaine.example/pop.js",
 )
-def test_popunder_reservation_rejects_every_non_popunder_slot(
-    client,
-    slot,
-):
-    response = client.get(
-        f"/api/v1/direct-ads/reserve/{slot}/"
-    )
-    assert response.status_code == 204
-    _assert_no_store(response)
-
-
-def test_popunder_reservation_returns_204_on_empty_or_runtime_failure(
+def test_popunder_returns_weighted_provider_queue(
     client,
     monkeypatch,
 ):
-    monkeypatch.setattr(views, "reserve", lambda slot: None)
-    empty = client.get(
-        "/api/v1/direct-ads/reserve/popunder/"
+    monkeypatch.setattr(
+        views,
+        "weighted_provider_order",
+        lambda ad_format: ["clickaine", "internal"],
     )
-    assert empty.status_code == 204
-
-    def fail(slot):
-        raise RuntimeError("redis unavailable")
-
-    monkeypatch.setattr(views, "reserve", fail)
-    failed = client.get(
-        "/api/v1/direct-ads/reserve/popunder/"
-    )
-    assert failed.status_code == 204
-
-
-def test_popunder_reservation_returns_only_open_contract(
-    client,
-    monkeypatch,
-):
     monkeypatch.setattr(
         views,
         "reserve",
@@ -225,34 +274,75 @@ def test_popunder_reservation_returns_only_open_contract(
             "campaign_id": 1,
             "creative_id": 2,
             "event_token": "signed-event",
-            "destination_url": "https://example.com/",
         },
     )
-    response = client.get(
-        "/api/v1/direct-ads/reserve/popunder/"
-    )
+    response = client.get("/api/v1/ads/popunder/")
     assert response.status_code == 200
     assert response.json() == {
-        "campaign_id": 1,
-        "creative_id": 2,
-        "open_url": "/ads/open/signed-event/",
+        "providers": [
+            {
+                "name": "clickaine",
+                "script_url": "https://clickaine.example/pop.js",
+            },
+            {
+                "name": "internal",
+                "campaign_id": 1,
+                "creative_id": 2,
+                "open_url": "/ads/open/signed-event/",
+            },
+        ]
     }
     _assert_no_store(response)
 
 
+@override_settings(
+    ADS_PROVIDER_WEIGHTS={
+        "internal": 50,
+        "clickaine": 50,
+        "partner": 0,
+    },
+    CLICKAINE_POPUNDER_ENABLED=True,
+    CLICKAINE_POPUNDER_SCRIPT_URL="https://clickaine.example/pop.js",
+)
+def test_popunder_skips_internal_no_fill_and_keeps_next_provider(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        views,
+        "weighted_provider_order",
+        lambda ad_format: ["internal", "clickaine"],
+    )
+    monkeypatch.setattr(views, "reserve", lambda slot: None)
+    response = client.get("/api/v1/ads/popunder/")
+    assert response.status_code == 200
+    assert response.json() == {
+        "providers": [
+            {
+                "name": "clickaine",
+                "script_url": "https://clickaine.example/pop.js",
+            }
+        ]
+    }
+
+
 def test_verified_googlebot_gets_no_popunder(monkeypatch):
     reserve = Mock()
+    order = Mock()
     monkeypatch.setattr(views, "reserve", reserve)
-    request = RequestFactory().get(
-        "/api/v1/direct-ads/reserve/popunder/"
-    )
+    monkeypatch.setattr(views, "weighted_provider_order", order)
+    request = RequestFactory().get("/api/v1/ads/popunder/")
     request.is_googlebot_verified = True
-    response = views.reserve_direct_ad(
-        request,
-        AdCampaign.PLACEMENT_POPUNDER,
-    )
+    response = views.ads_popunder(request)
     assert response.status_code == 204
     reserve.assert_not_called()
+    order.assert_not_called()
+
+
+def test_clickaine_vast_impression_is_no_store_noop(client):
+    response = client.get("/ads/clickaine-vast-impression/")
+    assert response.status_code == 204
+    _assert_no_store(response)
 
 
 def test_banner_serve_contract_and_fail_closed_behavior(

@@ -6,26 +6,6 @@
   window.__mcPopRotationInit = true;
 
   var config = {
-    enabled: {{ SHOW_TABUNDER|yesno:"true,false" }},
-
-    providers: {
-      clickaine: {
-        weight: 100
-      },
-      partner: {
-        weight: 0
-      }
-    },
-
-    capping: {
-      delaySeconds: 0,
-      frequencySeconds: 86400,
-      limitTotal: 1,
-      limitPerPage: 1,
-      limitPerSession: 1,
-      skipClicks: 0
-    },
-
     tracking: {
       enabled: true,
       beaconDomains: ["coreadness.com"]
@@ -46,211 +26,15 @@
       ],
 
       engine: {
-        preferredModeDesktop: "tabunder",
-        preferredModeMobile: "tabunder",
         enableCoverOverlays: true,
         coverSelectors: ["iframe", "object", "embed", "video"],
         bindTo: "",
-        ignoreTo: "a[href^='#'], .no-popunder, [data-no-popunder='1']",
-        openTargetBlank: true
+        ignoreTo: "a[href^='#'], .no-popunder, [data-no-popunder='1']"
       }
-    },
-
-    storagePrefix: "mc_pop_v3"
+    }
   };
 
   window.mcPopAdsConfig = config;
-
-  function getLocalStorageSafe() {
-    try {
-      return window.localStorage;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  function getSessionStorageSafe() {
-    try {
-      return window.sessionStorage;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  function readJson(storage, key, fallbackValue) {
-    if (!storage) {
-      return fallbackValue;
-    }
-    try {
-      var raw = storage.getItem(key);
-      return raw ? JSON.parse(raw) : fallbackValue;
-    } catch (error) {
-      return fallbackValue;
-    }
-  }
-
-  function writeJson(storage, key, value) {
-    if (!storage) {
-      return;
-    }
-    try {
-      storage.setItem(key, JSON.stringify(value));
-    } catch (error) {
-      // ignore
-    }
-  }
-
-  function nowSeconds() {
-    return Math.floor(Date.now() / 1000);
-  }
-
-  function getPageUrl() {
-    return String(window.location.href || "");
-  }
-
-  function getState() {
-    var localStorageSafe = getLocalStorageSafe();
-    var sessionStorageSafe = getSessionStorageSafe();
-
-    var globalState = readJson(localStorageSafe, config.storagePrefix + ":global", {
-      lastOpenTs: 0,
-      openTimestamps: []
-    });
-
-    var sessionState = readJson(sessionStorageSafe, config.storagePrefix + ":session", {
-      opens: 0
-    });
-
-    var pageState = readJson(sessionStorageSafe, config.storagePrefix + ":page", {
-      url: "",
-      opens: 0
-    });
-
-    var currentUrl = getPageUrl();
-    if (pageState.url !== currentUrl) {
-      pageState = {
-        url: currentUrl,
-        opens: 0
-      };
-      writeJson(sessionStorageSafe, config.storagePrefix + ":page", pageState);
-    }
-
-    return {
-      localStorageSafe: localStorageSafe,
-      sessionStorageSafe: sessionStorageSafe,
-      globalState: globalState,
-      sessionState: sessionState,
-      pageState: pageState
-    };
-  }
-
-  function pruneFrequencyWindow(openTimestamps, nowTs) {
-    var frequencySeconds = Number(config.capping.frequencySeconds || 0);
-    if (!frequencySeconds || !Array.isArray(openTimestamps)) {
-      return Array.isArray(openTimestamps) ? openTimestamps : [];
-    }
-    return openTimestamps.filter(function (ts) {
-      return (nowTs - ts) < frequencySeconds;
-    });
-  }
-
-  function canRun() {
-    if (!config.enabled) {
-      return false;
-    }
-
-    var nowTs = nowSeconds();
-    var state = getState();
-
-    if (Number(config.capping.delaySeconds || 0) > 0 && state.globalState.lastOpenTs > 0) {
-      if ((nowTs - state.globalState.lastOpenTs) < Number(config.capping.delaySeconds || 0)) {
-        return false;
-      }
-    }
-
-    if (
-      Number(config.capping.limitPerPage || 0) > 0 &&
-      Number(state.pageState.opens || 0) >= Number(config.capping.limitPerPage || 0)
-    ) {
-      return false;
-    }
-
-    if (
-      Number(config.capping.limitPerSession || 0) > 0 &&
-      Number(state.sessionState.opens || 0) >= Number(config.capping.limitPerSession || 0)
-    ) {
-      return false;
-    }
-
-    var frequencyWindow = pruneFrequencyWindow(state.globalState.openTimestamps || [], nowTs);
-
-    if (
-      Number(config.capping.limitTotal || 0) > 0 &&
-      frequencyWindow.length >= Number(config.capping.limitTotal || 0)
-    ) {
-      return false;
-    }
-
-    if (
-      Number(config.capping.frequencySeconds || 0) > 0 &&
-      Number(state.globalState.lastOpenTs || 0) > 0 &&
-      (nowTs - Number(state.globalState.lastOpenTs || 0)) < Number(config.capping.frequencySeconds || 0)
-    ) {
-      return false;
-    }
-
-    return true;
-  }
-
-  function markOpen(meta) {
-    var nowTs = nowSeconds();
-    var state = getState();
-
-    state.globalState.lastOpenTs = nowTs;
-    state.globalState.openTimestamps = pruneFrequencyWindow(state.globalState.openTimestamps || [], nowTs);
-    state.globalState.openTimestamps.push(nowTs);
-
-    state.sessionState.opens = Number(state.sessionState.opens || 0) + 1;
-    state.pageState.opens = Number(state.pageState.opens || 0) + 1;
-
-    writeJson(state.localStorageSafe, config.storagePrefix + ":global", state.globalState);
-    writeJson(state.sessionStorageSafe, config.storagePrefix + ":session", state.sessionState);
-    writeJson(state.sessionStorageSafe, config.storagePrefix + ":page", state.pageState);
-
-    window.mcPopLastConsumedOpen = {
-      provider: meta && meta.provider ? meta.provider : null,
-      offer: meta && meta.offer ? meta.offer : null,
-      mode: meta && meta.mode ? meta.mode : null,
-      ts: Date.now()
-    };
-  }
-
-  function chooseWeightedKey(items, fallbackKey) {
-    var totalWeight = 0;
-    var normalized = [];
-
-    Object.keys(items || {}).forEach(function (key) {
-      var weight = Math.max(0, Number((items[key] && items[key].weight) || 0));
-      normalized.push({ key: key, weight: weight });
-      totalWeight += weight;
-    });
-
-    if (totalWeight <= 0) {
-      return fallbackKey;
-    }
-
-    var bucket = Math.random() * totalWeight;
-    var cursor = 0;
-
-    for (var i = 0; i < normalized.length; i += 1) {
-      cursor += normalized[i].weight;
-      if (bucket < cursor) {
-        return normalized[i].key;
-      }
-    }
-
-    return fallbackKey;
-  }
 
   function chooseWeightedOffer(offers) {
     if (!Array.isArray(offers) || !offers.length) {
@@ -263,7 +47,7 @@
     }
 
     if (totalWeight <= 0) {
-      return offers[0];
+      return null;
     }
 
     var bucket = Math.random() * totalWeight;
@@ -276,63 +60,49 @@
       }
     }
 
-    return offers[0];
+    return null;
   }
 
-  function isMobileLike() {
-    var ua = String(navigator.userAgent || "").toLowerCase();
-    return /android|iphone|ipad|ipod|mobile/.test(ua) || window.innerWidth < 900;
-  }
-
-  function detectBrowserEnv() {
-    var isTop = false;
-
+  function emitProviderChange(runtime) {
     try {
-      isTop = window.top === window.self;
+      document.dispatchEvent(new CustomEvent("mcPopProviderChange", {
+        detail: {
+          provider: runtime.chosenProvider,
+          data: runtime.providerData
+        }
+      }));
     } catch (error) {
-      isTop = false;
+      // ignore
     }
-
-    return {
-      isMobile: isMobileLike(),
-      isTop: isTop
-    };
   }
-
-  function resolvePreferredMode() {
-    var env = detectBrowserEnv();
-    var engine = config.partner && config.partner.engine ? config.partner.engine : {};
-    var mode = env.isMobile
-      ? (engine.preferredModeMobile || "tabunder")
-      : (engine.preferredModeDesktop || "tabunder");
-
-    if (mode !== "tabunder" && mode !== "tabup") {
-      mode = "tabunder";
-    }
-
-    return mode;
-  }
-
-  var fallbackProvider = chooseWeightedKey(
-    config.providers,
-    "clickaine"
-  );
 
   window.mcPopAdsRuntime = {
     chosenProvider: null,
-    directAd: null,
+    providerData: null,
+    providerQueue: [],
+    providerIndex: -1,
     ready: null,
     chooseWeightedOffer: chooseWeightedOffer,
-    canRun: canRun,
-    markOpen: markOpen,
-    clickCount: 0,
-    deviceClass: isMobileLike() ? "mobile" : "desktop",
-    detectBrowserEnv: detectBrowserEnv,
-    resolvePreferredMode: resolvePreferredMode
+    advanceProvider: function (expectedProvider) {
+      if (
+        expectedProvider
+        && this.chosenProvider
+        && this.chosenProvider !== expectedProvider
+      ) {
+        return this.chosenProvider;
+      }
+
+      this.providerIndex += 1;
+      var entry = this.providerQueue[this.providerIndex] || null;
+      this.providerData = entry;
+      this.chosenProvider = entry && entry.name ? entry.name : null;
+      emitProviderChange(this);
+      return this.chosenProvider;
+    }
   };
 
   window.mcPopAdsRuntime.ready = fetch(
-    "/api/v1/direct-ads/reserve/popunder/",
+    "/api/v1/ads/popunder/",
     {
       method: "GET",
       credentials: "same-origin",
@@ -341,20 +111,23 @@
     }
   ).then(function (response) {
     if (response.status === 204 || !response.ok) {
-      return null;
+      return { providers: [] };
     }
     return response.json();
-  }).then(function (ad) {
-    if (ad && ad.open_url) {
-      window.mcPopAdsRuntime.directAd = ad;
-      window.mcPopAdsRuntime.chosenProvider = "direct";
-    } else {
-      window.mcPopAdsRuntime.chosenProvider = fallbackProvider;
-    }
-    return window.mcPopAdsRuntime.chosenProvider;
+  }).then(function (payload) {
+    var runtime = window.mcPopAdsRuntime;
+    runtime.providerQueue = Array.isArray(payload.providers)
+      ? payload.providers
+      : [];
+    runtime.providerIndex = -1;
+    return runtime.advanceProvider();
   }).catch(function () {
-    window.mcPopAdsRuntime.chosenProvider = fallbackProvider;
-    return fallbackProvider;
+    var runtime = window.mcPopAdsRuntime;
+    runtime.providerQueue = [];
+    runtime.providerIndex = -1;
+    runtime.providerData = null;
+    runtime.chosenProvider = null;
+    return null;
   });
 })();
 </script>
