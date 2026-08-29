@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from files.views import _build_wallet_deposit_options
 from ledger.providers.dfx import (
@@ -8,9 +8,59 @@ from ledger.providers.dfx import (
     DFX_PROVIDER_KEY,
 )
 from ledger.providers.paygate import PAYGATE_PROVIDER_KEY
+from ledger.providers.skillflow import SKILLFLOW_PROVIDER_KEY
 
 
 class TestWalletProviderRouting(SimpleTestCase):
+    @override_settings(
+        WALLET_PAYMENT_METHOD_PRICE_BPS={"skillflow_card": 250},
+        WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL={"skillflow_card": 0.30},
+    )
+    def test_skillflow_is_a_distinct_hosted_card_group(self):
+        skillflow_option = {
+            "key": "skillflow:eur:hosted_checkout",
+            "label": "Card (Skillflow)",
+            "route_label": "Card (Skillflow)",
+            "network_label": "Hosted checkout",
+            "network_display": "Hosted checkout",
+            "chain": "skillflow",
+            "asset_code": "EUR",
+            "token_contract_address": "",
+            "required_confirmations": 1,
+            "min_amount": 560_000,
+            "payment_method_key": "skillflow:card",
+            "payment_method_label": "Card (Skillflow)",
+            "payment_method_type": "provider",
+            "provider_key": SKILLFLOW_PROVIDER_KEY,
+            "payment_currency": "EUR",
+            "payment_currency_usd_rate": "1.12",
+            "payment_requires_route_selection": False,
+            "payment_price_mode": "fixed",
+        }
+
+        with (
+            patch("files.views.get_malum_deposit_option", return_value=None),
+            patch(
+                "files.views.get_skillflow_deposit_option",
+                return_value=skillflow_option,
+            ),
+            patch("files.views.get_paygate_deposit_options", return_value=[]),
+            patch("files.views.get_dfx_deposit_options", return_value=[]),
+            patch("files.views.get_mtpelerin_deposit_options", return_value=[]),
+            patch("files.views.get_banxa_deposit_options", return_value=[]),
+            patch("files.views.list_available_deposit_options", return_value=[]),
+        ):
+            options = _build_wallet_deposit_options()
+
+        self.assertEqual(len(options), 1)
+        option = options[0]
+        self.assertEqual(option["payment_group_key"], "skillflow_card")
+        self.assertEqual(option["provider_key"], SKILLFLOW_PROVIDER_KEY)
+        self.assertEqual(option["payment_currency"], "EUR")
+        self.assertEqual(option["payment_price_bps"], 250)
+        self.assertEqual(option["payment_price_fixed_canonical"], 300_000)
+        self.assertFalse(option["payment_requires_route_selection"])
+
     def test_direct_crypto_and_dfx_are_distinct_payment_groups(self):
         paygate_options = [
             {

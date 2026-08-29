@@ -156,6 +156,7 @@ WALLET_ROUTE_ONCHAIN_DECIMALS = {
 }
 
 WALLET_PAYMENT_GROUPS = {
+    "skillflow_card": {"label": "Card (Skillflow)", "icon_label": "Card", "icon_path": "images/wallet/google_apple_card.svg", "order": 15},
     "paypal_us": {"label": "PayPal (US only)", "icon_label": "PayPal", "icon_path": "images/wallet/paypal.svg", "order": 20},
     "revolut_eu": {"label": "Revolut (EU only)", "icon_label": "Revolut", "icon_path": "images/wallet/revolut.svg", "order": 30},
     "transak_card": {"label": "Card / Apple Pay / Google Pay (Transak)", "icon_label": "Transak", "icon_path": "images/wallet/google_apple_card.svg", "order": 35},

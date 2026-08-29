@@ -4,7 +4,14 @@ from django.conf.urls import include
 from django.conf.urls.static import static
 from django.urls import path, re_path
 from cms.views_video_sitemap import video_sitemap
-from . import download_views, management_views, views, malum_webhooks, paygate_webhooks
+from . import (
+    download_views,
+    malum_webhooks,
+    management_views,
+    paygate_webhooks,
+    skillflow_webhooks,
+    views,
+)
 from .feeds import IndexRSSFeed, SearchRSSFeed
 from ledger.dashboard import views as wallet_dashboard_views
 from users.views import ReferralSignupView
@@ -112,6 +119,11 @@ urlpatterns = [
         name="wallet_banxa_launch",
     ),
     path("api/payments/malum/webhook", malum_webhooks.malum_webhook, name="malum_webhook"),
+    path(
+        "api/payments/skillflow/webhook",
+        skillflow_webhooks.skillflow_webhook,
+        name="skillflow_webhook",
+    ),
     path("api/payments/paygate/callback", paygate_webhooks.paygate_callback, name="paygate_callback"),
     re_path(r"^wallet$", views.wallet, name="wallet"),
     re_path(

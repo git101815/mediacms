@@ -141,6 +141,14 @@ MALUM_PAYMENT_TTL_SECONDS = "3600"
 MALUM_BUYER_PAYS_FEES = "false"
 MALUM_MERCHANT_PAYS_GW_FEES = "false"
 
+SKILLFLOW_ENABLED = "true"
+SKILLFLOW_PARTNER_KEY = os.getenv("SKILLFLOW_PARTNER_KEY", "").strip()
+SKILLFLOW_WEBHOOK_SECRET = os.getenv("SKILLFLOW_WEBHOOK_SECRET", "").strip()
+SKILLFLOW_API_BASE_URL = "https://payments.skillflow.store"
+SKILLFLOW_PUBLIC_BASE_URL = FRONTEND_HOST
+SKILLFLOW_PAYMENT_TTL_SECONDS = 60 * 60
+SKILLFLOW_API_TIMEOUT_SECONDS = 20
+
 PAYGATE_ENABLED = "true"
 PAYGATE_API_BASE_URL = "https://api.paygate.to"
 PAYGATE_CHECKOUT_BASE_URL = "https://checkout.celebfakes.ru"
@@ -228,6 +236,7 @@ BANXA_SETTLEMENT_ROUTE_PREFERENCES = (
 BANXA_PAYMENT_TTL_SECONDS = 7 * 24 * 60 * 60
 
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
+    "skillflow_card": 0,
     "paypal_us": 600,
     "revolut_eu": 500,
     "transak_card": 600,
@@ -238,6 +247,7 @@ WALLET_PAYMENT_METHOD_PRICE_BPS = {
     "crypto": 0,
 }
 WALLET_PAYMENT_METHOD_PRICE_FIXED_CANONICAL = {
+    "skillflow_card": 0,
     "paypal_us": 1.3,
     "revolut_eu": 1.6,
     "transak_card": 1.3,
