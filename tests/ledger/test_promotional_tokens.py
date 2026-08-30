@@ -44,15 +44,15 @@ class PromotionalTokenAccountingTests(TestCase):
     @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=50)
     def test_available_and_withdrawable_balances_are_distinct(self):
         self.assertEqual(get_wallet_available_balance(self.wallet), 900 * SCALE)
-        self.assertEqual(get_wallet_withdrawable_balance(self.wallet), 400 * SCALE)
+        self.assertEqual(get_wallet_withdrawable_balance(self.wallet), 540 * SCALE)
 
-    def test_internal_spend_consumes_promotional_first(self):
+    def test_internal_spend_preserves_wallet_provenance_ratio(self):
         spent = consume_promotional_tokens_for_internal_spend(
             self.wallet,
             250 * SCALE,
         )
-        self.assertEqual(spent, 250 * SCALE)
-        self.assertEqual(self.wallet.promotional_balance, 450 * SCALE)
+        self.assertEqual(spent, 175 * SCALE)
+        self.assertEqual(self.wallet.promotional_balance, 525 * SCALE)
 
     @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=50)
     def test_withdrawal_reserves_promotional_tokens_up_to_ratio(self):
@@ -76,13 +76,13 @@ class PromotionalTokenAccountingTests(TestCase):
             create_wallet_withdrawal_request(
                 actor=self.user,
                 wallet=self.wallet,
-                amount="401",
+                amount="541",
                 destination_address="test-destination",
             )
 
     @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=0)
     def test_zero_percent_is_cash_only(self):
-        self.assertEqual(get_wallet_withdrawable_balance(self.wallet), 200 * SCALE)
+        self.assertEqual(get_wallet_withdrawable_balance(self.wallet), 270 * SCALE)
 
     @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=100)
     def test_hundred_percent_allows_all_available_promo(self):
@@ -145,9 +145,39 @@ class PromotionalTokenAccountingTests(TestCase):
 
         self.wallet.refresh_from_db()
         seller_wallet.refresh_from_db()
-        self.assertEqual(self.wallet.promotional_balance, 200 * SCALE)
-        self.assertEqual(seller_wallet.promotional_balance, 500 * SCALE)
-        self.assertEqual(get_wallet_withdrawable_balance(seller_wallet), 0)
+        self.assertEqual(self.wallet.promotional_balance, 350 * SCALE)
+        self.assertEqual(seller_wallet.promotional_balance, 350 * SCALE)
+        self.assertEqual(get_wallet_withdrawable_balance(seller_wallet), 300 * SCALE)
+
+    def test_user_to_user_transfer_preserves_promotional_proportion(self):
+        user_model = get_user_model()
+        recipient = user_model.objects.create_user(
+            username="promo-accounting-transfer-recipient",
+            email="promo-transfer@example.com",
+            password="test-password",
+        )
+        recipient_wallet = TokenWallet.objects.get(user=recipient)
+        admin = user_model.objects.create_superuser(
+            username="promo-accounting-transfer-admin",
+            email="promo-transfer-admin@example.com",
+            password="test-password",
+        )
+
+        apply_ledger_transaction(
+            actor=admin,
+            kind="transfer",
+            entries=[
+                (self.wallet, -500 * SCALE),
+                (recipient_wallet, 500 * SCALE),
+            ],
+            created_by=self.user,
+            external_id="promo-accounting:user-transfer",
+        )
+
+        self.wallet.refresh_from_db()
+        recipient_wallet.refresh_from_db()
+        self.assertEqual(self.wallet.promotional_balance, 350 * SCALE)
+        self.assertEqual(recipient_wallet.promotional_balance, 350 * SCALE)
 
     def test_bonus_vault_counts_only_money_backed_purchase_spend(self):
         self.wallet.held_balance = 0
@@ -188,7 +218,7 @@ class PromotionalTokenAccountingTests(TestCase):
 
 
 class PromotionalReservationAccountingTests(TestCase):
-    def test_unsettled_ads_spend_uses_promotional_balance_before_cash(self):
+    def test_unsettled_ads_reservation_preserves_funding_proportion(self):
         user_model = get_user_model()
         advertiser = user_model.objects.create_superuser(
             username="promo-reservation-advertiser",
@@ -220,5 +250,5 @@ class PromotionalReservationAccountingTests(TestCase):
             )
             self.assertEqual(
                 get_wallet_withdrawable_balance(wallet),
-                400 * SCALE,
+                420 * SCALE,
             )

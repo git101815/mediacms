@@ -137,7 +137,7 @@ def _post_batch_to_ledger(batch):
                     amount,
                     reserve_unsettled_ads=False,
                 )
-                withdrawable_spent = amount - promotional_spent
+                paid_spent = amount - promotional_spent
                 with suppress_wallet_runtime_sync():
                     wallet.balance = int(wallet.balance) - amount
                     wallet.save(
@@ -164,7 +164,8 @@ def _post_batch_to_ledger(batch):
                         "clicks": int(batch.clicks),
                         "amount_microtokens": amount,
                         "promotional_spent_units": promotional_spent,
-                        "withdrawable_spent_units": withdrawable_spent,
+                        "paid_spent_units": paid_spent,
+                        "withdrawable_spent_units": paid_spent,
                     },
                     metadata_version=LEDGER_METADATA_VERSION,
                 )

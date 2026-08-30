@@ -394,9 +394,15 @@ def purchase_premium_media_with_tokens(*, actor, media: Media) -> dict:
         buyer_wallet,
         price_tokens,
     )
-    creator_promotional_amount = min(promotional_spent, creator_amount)
+    creator_promotional_amount = (
+        (creator_amount * promotional_spent) // price_tokens
+        if price_tokens > 0
+        else 0
+    )
     platform_promotional_consumed = promotional_spent - creator_promotional_amount
-    withdrawable_spent = price_tokens - promotional_spent
+    paid_spent = price_tokens - promotional_spent
+    creator_paid_amount = creator_amount - creator_promotional_amount
+    platform_paid_amount = platform_amount - platform_promotional_consumed
 
     buyer_wallet.balance = int(buyer_wallet.balance) - price_tokens
     creator_wallet.balance = int(creator_wallet.balance) + creator_amount
@@ -428,9 +434,12 @@ def purchase_premium_media_with_tokens(*, actor, media: Media) -> dict:
             "creator_amount": creator_amount,
             "platform_amount": platform_amount,
             "promotional_spent_units": promotional_spent,
-            "withdrawable_spent_units": withdrawable_spent,
+            "paid_spent_units": paid_spent,
+            "withdrawable_spent_units": paid_spent,
             "creator_promotional_units": creator_promotional_amount,
+            "creator_paid_units": creator_paid_amount,
             "platform_promotional_consumed_units": platform_promotional_consumed,
+            "platform_paid_units": platform_paid_amount,
         },
         metadata_version=LEDGER_METADATA_VERSION,
     )

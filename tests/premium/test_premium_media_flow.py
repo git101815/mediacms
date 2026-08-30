@@ -547,7 +547,7 @@ def test_promotional_purchase_stays_promotional_for_creator(
     create_ready_asset(media=media, price_tokens=PRICE_TOKENS)
 
     buyer_wallet = fund_user_wallet(buyer, PRICE_TOKENS)
-    buyer_wallet.promotional_balance = PRICE_TOKENS
+    buyer_wallet.promotional_balance = 300 * 10**6
     buyer_wallet.save(update_fields=["promotional_balance", "updated_at"])
     creator_wallet = fund_user_wallet(creator, 0)
 
@@ -561,11 +561,15 @@ def test_promotional_purchase_stays_promotional_for_creator(
     assert buyer_wallet.balance == 0
     assert buyer_wallet.promotional_balance == 0
     assert creator_wallet.balance == 400 * 10**6
-    assert creator_wallet.promotional_balance == 400 * 10**6
+    assert creator_wallet.promotional_balance == 240 * 10**6
 
     buyer_entry = LedgerEntry.objects.get(txn=txn, wallet=buyer_wallet)
     creator_entry = LedgerEntry.objects.get(txn=txn, wallet=creator_wallet)
-    assert buyer_entry.promotional_delta == -PRICE_TOKENS
-    assert creator_entry.promotional_delta == 400 * 10**6
-    assert txn.metadata["promotional_spent_units"] == PRICE_TOKENS
-    assert txn.metadata["withdrawable_spent_units"] == 0
+    assert buyer_entry.promotional_delta == -300 * 10**6
+    assert creator_entry.promotional_delta == 240 * 10**6
+    assert txn.metadata["promotional_spent_units"] == 300 * 10**6
+    assert txn.metadata["paid_spent_units"] == 200 * 10**6
+    assert txn.metadata["creator_promotional_units"] == 240 * 10**6
+    assert txn.metadata["creator_paid_units"] == 160 * 10**6
+    assert txn.metadata["platform_promotional_consumed_units"] == 60 * 10**6
+    assert txn.metadata["platform_paid_units"] == 40 * 10**6

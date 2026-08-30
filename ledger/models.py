@@ -165,10 +165,10 @@ class TokenWallet(models.Model):
     system_key = models.CharField(max_length=32, choices=SYSTEM_CHOICES, null=True, blank=True, unique=True)
 
     balance = models.BigIntegerField(default=0)
-    # Subset of ``balance`` issued by promotional systems (daily rewards,
-    # quests, referrals, reward chests). Promotional units are spendable on
-    # internal products and may be withdrawn only within the operator-configured
-    # promotional withdrawal ratio. Ordinary user-to-user transfers stay cash-only.
+    # Subset of ``balance`` that originated from free/promotional issuance.
+    # Provenance is conserved proportionally across spends and user-to-user
+    # transfers. Withdrawals may include this component only up to the
+    # operator-configured promotional withdrawal ratio.
     promotional_balance = models.BigIntegerField(default=0)
     allow_negative = models.BooleanField(default=False)
 

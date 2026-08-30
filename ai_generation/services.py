@@ -280,7 +280,7 @@ def create_generation_request(*, actor, prompt, resolution=None) -> AIGeneration
     promotional_spent = consume_promotional_tokens_for_internal_spend(
         buyer_wallet, price_tokens
     )
-    withdrawable_spent = price_tokens - promotional_spent
+    paid_spent = price_tokens - promotional_spent
     buyer_wallet.balance = int(buyer_wallet.balance) - price_tokens
     platform_wallet.balance = int(platform_wallet.balance) + price_tokens
     buyer_wallet.save(
@@ -300,7 +300,8 @@ def create_generation_request(*, actor, prompt, resolution=None) -> AIGeneration
             "user_id": user.pk,
             "price_tokens": price_tokens,
             "promotional_spent_units": promotional_spent,
-            "withdrawable_spent_units": withdrawable_spent,
+            "paid_spent_units": paid_spent,
+            "withdrawable_spent_units": paid_spent,
         },
         metadata_version=LEDGER_METADATA_VERSION,
     )

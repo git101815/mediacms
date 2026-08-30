@@ -30,7 +30,7 @@ MAX_CHANGE_EXAMPLES = 12
 class ReconstructionStats:
     through_transaction_id: int
     transactions_scanned: int = 0
-    entries_scanned: int = 0
+    user_entries_scanned: int = 0
     reversal_transactions: int = 0
     entry_updates: int = 0
     wallet_updates: int = 0
@@ -58,9 +58,6 @@ def _validate_promotional_delta(*, delta: int, promotional_delta: int) -> None:
 def _flush_entry_updates(rows: list[LedgerEntry], *, batch_size: int) -> None:
     if not rows:
         return
-    # Ledger rows are immutable during normal runtime. This one-off repair is
-    # intentionally an administrative provenance backfill, so use the model's
-    # base manager to bypass the public immutable manager.
     LedgerEntry._base_manager.bulk_update(
         rows,
         ["promotional_delta"],
@@ -89,22 +86,55 @@ def _reversal_source_buckets(
     return buckets
 
 
+def _allocate_component_proportionally(
+    *,
+    component_units: int,
+    positive_entries: list[LedgerEntry],
+) -> dict[int, int]:
+    """Allocate one provenance component over credits without losing units."""
+    component_units = max(0, int(component_units))
+    positive_entries = [
+        entry for entry in positive_entries if int(entry.delta) > 0
+    ]
+    total_positive = sum(int(entry.delta) for entry in positive_entries)
+    if component_units == 0:
+        return {int(entry.id): 0 for entry in positive_entries}
+    if total_positive <= 0 or component_units > total_positive:
+        raise CommandError("Cannot allocate reconstructed promotional provenance")
+
+    allocations: dict[int, int] = {}
+    cumulative = 0
+    allocated = 0
+    for entry in positive_entries:
+        cumulative += int(entry.delta)
+        target = (component_units * cumulative) // total_positive
+        allocations[int(entry.id)] = target - allocated
+        allocated = target
+
+    if allocated != component_units:
+        raise CommandError("Promotional provenance allocation lost token units")
+    return allocations
+
+
 def rebuild_promotional_accounting(
     *,
     apply: bool,
     through_transaction_id: int | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> ReconstructionStats:
-    """Reconstruct promotional provenance from the historical ledger.
+    """Reconstruct free-token provenance from ledger history.
 
-    Historical debits are replayed promo-first. Promotional value that crosses
-    user -> user in the same transaction remains promotional; value absorbed by
-    a system wallet is consumed. Reward issuance is always promotional.
+    A token issued for free stays promotional until it leaves a user wallet.
+    Every ordinary outflow consumes paid/promotional units in the same
+    proportion as the source wallet at that moment. If that outflow is split
+    across several destinations, the promotional component is split across all
+    credits in the same proportion as their amounts. Promotional value credited
+    to a system wallet is considered consumed by the platform because system
+    wallets do not carry promotional balances.
 
-    Reversal transactions are *not* replayed as ordinary spends. Their
-    promotional component is the exact inverse of the corresponding original
-    user entry, which prevents refunds from turning promo into cash and prevents
-    cash reversals from consuming unrelated promo.
+    Reversals restore the exact reconstructed provenance of the original
+    transaction. This command only reconstructs provenance metadata/state; it
+    never changes total token balances.
     """
     normalized_batch_size = int(batch_size)
     if normalized_batch_size <= 0:
@@ -137,28 +167,28 @@ def rebuild_promotional_accounting(
     )
 
     promotional_by_wallet: dict[int, int] = {}
-    # Only originals that actually have a reversal need to remain in memory.
     reversal_sources: dict[int, list[tuple[int, int, int]]] = {}
     dirty_entries: list[LedgerEntry] = []
 
     queryset = (
         LedgerEntry._base_manager.filter(
-            wallet__wallet_type=TokenWallet.TYPE_USER,
             txn_id__lte=through_transaction_id,
             txn__status__in=ACCOUNTED_TRANSACTION_STATUSES,
         )
-        .select_related("txn")
+        .select_related("txn", "wallet")
         .order_by("txn__created_at", "txn_id", "id")
     )
 
     def set_desired(entry: LedgerEntry, desired: int) -> None:
+        if entry.wallet.wallet_type != TokenWallet.TYPE_USER:
+            return
         desired = int(desired)
         delta = int(entry.delta)
         _validate_promotional_delta(
             delta=delta,
             promotional_delta=desired,
         )
-        stats.entries_scanned += 1
+        stats.user_entries_scanned += 1
         if int(entry.promotional_delta) == desired:
             return
         stats.entry_updates += 1
@@ -174,51 +204,53 @@ def rebuild_promotional_accounting(
                     batch_size=normalized_batch_size,
                 )
 
-    def update_running_wallet(wallet_id: int, promotional_delta: int) -> None:
-        current = int(promotional_by_wallet.get(wallet_id, 0))
-        updated = current + int(promotional_delta)
-        if updated < 0:
-            raise CommandError(
-                "Historical replay would make promotional provenance negative "
-                f"for wallet {wallet_id}: {current} + {promotional_delta}"
-            )
-        promotional_by_wallet[wallet_id] = updated
+    def set_running_promotional(wallet_id: int, value: int) -> None:
+        promotional_by_wallet[int(wallet_id)] = max(0, int(value))
 
     def process_transaction(entries: list[LedgerEntry]) -> None:
         if not entries:
             return
+
         stats.transactions_scanned += 1
         txn = entries[0].txn
         txn_id = int(txn.id)
-        reversal_of_id = int(txn.reversal_of_id) if txn.reversal_of_id else None
+        user_entries = [
+            entry
+            for entry in entries
+            if entry.wallet.wallet_type == TokenWallet.TYPE_USER
+        ]
         desired_rows: list[tuple[int, int, int]] = []
+        reversal_of_id = int(txn.reversal_of_id) if txn.reversal_of_id else None
 
         if reversal_of_id is not None:
             stats.reversal_transactions += 1
             source_rows = reversal_sources.get(reversal_of_id)
             if source_rows is None:
                 raise CommandError(
-                    "Cannot reconstruct reversal transaction "
-                    f"{txn_id}: original transaction {reversal_of_id} was not "
-                    "replayed before its reversal"
+                    f"Cannot reconstruct reversal transaction {txn_id}: "
+                    f"original transaction {reversal_of_id} was not replayed first"
                 )
             source_buckets = _reversal_source_buckets(source_rows)
 
-            for entry in entries:
+            for entry in user_entries:
                 wallet_id = int(entry.wallet_id)
                 delta = int(entry.delta)
-                source_key = (wallet_id, -delta)
-                candidates = source_buckets.get(source_key)
+                candidates = source_buckets.get((wallet_id, -delta))
                 if not candidates:
                     raise CommandError(
-                        "Cannot match reversal entry "
-                        f"{entry.id} to an original user entry in transaction "
-                        f"{reversal_of_id}"
+                        f"Cannot match reversal entry {entry.id} to original "
+                        f"transaction {reversal_of_id}"
                     )
-                original_promotional_delta = int(candidates.popleft())
-                desired = -original_promotional_delta
+                desired = -int(candidates.popleft())
                 set_desired(entry, desired)
-                update_running_wallet(wallet_id, desired)
+                current = int(promotional_by_wallet.get(wallet_id, 0))
+                updated = current + desired
+                if updated < 0:
+                    raise CommandError(
+                        f"Reversal would make wallet {wallet_id} promotional "
+                        "provenance negative"
+                    )
+                set_running_promotional(wallet_id, updated)
                 desired_rows.append((wallet_id, delta, desired))
 
             unmatched = sum(len(values) for values in source_buckets.values())
@@ -227,42 +259,74 @@ def rebuild_promotional_accounting(
                     f"Reversal transaction {txn_id} did not reverse all user "
                     f"entries from transaction {reversal_of_id}"
                 )
-            # A OneToOne reversal can only consume this source once.
             reversal_sources.pop(reversal_of_id, None)
             return
 
-        promotional_to_propagate = 0
+        promotional_outflow = 0
 
-        # Debit first so a user -> user transaction can propagate the promo
-        # component to its recipients deterministically.
-        for entry in entries:
+        # Debits consume provenance according to the source wallet's composition
+        # immediately before that debit. ``balance_after`` lets the command infer
+        # the historical total balance without changing any total-balance data.
+        for entry in user_entries:
             delta = int(entry.delta)
             if delta >= 0:
                 continue
+
             wallet_id = int(entry.wallet_id)
-            available_promotional = max(
-                0,
-                int(promotional_by_wallet.get(wallet_id, 0)),
+            debit_amount = abs(delta)
+            balance_before = int(entry.balance_after) - delta
+            if balance_before <= 0:
+                raise CommandError(
+                    f"Cannot reconstruct debit entry {entry.id}: "
+                    f"non-positive source balance {balance_before}"
+                )
+
+            promotional_before = min(
+                max(0, int(promotional_by_wallet.get(wallet_id, 0))),
+                balance_before,
             )
-            consumed = min(available_promotional, abs(delta))
-            desired = -consumed
+            if debit_amount >= balance_before:
+                promotional_spent = promotional_before
+            else:
+                promotional_spent = (
+                    debit_amount * promotional_before
+                ) // balance_before
+
+            desired = -promotional_spent
             set_desired(entry, desired)
-            update_running_wallet(wallet_id, desired)
-            promotional_to_propagate += consumed
+            set_running_promotional(
+                wallet_id,
+                promotional_before - promotional_spent,
+            )
+            promotional_outflow += promotional_spent
             desired_rows.append((wallet_id, delta, desired))
 
-        for entry in entries:
+        positive_entries = [
+            entry for entry in entries if int(entry.delta) > 0
+        ]
+
+        if str(txn.kind or "") in PROMOTIONAL_ISSUANCE_KINDS:
+            allocations = {}
+        else:
+            allocations = _allocate_component_proportionally(
+                component_units=promotional_outflow,
+                positive_entries=positive_entries,
+            )
+
+        for entry in user_entries:
             delta = int(entry.delta)
             if delta <= 0:
                 continue
+
             wallet_id = int(entry.wallet_id)
             if str(txn.kind or "") in PROMOTIONAL_ISSUANCE_KINDS:
                 desired = delta
             else:
-                desired = min(promotional_to_propagate, delta)
-                promotional_to_propagate -= desired
+                desired = int(allocations.get(int(entry.id), 0))
+
             set_desired(entry, desired)
-            update_running_wallet(wallet_id, desired)
+            current = int(promotional_by_wallet.get(wallet_id, 0))
+            set_running_promotional(wallet_id, current + desired)
             desired_rows.append((wallet_id, delta, desired))
 
         if txn_id in reversed_original_ids:
@@ -281,19 +345,20 @@ def rebuild_promotional_accounting(
         current_entries.append(entry)
 
     process_transaction(current_entries)
+
+    if reversal_sources:
+        unresolved = ", ".join(
+            str(txn_id) for txn_id in sorted(reversal_sources)[:10]
+        )
+        raise CommandError(
+            "Historical replay ended with unresolved reversal sources: "
+            + unresolved
+        )
+
     if apply:
         _flush_entry_updates(
             dirty_entries,
             batch_size=normalized_batch_size,
-        )
-
-    # Any remaining source means a reversal exists inside the selected ID range
-    # but was not encountered in ledger chronology. Treat that as corrupt ledger
-    # ordering instead of guessing provenance.
-    if reversal_sources:
-        unresolved = ", ".join(str(txn_id) for txn_id in sorted(reversal_sources)[:10])
-        raise CommandError(
-            "Historical replay ended with unresolved reversal sources: " + unresolved
         )
 
     dirty_wallets: list[TokenWallet] = []
@@ -311,8 +376,10 @@ def rebuild_promotional_accounting(
         desired = min(reconstructed, positive_balance)
         if reconstructed > positive_balance:
             stats.wallets_clipped_to_current_balance += 1
+
         if int(wallet.promotional_balance) == desired:
             continue
+
         stats.wallet_updates += 1
         stats.add_example(
             f"wallet {wallet.id}: {int(wallet.promotional_balance)} -> {desired}"
@@ -337,15 +404,15 @@ def rebuild_promotional_accounting(
 
 class Command(BaseCommand):
     help = (
-        "Reconstruct historical promotional token provenance after migration "
-        "0038. Defaults to dry-run; pass --apply to write changes."
+        "Reconstruct historical free-token provenance. Defaults to dry-run; "
+        "pass --apply to write promotional deltas and wallet promo balances."
     )
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--apply",
             action="store_true",
-            help="Write reconstructed promotional deltas and wallet balances.",
+            help="Write reconstructed promotional provenance.",
         )
         parser.add_argument(
             "--dry-run",
@@ -377,8 +444,9 @@ class Command(BaseCommand):
         batch_size = options["batch_size"]
 
         if applying:
-            # Keep entry rewrites and final wallet provenance atomic. Runtime
-            # ledger writes should be paused while this one-off repair runs.
+            # Runtime ledger writes should be paused for this one-off repair so
+            # the reconstructed entry provenance and final wallet state are one
+            # consistent snapshot.
             with transaction.atomic():
                 stats = rebuild_promotional_accounting(
                     apply=True,
@@ -393,11 +461,21 @@ class Command(BaseCommand):
             )
 
         mode = "APPLY" if applying else "DRY-RUN"
-        self.stdout.write(f"[{mode}] through transaction id: {stats.through_transaction_id}")
-        self.stdout.write(f"transactions scanned: {stats.transactions_scanned}")
-        self.stdout.write(f"user entries scanned: {stats.entries_scanned}")
-        self.stdout.write(f"reversal transactions: {stats.reversal_transactions}")
-        self.stdout.write(f"ledger entries to change: {stats.entry_updates}")
+        self.stdout.write(
+            f"[{mode}] through transaction id: {stats.through_transaction_id}"
+        )
+        self.stdout.write(
+            f"transactions scanned: {stats.transactions_scanned}"
+        )
+        self.stdout.write(
+            f"user entries scanned: {stats.user_entries_scanned}"
+        )
+        self.stdout.write(
+            f"reversal transactions: {stats.reversal_transactions}"
+        )
+        self.stdout.write(
+            f"ledger entries to change: {stats.entry_updates}"
+        )
         self.stdout.write(f"wallets to change: {stats.wallet_updates}")
         self.stdout.write(
             "wallets clipped to current balance: "
@@ -409,7 +487,9 @@ class Command(BaseCommand):
                 self.stdout.write(f"  - {example}")
 
         if applying:
-            self.stdout.write(self.style.SUCCESS("promotional accounting rebuilt"))
+            self.stdout.write(
+                self.style.SUCCESS("promotional accounting rebuilt")
+            )
         else:
             self.stdout.write(
                 self.style.WARNING(
