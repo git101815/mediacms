@@ -89,16 +89,16 @@ class TestRewardChests(BaseLedgerTestCase):
     def test_production_chest_economy_matches_reworked_distribution(self):
         expected = {
             "small_chest": {
-                "amounts": [20, 25, 100, 250, 500],
-                "ev_numerator": 260_790,
+                "amounts": [15, 40, 100, 250, 500],
+                "ev_numerator": 244_800,
             },
             "medium_chest": {
-                "amounts": [40, 60, 450, 750, 1_500],
-                "ev_numerator": 646_560,
+                "amounts": [35, 80, 350, 750, 1_500],
+                "ev_numerator": 606_560,
             },
             "monthly_huge_chest": {
-                "amounts": [80, 120, 750, 2_000, 5_000],
-                "ev_numerator": 1_329_120,
+                "amounts": [65, 140, 550, 2_000, 5_000],
+                "ev_numerator": 1_177_200,
             },
             "big_chest": {
                 "amounts": [350, 750, 1_500, 2_500, 5_000],

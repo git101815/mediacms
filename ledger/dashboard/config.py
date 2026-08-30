@@ -97,23 +97,23 @@ WALLET_TOKEN_PACK_ASSETS = {
 # mapping, so each rarity intentionally receives distinct artwork.
 REWARD_CHEST_DROP_IMAGE_ASSETS = {
     "small_chest": {
-        "common_20": "token_pkg_500",
-        "uncommon_25": "token_pkg_1000",
+        "common_15": "token_pkg_500",
+        "uncommon_40": "token_pkg_1000",
         "rare_100": "token_pkg_2000",
         "epic_250": "token_pkg_5000",
         "jackpot_500": "token_pkg_10000",
     },
     "medium_chest": {
-        "common_40": "token_pkg_500",
-        "uncommon_60": "token_pkg_1000",
-        "rare_450": "token_pkg_2000",
+        "common_35": "token_pkg_500",
+        "uncommon_80": "token_pkg_1000",
+        "rare_350": "token_pkg_2000",
         "epic_750": "token_pkg_5000",
         "jackpot_1500": "token_pkg_10000",
     },
     "monthly_huge_chest": {
-        "common_80": "token_pkg_500",
-        "uncommon_120": "token_pkg_1000",
-        "rare_750": "token_pkg_2000",
+        "common_65": "token_pkg_500",
+        "uncommon_140": "token_pkg_1000",
+        "rare_550": "token_pkg_2000",
         "epic_2000": "token_pkg_5000",
         "jackpot_5000": "token_pkg_10000",
     },
@@ -512,7 +512,7 @@ BONUS_VAULT_START_AT = "2026-07-25T00:00:00+03:00"
 # ---------------------------------------------------------------------------
 # Generic Reward Chests
 # ---------------------------------------------------------------------------
-REWARD_CHEST_CONFIG_VERSION = 6
+REWARD_CHEST_CONFIG_VERSION = 7
 REWARD_CHEST_TOTAL_CHANCE_BPS = 10_000
 REWARD_CHEST_MAX_DROPS = 5
 REWARD_CHEST_MAX_TOKENS_PER_DROP = 10_000
@@ -530,8 +530,8 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["small_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["small_chest"]["opened"],
         "drops": (
-            {"key": "common_20", "label": "20 tokens", "rarity": "common", "chance_bps": 7_992, "amount": 20},
-            {"key": "uncommon_25", "label": "25 tokens", "rarity": "uncommon", "chance_bps": 1_598, "amount": 25},
+            {"key": "common_15", "label": "15 tokens", "rarity": "common", "chance_bps": 7_992, "amount": 15},
+            {"key": "uncommon_40", "label": "40 tokens", "rarity": "uncommon", "chance_bps": 1_598, "amount": 40},
             {"key": "rare_100", "label": "100 tokens", "rarity": "rare", "chance_bps": 320, "amount": 100},
             {"key": "epic_250", "label": "250 tokens", "rarity": "epic", "chance_bps": 64, "amount": 250},
             {"key": "jackpot_500", "label": "500 tokens", "rarity": "jackpot", "chance_bps": 26, "amount": 500},
@@ -543,9 +543,9 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["medium_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["medium_chest"]["opened"],
         "drops": (
-            {"key": "common_40", "label": "40 tokens", "rarity": "common", "chance_bps": 7_992, "amount": 40},
-            {"key": "uncommon_60", "label": "60 tokens", "rarity": "uncommon", "chance_bps": 1_598, "amount": 60},
-            {"key": "rare_450", "label": "450 tokens", "rarity": "rare", "chance_bps": 320, "amount": 450},
+            {"key": "common_35", "label": "35 tokens", "rarity": "common", "chance_bps": 7_992, "amount": 35},
+            {"key": "uncommon_80", "label": "80 tokens", "rarity": "uncommon", "chance_bps": 1_598, "amount": 80},
+            {"key": "rare_350", "label": "350 tokens", "rarity": "rare", "chance_bps": 320, "amount": 350},
             {"key": "epic_750", "label": "750 tokens", "rarity": "epic", "chance_bps": 64, "amount": 750},
             {"key": "jackpot_1500", "label": "1,500 tokens", "rarity": "jackpot", "chance_bps": 26, "amount": 1_500},
         ),
@@ -556,9 +556,9 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["big_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["big_chest"]["opened"],
         "drops": (
-            {"key": "common_80", "label": "80 tokens", "rarity": "common", "chance_bps": 7_992, "amount": 80},
-            {"key": "uncommon_120", "label": "120 tokens", "rarity": "uncommon", "chance_bps": 1_598, "amount": 120},
-            {"key": "rare_750", "label": "750 tokens", "rarity": "rare", "chance_bps": 320, "amount": 750},
+            {"key": "common_65", "label": "65 tokens", "rarity": "common", "chance_bps": 7_992, "amount": 65},
+            {"key": "uncommon_140", "label": "140 tokens", "rarity": "uncommon", "chance_bps": 1_598, "amount": 140},
+            {"key": "rare_550", "label": "550 tokens", "rarity": "rare", "chance_bps": 320, "amount": 550},
             {"key": "epic_2000", "label": "2,000 tokens", "rarity": "epic", "chance_bps": 64, "amount": 2_000},
             {"key": "jackpot_5000", "label": "5,000 tokens", "rarity": "jackpot", "chance_bps": 26, "amount": 5_000},
         ),
