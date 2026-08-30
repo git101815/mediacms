@@ -41,8 +41,7 @@ def skillflow_webhook(request):
         process_skillflow_webhook(payload)
     except ImproperlyConfigured:
         return JsonResponse({"received": False, "error": "configuration_error"}, status=500)
-    except (PermissionDenied, ValidationError) as exc:
-        message = exc.messages[0] if hasattr(exc, "messages") and exc.messages else str(exc)
-        return JsonResponse({"received": False, "error": message}, status=400)
+    except (PermissionDenied, ValidationError):
+        return JsonResponse({"received": False, "error": "invalid_payload"}, status=400)
 
     return JsonResponse({"received": True})
