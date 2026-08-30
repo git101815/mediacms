@@ -561,7 +561,9 @@ def _wallet_checkout_method_keys(
 ) -> tuple[str, ...]:
     if payment_method_type == "crypto":
         return ("crypto",)
-    if provider_key in {SKILLFLOW_PROVIDER_KEY, MALUM_PROVIDER_KEY}:
+    if provider_key == SKILLFLOW_PROVIDER_KEY:
+        return ("card", "apple_pay", "google_pay")
+    if provider_key == MALUM_PROVIDER_KEY:
         return ("card",)
     if provider_key == BANXA_PROVIDER_KEY:
         return ("card", "apple_pay", "google_pay")
