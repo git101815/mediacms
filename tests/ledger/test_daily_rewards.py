@@ -177,6 +177,45 @@ class TestDailyRewards(BaseLedgerTestCase):
         self.assertTrue(context["can_claim"])
         self.assertEqual(context["current_reward"]["status"], "current")
 
+    def test_production_daily_cycle_matches_reworked_economy(self):
+        definitions = config.get_daily_reward_definitions()
+        self.assertEqual(len(definitions), 30)
+
+        fixed_amounts = [
+            reward.amount_tokens
+            for reward in definitions
+            if reward.kind == "fixed"
+        ]
+        self.assertEqual(sum(fixed_amounts), 205)
+        self.assertEqual(
+            fixed_amounts,
+            [
+                5, 5, 10, 5,
+                5, 10, 15, 5,
+                5, 10, 15, 5,
+                5, 10, 15, 5,
+                5, 10, 15, 5,
+                5, 10, 20, 5,
+            ],
+        )
+
+        chest_schedule = {
+            reward.day: reward.chest_key
+            for reward in definitions
+            if reward.kind == "chest"
+        }
+        self.assertEqual(
+            chest_schedule,
+            {
+                5: "small_chest",
+                10: "small_chest",
+                15: "medium_chest",
+                20: "small_chest",
+                25: "small_chest",
+                30: "monthly_huge_chest",
+            },
+        )
+
     def test_cycle_wraps_after_last_configured_day(self):
         previous_date = get_daily_reward_date(self.instant(day=24))
         DailyRewardState.objects.create(
@@ -312,12 +351,15 @@ class TestDailyRewards(BaseLedgerTestCase):
             claim_url="/wallet/daily-reward/claim/",
             at=self.instant(),
         )
-        chest = config.get_reward_chest_definition("big_chest")
+        chest = config.get_reward_chest_definition("monthly_huge_chest")
 
         self.assertTrue(context["claimed_today"])
         self.assertEqual(context["cycle_day"], 29)
         self.assertEqual(context["next_chest"]["day"], 30)
-        self.assertEqual(context["next_chest"]["chest_key"], "big_chest")
+        self.assertEqual(
+            context["next_chest"]["chest_key"],
+            "monthly_huge_chest",
+        )
         self.assertEqual(context["next_chest"]["days_until_unlock"], 1)
         self.assertEqual(context["next_chest"]["image_path"], chest.closed_image)
 

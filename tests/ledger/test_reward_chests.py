@@ -86,6 +86,46 @@ class TestRewardChests(BaseLedgerTestCase):
             with self.assertRaises(ImproperlyConfigured):
                 config.get_reward_chest_definition("broken")
 
+    def test_production_chest_economy_matches_reworked_distribution(self):
+        expected = {
+            "small_chest": {
+                "amounts": [20, 25, 100, 250, 500],
+                "ev_numerator": 260_790,
+            },
+            "medium_chest": {
+                "amounts": [40, 60, 450, 750, 1_500],
+                "ev_numerator": 646_560,
+            },
+            "monthly_huge_chest": {
+                "amounts": [80, 120, 750, 2_000, 5_000],
+                "ev_numerator": 1_329_120,
+            },
+            "big_chest": {
+                "amounts": [350, 750, 1_500, 2_500, 5_000],
+                "ev_numerator": 4_765_700,
+            },
+        }
+        expected_odds = [7_992, 1_598, 320, 64, 26]
+
+        for chest_key, chest_expected in expected.items():
+            definition = config.get_reward_chest_definition(chest_key)
+            self.assertEqual(
+                [drop.chance_bps for drop in definition.drops],
+                expected_odds,
+            )
+            self.assertEqual(
+                [drop.amount_tokens for drop in definition.drops],
+                chest_expected["amounts"],
+            )
+            self.assertEqual(
+                definition.expected_value_numerator,
+                chest_expected["ev_numerator"],
+            )
+
+        self.assertEqual(config.BONUS_VAULT_CHEST_KEY, "big_chest")
+        self.assertEqual(config.REFERRAL_REWARD_TOKENS, 200)
+        self.assertEqual(config.REFERRAL_MIN_PURCHASE_TOKENS, 500)
+
     def test_grant_is_idempotent_by_business_source(self):
         first = self.grant(source_ref="grant-idempotent")
         second = self.grant(source_ref="grant-idempotent")
@@ -230,7 +270,12 @@ class TestRewardChests(BaseLedgerTestCase):
         self.assertEqual(LedgerTransaction.objects.filter(kind="reward_chest").count(), 0)
 
     def test_chest_identity_exposes_distinct_opened_and_closed_assets(self):
-        for chest_key in ("small_chest", "medium_chest", "big_chest"):
+        for chest_key in (
+            "small_chest",
+            "medium_chest",
+            "monthly_huge_chest",
+            "big_chest",
+        ):
             definition = config.get_reward_chest_definition(chest_key)
             self.assertTrue(definition.label)
             self.assertTrue(

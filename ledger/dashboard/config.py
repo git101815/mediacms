@@ -97,18 +97,25 @@ WALLET_TOKEN_PACK_ASSETS = {
 # mapping, so each rarity intentionally receives distinct artwork.
 REWARD_CHEST_DROP_IMAGE_ASSETS = {
     "small_chest": {
-        "common_25": "token_pkg_500",
-        "uncommon_50": "token_pkg_1000",
+        "common_20": "token_pkg_500",
+        "uncommon_25": "token_pkg_1000",
         "rare_100": "token_pkg_2000",
         "epic_250": "token_pkg_5000",
         "jackpot_500": "token_pkg_10000",
     },
     "medium_chest": {
-        "common_75": "token_pkg_500",
-        "uncommon_150": "token_pkg_1000",
+        "common_40": "token_pkg_500",
+        "uncommon_60": "token_pkg_1000",
         "rare_450": "token_pkg_2000",
         "epic_750": "token_pkg_5000",
         "jackpot_1500": "token_pkg_10000",
+    },
+    "monthly_huge_chest": {
+        "common_80": "token_pkg_500",
+        "uncommon_120": "token_pkg_1000",
+        "rare_750": "token_pkg_2000",
+        "epic_2000": "token_pkg_5000",
+        "jackpot_5000": "token_pkg_10000",
     },
     "big_chest": {
         "common_350": "token_pkg_500",
@@ -505,7 +512,7 @@ BONUS_VAULT_START_AT = "2026-07-25T00:00:00+03:00"
 # ---------------------------------------------------------------------------
 # Generic Reward Chests
 # ---------------------------------------------------------------------------
-REWARD_CHEST_CONFIG_VERSION = 5
+REWARD_CHEST_CONFIG_VERSION = 6
 REWARD_CHEST_TOTAL_CHANCE_BPS = 10_000
 REWARD_CHEST_MAX_DROPS = 5
 REWARD_CHEST_MAX_TOKENS_PER_DROP = 10_000
@@ -523,11 +530,11 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["small_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["small_chest"]["opened"],
         "drops": (
-            {"key": "common_25", "label": "25 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 25},
-            {"key": "uncommon_50", "label": "50 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 50},
-            {"key": "rare_100", "label": "100 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 100},
-            {"key": "epic_250", "label": "250 tokens", "rarity": "epic", "chance_bps": 650, "amount": 250},
-            {"key": "jackpot_500", "label": "500 tokens", "rarity": "jackpot", "chance_bps": 350, "amount": 500},
+            {"key": "common_20", "label": "20 tokens", "rarity": "common", "chance_bps": 7_992, "amount": 20},
+            {"key": "uncommon_25", "label": "25 tokens", "rarity": "uncommon", "chance_bps": 1_598, "amount": 25},
+            {"key": "rare_100", "label": "100 tokens", "rarity": "rare", "chance_bps": 320, "amount": 100},
+            {"key": "epic_250", "label": "250 tokens", "rarity": "epic", "chance_bps": 64, "amount": 250},
+            {"key": "jackpot_500", "label": "500 tokens", "rarity": "jackpot", "chance_bps": 26, "amount": 500},
         ),
     },
     "medium_chest": {
@@ -536,11 +543,24 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["medium_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["medium_chest"]["opened"],
         "drops": (
-            {"key": "common_75", "label": "75 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 75},
-            {"key": "uncommon_150", "label": "150 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 150},
-            {"key": "rare_450", "label": "450 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 450},
-            {"key": "epic_750", "label": "750 tokens", "rarity": "epic", "chance_bps": 650, "amount": 750},
-            {"key": "jackpot_1500", "label": "1,500 tokens", "rarity": "jackpot", "chance_bps": 350, "amount": 1_500},
+            {"key": "common_40", "label": "40 tokens", "rarity": "common", "chance_bps": 7_992, "amount": 40},
+            {"key": "uncommon_60", "label": "60 tokens", "rarity": "uncommon", "chance_bps": 1_598, "amount": 60},
+            {"key": "rare_450", "label": "450 tokens", "rarity": "rare", "chance_bps": 320, "amount": 450},
+            {"key": "epic_750", "label": "750 tokens", "rarity": "epic", "chance_bps": 64, "amount": 750},
+            {"key": "jackpot_1500", "label": "1,500 tokens", "rarity": "jackpot", "chance_bps": 26, "amount": 1_500},
+        ),
+    },
+    "monthly_huge_chest": {
+        "label": "Huge Chest",
+        "asset": "big_chest",
+        "closed_image": WALLET_CHEST_ASSETS["big_chest"]["closed"],
+        "opened_image": WALLET_CHEST_ASSETS["big_chest"]["opened"],
+        "drops": (
+            {"key": "common_80", "label": "80 tokens", "rarity": "common", "chance_bps": 7_992, "amount": 80},
+            {"key": "uncommon_120", "label": "120 tokens", "rarity": "uncommon", "chance_bps": 1_598, "amount": 120},
+            {"key": "rare_750", "label": "750 tokens", "rarity": "rare", "chance_bps": 320, "amount": 750},
+            {"key": "epic_2000", "label": "2,000 tokens", "rarity": "epic", "chance_bps": 64, "amount": 2_000},
+            {"key": "jackpot_5000", "label": "5,000 tokens", "rarity": "jackpot", "chance_bps": 26, "amount": 5_000},
         ),
     },
     "big_chest": {
@@ -549,11 +569,11 @@ REWARD_CHESTS = {
         "closed_image": WALLET_CHEST_ASSETS["big_chest"]["closed"],
         "opened_image": WALLET_CHEST_ASSETS["big_chest"]["opened"],
         "drops": (
-            {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 4_500, "amount": 350},
-            {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 3_000, "amount": 750},
-            {"key": "rare_1500", "label": "1,500 tokens", "rarity": "rare", "chance_bps": 1_500, "amount": 1_500},
-            {"key": "epic_2500", "label": "2,500 tokens", "rarity": "epic", "chance_bps": 650, "amount": 2_500},
-            {"key": "jackpot_5000", "label": "5,000 tokens", "rarity": "jackpot", "chance_bps": 350, "amount": 5_000},
+            {"key": "common_350", "label": "350 tokens", "rarity": "common", "chance_bps": 7_992, "amount": 350},
+            {"key": "uncommon_750", "label": "750 tokens", "rarity": "uncommon", "chance_bps": 1_598, "amount": 750},
+            {"key": "rare_1500", "label": "1,500 tokens", "rarity": "rare", "chance_bps": 320, "amount": 1_500},
+            {"key": "epic_2500", "label": "2,500 tokens", "rarity": "epic", "chance_bps": 64, "amount": 2_500},
+            {"key": "jackpot_5000", "label": "5,000 tokens", "rarity": "jackpot", "chance_bps": 26, "amount": 5_000},
         ),
     },
 }
@@ -561,7 +581,7 @@ REWARD_CHESTS = {
 # ---------------------------------------------------------------------------
 # Daily Rewards
 # ---------------------------------------------------------------------------
-DAILY_REWARD_CONFIG_VERSION = 3
+DAILY_REWARD_CONFIG_VERSION = 4
 DAILY_REWARDS_ENABLED = True
 
 # None means: use django.conf.settings.TIME_ZONE.
@@ -578,47 +598,47 @@ DAILY_REWARD_MAX_TOKENS_PER_CLAIM = 10_000
 # Reward Chest:
 #   {"kind": "chest", "chest": "small_chest"}
 DAILY_REWARDS = (
-    # Cycle 1 — 135 expected tokens
+    # Wave 1 — gentle start, then a Small Chest peak.
     {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 1
-    {"kind": "fixed", "amount": 10, "asset": "coins"},      # Day 2
-    {"kind": "fixed", "amount": 30, "asset": "coins"},      # Day 3
-    {"kind": "fixed", "amount": 15, "asset": "coins"},      # Day 4
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 2
+    {"kind": "fixed", "amount": 10, "asset": "coins"},      # Day 3
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 4
     {"kind": "chest", "chest": "small_chest"},              # Day 5
 
-    # Cycle 2 — 155 expected tokens
-    {"kind": "fixed", "amount": 10, "asset": "coins"},      # Day 6
-    {"kind": "fixed", "amount": 15, "asset": "coins"},      # Day 7
-    {"kind": "fixed", "amount": 35, "asset": "coins"},      # Day 8
-    {"kind": "fixed", "amount": 20, "asset": "coins"},      # Day 9
+    # Wave 2 — stronger fixed peak, reset before the chest.
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 6
+    {"kind": "fixed", "amount": 10, "asset": "coins"},      # Day 7
+    {"kind": "fixed", "amount": 15, "asset": "coins"},      # Day 8
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 9
     {"kind": "chest", "chest": "small_chest"},              # Day 10
 
-    # Cycle 3 — 347.5 expected tokens
-    {"kind": "fixed", "amount": 15, "asset": "coins"},      # Day 11
-    {"kind": "fixed", "amount": 20, "asset": "coins"},      # Day 12
-    {"kind": "fixed", "amount": 40, "asset": "coins"},      # Day 13
-    {"kind": "fixed", "amount": 25, "asset": "coins"},      # Day 14
-    {"kind": "chest", "chest": "medium_chest"},                # Day 15
+    # Wave 3 — mid-cycle climax with a Medium Chest.
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 11
+    {"kind": "fixed", "amount": 10, "asset": "coins"},      # Day 12
+    {"kind": "fixed", "amount": 15, "asset": "coins"},      # Day 13
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 14
+    {"kind": "chest", "chest": "medium_chest"},             # Day 15
 
-    # Cycle 4 — 195 expected tokens
-    {"kind": "fixed", "amount": 20, "asset": "coins"},      # Day 16
-    {"kind": "fixed", "amount": 25, "asset": "coins"},      # Day 17
-    {"kind": "fixed", "amount": 45, "asset": "coins"},      # Day 18
-    {"kind": "fixed", "amount": 30, "asset": "coins"},      # Day 19
-    {"kind": "chest", "chest": "small_chest"},             # Day 20
+    # Wave 4 — reset after the midpoint, then rebuild.
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 16
+    {"kind": "fixed", "amount": 10, "asset": "coins"},      # Day 17
+    {"kind": "fixed", "amount": 15, "asset": "coins"},      # Day 18
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 19
+    {"kind": "chest", "chest": "small_chest"},              # Day 20
 
-    # Cycle 5 — 387.5 expected tokens
-    {"kind": "fixed", "amount": 25, "asset": "coins"},      # Day 21
-    {"kind": "fixed", "amount": 30, "asset": "coins"},      # Day 22
-    {"kind": "fixed", "amount": 50, "asset": "coins"},      # Day 23
-    {"kind": "fixed", "amount": 35, "asset": "coins"},      # Day 24
-    {"kind": "chest", "chest": "medium_chest"},             # Day 25
+    # Wave 5 — another Small Chest peak before the final stretch.
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 21
+    {"kind": "fixed", "amount": 10, "asset": "coins"},      # Day 22
+    {"kind": "fixed", "amount": 15, "asset": "coins"},      # Day 23
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 24
+    {"kind": "chest", "chest": "small_chest"},              # Day 25
 
-    # Cycle 6 — 1,125 expected tokens
-    {"kind": "fixed", "amount": 30, "asset": "coins"},      # Day 26
-    {"kind": "fixed", "amount": 40, "asset": "coins"},      # Day 27
-    {"kind": "fixed", "amount": 60, "asset": "coins"},      # Day 28
-    {"kind": "fixed", "amount": 50, "asset": "coins"},      # Day 29
-    {"kind": "chest", "chest": "big_chest"},                # Day 30
+    # Wave 6 — highest fixed peak, reset, then the Monthly Huge grail.
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 26
+    {"kind": "fixed", "amount": 10, "asset": "coins"},      # Day 27
+    {"kind": "fixed", "amount": 20, "asset": "coins"},      # Day 28
+    {"kind": "fixed", "amount": 5, "asset": "coins"},       # Day 29
+    {"kind": "chest", "chest": "monthly_huge_chest"},       # Day 30
 )
 
 _CHEST_ASSET_ALIASES = {
