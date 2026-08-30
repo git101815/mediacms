@@ -44,6 +44,13 @@ def _assert_no_store(response):
     assert response["Pragma"].lower() == "no-cache"
 
 
+@override_settings(
+    IN_VIDEO_ADS_ENABLED=True,
+    ADS_PROVIDER_WEIGHTS={
+        "popunder": {"internal": 100, "clickaine": 0, "partner": 0},
+        "in_video": {"internal": 100, "clickaine": 0, "partner": 0},
+    },
+)
 def test_vmap_is_valid_xml_and_contains_all_three_breaks(client):
     response = client.get("/api/v1/ads/vmap/")
     assert response.status_code == 200
@@ -62,10 +69,26 @@ def test_vmap_is_valid_xml_and_contains_all_three_breaks(client):
     assert "/api/v1/ads/vast/video_postroll/" in body
 
 
-@override_settings(ADS_MIDROLL_TIME_OFFSET="33%")
+@override_settings(
+    ADS_MIDROLL_TIME_OFFSET="33%",
+    IN_VIDEO_ADS_ENABLED=True,
+    ADS_PROVIDER_WEIGHTS={
+        "popunder": {"internal": 100, "clickaine": 0, "partner": 0},
+        "in_video": {"internal": 100, "clickaine": 0, "partner": 0},
+    },
+)
 def test_vmap_uses_configured_midroll_offset(client):
     response = client.get("/api/v1/ads/vmap/")
     assert 'timeOffset="33%"' in response.content.decode()
+
+
+@override_settings(IN_VIDEO_ADS_ENABLED=False)
+def test_vmap_is_empty_when_in_video_is_disabled(client):
+    response = client.get("/api/v1/ads/vmap/")
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert "<vmap:AdBreak" not in body
+    _assert_no_store(response)
 
 
 def test_vast_rejects_non_video_slot(client):
@@ -94,10 +117,11 @@ def test_vast_rejects_non_video_slot(client):
     ],
 )
 @override_settings(
+    POPUNDER_ADS_ENABLED=True,
+    IN_VIDEO_ADS_ENABLED=True,
     ADS_PROVIDER_WEIGHTS={
-        "internal": 100,
-        "clickaine": 0,
-        "partner": 0,
+        "popunder": {"internal": 50, "clickaine": 50, "partner": 0},
+        "in_video": {"internal": 100, "clickaine": 0, "partner": 0},
     },
     CLICKAINE_VAST_ENABLED=False,
     CLICKAINE_VAST_URL="https://clickaine.example/vast",
@@ -119,10 +143,11 @@ def test_vast_returns_empty_document_when_internal_has_no_deliverable_vast(
 
 
 @override_settings(
+    POPUNDER_ADS_ENABLED=True,
+    IN_VIDEO_ADS_ENABLED=True,
     ADS_PROVIDER_WEIGHTS={
-        "internal": 50,
-        "clickaine": 50,
-        "partner": 0,
+        "popunder": {"internal": 50, "clickaine": 50, "partner": 0},
+        "in_video": {"internal": 50, "clickaine": 50, "partner": 0},
     },
     CLICKAINE_VAST_ENABLED=True,
     CLICKAINE_VAST_URL="https://clickaine.example/vast",
@@ -170,10 +195,11 @@ def test_verified_googlebot_gets_empty_vast(monkeypatch):
 
 
 @override_settings(
+    POPUNDER_ADS_ENABLED=True,
+    IN_VIDEO_ADS_ENABLED=True,
     ADS_PROVIDER_WEIGHTS={
-        "internal": 100,
-        "clickaine": 0,
-        "partner": 0,
+        "popunder": {"internal": 50, "clickaine": 50, "partner": 0},
+        "in_video": {"internal": 100, "clickaine": 0, "partner": 0},
     },
     CLICKAINE_VAST_ENABLED=False,
     CLICKAINE_VAST_URL="https://clickaine.example/vast",
@@ -209,10 +235,11 @@ def test_internal_vast_wrapper_contains_downstream_tag_and_tracking(
 
 
 @override_settings(
+    POPUNDER_ADS_ENABLED=True,
+    IN_VIDEO_ADS_ENABLED=True,
     ADS_PROVIDER_WEIGHTS={
-        "internal": 50,
-        "clickaine": 50,
-        "partner": 0,
+        "popunder": {"internal": 50, "clickaine": 50, "partner": 0},
+        "in_video": {"internal": 50, "clickaine": 50, "partner": 0},
     },
     CLICKAINE_VAST_ENABLED=True,
     CLICKAINE_VAST_URL="https://clickaine.example/vast",
@@ -250,11 +277,15 @@ def test_cdata_terminator_is_safely_split():
 
 
 @override_settings(
+    POPUNDER_ADS_ENABLED=True,
+    IN_VIDEO_ADS_ENABLED=True,
     ADS_PROVIDER_WEIGHTS={
-        "internal": 50,
-        "clickaine": 50,
-        "partner": 0,
+        "popunder": {"internal": 50, "clickaine": 50, "partner": 0},
+        "in_video": {"internal": 50, "clickaine": 50, "partner": 0},
     },
+    ADS_PARTNER_POPUNDER_OFFERS=[
+        {"weight": 100, "url_template": "https://partner.example/?click=CLICKID"}
+    ],
     CLICKAINE_POPUNDER_ENABLED=True,
     CLICKAINE_POPUNDER_SCRIPT_URL="https://clickaine.example/pop.js",
 )
@@ -282,12 +313,12 @@ def test_popunder_returns_weighted_provider_queue(
         "providers": [
             {
                 "name": "clickaine",
+                "delivery": "script",
                 "script_url": "https://clickaine.example/pop.js",
             },
             {
                 "name": "internal",
-                "campaign_id": 1,
-                "creative_id": 2,
+                "delivery": "url",
                 "open_url": "/ads/open/signed-event/",
             },
         ]
@@ -296,11 +327,15 @@ def test_popunder_returns_weighted_provider_queue(
 
 
 @override_settings(
+    POPUNDER_ADS_ENABLED=True,
+    IN_VIDEO_ADS_ENABLED=True,
     ADS_PROVIDER_WEIGHTS={
-        "internal": 50,
-        "clickaine": 50,
-        "partner": 0,
+        "popunder": {"internal": 50, "clickaine": 50, "partner": 0},
+        "in_video": {"internal": 50, "clickaine": 50, "partner": 0},
     },
+    ADS_PARTNER_POPUNDER_OFFERS=[
+        {"weight": 100, "url_template": "https://partner.example/?click=CLICKID"}
+    ],
     CLICKAINE_POPUNDER_ENABLED=True,
     CLICKAINE_POPUNDER_SCRIPT_URL="https://clickaine.example/pop.js",
 )
@@ -320,6 +355,7 @@ def test_popunder_skips_internal_no_fill_and_keeps_next_provider(
         "providers": [
             {
                 "name": "clickaine",
+                "delivery": "script",
                 "script_url": "https://clickaine.example/pop.js",
             }
         ]
@@ -339,10 +375,33 @@ def test_verified_googlebot_gets_no_popunder(monkeypatch):
     order.assert_not_called()
 
 
-def test_clickaine_vast_impression_is_no_store_noop(client):
-    response = client.get("/ads/clickaine-vast-impression/")
+def test_internal_preroll_impression_consumes_cooldown(client, monkeypatch):
+    token = _signed_payload(s=AdCampaign.PLACEMENT_PREROLL)
+    marker = Mock()
+    monkeypatch.setattr(views, "mark_cooldown", marker)
+    monkeypatch.setattr(views, "record_impression", lambda payload: None)
+    response = client.get(f"/ads/impression/{token}/")
+    assert response.status_code == 204
+    marker.assert_called_once()
+
+
+def test_clickaine_vast_impression_consumes_preroll_cooldown(client, monkeypatch):
+    monkeypatch.setattr(views, "mark_cooldown", Mock())
+    response = client.get(
+        "/ads/clickaine-vast-impression/?slot=video_preroll"
+    )
     assert response.status_code == 204
     _assert_no_store(response)
+    views.mark_cooldown.assert_called_once()
+
+
+def test_popunder_consume_endpoint_marks_session_cooldown(client, monkeypatch):
+    marker = Mock()
+    monkeypatch.setattr(views, "mark_cooldown", marker)
+    response = client.post("/api/v1/ads/popunder/consume/", data="1", content_type="text/plain")
+    assert response.status_code == 204
+    _assert_no_store(response)
+    marker.assert_called_once()
 
 
 def test_banner_serve_contract_and_fail_closed_behavior(

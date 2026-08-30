@@ -15,6 +15,11 @@ urlpatterns = [
         name="ads_popunder",
     ),
     path(
+        "api/v1/ads/popunder/consume/",
+        views.ads_popunder_consume,
+        name="ads_popunder_consume",
+    ),
+    path(
         "api/v1/ads/vmap/",
         views.ads_vmap,
         name="ads_vmap",

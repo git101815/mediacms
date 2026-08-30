@@ -1,8 +1,10 @@
+
 from __future__ import annotations
 
 import random
+import secrets
 from decimal import Decimal, InvalidOperation
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -18,6 +20,12 @@ PROVIDERS = (
 
 FORMAT_POPUNDER = "popunder"
 FORMAT_IN_VIDEO = "in_video"
+FORMATS = (FORMAT_POPUNDER, FORMAT_IN_VIDEO)
+
+_FORMAT_ENABLED_SETTINGS = {
+    FORMAT_POPUNDER: "POPUNDER_ADS_ENABLED",
+    FORMAT_IN_VIDEO: "IN_VIDEO_ADS_ENABLED",
+}
 
 
 def _setting(name):
@@ -29,22 +37,33 @@ def _setting(name):
         ) from exc
 
 
-def _http_url_setting(name):
-    value = str(_setting(name) or "").strip()
+def _require_format(ad_format):
+    if ad_format not in FORMATS:
+        raise ValueError(f"Unknown advertising format: {ad_format}")
+
+
+def _http_url(value, *, setting_name):
+    value = str(value or "").strip()
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ImproperlyConfigured(
-            f"{name} must be an absolute HTTP(S) URL"
+            f"{setting_name} must be an absolute HTTP(S) URL"
         )
     return value
 
 
-def provider_weights():
-    raw = _setting("ADS_PROVIDER_WEIGHTS")
+def _http_url_setting(name):
+    return _http_url(_setting(name), setting_name=name)
+
+
+def format_enabled(ad_format):
+    _require_format(ad_format)
+    return bool(_setting(_FORMAT_ENABLED_SETTINGS[ad_format]))
+
+
+def _normalize_provider_weights(raw, *, setting_label):
     if not isinstance(raw, dict):
-        raise ImproperlyConfigured(
-            "ADS_PROVIDER_WEIGHTS must be a dict"
-        )
+        raise ImproperlyConfigured(f"{setting_label} must be a dict")
 
     keys = set(raw)
     expected = set(PROVIDERS)
@@ -57,8 +76,7 @@ def provider_weights():
         if unknown:
             details.append("unknown=" + ",".join(unknown))
         raise ImproperlyConfigured(
-            "ADS_PROVIDER_WEIGHTS must contain exactly "
-            "internal, clickaine and partner"
+            f"{setting_label} must contain exactly internal, clickaine and partner"
             + (" (" + "; ".join(details) + ")" if details else "")
         )
 
@@ -67,46 +85,114 @@ def provider_weights():
         value = raw[provider]
         if isinstance(value, bool):
             raise ImproperlyConfigured(
-                f"ADS_PROVIDER_WEIGHTS[{provider!r}] must be numeric"
+                f"{setting_label}[{provider!r}] must be numeric"
             )
         try:
             weight = Decimal(str(value))
         except (InvalidOperation, TypeError, ValueError) as exc:
             raise ImproperlyConfigured(
-                f"ADS_PROVIDER_WEIGHTS[{provider!r}] must be numeric"
+                f"{setting_label}[{provider!r}] must be numeric"
             ) from exc
         if not weight.is_finite() or weight < 0:
             raise ImproperlyConfigured(
-                f"ADS_PROVIDER_WEIGHTS[{provider!r}] must be >= 0"
+                f"{setting_label}[{provider!r}] must be >= 0"
             )
         weights[provider] = weight
 
     if sum(weights.values(), Decimal("0")) != Decimal("100"):
         raise ImproperlyConfigured(
-            "ADS_PROVIDER_WEIGHTS must sum to exactly 100"
+            f"{setting_label} must sum to exactly 100"
         )
     return weights
 
 
+def provider_weights(ad_format):
+    _require_format(ad_format)
+    raw = _setting("ADS_PROVIDER_WEIGHTS")
+    if not isinstance(raw, dict):
+        raise ImproperlyConfigured("ADS_PROVIDER_WEIGHTS must be a dict")
+
+    keys = set(raw)
+    expected = set(FORMATS)
+    if keys != expected:
+        missing = sorted(expected - keys)
+        unknown = sorted(keys - expected)
+        details = []
+        if missing:
+            details.append("missing=" + ",".join(missing))
+        if unknown:
+            details.append("unknown=" + ",".join(unknown))
+        raise ImproperlyConfigured(
+            "ADS_PROVIDER_WEIGHTS must contain exactly popunder and in_video"
+            + (" (" + "; ".join(details) + ")" if details else "")
+        )
+
+    return _normalize_provider_weights(
+        raw[ad_format],
+        setting_label=f"ADS_PROVIDER_WEIGHTS[{ad_format!r}]",
+    )
+
+
+def _partner_popunder_offers():
+    raw = _setting("ADS_PARTNER_POPUNDER_OFFERS")
+    if not isinstance(raw, (list, tuple)):
+        raise ImproperlyConfigured(
+            "ADS_PARTNER_POPUNDER_OFFERS must be a list"
+        )
+
+    offers = []
+    for index, item in enumerate(raw):
+        label = f"ADS_PARTNER_POPUNDER_OFFERS[{index}]"
+        if not isinstance(item, dict):
+            raise ImproperlyConfigured(f"{label} must be a dict")
+        _http_url(
+            str(item.get("url_template") or "").replace("CLICKID", "probe"),
+            setting_name=f"{label}.url_template",
+        )
+        original_template = str(item.get("url_template") or "").strip()
+        try:
+            weight = Decimal(str(item.get("weight", 0)))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ImproperlyConfigured(f"{label}.weight must be numeric") from exc
+        if not weight.is_finite() or weight < 0:
+            raise ImproperlyConfigured(f"{label}.weight must be >= 0")
+        if weight > 0:
+            offers.append(
+                {
+                    "weight": weight,
+                    "url_template": original_template,
+                }
+            )
+
+    if not offers:
+        raise ImproperlyConfigured(
+            "ADS_PARTNER_POPUNDER_OFFERS must contain at least one positive-weight offer"
+        )
+    return offers
+
+
 def eligible_provider_weights(ad_format):
-    weights = provider_weights()
+    _require_format(ad_format)
+    if not format_enabled(ad_format):
+        return {}
+
+    weights = provider_weights(ad_format)
+    clickaine_enabled = False
 
     if ad_format == FORMAT_POPUNDER:
-        clickaine_enabled = bool(
-            _setting("CLICKAINE_POPUNDER_ENABLED")
-        )
-        if clickaine_enabled:
+        clickaine_enabled = bool(_setting("CLICKAINE_POPUNDER_ENABLED"))
+        if weights[PROVIDER_CLICKAINE] > 0 and clickaine_enabled:
             _http_url_setting("CLICKAINE_POPUNDER_SCRIPT_URL")
-    elif ad_format == FORMAT_IN_VIDEO:
+        if weights[PROVIDER_PARTNER] > 0:
+            _partner_popunder_offers()
+    else:
         clickaine_enabled = bool(_setting("CLICKAINE_VAST_ENABLED"))
-        if clickaine_enabled:
+        if weights[PROVIDER_CLICKAINE] > 0 and clickaine_enabled:
             _http_url_setting("CLICKAINE_VAST_URL")
         if weights[PROVIDER_PARTNER] > 0:
             raise ImproperlyConfigured(
-                "partner has no in-video/VAST adapter; set its weight to 0"
+                "partner has no in-video/VAST adapter; set its in_video weight to 0"
             )
-    else:
-        raise ValueError(f"Unknown advertising format: {ad_format}")
 
     eligible = {}
     for provider, weight in weights.items():
@@ -118,6 +204,10 @@ def eligible_provider_weights(ad_format):
             continue
         eligible[provider] = weight
     return eligible
+
+
+def has_eligible_provider(ad_format):
+    return bool(eligible_provider_weights(ad_format))
 
 
 def weighted_provider_order(ad_format, *, rng=None):
@@ -150,3 +240,23 @@ def clickaine_popunder_script_url():
 
 def clickaine_vast_url():
     return _http_url_setting("CLICKAINE_VAST_URL")
+
+
+def partner_popunder_url(*, rng=None, click_id=None):
+    offers = _partner_popunder_offers()
+    total = sum((offer["weight"] for offer in offers), Decimal("0"))
+    random_source = rng or random.random
+    bucket = Decimal(str(random_source())) * total
+    cursor = Decimal("0")
+    selected = offers[-1]
+    for offer in offers:
+        cursor += offer["weight"]
+        if bucket < cursor:
+            selected = offer
+            break
+
+    raw_click_id = click_id or secrets.token_urlsafe(16)
+    encoded_click_id = quote(str(raw_click_id), safe="")
+    url = selected["url_template"].replace("CLICKID", encoded_click_id)
+    separator = "&" if "?" in url else "?"
+    return url + separator + "focus=0"

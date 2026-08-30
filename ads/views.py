@@ -8,6 +8,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model, login, logout
 from django.contrib.auth.forms import AuthenticationForm
 from django.core import signing
+from django.core.exceptions import ImproperlyConfigured
 from django.core.cache import cache
 from django.core.signing import BadSignature, SignatureExpired
 from django.db import transaction
@@ -16,6 +17,7 @@ from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonRespon
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from ledger.models import DepositSession, TokenWallet
@@ -26,6 +28,7 @@ from ledger.services import (
     get_wallet_available_balance,
 )
 
+from .cooldowns import mark_cooldown
 from .forms import AdCampaignForm, AdCreativeForm
 from .models import AdCampaign, AdCampaignCreative, AdCreative
 from .providers import (
@@ -36,6 +39,8 @@ from .providers import (
     PROVIDER_PARTNER,
     clickaine_popunder_script_url,
     clickaine_vast_url,
+    has_eligible_provider,
+    partner_popunder_url,
     weighted_provider_order,
 )
 from .runtime import (
@@ -772,29 +777,36 @@ def _empty_vast():
     )
 
 
+def _empty_vmap():
+    return _no_store(
+        HttpResponse(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<vmap:VMAP version="1.0" '
+            'xmlns:vmap="http://www.iab.net/videosuite/vmap"></vmap:VMAP>',
+            content_type="application/xml",
+        )
+    )
+
+
+
 @never_cache
 @require_GET
 def ads_vmap(request):
+    if getattr(request, "is_googlebot_verified", False):
+        return _empty_vmap()
+    try:
+        if not has_eligible_provider(FORMAT_IN_VIDEO):
+            return _empty_vmap()
+    except ImproperlyConfigured:
+        return _empty_vmap()
+
     midroll_offset = str(
-        getattr(settings, "ADS_MIDROLL_TIME_OFFSET", "50%")
-        or "50%"
+        getattr(settings, "ADS_MIDROLL_TIME_OFFSET", "50%") or "50%"
     )
     breaks = (
-        (
-            "start",
-            "preroll",
-            AdCampaign.PLACEMENT_PREROLL,
-        ),
-        (
-            midroll_offset,
-            "midroll",
-            AdCampaign.PLACEMENT_MIDROLL,
-        ),
-        (
-            "end",
-            "postroll",
-            AdCampaign.PLACEMENT_POSTROLL,
-        ),
+        ("start", "preroll", AdCampaign.PLACEMENT_PREROLL),
+        (midroll_offset, "midroll", AdCampaign.PLACEMENT_MIDROLL),
+        ("end", "postroll", AdCampaign.PLACEMENT_POSTROLL),
     )
 
     chunks = [
@@ -802,24 +814,16 @@ def ads_vmap(request):
         '<vmap:VMAP version="1.0" '
         'xmlns:vmap="http://www.iab.net/videosuite/vmap">',
     ]
-
     for time_offset, break_id, slot in breaks:
         tag_url = request.build_absolute_uri(
-            reverse(
-                "ads_vast",
-                kwargs={"slot": slot},
-            )
+            reverse("ads_vast", kwargs={"slot": slot})
         )
         chunks.extend(
             [
-                (
-                    f'<vmap:AdBreak timeOffset="{time_offset}" '
-                    f'breakType="linear" breakId="{break_id}">'
-                ),
-                (
-                    f'<vmap:AdSource id="{break_id}" '
-                    'allowMultipleAds="false" followRedirects="true">'
-                ),
+                f'<vmap:AdBreak timeOffset="{time_offset}" '
+                f'breakType="linear" breakId="{break_id}">',
+                f'<vmap:AdSource id="{break_id}" '
+                'allowMultipleAds="false" followRedirects="true">',
                 '<vmap:AdTagURI templateType="vast3"><![CDATA['
                 + _cdata(tag_url)
                 + ']]></vmap:AdTagURI>',
@@ -827,14 +831,11 @@ def ads_vmap(request):
                 '</vmap:AdBreak>',
             ]
         )
-
     chunks.append("</vmap:VMAP>")
     return _no_store(
-        HttpResponse(
-            "".join(chunks),
-            content_type="application/xml",
-        )
+        HttpResponse("".join(chunks), content_type="application/xml")
     )
+
 
 
 def _internal_vast_material(slot):
@@ -899,10 +900,11 @@ def _internal_vast_ad(request, candidate, has_fallback):
     )
 
 
-def _clickaine_vast_ad(request, vast_url, has_fallback):
+
+def _clickaine_vast_ad(request, vast_url, has_fallback, slot):
     impression_url = request.build_absolute_uri(
         reverse("clickaine_vast_impression")
-    )
+    ) + "?slot=" + quote(str(slot), safe="")
     return (
         '<Ad id="clickaine"><Wrapper '
         + _vast_wrapper_attributes(has_fallback)
@@ -919,6 +921,8 @@ def _clickaine_vast_ad(request, vast_url, has_fallback):
     )
 
 
+
+
 @never_cache
 @require_GET
 def ads_vast(request, slot):
@@ -932,14 +936,22 @@ def ads_vast(request, slot):
     if getattr(request, "is_googlebot_verified", False):
         return _empty_vast()
 
+    try:
+        provider_order = weighted_provider_order(FORMAT_IN_VIDEO)
+    except ImproperlyConfigured:
+        return _empty_vast()
+
     materials = []
-    for provider in weighted_provider_order(FORMAT_IN_VIDEO):
+    for provider in provider_order:
         if provider == PROVIDER_INTERNAL:
             candidate = _internal_vast_material(slot)
             if candidate is not None:
                 materials.append((provider, candidate))
         elif provider == PROVIDER_CLICKAINE:
-            materials.append((provider, clickaine_vast_url()))
+            try:
+                materials.append((provider, clickaine_vast_url()))
+            except ImproperlyConfigured:
+                continue
 
     if not materials:
         return _empty_vast()
@@ -948,19 +960,14 @@ def ads_vast(request, slot):
     for index, (provider, material) in enumerate(materials):
         has_fallback = index < len(materials) - 1
         if provider == PROVIDER_INTERNAL:
-            ads.append(
-                _internal_vast_ad(
-                    request,
-                    material,
-                    has_fallback,
-                )
-            )
+            ads.append(_internal_vast_ad(request, material, has_fallback))
         elif provider == PROVIDER_CLICKAINE:
             ads.append(
                 _clickaine_vast_ad(
                     request,
                     material,
                     has_fallback,
+                    slot,
                 )
             )
 
@@ -970,9 +977,9 @@ def ads_vast(request, slot):
         + "".join(ads)
         + '</VAST>'
     )
-    return _no_store(
-        HttpResponse(body, content_type="application/xml")
-    )
+    return _no_store(HttpResponse(body, content_type="application/xml"))
+
+
 
 
 @never_cache
@@ -981,8 +988,13 @@ def ads_popunder(request):
     if getattr(request, "is_googlebot_verified", False):
         return _no_store(HttpResponse(status=204))
 
+    try:
+        provider_order = weighted_provider_order(FORMAT_POPUNDER)
+    except ImproperlyConfigured:
+        return _no_store(HttpResponse(status=204))
+
     providers = []
-    for provider in weighted_provider_order(FORMAT_POPUNDER):
+    for provider in provider_order:
         if provider == PROVIDER_INTERNAL:
             try:
                 payload = reserve(AdCampaign.PLACEMENT_POPUNDER)
@@ -993,8 +1005,7 @@ def ads_popunder(request):
             providers.append(
                 {
                     "name": PROVIDER_INTERNAL,
-                    "campaign_id": payload["campaign_id"],
-                    "creative_id": payload["creative_id"],
+                    "delivery": "url",
                     "open_url": reverse(
                         "direct_ad_open",
                         kwargs={"token": payload["event_token"]},
@@ -1002,34 +1013,66 @@ def ads_popunder(request):
                 }
             )
         elif provider == PROVIDER_CLICKAINE:
+            try:
+                script_url = clickaine_popunder_script_url()
+            except ImproperlyConfigured:
+                continue
             providers.append(
                 {
                     "name": PROVIDER_CLICKAINE,
-                    "script_url": clickaine_popunder_script_url(),
+                    "delivery": "script",
+                    "script_url": script_url,
                 }
             )
         elif provider == PROVIDER_PARTNER:
-            providers.append({"name": PROVIDER_PARTNER})
+            try:
+                open_url = partner_popunder_url()
+            except ImproperlyConfigured:
+                continue
+            providers.append(
+                {
+                    "name": PROVIDER_PARTNER,
+                    "delivery": "url",
+                    "open_url": open_url,
+                }
+            )
 
     if not providers:
         return _no_store(HttpResponse(status=204))
     return _no_store(JsonResponse({"providers": providers}))
 
 
+
+
+@csrf_exempt
+@never_cache
+@require_POST
+def ads_popunder_consume(request):
+    mark_cooldown(request, FORMAT_POPUNDER)
+    return _no_store(HttpResponse(status=204))
+
+
 @never_cache
 @require_GET
 def clickaine_vast_impression(request):
+    if request.GET.get("slot") == AdCampaign.PLACEMENT_PREROLL:
+        mark_cooldown(request, FORMAT_IN_VIDEO)
     return _no_store(HttpResponse(status=204))
+
+
 
 
 @require_GET
 def direct_ad_impression(request, token):
     payload = _load_ad_event_token(token)
+    if payload.get("s") == AdCampaign.PLACEMENT_PREROLL:
+        mark_cooldown(request, FORMAT_IN_VIDEO)
     try:
         record_impression(payload)
     except Exception:
         pass
     return _no_store(HttpResponse(status=204))
+
 
 
 @require_GET
@@ -1042,6 +1085,7 @@ def direct_ad_track_click(request, token):
     return _no_store(HttpResponse(status=204))
 
 
+
 @require_GET
 def direct_ad_open(request, token):
     payload = _load_ad_event_token(token)
@@ -1049,17 +1093,19 @@ def direct_ad_open(request, token):
     if not target.startswith(("http://", "https://")):
         raise Http404
 
+    if payload.get("s") == AdCampaign.PLACEMENT_POPUNDER:
+        mark_cooldown(request, FORMAT_POPUNDER)
+
     try:
         record_impression(payload)
     except Exception:
         pass
-
     try:
         record_click(payload)
     except Exception:
         pass
-
     return redirect(target)
+
 
 
 @require_GET

@@ -1,4 +1,12 @@
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+
+from ads.cooldowns import cooldown_elapsed
+from ads.providers import (
+    FORMAT_IN_VIDEO,
+    FORMAT_POPUNDER,
+    has_eligible_provider,
+)
 
 from cms.version import VERSION
 
@@ -52,8 +60,8 @@ def stuff(request):
 
     return ret
 
+
 def ads_flags(request):
-    # Advanced user, paid ad-free user, or Googlebot: no ads.
     is_gbot = getattr(request, "is_googlebot_verified", False)
     is_adv = (
         request.user.is_authenticated
@@ -64,54 +72,31 @@ def ads_flags(request):
         and getattr(request.user, "adFreeUser", False)
     )
 
-    if is_gbot:
+    if is_gbot or is_adv or is_ad_free:
         return {
-            "IS_ADVANCED_USER": False,
-            "IS_AD_FREE_USER": False,
-            "SHOW_PREROLL": False,
-            "SHOW_TABUNDER": False,
-        }
-
-    if is_adv or is_ad_free:
-        return {
-            "IS_ADVANCED_USER": is_adv,
-            "IS_AD_FREE_USER": is_ad_free,
+            "IS_ADVANCED_USER": is_adv if not is_gbot else False,
+            "IS_AD_FREE_USER": is_ad_free if not is_gbot else False,
             "SHOW_PREROLL": False,
             "SHOW_TABUNDER": False,
         }
 
     now = int(time.time())
     media_page = bool(getattr(request, "media_page", False))
-    preroll_eligible = bool(
-        getattr(request, "preroll_eligible", False)
-    )
+    preroll_eligible = bool(getattr(request, "preroll_eligible", False))
 
-    show_tabunder = False
-    if media_page:
-        cooldown_tab = int(settings.TABUNDER_COOLDOWN_SECONDS)
-        last_tab = request.session.get("tabunder_last_ts")
-        if not isinstance(last_tab, int) or last_tab > now:
-            last_tab = None
-        show_tabunder = (
-            last_tab is None
-            or now - last_tab >= cooldown_tab
-        )
+    def can_show(ad_format):
+        try:
+            return (
+                has_eligible_provider(ad_format)
+                and cooldown_elapsed(request, ad_format, now=now)
+            )
+        except ImproperlyConfigured:
+            # Advertising configuration must fail closed without taking the
+            # media page down with it.
+            return False
 
-    show_preroll = False
-    if preroll_eligible:
-        cooldown_pre = int(settings.PREROLLS_COOLDOWN_SECONDS)
-        last_pre = request.session.get("preroll_last_ts")
-        if not isinstance(last_pre, int) or last_pre > now:
-            last_pre = None
-        show_preroll = (
-            last_pre is None
-            or now - last_pre >= cooldown_pre
-        )
-
-    if show_tabunder:
-        request.session["tabunder_last_ts"] = now
-    if show_preroll:
-        request.session["preroll_last_ts"] = now
+    show_tabunder = media_page and can_show(FORMAT_POPUNDER)
+    show_preroll = preroll_eligible and can_show(FORMAT_IN_VIDEO)
 
     return {
         "IS_ADVANCED_USER": False,

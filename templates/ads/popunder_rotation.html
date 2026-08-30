@@ -1,3 +1,4 @@
+
 <script>
 (function () {
   if (window.__mcPopRotationInit) {
@@ -5,63 +6,16 @@
   }
   window.__mcPopRotationInit = true;
 
-  var config = {
+  window.mcPopAdsConfig = {
     tracking: {
       enabled: true,
       beaconDomains: ["coreadness.com"]
     },
-
-    partner: {
-      offers: [
-        {
-          key: "cams",
-          weight: 50,
-          urlTemplate: "https://track.gpsecureads.com/556564ae-1588-4c3a-a795-4684cf4d1da0?var1=celebfakessodaigr&var2=tab&var3=CLICKID"
-        },
-        {
-          key: "dating",
-          weight: 50,
-          urlTemplate: "https://www.instabang.com/tours/?t=best&id=celebfakesgpigr&cmp=tab&ad_id=CLICKID"
-        }
-      ],
-
-      engine: {
-        enableCoverOverlays: true,
-        coverSelectors: ["iframe", "object", "embed", "video"],
-        bindTo: "",
-        ignoreTo: "a[href^='#'], .no-popunder, [data-no-popunder='1']"
-      }
+    interaction: {
+      bindTo: "",
+      ignoreTo: "a[href^='#'], .no-popunder, [data-no-popunder='1']"
     }
   };
-
-  window.mcPopAdsConfig = config;
-
-  function chooseWeightedOffer(offers) {
-    if (!Array.isArray(offers) || !offers.length) {
-      return null;
-    }
-
-    var totalWeight = 0;
-    for (var i = 0; i < offers.length; i += 1) {
-      totalWeight += Math.max(0, Number(offers[i].weight || 0));
-    }
-
-    if (totalWeight <= 0) {
-      return null;
-    }
-
-    var bucket = Math.random() * totalWeight;
-    var cursor = 0;
-
-    for (var j = 0; j < offers.length; j += 1) {
-      cursor += Math.max(0, Number(offers[j].weight || 0));
-      if (bucket < cursor) {
-        return offers[j];
-      }
-    }
-
-    return null;
-  }
 
   function emitProviderChange(runtime) {
     try {
@@ -71,8 +25,34 @@
           data: runtime.providerData
         }
       }));
-    } catch (error) {
-      // ignore
+    } catch (error) {}
+  }
+
+  function consumeCooldown(runtime) {
+    if (runtime.cooldownConsumed) {
+      return;
+    }
+    runtime.cooldownConsumed = true;
+
+    var url = "/api/v1/ads/popunder/consume/";
+    var sent = false;
+    try {
+      if (navigator.sendBeacon) {
+        sent = navigator.sendBeacon(url, new Blob(["1"], { type: "text/plain" }));
+      }
+    } catch (error) {}
+
+    if (!sent && window.fetch) {
+      try {
+        fetch(url, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          keepalive: true,
+          headers: { "Content-Type": "text/plain" },
+          body: "1"
+        }).catch(function () {});
+      } catch (error) {}
     }
   }
 
@@ -82,7 +62,10 @@
     providerQueue: [],
     providerIndex: -1,
     ready: null,
-    chooseWeightedOffer: chooseWeightedOffer,
+    cooldownConsumed: false,
+    consumeCooldown: function () {
+      consumeCooldown(this);
+    },
     advanceProvider: function (expectedProvider) {
       if (
         expectedProvider
@@ -127,6 +110,7 @@
     runtime.providerIndex = -1;
     runtime.providerData = null;
     runtime.chosenProvider = null;
+    emitProviderChange(runtime);
     return null;
   });
 })();

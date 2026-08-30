@@ -58,14 +58,24 @@ AI_GENERATION_N8N_WAKE_SECRET = os.getenv(
 LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
 
 # Advertising delivery controls. This is the single source of truth for
-# provider rotation and ad cooldowns. Provider weights are percentages and
-# must sum to exactly 100.
+# provider rotation and ad cooldowns. Format kill-switches stop the whole
+# pipeline before frontend ad code is injected. Provider weights are scoped
+# per format and each format must sum to exactly 100.
 TABUNDER_COOLDOWN_SECONDS = 180
 PREROLLS_COOLDOWN_SECONDS = 30
+POPUNDER_ADS_ENABLED = False
+IN_VIDEO_ADS_ENABLED = False
 ADS_PROVIDER_WEIGHTS = {
-    "internal": 50,
-    "clickaine": 50,
-    "partner": 0,
+    "popunder": {
+        "internal": 50,
+        "clickaine": 50,
+        "partner": 0,
+    },
+    "in_video": {
+        "internal": 50,
+        "clickaine": 50,
+        "partner": 0,
+    },
 }
 CLICKAINE_POPUNDER_ENABLED = True
 CLICKAINE_POPUNDER_SCRIPT_URL = (
@@ -75,6 +85,16 @@ CLICKAINE_VAST_ENABLED = True
 CLICKAINE_VAST_URL = (
     "https://36707.badylenicesist.com/v2/a/prl/vst/261578"
 )
+ADS_PARTNER_POPUNDER_OFFERS = [
+    {
+        "weight": 50,
+        "url_template": "https://track.gpsecureads.com/556564ae-1588-4c3a-a795-4684cf4d1da0?var1=celebfakessodaigr&var2=tab&var3=CLICKID",
+    },
+    {
+        "weight": 50,
+        "url_template": "https://www.instabang.com/tours/?t=best&id=celebfakesgpigr&cmp=tab&ad_id=CLICKID",
+    },
+]
 
 # ads-min-bids-by-type-v3
 # Human USD amounts. Keep strings to avoid float rounding.

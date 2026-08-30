@@ -1,8 +1,15 @@
+
 <script>
 !function(){
 var sent=0;
 
 addEventListener("pointerdown",function handler(){
+  var runtime=window.mcPopAdsRuntime||null,
+      provider=runtime&&runtime.chosenProvider ? runtime.chosenProvider : "";
+
+  if(!provider){
+    return;
+  }
   removeEventListener("pointerdown",handler,!0);
 
   var originalBeacon=navigator.sendBeacon,
@@ -43,7 +50,6 @@ addEventListener("pointerdown",function handler(){
     if(typeof originalBeacon!=="function"){
       return false;
     }
-
     return originalBeacon.apply(this,arguments);
   };
 
@@ -73,21 +79,27 @@ addEventListener("pointerdown",function handler(){
       }catch(e){}
     }
 
+    if(beaconDetected || popupDetected){
+      if(runtime && typeof runtime.consumeCooldown === "function"){
+        runtime.consumeCooldown();
+      }
+    }
+
     if(sent || typeof plausible!=="function"){
       return;
     }
 
     var attempt=window.mcPopLastAttempt||{},
         success=window.mcPopLastSuccess||{},
-        provider=success.provider||attempt.provider||"",
+        trackedProvider=success.provider||attempt.provider||provider||"",
         offer=success.offer||attempt.offer||"",
-        blocked=(beaconDetected||popupDetected) ? "0" : (attempt.provider ? "1" : "");
+        blocked=(beaconDetected||popupDetected) ? "0" : (trackedProvider ? "1" : "");
 
-    if(beaconDetected || popupDetected || attempt.provider){
+    if(beaconDetected || popupDetected || trackedProvider){
       sent=1;
       plausible("e1", {
         props: {
-          provider: provider,
+          provider: trackedProvider,
           offer: offer,
           blocked: blocked
         }

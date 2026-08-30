@@ -1,0 +1,42 @@
+
+<script>
+(function () {
+  if (!window.mcPopAdsRuntime) {
+    return;
+  }
+
+  var runtime = window.mcPopAdsRuntime;
+  var bootedProviders = {};
+
+  function boot() {
+    var data = runtime.providerData || {};
+    var provider = runtime.chosenProvider;
+    if (!provider || data.delivery !== "script") {
+      return;
+    }
+    if (bootedProviders[provider]) {
+      return;
+    }
+
+    var scriptUrl = String(data.script_url || "");
+    if (!scriptUrl) {
+      runtime.advanceProvider(provider);
+      return;
+    }
+
+    bootedProviders[provider] = true;
+    var script = document.createElement("script");
+    script.src = scriptUrl;
+    script.async = true;
+    script.dataset.mcProvider = provider;
+    script.onerror = function () {
+      delete bootedProviders[provider];
+      runtime.advanceProvider(provider);
+    };
+    document.body.appendChild(script);
+  }
+
+  document.addEventListener("mcPopProviderChange", boot);
+  Promise.resolve(runtime.ready).then(boot);
+})();
+</script>

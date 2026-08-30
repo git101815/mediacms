@@ -1,0 +1,228 @@
+
+<script>
+(function () {
+  if (!window.mcPopAdsRuntime || !window.mcPopAdsConfig) {
+    return;
+  }
+  if (window.__mcPopUrlAdapterBooted) {
+    return;
+  }
+  window.__mcPopUrlAdapterBooted = true;
+
+  var runtime = window.mcPopAdsRuntime;
+  var config = window.mcPopAdsConfig;
+  var interaction = config.interaction || {};
+  var isTriggerLocked = false;
+  var pointerMoved = false;
+
+  function plausibleSafe(eventName, props) {
+    if (!config.tracking || !config.tracking.enabled || typeof window.plausible !== "function") {
+      return;
+    }
+    try {
+      window.plausible(eventName, props ? { props: props } : undefined);
+    } catch (error) {}
+  }
+
+  function currentUrlDelivery() {
+    var data = runtime.providerData || {};
+    if (data.delivery !== "url") {
+      return null;
+    }
+    var url = String(data.open_url || "");
+    if (!url) {
+      return null;
+    }
+    return {
+      provider: runtime.chosenProvider,
+      url: url
+    };
+  }
+
+  function looksUsable(handle) {
+    return !!(handle && typeof handle === "object" && "closed" in handle);
+  }
+
+  function rawOpen(url, name, features) {
+    try {
+      return window.open(url || "", name || "", features || "");
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function openWithReplace(url, name, features) {
+    var popupName = name || String(Math.random());
+    var handle = features ? rawOpen("", popupName, features) : rawOpen("", popupName);
+    if (!handle) {
+      return null;
+    }
+    try {
+      handle.location.replace(url);
+    } catch (error) {
+      try { handle.close(); } catch (closeError) {}
+      return null;
+    }
+    return handle;
+  }
+
+  function installNextClickBlocker() {
+    var blocked = false;
+    function blockClick(event) {
+      if (blocked) {
+        return;
+      }
+      blocked = true;
+      try {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === "function") {
+          event.stopImmediatePropagation();
+        }
+      } catch (error) {}
+      document.removeEventListener("click", blockClick, true);
+    }
+    document.addEventListener("click", blockClick, true);
+    setTimeout(function () {
+      document.removeEventListener("click", blockClick, true);
+    }, 250);
+  }
+
+  function markAttempt(delivery) {
+    window.mcPopLastAttempt = {
+      provider: delivery.provider,
+      offer: delivery.provider,
+      mode: "tabunder",
+      ts: Date.now()
+    };
+  }
+
+  function markSuccess(delivery) {
+    window.mcPopLastSuccess = {
+      provider: delivery.provider,
+      offer: delivery.provider,
+      mode: "tabunder",
+      ts: Date.now()
+    };
+    runtime.consumeCooldown();
+    plausibleSafe("popunder_open", {
+      provider: delivery.provider,
+      offer: delivery.provider,
+      blocked: "0"
+    });
+  }
+
+  function markBlocked(delivery) {
+    plausibleSafe("popunder_blocked", {
+      provider: delivery.provider,
+      offer: delivery.provider,
+      mode: "tabunder",
+      blocked: "1"
+    });
+  }
+
+  function consumeOriginalEvent(event, triggerEventName) {
+    try {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
+    } catch (error) {}
+    if (triggerEventName !== "click") {
+      installNextClickBlocker();
+    }
+  }
+
+  function openTrueTabunder(delivery, event, triggerEventName) {
+    var cloneUrl = String(window.location.href || "");
+    markAttempt(delivery);
+
+    // Do not consume the user's original click until a continuation tab has
+    // actually been opened. If the browser blocks the popup, the player/link
+    // keeps receiving its normal event.
+    var cloneHandle = openWithReplace(cloneUrl, String(Math.random()), "");
+    if (!looksUsable(cloneHandle)) {
+      markBlocked(delivery);
+      return false;
+    }
+
+    consumeOriginalEvent(event, triggerEventName);
+
+    try {
+      window.location.replace(delivery.url);
+    } catch (error) {
+      try {
+        window.location.assign(delivery.url);
+      } catch (innerError) {
+        markBlocked(delivery);
+        return false;
+      }
+    }
+
+    markSuccess(delivery);
+    return true;
+  }
+
+  function shouldIgnoreTarget(target) {
+    if (!target || !target.closest) {
+      return false;
+    }
+    if (interaction.ignoreTo && target.closest(interaction.ignoreTo)) {
+      return true;
+    }
+    if (interaction.bindTo && !target.closest(interaction.bindTo)) {
+      return true;
+    }
+    return false;
+  }
+
+  function handleTrigger(event, triggerEventName) {
+    if (isTriggerLocked || !event || shouldIgnoreTarget(event.target)) {
+      return;
+    }
+
+    var delivery = currentUrlDelivery();
+    if (!delivery) {
+      var data = runtime.providerData || {};
+      if (runtime.chosenProvider && data.delivery === "url") {
+        runtime.advanceProvider(runtime.chosenProvider);
+      }
+      return;
+    }
+
+    isTriggerLocked = true;
+    if (!openTrueTabunder(delivery, event, triggerEventName)) {
+      setTimeout(function () {
+        isTriggerLocked = false;
+      }, 150);
+    }
+  }
+
+  var ua = String(navigator.userAgent || "").toLowerCase();
+  var isFirefox = ua.indexOf("firefox") !== -1;
+  var isMobile = /android|iphone|ipad|ipod|mobile/.test(ua) || window.innerWidth < 900;
+
+  if (isMobile) {
+    document.addEventListener("touchstart", function () {
+      pointerMoved = false;
+    }, { capture: true, passive: true });
+    document.addEventListener("touchmove", function () {
+      pointerMoved = true;
+    }, { capture: true, passive: true });
+    document.addEventListener("touchend", function (event) {
+      if (!pointerMoved) {
+        handleTrigger(event, "touchend");
+      }
+    }, { capture: true, passive: false });
+  } else if (isFirefox) {
+    document.addEventListener("click", function (event) {
+      handleTrigger(event, "click");
+    }, { capture: true, passive: false });
+  } else {
+    document.addEventListener("mousedown", function (event) {
+      handleTrigger(event, "mousedown");
+    }, { capture: true, passive: false });
+  }
+})();
+</script>
