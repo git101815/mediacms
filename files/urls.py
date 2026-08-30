@@ -293,8 +293,6 @@ urlpatterns = [
     re_path(r"^manage/users$", views.manage_users, name="manage_users"),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
-if hasattr(settings, "USE_SAML") and settings.USE_SAML:
-    urlpatterns.append(re_path(r"^saml/metadata", views.saml_metadata, name="saml-metadata"))
 
 if hasattr(settings, "USE_IDENTITY_PROVIDERS") and settings.USE_IDENTITY_PROVIDERS:
     urlpatterns.append(path('accounts/login_system', LoginView.as_view(), name='login_system'))

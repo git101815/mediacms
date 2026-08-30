@@ -21,7 +21,7 @@ This has been tested only in Ubuntu Linux 22 and 24. Make sure you check the scr
     esac
 done
 
-apt-get update && apt-get -y upgrade && apt-get install pkg-config python3-venv python3-dev virtualenv redis-server postgresql nginx git gcc vim unzip imagemagick procps libxml2-dev libxmlsec1-dev libxmlsec1-openssl python3-certbot-nginx certbot wget xz-utils -y
+apt-get update && apt-get -y upgrade && apt-get install python3-venv python3-dev virtualenv redis-server postgresql nginx git gcc vim unzip imagemagick procps python3-certbot-nginx certbot wget xz-utils -y
 
 # install ffmpeg
 echo "Downloading and installing ffmpeg"
@@ -51,7 +51,7 @@ cd /home/mediacms.io
 virtualenv . --python=python3
 source  /home/mediacms.io/bin/activate
 cd mediacms
-pip install --no-binary lxml,xmlsec -r requirements.txt
+pip install -r requirements.txt
 
 SECRET_KEY=`python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'`
 

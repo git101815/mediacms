@@ -12,32 +12,10 @@ from identity_providers.models import (
     IdentityProviderCategoryMapping,
     IdentityProviderGlobalRole,
     IdentityProviderGroupRole,
-    IdentityProviderUserLog,
     LoginOption,
 )
 from rbac.models import RBACGroup
-from saml_auth.models import SAMLConfiguration
 
-
-class IdentityProviderUserLogAdmin(admin.ModelAdmin):
-    list_display = [
-        'identity_provider',
-        'user',
-        'created_at',
-    ]
-
-    list_filter = ['identity_provider', 'created_at']
-
-    search_fields = ['identity_provider__name', 'user__username', 'user__email', 'logs']
-
-    readonly_fields = ['identity_provider', 'user', 'created_at', 'logs']
-
-
-class SAMLConfigurationInline(admin.StackedInline):
-    model = SAMLConfiguration
-    extra = 0
-    can_delete = True
-    max_num = 1
 
 
 class IdentityProviderCategoryMappingInlineForm(forms.ModelForm):
@@ -139,9 +117,6 @@ class CustomSocialAppAdmin(SocialAppAdmin):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.inlines = []
-
-        if getattr(settings, 'USE_SAML', False):
-            self.inlines.append(SAMLConfigurationInline)
         self.inlines.append(IdentityProviderGlobalRoleInline)
         self.inlines.append(IdentityProviderGroupRoleInline)
         self.inlines.append(RBACGroupInline)
@@ -157,12 +132,12 @@ class CustomSocialAppAdmin(SocialAppAdmin):
         field = super().formfield_for_dbfield(db_field, **kwargs)
         if db_field.name == 'provider':
             field.label = 'Protocol'
-            field.help_text = "The provider type, eg `google`. For SAML providers, make sure this is set to `saml` lowercase."
+            field.help_text = "The provider type, eg `google`."
         elif db_field.name == 'name':
             field.label = 'IDP Config Name'
             field.help_text = "This should be a unique name for the provider."
         elif db_field.name == 'client_id':
-            field.help_text = 'App ID, or consumer key. For SAML providers, this will be part of the default login URL /accounts/saml/{client_id}/login/'
+            field.help_text = 'App ID, or consumer key for this provider.'
         elif db_field.name == 'sites':
             field.required = True
             field.help_text = "Select at least one site where this social application is available. Required."
@@ -340,14 +315,10 @@ class LoginOptionAdmin(admin.ModelAdmin):
 
 
 if getattr(settings, 'USE_IDENTITY_PROVIDERS', False):
-    admin.site.register(IdentityProviderUserLog, IdentityProviderUserLogAdmin)
     admin.site.unregister(SocialToken)
 
     # This is unregistering the default Social App and registers the custom one here,
     # with mostly name setting options
-    IdentityProviderUserLog._meta.verbose_name = "User Logs"
-    IdentityProviderUserLog._meta.verbose_name_plural = "User Logs"
-
     SocialAccount._meta.verbose_name = "User Account"
     SocialAccount._meta.verbose_name_plural = "User Accounts"
     admin.site.unregister(SocialApp)

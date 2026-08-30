@@ -44,7 +44,6 @@ def stuff(request):
     ret["RSS_URL"] = "/rss"
     ret["TRANSLATION"] = get_translation(request.LANGUAGE_CODE)
     ret["REPLACEMENTS"] = get_translation_strings(request.LANGUAGE_CODE)
-    ret["USE_SAML"] = settings.USE_SAML
     ret["USE_RBAC"] = settings.USE_RBAC
     ret["USE_ROUNDED_CORNERS"] = settings.USE_ROUNDED_CORNERS
     ret["VERSION"] = VERSION

@@ -39,11 +39,7 @@ RUN apt-get update -y && \
         supervisor \
         nginx \
         imagemagick \
-        procps \
-        pkg-config \
-        libxml2-dev \
-        libxmlsec1-dev \
-        libxmlsec1-openssl && \
+        procps && \
     install -d /usr/share/postgresql-common/pgdg && \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc && \
@@ -66,7 +62,7 @@ COPY requirements.txt requirements-dev.txt ./
 
 ARG DEVELOPMENT_MODE=False
 
-RUN pip install --no-cache-dir --no-binary lxml,xmlsec -r requirements.txt && \
+RUN pip install --no-cache-dir -r requirements.txt && \
     if [ "$DEVELOPMENT_MODE" = "True" ]; then \
         echo "Installing development dependencies..." && \
         pip install --no-cache-dir -r requirements-dev.txt; \

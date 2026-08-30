@@ -319,8 +319,6 @@ INSTALLED_APPS = [
     "uploader.apps.UploaderConfig",
     "djcelery_email",
     "drf_yasg",
-    "allauth.socialaccount.providers.saml",
-    "saml_auth.apps.SamlAuthConfig",
 ]
 
 MIDDLEWARE = [
@@ -648,7 +646,6 @@ ADS_CPC_PRIOR_CTR_PPM = 10000
 
 # this are used around a number of places and will need to be well documented!!!
 
-USE_SAML = False
 USE_RBAC = False
 USE_IDENTITY_PROVIDERS = False
 JAZZMIN_UI_TWEAKS = {"theme": "flatly"}

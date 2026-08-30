@@ -18,7 +18,6 @@ class AdminCustomizationsConfig(AppConfig):
 
             email_model = None
             rbac_group_model = None
-            identity_providers_user_log_model = None
             identity_providers_login_option = None
             auth_app = None
             rbac_app = None
@@ -46,8 +45,6 @@ class AdminCustomizationsConfig(AppConfig):
                     models_to_check = list(app['models'])
 
                     for model in models_to_check:
-                        if model['object_name'] == 'IdentityProviderUserLog':
-                            identity_providers_user_log_model = model
                         if model['object_name'] == 'LoginOption':
                             identity_providers_login_option = model
                 elif app['app_label'] == 'socialaccount':
@@ -59,11 +56,9 @@ class AdminCustomizationsConfig(AppConfig):
                 auth_app['models'].append(rbac_group_model)
             if identity_providers_login_option and socialaccount_app:
                 socialaccount_app['models'].append(identity_providers_login_option)
-            if identity_providers_user_log_model and socialaccount_app:
-                socialaccount_app['models'].append(identity_providers_user_log_model)
 
             # 2. don't include the following apps
-            apps_to_hide = ['authtoken', 'auth', 'account', 'saml_auth', 'rbac']
+            apps_to_hide = ['authtoken', 'auth', 'account', 'rbac']
             if not getattr(settings, 'USE_RBAC', False):
                 apps_to_hide.append('rbac')
             if not getattr(settings, 'USE_IDENTITY_PROVIDERS', False):
