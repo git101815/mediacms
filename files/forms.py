@@ -31,7 +31,6 @@ class MediaMetadataForm(forms.ModelForm):
             "state",
             "enable_comments",
             "allow_download",
-            "thumbnail_time",
             "dfans_video_url",
         )
 
@@ -39,17 +38,14 @@ class MediaMetadataForm(forms.ModelForm):
             "new_tags": MultipleSelect(),
             "description": forms.Textarea(attrs={'rows': 4}),
             "add_date": forms.DateTimeInput(attrs={'type': 'datetime-local'},format='%Y-%m-%dT%H:%M'),
-            "thumbnail_time": forms.NumberInput(attrs={'min': 0, 'step': 0.1}),
         }
         labels = {
             "friendly_token": "Slug",
             "uploaded_poster": "Poster Image",
-            "thumbnail_time": "Thumbnail Time (seconds)",
         }
         help_texts = {
             "title": "",
             "friendly_token": "Media URL slug",
-            "thumbnail_time": "Select the time in seconds for the video thumbnail",
             "uploaded_poster": "Maximum file size: 5MB",
         }
 
@@ -58,8 +54,6 @@ class MediaMetadataForm(forms.ModelForm):
         super(MediaMetadataForm, self).__init__(*args, **kwargs)
         if not getattr(settings, 'ALLOW_CUSTOM_MEDIA_URLS', False):
             self.fields.pop("friendly_token")
-        if self.instance.media_type != "video":
-            self.fields.pop("thumbnail_time")
         if self.instance.media_type == "image":
             self.fields.pop("uploaded_poster")
 
@@ -83,8 +77,6 @@ class MediaMetadataForm(forms.ModelForm):
             CustomField('state'),
         )
 
-        if self.instance.media_type == "video":
-            self.helper.layout.append(CustomField('thumbnail_time'))
         if getattr(settings, 'ALLOW_CUSTOM_MEDIA_URLS', False):
             self.helper.layout.insert(0, CustomField('friendly_token'))
 

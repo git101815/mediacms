@@ -327,7 +327,6 @@ class Media(models.Model):
 
     # keep track if media file has changed, on saves
     __original_media_file = None
-    __original_thumbnail_time = None
     __original_uploaded_poster = None
 
     class Meta:
@@ -343,13 +342,8 @@ class Media(models.Model):
 
     def __init__(self, *args, **kwargs):
         super(Media, self).__init__(*args, **kwargs)
-        # keep track if media file has changed, on saves
-        # thus know when another media was uploaded
-        # or when thumbnail time change - for videos to
-        # grep for thumbnail, or even when a new image
-        # was added as the media poster
+        # Keep track of fields whose changes require post-save handling.
         self.__original_media_file = self.media_file
-        self.__original_thumbnail_time = self.thumbnail_time
         self.__original_uploaded_poster = self.uploaded_poster
 
     def save(self, *args, **kwargs):
@@ -360,10 +354,6 @@ class Media(models.Model):
         for item in strip_text_items:
             setattr(self, item, strip_tags(getattr(self, item, None)))
         self.title = self.title[:99]
-
-        # if thumbnail_time specified, keep up to single digit
-        if self.thumbnail_time:
-            self.thumbnail_time = round(self.thumbnail_time, 1)
 
         # by default get an add_date of now
         if not self.add_date:
@@ -386,11 +376,6 @@ class Media(models.Model):
                 self.__original_media_file = self.media_file
                 self.media_init()
 
-            # for video files, if user specified a different time
-            # to automatically grub thumbnail
-            if self.thumbnail_time != self.__original_thumbnail_time:
-                self.__original_thumbnail_time = self.thumbnail_time
-                self.set_thumbnail(force=True)
         else:
             # media is going to be created now
             # after media is saved, post_save signal will call media_init function
