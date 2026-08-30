@@ -12,7 +12,10 @@ from ledger.models import (
     LedgerTransaction,
     TokenWallet,
 )
-from ledger.services import get_system_wallet
+from ledger.services import (
+    consume_promotional_tokens_for_internal_spend,
+    get_system_wallet,
+)
 
 from .models import AdCampaign, AdSettlementBatch
 from .runtime import (
@@ -129,9 +132,19 @@ def _post_batch_to_ledger(batch):
             if existing_txn:
                 ledger_txn = existing_txn
             else:
+                promotional_spent = consume_promotional_tokens_for_internal_spend(
+                    wallet, amount
+                )
+                withdrawable_spent = amount - promotional_spent
                 with suppress_wallet_runtime_sync():
                     wallet.balance = int(wallet.balance) - amount
-                    wallet.save(update_fields=["balance", "updated_at"])
+                    wallet.save(
+                        update_fields=[
+                            "balance",
+                            "promotional_balance",
+                            "updated_at",
+                        ]
+                    )
 
                 platform_wallet.balance = int(platform_wallet.balance) + amount
                 platform_wallet.save(update_fields=["balance", "updated_at"])
@@ -148,6 +161,8 @@ def _post_batch_to_ledger(batch):
                         "impressions": int(batch.impressions),
                         "clicks": int(batch.clicks),
                         "amount_microtokens": amount,
+                        "promotional_spent_units": promotional_spent,
+                        "withdrawable_spent_units": withdrawable_spent,
                     },
                     metadata_version=LEDGER_METADATA_VERSION,
                 )
@@ -155,6 +170,7 @@ def _post_batch_to_ledger(batch):
                     txn=ledger_txn,
                     wallet=wallet,
                     delta=-amount,
+                    promotional_delta=-promotional_spent,
                     balance_after=wallet.balance,
                 )
                 LedgerEntry.objects.create(

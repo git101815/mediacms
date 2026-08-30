@@ -165,6 +165,10 @@ class TokenWallet(models.Model):
     system_key = models.CharField(max_length=32, choices=SYSTEM_CHOICES, null=True, blank=True, unique=True)
 
     balance = models.BigIntegerField(default=0)
+    # Subset of ``balance`` issued by promotional systems (daily rewards,
+    # quests, referrals, reward chests). Promotional units are spendable on
+    # internal products but are never withdrawable or transferable.
+    promotional_balance = models.BigIntegerField(default=0)
     allow_negative = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
@@ -208,6 +212,27 @@ class TokenWallet(models.Model):
             models.CheckConstraint(
                 condition=models.Q(held_balance__gte=0),
                 name="tokenwallet_held_balance_gte_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(promotional_balance__gte=0),
+                name="tokenwallet_promotional_balance_gte_0",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(wallet_type=SYSTEM_WALLET_TYPE, promotional_balance=0)
+                    | (
+                        models.Q(
+                            wallet_type=USER_WALLET_TYPE,
+                            allow_negative=True,
+                            promotional_balance=0,
+                        )
+                    )
+                    | (
+                        models.Q(wallet_type=USER_WALLET_TYPE)
+                        & models.Q(balance__gte=models.F("promotional_balance"))
+                    )
+                ),
+                name="tokenwallet_promotional_balance_valid",
             ),
             models.CheckConstraint(
                 condition=models.Q(balance__gte=models.F("held_balance")) | models.Q(allow_negative=True),
@@ -390,6 +415,10 @@ class LedgerEntry(ImmutableLedgerRow):
         db_index=True,
     )
     delta = models.BigIntegerField()
+    # Promotional component of ``delta``. It has the same sign as delta and
+    # its absolute value can never exceed the total entry delta. System-wallet
+    # entries always use zero. This makes funding provenance auditable.
+    promotional_delta = models.BigIntegerField(default=0)
     balance_after = models.BigIntegerField()
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
 
@@ -402,6 +431,22 @@ class LedgerEntry(ImmutableLedgerRow):
             models.CheckConstraint(
                 condition=~models.Q(delta=0),
                 name="ledgerentry_delta_non_zero",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(promotional_delta=0)
+                    | (
+                        models.Q(delta__gt=0)
+                        & models.Q(promotional_delta__gt=0)
+                        & models.Q(promotional_delta__lte=models.F("delta"))
+                    )
+                    | (
+                        models.Q(delta__lt=0)
+                        & models.Q(promotional_delta__lt=0)
+                        & models.Q(promotional_delta__gte=models.F("delta"))
+                    )
+                ),
+                name="ledgerentry_promotional_delta_valid",
             ),
         ]
         permissions = [

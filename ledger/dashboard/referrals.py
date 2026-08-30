@@ -178,17 +178,8 @@ def assign_referrer_from_signup(*, request, user):
 
 
 def _purchase_amount_units(purchase: LedgerTransaction, invitee_id: int) -> int:
-    metadata = purchase.metadata or {}
-    for key in ("price_tokens", "amount_units"):
-        value = metadata.get(key)
-        if value not in (None, ""):
-            try:
-                normalized = int(value)
-            except (TypeError, ValueError):
-                continue
-            if normalized > 0:
-                return normalized
-
+    # Referral qualification is based on money-backed spend only. A referred
+    # account must not be able to recycle free rewards into a referrer payout.
     entry = (
         purchase.entries.filter(
             wallet__user_id=invitee_id,
@@ -197,7 +188,24 @@ def _purchase_amount_units(purchase: LedgerTransaction, invitee_id: int) -> int:
         .order_by("id")
         .first()
     )
-    return abs(int(entry.delta)) if entry is not None else 0
+    if entry is not None:
+        total_spent = abs(int(entry.delta))
+        promotional_spent = max(0, -int(entry.promotional_delta))
+        return max(0, total_spent - promotional_spent)
+
+    # Legacy/fault-tolerance fallback for malformed transactions that have no
+    # user ledger entry. New transactions always use the entry above.
+    metadata = purchase.metadata or {}
+    for key in ("withdrawable_spent_units", "amount_units", "price_tokens"):
+        value = metadata.get(key)
+        if value not in (None, ""):
+            try:
+                normalized = int(value)
+            except (TypeError, ValueError):
+                continue
+            if normalized > 0:
+                return normalized
+    return 0
 
 
 def _wallet_block_reason(wallet: TokenWallet) -> str:
@@ -339,8 +347,13 @@ def award_referral_for_purchase(*, purchase_txn_id: int) -> dict:
     ).hexdigest()
 
     user_wallet.balance = int(user_wallet.balance) + reward_units
+    user_wallet.promotional_balance = (
+        int(user_wallet.promotional_balance) + reward_units
+    )
     issuance_wallet.balance = int(issuance_wallet.balance) - reward_units
-    user_wallet.save(update_fields=["balance", "updated_at"])
+    user_wallet.save(
+        update_fields=["balance", "promotional_balance", "updated_at"]
+    )
     issuance_wallet.save(update_fields=["balance", "updated_at"])
 
     reward_txn = LedgerTransaction.objects.create(
@@ -365,6 +378,7 @@ def award_referral_for_purchase(*, purchase_txn_id: int) -> dict:
         txn=reward_txn,
         wallet=user_wallet,
         delta=reward_units,
+        promotional_delta=reward_units,
         balance_after=user_wallet.balance,
     )
     LedgerEntry.objects.create(
