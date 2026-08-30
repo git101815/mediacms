@@ -4,7 +4,7 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
-from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
