@@ -436,6 +436,7 @@ class TestDailyRewards(BaseLedgerTestCase):
 
         lower_tier = tiers[0]
         upper_tier = tiers[1]
+        self.assertEqual(upper_tier["min_amount"], 14)
         below_threshold = config.get_daily_reward_asset_definition(
             "coins",
             amount_tokens=upper_tier["min_amount"] - 1,
@@ -466,6 +467,7 @@ class TestDailyRewards(BaseLedgerTestCase):
             below_threshold["image"],
             at_threshold["image"],
         )
+        self.assertEqual(upper_tier["min_amount"] - 1, 13)
 
     def test_daily_reward_context_uses_large_coin_asset_at_threshold(self):
         tiers = config.DAILY_REWARD_ASSETS["coins"]["tiers"]

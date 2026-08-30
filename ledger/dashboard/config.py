@@ -65,8 +65,8 @@ WALLET_ASSETS = {
 
 # Amount tiers are evaluated from the highest matching ``min_amount``.
 # Current split:
-#   1-29 tokens  -> few_coins.png
-#   30+ tokens   -> coin_pile.png
+#   1-13 tokens  -> few_coins.png
+#   14+ tokens   -> coin_pile.png
 DAILY_REWARD_ASSETS = {
     "coins": {
         "button_asset": "token_icon",
@@ -76,7 +76,7 @@ DAILY_REWARD_ASSETS = {
                 "image_asset": "daily_reward_coins_few",
             },
             {
-                "min_amount": 30,
+                "min_amount": 14,
                 "image_asset": "daily_reward_coins_pile",
             },
         ),
