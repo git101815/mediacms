@@ -370,53 +370,77 @@ def consume_promotional_tokens_for_internal_spend(
     return promotional_spent
 
 
-def get_wallet_available_balance(wallet: TokenWallet) -> int:
-    available = int(wallet.balance) - int(wallet.held_balance)
-    if wallet.wallet_type == TokenWallet.TYPE_USER and wallet.user_id:
-        try:
-            user = wallet.user
-        except Exception:
-            user = None
+def _get_wallet_unsettled_ads_reservation(wallet: TokenWallet) -> int:
+    if wallet.wallet_type != TokenWallet.TYPE_USER or not wallet.user_id:
+        return 0
 
-        # Unsettled Ads spend remains reserved even if advertiserUser is later
-        # removed. Campaigns are retained in the database, so their existence
-        # is the durable indicator that this wallet can still have Redis-metered
-        # spend waiting for settlement. Superusers can also own Ads campaigns
-        # without advertiserUser.
-        has_ads_exposure = bool(
-            user is not None
-            and (
-                getattr(user, "advertiserUser", False)
-                or getattr(user, "is_superuser", False)
-                or user.ad_campaigns.exists()
-            )
+    try:
+        user = wallet.user
+    except Exception:
+        user = None
+
+    # Unsettled Ads spend remains reserved even if advertiserUser is later
+    # removed. Campaigns are retained in the database, so their existence is
+    # the durable indicator that this wallet can still have Redis-metered spend
+    # waiting for settlement. Superusers can also own Ads campaigns without
+    # advertiserUser.
+    has_ads_exposure = bool(
+        user is not None
+        and (
+            getattr(user, "advertiserUser", False)
+            or getattr(user, "is_superuser", False)
+            or user.ad_campaigns.exists()
         )
-        if has_ads_exposure:
-            try:
-                from ads.runtime import get_account_unsettled_microtokens
+    )
+    if not has_ads_exposure:
+        return 0
 
-                available -= int(
-                    get_account_unsettled_microtokens(wallet.user_id)
-                )
-            except Exception as exc:
-                # Wallet outflows fail closed whenever this account can still
-                # have unsettled advertising spend.
-                raise ValidationError(
-                    "Advertising balance is temporarily unavailable"
-                ) from exc
+    try:
+        from ads.runtime import get_account_unsettled_microtokens
+
+        return max(
+            0,
+            int(get_account_unsettled_microtokens(wallet.user_id)),
+        )
+    except Exception as exc:
+        # Wallet outflows fail closed whenever this account can still have
+        # unsettled advertising spend.
+        raise ValidationError(
+            "Advertising balance is temporarily unavailable"
+        ) from exc
+
+
+def get_wallet_available_balance(wallet: TokenWallet) -> int:
+    available = (
+        int(wallet.balance)
+        - int(wallet.held_balance)
+        - _get_wallet_unsettled_ads_reservation(wallet)
+    )
     return max(0, available)
 
 
 def get_wallet_withdrawable_balance(wallet: TokenWallet) -> int:
     """Return cash-out eligible units only.
 
-    ``get_wallet_available_balance`` remains the spendable balance and may
-    include promotional units. Cash-out subtracts the promotional bucket as
-    well as normal holds/unsettled Ads reservations.
+    Promotional units are spendable internally but not cash-outable. Unsettled
+    Ads spend is itself an internal purchase and consumes promotional units
+    first, so only the part not covered by promotional balance reserves cash.
+    Withdrawal holds are always cash-only because request creation validates
+    this function before increasing ``held_balance``.
     """
-    available = get_wallet_available_balance(wallet)
+    if wallet.wallet_type != TokenWallet.TYPE_USER:
+        return get_wallet_available_balance(wallet)
+
     promotional = get_wallet_promotional_balance(wallet)
-    return max(0, available - promotional)
+    cash_balance = max(0, int(wallet.balance) - promotional)
+    held_cash = max(0, int(wallet.held_balance))
+    unsettled_ads = _get_wallet_unsettled_ads_reservation(wallet)
+    unsettled_ads_cash = max(0, unsettled_ads - promotional)
+
+    return max(
+        0,
+        cash_balance - held_cash - unsettled_ads_cash,
+    )
 
 
 def _require_wallet_not_blocked(wallet: TokenWallet):

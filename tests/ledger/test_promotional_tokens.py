@@ -129,3 +129,40 @@ class PromotionalTokenAccountingTests(TestCase):
             referrals._purchase_amount_units(txn, self.user.pk),
             50 * SCALE,
         )
+
+
+class PromotionalReservationAccountingTests(TestCase):
+    def test_unsettled_ads_spend_uses_promotional_balance_before_cash(self):
+        user_model = get_user_model()
+        advertiser = user_model.objects.create_superuser(
+            username="promo-reservation-advertiser",
+            email="promo-reservation@example.com",
+            password="test-password",
+        )
+        wallet = TokenWallet.objects.get(user=advertiser)
+        wallet.balance = 1_000 * SCALE
+        wallet.promotional_balance = 700 * SCALE
+        wallet.held_balance = 100 * SCALE
+        wallet.allow_negative = False
+        wallet.save(
+            update_fields=[
+                "balance",
+                "promotional_balance",
+                "held_balance",
+                "allow_negative",
+                "updated_at",
+            ]
+        )
+
+        with mock.patch(
+            "ads.runtime.get_account_unsettled_microtokens",
+            return_value=200 * SCALE,
+        ):
+            self.assertEqual(
+                get_wallet_available_balance(wallet),
+                700 * SCALE,
+            )
+            self.assertEqual(
+                get_wallet_withdrawable_balance(wallet),
+                200 * SCALE,
+            )
