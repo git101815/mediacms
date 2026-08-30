@@ -525,3 +525,47 @@ def test_generic_media_detail_uses_premium_only_when_explicitly_requested(client
 
     assert payload["premium"]["viewer_has_unlock"] is True
     assert "https://private.example.com/full.mp4" in serialized
+
+
+@pytest.mark.django_db
+def test_promotional_purchase_stays_promotional_for_creator(
+    django_user_model,
+    settings,
+):
+    settings.PREMIUM_CREATOR_SHARE_BPS = 8000
+
+    creator = django_user_model.objects.create_user(
+        username="creator_promo_purchase"
+    )
+    buyer = django_user_model.objects.create_user(
+        username="buyer_promo_purchase"
+    )
+    media = create_test_media(
+        user=creator,
+        friendly_token="promopurchasepremium",
+    )
+    create_ready_asset(media=media, price_tokens=PRICE_TOKENS)
+
+    buyer_wallet = fund_user_wallet(buyer, PRICE_TOKENS)
+    buyer_wallet.promotional_balance = PRICE_TOKENS
+    buyer_wallet.save(update_fields=["promotional_balance", "updated_at"])
+    creator_wallet = fund_user_wallet(creator, 0)
+
+    result = purchase_premium_media_with_tokens(actor=buyer, media=media)
+
+    buyer_wallet.refresh_from_db()
+    creator_wallet.refresh_from_db()
+    txn = MediaPurchase.objects.get(user=buyer, media=media).txn
+
+    assert result["purchased"] is True
+    assert buyer_wallet.balance == 0
+    assert buyer_wallet.promotional_balance == 0
+    assert creator_wallet.balance == 400 * 10**6
+    assert creator_wallet.promotional_balance == 400 * 10**6
+
+    buyer_entry = LedgerEntry.objects.get(txn=txn, wallet=buyer_wallet)
+    creator_entry = LedgerEntry.objects.get(txn=txn, wallet=creator_wallet)
+    assert buyer_entry.promotional_delta == -PRICE_TOKENS
+    assert creator_entry.promotional_delta == 400 * 10**6
+    assert txn.metadata["promotional_spent_units"] == PRICE_TOKENS
+    assert txn.metadata["withdrawable_spent_units"] == 0

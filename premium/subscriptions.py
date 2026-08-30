@@ -20,6 +20,7 @@ from ledger.models import (
 from ledger.services import (
     _create_outbox_event,
     _require_wallet_not_blocked,
+    consume_promotional_tokens_for_internal_spend,
     enforce_wallet_velocity_limits,
     get_system_wallet,
     get_wallet_available_balance,
@@ -301,12 +302,27 @@ def _create_subscription_payment(
         ).encode("utf-8")
     ).hexdigest()
 
+    promotional_spent = consume_promotional_tokens_for_internal_spend(
+        buyer_wallet,
+        price_tokens,
+    )
+    creator_promotional_amount = min(promotional_spent, creator_amount)
+    platform_promotional_consumed = promotional_spent - creator_promotional_amount
+    withdrawable_spent = price_tokens - promotional_spent
+
     buyer_wallet.balance = int(buyer_wallet.balance) - price_tokens
     creator_wallet.balance = int(creator_wallet.balance) + creator_amount
+    creator_wallet.promotional_balance = (
+        int(creator_wallet.promotional_balance) + creator_promotional_amount
+    )
     platform_wallet.balance = int(platform_wallet.balance) + platform_amount
 
-    buyer_wallet.save(update_fields=["balance", "updated_at"])
-    creator_wallet.save(update_fields=["balance", "updated_at"])
+    buyer_wallet.save(
+        update_fields=["balance", "promotional_balance", "updated_at"]
+    )
+    creator_wallet.save(
+        update_fields=["balance", "promotional_balance", "updated_at"]
+    )
     platform_wallet.save(update_fields=["balance", "updated_at"])
 
     txn = LedgerTransaction.objects.create(
@@ -326,6 +342,10 @@ def _create_subscription_payment(
             "price_tokens": price_tokens,
             "creator_amount": creator_amount,
             "platform_amount": platform_amount,
+            "promotional_spent_units": promotional_spent,
+            "withdrawable_spent_units": withdrawable_spent,
+            "creator_promotional_units": creator_promotional_amount,
+            "platform_promotional_consumed_units": platform_promotional_consumed,
         },
         metadata_version=LEDGER_METADATA_VERSION,
     )
@@ -334,6 +354,7 @@ def _create_subscription_payment(
         txn=txn,
         wallet=buyer_wallet,
         delta=-price_tokens,
+        promotional_delta=-promotional_spent,
         balance_after=buyer_wallet.balance,
     )
 
@@ -342,6 +363,7 @@ def _create_subscription_payment(
             txn=txn,
             wallet=creator_wallet,
             delta=creator_amount,
+            promotional_delta=creator_promotional_amount,
             balance_after=creator_wallet.balance,
         )
 

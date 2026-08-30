@@ -167,7 +167,8 @@ class TokenWallet(models.Model):
     balance = models.BigIntegerField(default=0)
     # Subset of ``balance`` issued by promotional systems (daily rewards,
     # quests, referrals, reward chests). Promotional units are spendable on
-    # internal products but are never withdrawable or transferable.
+    # internal products and may be withdrawn only within the operator-configured
+    # promotional withdrawal ratio. Ordinary user-to-user transfers stay cash-only.
     promotional_balance = models.BigIntegerField(default=0)
     allow_negative = models.BooleanField(default=False)
 

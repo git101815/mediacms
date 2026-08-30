@@ -1131,3 +1131,49 @@ def test_renewal_task_continues_after_one_subscription_crashes():
             "payment_failed": 1,
         },
     }
+
+
+@pytest.mark.django_db
+def test_promotional_subscription_payment_stays_promotional_for_creator(
+    django_user_model,
+    settings,
+):
+    settings.PREMIUM_SUBSCRIPTION_CREATOR_SHARE_BPS = 8000
+
+    creator = create_user(
+        django_user_model,
+        "sub_creator_promo_payment",
+        creator=True,
+    )
+    subscriber = create_user(
+        django_user_model,
+        "sub_buyer_promo_payment",
+    )
+    plan = create_plan(creator, price_tokens=10 * TOKEN_SCALE)
+
+    buyer_wallet = fund_wallet(subscriber, 10 * TOKEN_SCALE)
+    buyer_wallet.promotional_balance = 10 * TOKEN_SCALE
+    buyer_wallet.save(update_fields=["promotional_balance", "updated_at"])
+    creator_wallet = fund_wallet(creator, 0)
+
+    result = subscribe_at(
+        actor=subscriber,
+        plan=plan,
+        when=timezone.now().replace(microsecond=0),
+    )
+
+    buyer_wallet.refresh_from_db()
+    creator_wallet.refresh_from_db()
+    txn = result["period"].txn
+
+    assert buyer_wallet.balance == 0
+    assert buyer_wallet.promotional_balance == 0
+    assert creator_wallet.balance == 8 * TOKEN_SCALE
+    assert creator_wallet.promotional_balance == 8 * TOKEN_SCALE
+
+    buyer_entry = LedgerEntry.objects.get(txn=txn, wallet=buyer_wallet)
+    creator_entry = LedgerEntry.objects.get(txn=txn, wallet=creator_wallet)
+    assert buyer_entry.promotional_delta == -10 * TOKEN_SCALE
+    assert creator_entry.promotional_delta == 8 * TOKEN_SCALE
+    assert txn.metadata["promotional_spent_units"] == 10 * TOKEN_SCALE
+    assert txn.metadata["withdrawable_spent_units"] == 0

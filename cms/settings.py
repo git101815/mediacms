@@ -51,6 +51,10 @@ LEDGER_DEPOSIT_OPEN_COOLDOWN_THRESHOLD = 3
 LEDGER_DEPOSIT_OPEN_COOLDOWN_WINDOW_SECONDS = 5 * 60
 LEDGER_DEPOSIT_OPEN_COOLDOWN_SECONDS = 15 * 60
 
+# Maximum promotional/free-token share allowed in a withdrawal.
+# 0 = cash-only withdrawals, 100 = promotional tokens may be fully withdrawn.
+LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT = 50
+
 LEDGER_DEPOSIT_SESSION_EXPIRATION_TASK_LIMIT = int(
     os.environ.get("LEDGER_DEPOSIT_SESSION_EXPIRATION_TASK_LIMIT", "500")
 )

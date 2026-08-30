@@ -133,7 +133,9 @@ def _post_batch_to_ledger(batch):
                 ledger_txn = existing_txn
             else:
                 promotional_spent = consume_promotional_tokens_for_internal_spend(
-                    wallet, amount
+                    wallet,
+                    amount,
+                    reserve_unsettled_ads=False,
                 )
                 withdrawable_spent = amount - promotional_spent
                 with suppress_wallet_runtime_sync():

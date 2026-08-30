@@ -139,6 +139,11 @@ LEDGER_DEPOSIT_OPEN_COOLDOWN_THRESHOLD = 3
 LEDGER_DEPOSIT_OPEN_COOLDOWN_WINDOW_SECONDS = 5 * 60
 LEDGER_DEPOSIT_OPEN_COOLDOWN_SECONDS = 15 * 60
 
+# Maximum promotional/free-token share allowed in a withdrawal.
+# Change this operator setting without changing ledger code.
+# 0 = cash-only, 50 = at most half promo, 100 = fully promo allowed.
+LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT = 50
+
 MALUM_ENABLED = "false"
 MALUM_MERCHANT_ID = os.getenv("MALUM_MERCHANT_ID", "").strip()
 MALUM_PRIVATE_KEY = os.getenv("MALUM_PRIVATE_KEY", "").strip()

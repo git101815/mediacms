@@ -41,9 +41,10 @@ class PromotionalTokenAccountingTests(TestCase):
             ]
         )
 
+    @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=50)
     def test_available_and_withdrawable_balances_are_distinct(self):
         self.assertEqual(get_wallet_available_balance(self.wallet), 900 * SCALE)
-        self.assertEqual(get_wallet_withdrawable_balance(self.wallet), 200 * SCALE)
+        self.assertEqual(get_wallet_withdrawable_balance(self.wallet), 400 * SCALE)
 
     def test_internal_spend_consumes_promotional_first(self):
         spent = consume_promotional_tokens_for_internal_spend(
@@ -53,14 +54,69 @@ class PromotionalTokenAccountingTests(TestCase):
         self.assertEqual(spent, 250 * SCALE)
         self.assertEqual(self.wallet.promotional_balance, 450 * SCALE)
 
-    def test_withdrawal_cannot_reserve_promotional_tokens(self):
+    @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=50)
+    def test_withdrawal_reserves_promotional_tokens_up_to_ratio(self):
+        request = create_wallet_withdrawal_request(
+            actor=self.user,
+            wallet=self.wallet,
+            amount="400",
+            destination_address="test-destination",
+        )
+        self.wallet.refresh_from_db()
+        request.hold.refresh_from_db()
+        self.assertEqual(self.wallet.held_balance, 500 * SCALE)
+        self.assertEqual(request.metadata["cash_reserved_units"], 200 * SCALE)
+        self.assertEqual(request.metadata["promotional_reserved_units"], 200 * SCALE)
+        self.assertEqual(request.metadata["promotional_withdrawal_percent"], 50)
+        self.assertEqual(request.hold.metadata["promotional_reserved_units"], 200 * SCALE)
+
+    @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=50)
+    def test_withdrawal_above_ratio_capacity_is_rejected(self):
         with self.assertRaisesMessage(ValidationError, "Insufficient withdrawable balance"):
             create_wallet_withdrawal_request(
                 actor=self.user,
                 wallet=self.wallet,
-                amount="201",
+                amount="401",
                 destination_address="test-destination",
             )
+
+    @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=0)
+    def test_zero_percent_is_cash_only(self):
+        self.assertEqual(get_wallet_withdrawable_balance(self.wallet), 200 * SCALE)
+
+    @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=100)
+    def test_hundred_percent_allows_all_available_promo(self):
+        self.assertEqual(get_wallet_withdrawable_balance(self.wallet), 900 * SCALE)
+
+    @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=50)
+    def test_pending_withdrawal_cannot_reuse_reserved_promo_or_cash(self):
+        self.wallet.held_balance = 0
+        self.wallet.save(update_fields=["held_balance", "updated_at"])
+        first = create_wallet_withdrawal_request(
+            actor=self.user,
+            wallet=self.wallet,
+            amount="600",
+            destination_address="first-destination",
+        )
+        self.assertEqual(first.metadata["cash_reserved_units"], 300 * SCALE)
+        self.assertEqual(first.metadata["promotional_reserved_units"], 300 * SCALE)
+        self.wallet.refresh_from_db()
+        self.assertEqual(get_wallet_withdrawable_balance(self.wallet), 0)
+        with self.assertRaisesMessage(ValidationError, "Insufficient withdrawable balance"):
+            create_wallet_withdrawal_request(
+                actor=self.user,
+                wallet=self.wallet,
+                amount="1",
+                destination_address="second-destination",
+            )
+
+    @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=101)
+    def test_invalid_promotional_withdrawal_percent_fails_closed(self):
+        with self.assertRaisesMessage(
+            ValidationError,
+            "LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT must be between 0 and 100",
+        ):
+            get_wallet_withdrawable_balance(self.wallet)
 
     def test_user_to_user_purchase_preserves_promotional_provenance(self):
         user_model = get_user_model()
@@ -164,5 +220,5 @@ class PromotionalReservationAccountingTests(TestCase):
             )
             self.assertEqual(
                 get_wallet_withdrawable_balance(wallet),
-                200 * SCALE,
+                400 * SCALE,
             )
