@@ -76,6 +76,8 @@ services:
       DEPOSIT_EVM_ACCOUNT_XPUB: ${DEPOSIT_EVM_ACCOUNT_XPUB}
       DFX_SWEEPER_SIGNER_BASE_URL: http://dfx_signer_service:8080
       SECRET_KEY: ${SECRET_KEY}
+      SKILLFLOW_PARTNER_KEY: ${SKILLFLOW_PARTNER_KEY}
+      SKILLFLOW_WEBHOOK_SECRET: ${SKILLFLOW_WEBHOOK_SECRET}
       LEDGER_INTERNAL_GATEWAY_SECRET: ${LEDGER_INTERNAL_GATEWAY_SECRET}
       MEDIACMS_INTERNAL_GATEWAY_SECRET: ${MEDIACMS_INTERNAL_GATEWAY_SECRET}
       MEDIACMS_INTERNAL_GATEWAY_HEADER: ${MEDIACMS_INTERNAL_GATEWAY_HEADER}
@@ -443,4 +445,3 @@ secrets:
     file: ../mediacms-secrets/sweeper/bsc_funding_private_key.txt
   polygon_sweeper_funding_private_key:
     file: ../mediacms-secrets/sweeper/polygon_funding_private_key.txt
-
