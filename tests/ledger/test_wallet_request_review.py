@@ -1,4 +1,6 @@
-from ledger.models import WalletRequest
+from django.test import override_settings
+
+from ledger.models import LedgerEntry, WalletRequest
 from ledger.services import (
     apply_ledger_transaction,
     complete_wallet_withdrawal_request,
@@ -106,3 +108,38 @@ class TestWalletRequestReview(BaseLedgerTestCase):
         self.assertEqual(self.w1.balance, 3_000_000)
         self.assertEqual(self.w1.held_balance, 0)
         self.assertEqual(external_asset_clearing_wallet.balance, 2_000_000)
+
+    @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=50)
+    def test_pending_withdrawal_keeps_creation_time_promotional_ratio(self):
+        self.w1.balance = 6_000_000
+        self.w1.promotional_balance = 3_000_000
+        self.w1.held_balance = 0
+        self.w1.save(
+            update_fields=["balance", "promotional_balance", "held_balance", "updated_at"]
+        )
+        wallet_request = create_wallet_withdrawal_request(
+            actor=self.u1,
+            wallet=self.w1,
+            amount="6",
+            destination_address="0xratio000000000000000000000000000000000001",
+        )
+        self.assertEqual(wallet_request.metadata["cash_reserved_units"], 3_000_000)
+        self.assertEqual(wallet_request.metadata["promotional_reserved_units"], 3_000_000)
+
+        with override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=0):
+            completed = complete_wallet_withdrawal_request(
+                actor=self.operator,
+                wallet_request=wallet_request,
+                payout_txid="0xratiopaid00000000000000000000000000000001",
+            )
+
+        self.w1.refresh_from_db()
+        entry = LedgerEntry.objects.get(txn=completed.linked_ledger_txn, wallet=self.w1)
+        self.assertEqual(self.w1.balance, 0)
+        self.assertEqual(self.w1.promotional_balance, 0)
+        self.assertEqual(entry.delta, -6_000_000)
+        self.assertEqual(entry.promotional_delta, -3_000_000)
+        self.assertEqual(
+            completed.linked_ledger_txn.metadata["promotional_withdrawal_percent"],
+            50,
+        )

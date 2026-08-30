@@ -83,6 +83,7 @@ class TokenWalletAdmin(ReadOnlyAdmin):
         "wallet_type",
         "system_key",
         "balance",
+        "promotional_balance",
         "held_balance",
         "risk_status",
         "review_required",
@@ -92,7 +93,13 @@ class TokenWalletAdmin(ReadOnlyAdmin):
     )
     list_filter = ("wallet_type", "risk_status", "review_required", "allow_negative")
     search_fields = ("user__username", "user__email")
-    readonly_fields = ("user", "balance", "created_at", "updated_at")
+    readonly_fields = (
+        "user",
+        "balance",
+        "promotional_balance",
+        "created_at",
+        "updated_at",
+    )
 
 class WalletRequestReviewAdminForm(forms.ModelForm):
     ACTION_NONE = ""
@@ -291,9 +298,24 @@ class LedgerTransactionAdmin(ReadOnlyAdmin):
 
 @admin.register(LedgerEntry)
 class LedgerEntryAdmin(ReadOnlyAdmin):
-    list_display = ("id", "txn", "wallet", "delta", "balance_after", "created_at")
+    list_display = (
+        "id",
+        "txn",
+        "wallet",
+        "delta",
+        "promotional_delta",
+        "balance_after",
+        "created_at",
+    )
     search_fields = ("wallet__user__username", "txn__id")
-    readonly_fields = ("txn", "wallet", "delta", "balance_after", "created_at")
+    readonly_fields = (
+        "txn",
+        "wallet",
+        "delta",
+        "promotional_delta",
+        "balance_after",
+        "created_at",
+    )
 
 @admin.register(LedgerOutbox)
 class LedgerOutboxAdmin(ReadOnlyAdmin):

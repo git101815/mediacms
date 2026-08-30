@@ -313,8 +313,13 @@ def open_reward_chest(*, user, grant, at=None) -> dict:
         raise ValidationError("Reward Chest ledger transaction exists but grant is not opened")
 
     user_wallet.balance = int(user_wallet.balance) + amount
+    user_wallet.promotional_balance = (
+        int(user_wallet.promotional_balance) + amount
+    )
     issuance_wallet.balance = int(issuance_wallet.balance) - amount
-    user_wallet.save(update_fields=["balance", "updated_at"])
+    user_wallet.save(
+        update_fields=["balance", "promotional_balance", "updated_at"]
+    )
     issuance_wallet.save(update_fields=["balance", "updated_at"])
 
     txn = LedgerTransaction.objects.create(
@@ -337,6 +342,7 @@ def open_reward_chest(*, user, grant, at=None) -> dict:
         txn=txn,
         wallet=user_wallet,
         delta=amount,
+        promotional_delta=amount,
         balance_after=user_wallet.balance,
     )
     LedgerOutbox.objects.create(

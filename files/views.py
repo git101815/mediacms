@@ -103,6 +103,7 @@ from ledger.models import (
 )
 from ledger.services import (
     get_wallet_available_balance,
+    get_wallet_withdrawable_balance,
     get_wallet_velocity_amount,
     create_wallet_withdrawal_request,
     open_user_deposit_session,
@@ -560,7 +561,9 @@ def _wallet_checkout_method_keys(
 ) -> tuple[str, ...]:
     if payment_method_type == "crypto":
         return ("crypto",)
-    if provider_key in {SKILLFLOW_PROVIDER_KEY, MALUM_PROVIDER_KEY}:
+    if provider_key == SKILLFLOW_PROVIDER_KEY:
+        return ("card", "apple_pay", "google_pay")
+    if provider_key == MALUM_PROVIDER_KEY:
         return ("card",)
     if provider_key == BANXA_PROVIDER_KEY:
         return ("card", "apple_pay", "google_pay")
@@ -2119,6 +2122,9 @@ def _build_guest_wallet_context(request) -> dict:
         "total_balance_display": balance_display,
         "available_balance_display": balance_display,
         "available_balance_units": balance_units,
+        "promotional_balance_display": "0",
+        "withdrawable_balance_display": balance_display,
+        "withdrawable_balance_units": balance_units,
         "held_balance_display": "0",
         "wallet_status_display": "Preview",
         "active_tab": active_tab,
@@ -2214,6 +2220,7 @@ def wallet(request):
     wallet_obj.refresh_from_db(
         fields=[
             "balance",
+            "promotional_balance",
             "held_balance",
             "risk_status",
             "review_required",
@@ -2233,12 +2240,16 @@ def wallet(request):
         page_number = 1
 
     available_balance = get_wallet_available_balance(wallet_obj)
+    withdrawable_balance = get_wallet_withdrawable_balance(wallet_obj)
     can_view_risk_reason = request.user.is_superuser or request.user.has_perm("ledger.can_view_wallet_risk")
     recent_request_rows = _build_wallet_request_rows(
         wallet_obj,
         active_status=active_status,
     )
-    wallet_actions = _build_wallet_action_state(wallet=wallet_obj, available_balance=available_balance)
+    wallet_actions = _build_wallet_action_state(
+        wallet=wallet_obj,
+        available_balance=withdrawable_balance,
+    )
 
     wallet_banner = None
     if wallet_obj.risk_status == LEDGER_RISK_STATUS_BLOCKED:
@@ -2289,6 +2300,13 @@ def wallet(request):
         "total_balance_display": _format_platform_token_amount(wallet_obj.balance),
         "available_balance_display": _format_platform_token_amount(available_balance),
         "available_balance_units": int(available_balance),
+        "promotional_balance_display": _format_platform_token_amount(
+            wallet_obj.promotional_balance
+        ),
+        "withdrawable_balance_display": _format_platform_token_amount(
+            withdrawable_balance
+        ),
+        "withdrawable_balance_units": int(withdrawable_balance),
         "held_balance_display": _format_platform_token_amount(wallet_obj.held_balance),
         "wallet_status_display": wallet_obj.get_risk_status_display(),
         "active_tab": active_tab,

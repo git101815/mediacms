@@ -285,7 +285,9 @@
         </header>
         <div class="wallet-dashboard-status__stats">
           <article><span>Total</span><strong>{{ total_balance_display }}</strong></article>
-          <article><span>Available</span><strong>{{ available_balance_display }}</strong></article>
+          <article><span>Available to spend</span><strong>{{ available_balance_display }}</strong></article>
+          <article><span>Promotional</span><strong>{{ promotional_balance_display }}</strong></article>
+          <article><span>Cash-out eligible</span><strong>{{ withdrawable_balance_display }}</strong></article>
           <article><span>On hold</span><strong>{{ held_balance_display }}</strong></article>
         </div>
         <div class="wallet-dashboard-status__activity">
@@ -916,7 +918,7 @@
       action="{{ wallet_withdrawal_request_url }}"
       class="wallet-withdraw__form"
       data-wallet-withdraw-form
-      data-wallet-withdraw-available-units="{{ available_balance_units }}"
+      data-wallet-withdraw-available-units="{{ withdrawable_balance_units }}"
     >
       {% csrf_token %}
       <input type="hidden" name="return_tab" value="{{ active_tab }}">
@@ -973,7 +975,7 @@
   >
 
   <div class="wallet-field__hint">
-    Available: {{ available_balance_display }} tokens
+    Cash-out eligible: {{ withdrawable_balance_display }} tokens
   </div>
 
       <label class="wallet-field">

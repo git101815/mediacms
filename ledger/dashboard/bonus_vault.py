@@ -122,12 +122,15 @@ def _get_total_eligible_spend_units(*, wallet: TokenWallet) -> int:
     if start_at is not None:
         filters["created_at__gte"] = start_at
 
-    signed_total = (
-        LedgerEntry.objects.filter(**filters)
-        .aggregate(total=Sum("delta"))
-        .get("total")
+    totals = LedgerEntry.objects.filter(**filters).aggregate(
+        total=Sum("delta"),
+        promotional_total=Sum("promotional_delta"),
     )
-    return max(0, -int(signed_total or 0))
+    signed_total = int(totals.get("total") or 0)
+    signed_promotional = int(totals.get("promotional_total") or 0)
+    # Debit entries are negative. Removing their promotional component leaves
+    # only spend backed by deposited/earned-withdrawable funds.
+    return max(0, -(signed_total - signed_promotional))
 
 
 def _grant_threshold_units(grant: RewardChestGrant, current_threshold: int) -> int:

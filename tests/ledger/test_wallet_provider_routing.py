@@ -156,12 +156,24 @@ class TestWalletProviderRouting(SimpleTestCase):
                 return_value=None,
             ),
             patch(
+                "files.views.get_skillflow_deposit_option",
+                return_value=None,
+            ),
+            patch(
                 "files.views.get_paygate_deposit_options",
                 return_value=paygate_options,
             ),
             patch(
                 "files.views.get_dfx_deposit_options",
                 return_value=dfx_options,
+            ),
+            patch(
+                "files.views.get_mtpelerin_deposit_options",
+                return_value=[],
+            ),
+            patch(
+                "files.views.get_banxa_deposit_options",
+                return_value=[],
             ),
             patch(
                 "files.views.list_available_deposit_options",
