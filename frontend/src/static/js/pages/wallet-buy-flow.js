@@ -121,9 +121,8 @@
     paymentMethodKey: '',
     paymentMethodLabel: '',
     paymentMethodType: '',
-    paymentRequiresRouteSelection: false,
+    providerKey: '',
     paymentOpenNewTab: false,
-    paymentPriceMode: 'fixed',
     assetKey: '',
     routeKey: '',
   };
@@ -170,6 +169,29 @@
     return '<span class="wallet-buy-flow__choice-icon-fallback">' + escapeHtml(fallbackLabel || '') + '</span>';
   }
 
+  function getMethodDefinitions() {
+    const form = getBuyForm();
+    if (!form) {
+      return [];
+    }
+
+    return Array.from(form.querySelectorAll('[data-wallet-checkout-method]')).map(function (node) {
+      return {
+        key: node.getAttribute('data-method-key') || '',
+        label: node.getAttribute('data-method-label') || '',
+        subtitle: node.getAttribute('data-method-subtitle') || '',
+        icon: node.getAttribute('data-method-icon') || '',
+        iconPath: node.getAttribute('data-method-icon-path') || '',
+        order: Number(node.getAttribute('data-method-order') || 100),
+      };
+    }).sort(function (a, b) {
+      if (a.order !== b.order) {
+        return a.order - b.order;
+      }
+      return String(a.label || '').localeCompare(String(b.label || ''));
+    });
+  }
+
   function getRouteOptions() {
     const form = getBuyForm();
     if (!form) {
@@ -179,6 +201,9 @@
     return Array.from(form.querySelectorAll('[data-wallet-route-option]')).map(function (node) {
       const assetCode = node.getAttribute('data-asset-code') || '';
       const assetGroupKey = node.getAttribute('data-asset-group-key') || assetCode;
+      const checkoutMethodKeys = String(
+        node.getAttribute('data-checkout-method-keys') || ''
+      ).split(/\s+/).filter(Boolean);
 
       return {
         key: node.getAttribute('data-option-key') || '',
@@ -189,13 +214,16 @@
         paymentGroupLabel: node.getAttribute('data-payment-group-label') || '',
         paymentGroupIcon: node.getAttribute('data-payment-group-icon') || '',
         paymentGroupIconPath: node.getAttribute('data-payment-group-icon-path') || '',
+        checkoutMethodKeys: checkoutMethodKeys,
+        checkoutProviderKey: node.getAttribute('data-checkout-provider-key') || '',
+        checkoutProviderLabel: node.getAttribute('data-checkout-provider-label') || '',
+        checkoutProviderOrder: Number(node.getAttribute('data-checkout-provider-order') || 100),
+        checkoutProviderOptionLabel: node.getAttribute('data-checkout-provider-option-label') || '',
         paymentPriceFixedCanonical: Number(node.getAttribute('data-payment-price-fixed-canonical') || 0),
         paymentPriceBps: Number(node.getAttribute('data-payment-price-bps') || 0),
         paymentCurrency: node.getAttribute('data-payment-currency') || 'USD',
         paymentCurrencySymbol: node.getAttribute('data-payment-currency-symbol') || '$',
         paymentCurrencyUsdRate: Number(node.getAttribute('data-payment-currency-usd-rate') || 1),
-        paymentRequiresRouteSelection:
-          node.getAttribute('data-payment-requires-route-selection') === 'true',
         paymentOpenNewTab:
           node.getAttribute('data-payment-open-new-tab') === 'true',
         paymentPriceMode: node.getAttribute('data-payment-price-mode') || 'fixed',
@@ -240,52 +268,43 @@
     return getRouteOptions().filter(routeSupportsSelectedPack);
   }
 
-  function getPaymentMethods() {
-    const map = new Map();
-
-    getAvailableRouteOptions().forEach(function (option) {
-      const groupKey = option.paymentGroupKey || option.paymentMethodKey;
-      if (!groupKey) {
-        return;
-      }
-
-      if (!map.has(groupKey)) {
-        map.set(groupKey, {
-          key: groupKey,
-          label: option.paymentGroupLabel || option.paymentMethodLabel || option.assetCode,
-          icon: option.paymentGroupIcon || option.paymentGroupLabel || option.assetCode,
-          iconPath: option.paymentGroupIconPath || '',
-          type: option.paymentMethodType || 'crypto',
-          priceBps: option.paymentPriceBps || 0,
-          priceFixedCanonical: option.paymentPriceFixedCanonical || 0,
-          currency: option.paymentCurrency || 'USD',
-          currencySymbol: option.paymentCurrencySymbol || '$',
-          currencyUsdRate: option.paymentCurrencyUsdRate || 1,
-          requiresRouteSelection: Boolean(
-            option.paymentRequiresRouteSelection ||
-            option.paymentMethodType === 'crypto'
-          ),
-          openNewTab: Boolean(option.paymentOpenNewTab),
-          priceMode: option.paymentPriceMode || 'fixed',
-          routes: [],
-        });
-      }
-
-      const method = map.get(groupKey);
-      method.routes.push(option);
-      method.openNewTab = (
-        method.openNewTab ||
-        Boolean(option.paymentOpenNewTab)
-      );
-    });
-
-    return Array.from(map.values());
-  }
-
   function getRoutesForPaymentMethod(paymentMethodKey) {
     return getAvailableRouteOptions().filter(function (option) {
-      return (option.paymentGroupKey || option.paymentMethodKey) === paymentMethodKey;
+      return option.checkoutMethodKeys.indexOf(paymentMethodKey) !== -1;
     });
+  }
+
+  function getPaymentMethods() {
+    return getMethodDefinitions().map(function (definition) {
+      const routes = getRoutesForPaymentMethod(definition.key);
+      if (!routes.length) {
+        return null;
+      }
+      const providerKeys = new Set();
+      const assetKeys = new Set();
+      routes.forEach(function (route) {
+        if (route.checkoutProviderKey) {
+          providerKeys.add(route.checkoutProviderKey);
+        }
+        if (route.assetGroupKey || route.assetCode) {
+          assetKeys.add(route.assetGroupKey || route.assetCode);
+        }
+      });
+      return {
+        key: definition.key,
+        label: definition.label,
+        subtitle: definition.subtitle,
+        icon: definition.icon,
+        iconPath: definition.iconPath,
+        order: definition.order,
+        type: routes.every(function (route) {
+          return route.paymentMethodType === 'crypto';
+        }) ? 'crypto' : 'provider',
+        providerCount: providerKeys.size,
+        assetCount: assetKeys.size,
+        routes: routes,
+      };
+    }).filter(Boolean);
   }
 
   function getRouteByKey(routeKey) {
@@ -294,13 +313,45 @@
     }) || null;
   }
 
+  function getProvidersForPaymentMethod(paymentMethodKey) {
+    const map = new Map();
+
+    getRoutesForPaymentMethod(paymentMethodKey).forEach(function (option) {
+      const key = option.checkoutProviderKey;
+      if (!key) {
+        return;
+      }
+      if (!map.has(key)) {
+        map.set(key, {
+          key: key,
+          label: option.checkoutProviderLabel || key,
+          order: option.checkoutProviderOrder || 100,
+          routes: [],
+        });
+      }
+      map.get(key).routes.push(option);
+    });
+
+    return Array.from(map.values()).sort(function (a, b) {
+      if (a.order !== b.order) {
+        return a.order - b.order;
+      }
+      return String(a.label || '').localeCompare(String(b.label || ''));
+    });
+  }
+
+  function getRoutesForSelectedProvider() {
+    return getRoutesForPaymentMethod(buyState.paymentMethodKey).filter(function (option) {
+      return option.checkoutProviderKey === buyState.providerKey;
+    });
+  }
+
   function getAssetsForPaymentMethod(paymentMethodKey) {
     const map = new Map();
 
     getRoutesForPaymentMethod(paymentMethodKey)
       .filter(function (option) {
-        return option.paymentMethodType === 'crypto' ||
-          option.paymentRequiresRouteSelection;
+        return option.paymentMethodType === 'crypto';
       })
       .forEach(function (option) {
         const key = option.assetGroupKey || option.assetCode;
@@ -369,24 +420,19 @@
     buyState.paymentMethodKey = method ? method.key : '';
     buyState.paymentMethodLabel = method ? method.label : '';
     buyState.paymentMethodType = method ? method.type : '';
-    buyState.paymentRequiresRouteSelection = Boolean(
-      method && method.requiresRouteSelection
-    );
-    buyState.paymentOpenNewTab = Boolean(
-      method && method.openNewTab
-    );
-    buyState.paymentPriceMode = method ? method.priceMode || 'fixed' : 'fixed';
-    syncBuyFormTarget();
 
     const hiddenKey = document.querySelector('[data-wallet-selected-payment-method-key]');
     const hiddenType = document.querySelector('[data-wallet-selected-payment-method-type]');
-
     if (hiddenKey) {
       hiddenKey.value = buyState.paymentMethodKey;
     }
     if (hiddenType) {
       hiddenType.value = buyState.paymentMethodType;
     }
+  }
+
+  function setSelectedProvider(providerKey) {
+    buyState.providerKey = providerKey || '';
   }
 
   function setSelectedAsset(assetKey) {
@@ -416,13 +462,22 @@
 
   function setSelectedRoute(routeKey) {
     buyState.routeKey = routeKey || '';
+    const route = getRouteByKey(buyState.routeKey);
+    buyState.paymentOpenNewTab = Boolean(route && route.paymentOpenNewTab);
+    syncBuyFormTarget();
 
     const hidden = document.querySelector('[data-wallet-selected-route]');
     if (hidden) {
       hidden.value = buyState.routeKey;
     }
 
-    syncHiddenPaymentFromRoute(getRouteByKey(buyState.routeKey));
+    syncHiddenPaymentFromRoute(route);
+  }
+
+  function resetDownstreamSelection() {
+    setSelectedProvider('');
+    setSelectedAsset('');
+    setSelectedRoute('');
   }
 
   function selectDefaultAssetForPaymentMethod() {
@@ -430,29 +485,28 @@
     setSelectedAsset(assets[0] ? assets[0].key : '');
   }
 
-  function selectDefaultRouteForPaymentMethod() {
-    const methodRoutes = getRoutesForPaymentMethod(buyState.paymentMethodKey);
-
-    if (!buyState.paymentRequiresRouteSelection) {
-      setSelectedRoute(methodRoutes[0] ? methodRoutes[0].key : '');
-      return;
-    }
-
-    if (!buyState.assetKey) {
-      selectDefaultAssetForPaymentMethod();
-    }
-
-    const assetRoutes = getRoutesForSelectedAsset();
-    setSelectedRoute(assetRoutes[0] ? assetRoutes[0].key : '');
+  function selectDefaultProviderForPaymentMethod() {
+    const providers = getProvidersForPaymentMethod(buyState.paymentMethodKey);
+    setSelectedProvider(providers[0] ? providers[0].key : '');
   }
 
-  function getPaymentMethodPriceDisplay(method) {
+  function selectDefaultRouteForCryptoAsset() {
+    const routes = getRoutesForSelectedAsset();
+    setSelectedRoute(routes[0] ? routes[0].key : '');
+  }
+
+  function selectDefaultRouteForProvider() {
+    const routes = getRoutesForSelectedProvider();
+    setSelectedRoute(routes[0] ? routes[0].key : '');
+  }
+
+  function getRoutePriceDisplay(option) {
     const base = Number(buyState.packGrossCanonical || 0);
-    const bps = Number((method && method.priceBps) || 0);
-    const fixed = Number((method && method.priceFixedCanonical) || 0);
-    const currency = String((method && method.currency) || 'USD').toUpperCase();
-    const currencySymbol = String((method && method.currencySymbol) || currency + ' ');
-    const currencyUsdRate = Number((method && method.currencyUsdRate) || 1);
+    const bps = Number((option && option.paymentPriceBps) || 0);
+    const fixed = Number((option && option.paymentPriceFixedCanonical) || 0);
+    const currency = String((option && option.paymentCurrency) || 'USD').toUpperCase();
+    const currencySymbol = String((option && option.paymentCurrencySymbol) || currency + ' ');
+    const currencyUsdRate = Number((option && option.paymentCurrencyUsdRate) || 1);
 
     const percentageFee = Math.round(base * bps / 10000);
     const adjusted = base + fixed + percentageFee;
@@ -475,14 +529,14 @@
     }
 
     const methods = getPaymentMethods();
-    const selectedMethod = methods.find(function (method) {
+    let selectedMethod = methods.find(function (method) {
       return method.key === buyState.paymentMethodKey;
     });
 
     if (!selectedMethod) {
-      setSelectedPaymentMethod(methods[0] || null);
-      selectDefaultAssetForPaymentMethod();
-      selectDefaultRouteForPaymentMethod();
+      selectedMethod = methods[0] || null;
+      setSelectedPaymentMethod(selectedMethod);
+      resetDownstreamSelection();
     }
 
     container.innerHTML = '';
@@ -495,67 +549,112 @@
       );
       button.setAttribute('data-wallet-payment-method-choice', method.key);
 
+      const countText = method.type === 'crypto'
+        ? method.assetCount + ' ' + (method.assetCount === 1 ? 'coin' : 'coins')
+        : method.providerCount + ' ' + (method.providerCount === 1 ? 'provider' : 'providers');
+      const subtitle = [countText, method.subtitle].filter(Boolean).join(' · ');
+
       button.innerHTML =
         '<span class="wallet-buy-flow__choice-icon">' +
           renderChoiceIcon(method.iconPath, method.icon, 'wallet-buy-flow__choice-icon-image') +
         '</span>' +
         '<span class="wallet-buy-flow__choice-copy">' +
           '<span class="wallet-buy-flow__choice-title">' + escapeHtml(method.label) + '</span>' +
-        '</span>' +
-        '<span class="wallet-buy-flow__choice-price">' + escapeHtml(getPaymentMethodPriceDisplay(method)) + '</span>';
-
-      container.appendChild(button);
-    });
-  }
-
-  function renderAssetChoices() {
-    const container = document.querySelector('[data-wallet-asset-choices]');
-    if (!container) {
-      return;
-    }
-
-    const assets = getAssetsForPaymentMethod(buyState.paymentMethodKey);
-
-    if (!buyState.assetKey || !assets.some(function (item) { return item.key === buyState.assetKey; })) {
-      setSelectedAsset(assets[0] ? assets[0].key : '');
-    }
-
-    container.innerHTML = '';
-
-    assets.forEach(function (asset) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'wallet-buy-flow__choice' + (
-        buyState.assetKey === asset.key ? ' wallet-buy-flow__choice--selected' : ''
-      );
-      button.setAttribute('data-wallet-asset-choice', asset.key);
-
-      button.innerHTML =
-        '<span class="wallet-buy-flow__choice-icon">' +
-          renderChoiceIcon(asset.iconPath, asset.label, 'wallet-buy-flow__choice-icon-image') +
-        '</span>' +
-        '<span class="wallet-buy-flow__choice-copy">' +
-          '<span class="wallet-buy-flow__choice-title">' + escapeHtml(asset.label) + '</span>' +
+          '<span class="wallet-buy-flow__choice-subtitle">' + escapeHtml(subtitle) + '</span>' +
         '</span>';
 
       container.appendChild(button);
     });
   }
 
-  function renderNetworkChoices() {
-    const container = document.querySelector('[data-wallet-network-choices]');
+  function renderStep3Choices() {
+    const container = document.querySelector('[data-wallet-step-3-choices]');
+    const title = document.querySelector('[data-wallet-step-3-title]');
     if (!container) {
       return;
     }
 
-    const routes = getRoutesForSelectedAsset();
+    const isCrypto = buyState.paymentMethodKey === 'crypto';
+    if (title) {
+      title.textContent = isCrypto ? 'Choose coin' : 'Choose provider';
+    }
+    container.innerHTML = '';
 
+    if (isCrypto) {
+      const assets = getAssetsForPaymentMethod(buyState.paymentMethodKey);
+      if (!buyState.assetKey || !assets.some(function (item) { return item.key === buyState.assetKey; })) {
+        setSelectedAsset(assets[0] ? assets[0].key : '');
+      }
+      assets.forEach(function (asset) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'wallet-buy-flow__choice' + (
+          buyState.assetKey === asset.key ? ' wallet-buy-flow__choice--selected' : ''
+        );
+        button.setAttribute('data-wallet-asset-choice', asset.key);
+        button.innerHTML =
+          '<span class="wallet-buy-flow__choice-icon">' +
+            renderChoiceIcon(asset.iconPath, asset.label, 'wallet-buy-flow__choice-icon-image') +
+          '</span>' +
+          '<span class="wallet-buy-flow__choice-copy">' +
+            '<span class="wallet-buy-flow__choice-title">' + escapeHtml(asset.label) + '</span>' +
+          '</span>';
+        container.appendChild(button);
+      });
+      return;
+    }
+
+    const providers = getProvidersForPaymentMethod(buyState.paymentMethodKey);
+    if (!buyState.providerKey || !providers.some(function (item) { return item.key === buyState.providerKey; })) {
+      setSelectedProvider(providers[0] ? providers[0].key : '');
+    }
+
+    providers.forEach(function (provider) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'wallet-buy-flow__choice' + (
+        buyState.providerKey === provider.key ? ' wallet-buy-flow__choice--selected' : ''
+      );
+      button.setAttribute('data-wallet-provider-choice', provider.key);
+      const hasMultipleOptions = provider.routes.length > 1;
+      const subtitle = hasMultipleOptions
+        ? provider.routes.length + ' options'
+        : (provider.routes[0].networkLabel || provider.routes[0].paymentGroupLabel || '');
+      const price = hasMultipleOptions ? '' : getRoutePriceDisplay(provider.routes[0]);
+      button.innerHTML =
+        '<span class="wallet-buy-flow__choice-copy">' +
+          '<span class="wallet-buy-flow__choice-title">' + escapeHtml(provider.label) + '</span>' +
+          (subtitle ? '<span class="wallet-buy-flow__choice-subtitle">' + escapeHtml(subtitle) + '</span>' : '') +
+        '</span>' +
+        (price ? '<span class="wallet-buy-flow__choice-price">' + escapeHtml(price) + '</span>' : '');
+      container.appendChild(button);
+    });
+  }
+
+  function renderStep4Choices() {
+    const container = document.querySelector('[data-wallet-step-4-choices]');
+    const title = document.querySelector('[data-wallet-step-4-title]');
+    if (!container) {
+      return;
+    }
+
+    const isCrypto = buyState.paymentMethodKey === 'crypto';
+    const routes = isCrypto ? getRoutesForSelectedAsset() : getRoutesForSelectedProvider();
     if (!buyState.routeKey || !routes.some(function (item) { return item.key === buyState.routeKey; })) {
       setSelectedRoute(routes[0] ? routes[0].key : '');
     }
 
-    container.innerHTML = '';
+    if (title) {
+      if (isCrypto) {
+        title.textContent = 'Choose network';
+      } else if (buyState.providerKey === 'mtpelerin') {
+        title.textContent = 'Choose currency';
+      } else {
+        title.textContent = 'Choose option';
+      }
+    }
 
+    container.innerHTML = '';
     routes.forEach(function (item) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -564,20 +663,19 @@
       );
       button.setAttribute('data-wallet-route-choice', item.key);
 
-        button.innerHTML =
-          '<span class="wallet-buy-flow__choice-icon">' +
-            renderChoiceIcon(
-              item.networkGroupIconPath || '',
-              item.networkGroupLabel || item.networkLabel,
-              'wallet-buy-flow__choice-icon-image'
-            ) +
-          '</span>' +
-          '<span class="wallet-buy-flow__choice-copy">' +
-            '<span class="wallet-buy-flow__choice-title">' +
-              escapeHtml(item.networkGroupLabel || item.networkLabel) +
-            '</span>' +
-          '</span>';
-
+      const label = isCrypto
+        ? (item.networkGroupLabel || item.networkLabel)
+        : (item.checkoutProviderOptionLabel || item.paymentCurrency || item.paymentMethodLabel);
+      const iconPath = isCrypto ? (item.networkGroupIconPath || '') : '';
+      const price = isCrypto ? '' : getRoutePriceDisplay(item);
+      button.innerHTML =
+        '<span class="wallet-buy-flow__choice-icon">' +
+          renderChoiceIcon(iconPath, label, 'wallet-buy-flow__choice-icon-image') +
+        '</span>' +
+        '<span class="wallet-buy-flow__choice-copy">' +
+          '<span class="wallet-buy-flow__choice-title">' + escapeHtml(label) + '</span>' +
+        '</span>' +
+        (price ? '<span class="wallet-buy-flow__choice-price">' + escapeHtml(price) + '</span>' : '');
       container.appendChild(button);
     });
   }
@@ -590,13 +688,11 @@
     if (step >= 2) {
       renderPaymentMethodChoices();
     }
-
     if (step >= 3) {
-      renderAssetChoices();
+      renderStep3Choices();
     }
-
     if (step >= 4) {
-      renderNetworkChoices();
+      renderStep4Choices();
     }
   }
 
@@ -606,12 +702,18 @@
 
     const methods = getPaymentMethods();
     setSelectedPaymentMethod(methods[0] || null);
-    selectDefaultAssetForPaymentMethod();
-    selectDefaultRouteForPaymentMethod();
+    resetDownstreamSelection();
+    if (buyState.paymentMethodKey === 'crypto') {
+      selectDefaultAssetForPaymentMethod();
+      selectDefaultRouteForCryptoAsset();
+    } else {
+      selectDefaultProviderForPaymentMethod();
+      selectDefaultRouteForProvider();
+    }
 
     renderPaymentMethodChoices();
-    renderAssetChoices();
-    renderNetworkChoices();
+    renderStep3Choices();
+    renderStep4Choices();
     goToStep(1);
   }
 
@@ -1295,22 +1397,44 @@
       }
 
       if (step === '3') {
-        const methods = getPaymentMethods();
-        const selectedMethod = methods.find(function (item) {
+        const selectedMethod = getPaymentMethods().find(function (item) {
           return item.key === buyState.paymentMethodKey;
         });
-
         if (!selectedMethod) {
           renderPaymentMethodChoices();
           return;
         }
 
-        const routes = getRoutesForPaymentMethod(selectedMethod.key);
-        if (!routes.length) {
+        resetDownstreamSelection();
+        if (selectedMethod.type === 'crypto') {
+          selectDefaultAssetForPaymentMethod();
+          selectDefaultRouteForCryptoAsset();
+        } else {
+          selectDefaultProviderForPaymentMethod();
+          selectDefaultRouteForProvider();
+        }
+        renderStep3Choices();
+        goToStep(3);
+        return;
+      }
+
+      if (step === '4') {
+        if (buyState.paymentMethodKey === 'crypto') {
+          const routes = getRoutesForSelectedAsset();
+          if (!routes.length) {
+            return;
+          }
+          selectDefaultRouteForCryptoAsset();
+          renderStep4Choices();
+          goToStep(4);
           return;
         }
 
-        if (!selectedMethod.requiresRouteSelection) {
+        const routes = getRoutesForSelectedProvider();
+        if (!routes.length) {
+          return;
+        }
+        if (routes.length === 1) {
           setSelectedRoute(routes[0].key);
           const form = getBuyForm();
           if (form) {
@@ -1323,15 +1447,8 @@
           return;
         }
 
-        selectDefaultAssetForPaymentMethod();
-        selectDefaultRouteForPaymentMethod();
-        renderAssetChoices();
-        goToStep(3);
-        return;
-      }
-
-      if (step === '4') {
-        renderNetworkChoices();
+        selectDefaultRouteForProvider();
+        renderStep4Choices();
         goToStep(4);
         return;
       }
@@ -1351,39 +1468,38 @@
       event.preventDefault();
 
       const methodKey = paymentMethodChoice.getAttribute('data-wallet-payment-method-choice');
-      const methods = getPaymentMethods();
-      const selectedMethod = methods.find(function (item) {
+      const selectedMethod = getPaymentMethods().find(function (item) {
         return item.key === methodKey;
       });
-
       setSelectedPaymentMethod(selectedMethod || null);
-      selectDefaultAssetForPaymentMethod();
-      selectDefaultRouteForPaymentMethod();
-
+      resetDownstreamSelection();
       renderPaymentMethodChoices();
-      renderAssetChoices();
-      renderNetworkChoices();
+      return;
+    }
+
+    const providerChoice = event.target.closest('[data-wallet-provider-choice]');
+    if (providerChoice) {
+      event.preventDefault();
+      setSelectedProvider(providerChoice.getAttribute('data-wallet-provider-choice'));
+      selectDefaultRouteForProvider();
+      renderStep3Choices();
       return;
     }
 
     const assetChoice = event.target.closest('[data-wallet-asset-choice]');
     if (assetChoice) {
       event.preventDefault();
-
       setSelectedAsset(assetChoice.getAttribute('data-wallet-asset-choice'));
-      selectDefaultRouteForPaymentMethod();
-
-      renderAssetChoices();
-      renderNetworkChoices();
+      selectDefaultRouteForCryptoAsset();
+      renderStep3Choices();
       return;
     }
 
     const routeChoice = event.target.closest('[data-wallet-route-choice]');
     if (routeChoice) {
       event.preventDefault();
-
       setSelectedRoute(routeChoice.getAttribute('data-wallet-route-choice'));
-      renderNetworkChoices();
+      renderStep4Choices();
     }
   });
 

@@ -656,6 +656,18 @@
       <input type="hidden" value="" data-wallet-selected-asset>
 
       <div class="wallet-buy-flow__source" hidden aria-hidden="true">
+        {% for method in wallet_checkout_methods %}
+        <input
+          type="hidden"
+          data-wallet-checkout-method
+          data-method-key="{{ method.key }}"
+          data-method-label="{{ method.label }}"
+          data-method-subtitle="{{ method.subtitle|default:'' }}"
+          data-method-icon="{{ method.icon_label|default:method.label }}"
+          data-method-icon-path="{% if method.icon_path %}{% static method.icon_path %}{% endif %}"
+          data-method-order="{{ method.order|default:100 }}"
+        >
+        {% endfor %}
         {% for option in deposit_options %}
         <input
           type="hidden"
@@ -668,6 +680,11 @@
           data-payment-group-label="{{ option.payment_group_label }}"
           data-payment-group-icon="{{ option.payment_group_icon }}"
           data-payment-group-icon-path="{% if option.payment_group_icon_path %}{% static option.payment_group_icon_path %}{% endif %}"
+          data-checkout-method-keys="{{ option.checkout_method_keys }}"
+          data-checkout-provider-key="{{ option.checkout_provider_key }}"
+          data-checkout-provider-label="{{ option.checkout_provider_label }}"
+          data-checkout-provider-order="{{ option.checkout_provider_order|default:100 }}"
+          data-checkout-provider-option-label="{{ option.checkout_provider_option_label }}"
           data-payment-price-bps="{{ option.payment_price_bps }}"
           data-payment-price-fixed-canonical="{{ option.payment_price_fixed_canonical }}"
           data-payment-currency="{{ option.payment_currency }}"
@@ -774,8 +791,8 @@
 
       <div class="wallet-buy-flow__panel" data-wallet-step-panel="3" hidden>
         <div class="wallet-buy-modal__section">
-          <div class="wallet-buy-modal__section-title">Choose coin</div>
-          <div class="wallet-buy-flow__choices" data-wallet-asset-choices></div>
+          <div class="wallet-buy-modal__section-title" data-wallet-step-3-title>Choose provider</div>
+          <div class="wallet-buy-flow__choices" data-wallet-step-3-choices></div>
         </div>
 
         <div class="wallet-buy-flow__actions wallet-buy-flow__actions--split">
@@ -790,8 +807,8 @@
 
       <div class="wallet-buy-flow__panel" data-wallet-step-panel="4" hidden>
         <div class="wallet-buy-modal__section">
-          <div class="wallet-buy-modal__section-title">Choose network</div>
-          <div class="wallet-buy-flow__choices" data-wallet-network-choices></div>
+          <div class="wallet-buy-modal__section-title" data-wallet-step-4-title>Choose option</div>
+          <div class="wallet-buy-flow__choices" data-wallet-step-4-choices></div>
         </div>
 
         <div class="wallet-buy-flow__actions wallet-buy-flow__actions--split">

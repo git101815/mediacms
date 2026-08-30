@@ -167,6 +167,67 @@ WALLET_PAYMENT_GROUPS = {
     "crypto": {"label": "Crypto", "icon_label": "Crypto", "icon_path": "images/wallet/crypto.svg", "order": 10},
 }
 
+# User-facing checkout taxonomy. WALLET_PAYMENT_GROUPS above remains the
+# provider/route pricing taxonomy so existing fee configuration keys stay
+# backwards-compatible. The buy flow renders these methods first, then the
+# compatible provider(s).
+WALLET_CHECKOUT_METHODS = {
+    "card": {
+        "label": "Credit / Debit Card",
+        "icon_label": "Card",
+        "icon_path": "images/wallet/card.svg",
+        "order": 10,
+    },
+    "apple_pay": {
+        "label": "Apple Pay",
+        "icon_label": "Apple Pay",
+        "icon_path": "images/wallet/google_apple_card.svg",
+        "order": 20,
+    },
+    "google_pay": {
+        "label": "Google Pay",
+        "icon_label": "Google Pay",
+        "icon_path": "images/wallet/google_apple_card.svg",
+        "order": 30,
+    },
+    "paypal": {
+        "label": "PayPal",
+        "subtitle": "US only",
+        "icon_label": "PayPal",
+        "icon_path": "images/wallet/paypal.svg",
+        "order": 40,
+    },
+    "revolut": {
+        "label": "Revolut",
+        "subtitle": "EU only",
+        "icon_label": "Revolut",
+        "icon_path": "images/wallet/revolut.svg",
+        "order": 50,
+    },
+    "bank_transfer": {
+        "label": "Bank transfer",
+        "icon_label": "Bank",
+        "icon_path": "images/wallet/bank.svg",
+        "order": 60,
+    },
+    "crypto": {
+        "label": "Crypto",
+        "icon_label": "Crypto",
+        "icon_path": "images/wallet/crypto.svg",
+        "order": 70,
+    },
+}
+
+WALLET_CHECKOUT_PROVIDERS = {
+    "skillflow": {"label": "Skillflow", "order": 10},
+    "malum": {"label": "Malum", "order": 20},
+    "transak": {"label": "Transak", "order": 30},
+    "banxa": {"label": "Banxa", "order": 40},
+    "paygate": {"label": "Paygate", "order": 50},
+    "dfx": {"label": "DFX", "order": 60},
+    "mtpelerin": {"label": "Mt Pelerin", "order": 70},
+}
+
 WALLET_CRYPTO_ASSET_GROUPS = {
     "USDC": {"label": "USDC", "icon_path": "images/wallet/usdc.svg", "order": 10},
     "USDT": {"label": "USDT", "icon_path": "images/wallet/usdt.svg", "order": 20},
@@ -854,6 +915,20 @@ def _get_wallet_visual_groups(raw_groups, *, field_name: str, uppercase_keys: bo
 
 def get_wallet_payment_groups() -> dict[str, dict]:
     return _get_wallet_visual_groups(WALLET_PAYMENT_GROUPS, field_name="WALLET_PAYMENT_GROUPS")
+
+
+def get_wallet_checkout_methods() -> dict[str, dict]:
+    return _get_wallet_visual_groups(
+        WALLET_CHECKOUT_METHODS,
+        field_name="WALLET_CHECKOUT_METHODS",
+    )
+
+
+def get_wallet_checkout_providers() -> dict[str, dict]:
+    return _get_wallet_visual_groups(
+        WALLET_CHECKOUT_PROVIDERS,
+        field_name="WALLET_CHECKOUT_PROVIDERS",
+    )
 
 
 def get_wallet_crypto_asset_groups() -> dict[str, dict]:

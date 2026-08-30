@@ -516,6 +516,8 @@ def _format_route_amount(value, *, chain: str, asset_code: str) -> str:
     return text
 
 WALLET_PAYMENT_GROUPS = wallet_config.get_wallet_payment_groups()
+WALLET_CHECKOUT_METHODS = wallet_config.get_wallet_checkout_methods()
+WALLET_CHECKOUT_PROVIDERS = wallet_config.get_wallet_checkout_providers()
 WALLET_CRYPTO_ASSET_GROUPS = wallet_config.get_wallet_crypto_asset_groups()
 WALLET_CRYPTO_NETWORK_GROUPS = wallet_config.get_wallet_crypto_network_groups()
 PAYGATE_PROVIDER_PAYMENT_GROUPS = wallet_config.WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS
@@ -548,6 +550,64 @@ def _apply_payment_bps(canonical_amount: int, bps: int) -> int:
         / Decimal(10000)
     )
     return int(amount.to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def _wallet_checkout_method_keys(
+    *,
+    provider_key: str,
+    provider_id: str,
+    payment_method_type: str,
+) -> tuple[str, ...]:
+    if payment_method_type == "crypto":
+        return ("crypto",)
+    if provider_key in {SKILLFLOW_PROVIDER_KEY, MALUM_PROVIDER_KEY}:
+        return ("card",)
+    if provider_key == BANXA_PROVIDER_KEY:
+        return ("card", "apple_pay", "google_pay")
+    if provider_key in {DFX_PROVIDER_KEY, MTPERELIN_PROVIDER_KEY}:
+        return ("bank_transfer",)
+    if provider_key == PAYGATE_PROVIDER_KEY:
+        if provider_id == "paypal":
+            return ("paypal",)
+        if provider_id == "revolut":
+            return ("revolut",)
+        if provider_id == "transak":
+            return ("card", "apple_pay", "google_pay")
+    return ()
+
+
+def _wallet_checkout_provider_key(
+    *,
+    provider_key: str,
+    provider_id: str,
+    payment_method_type: str,
+) -> str:
+    if payment_method_type == "crypto":
+        return ""
+    if provider_key == PAYGATE_PROVIDER_KEY and provider_id == "transak":
+        return "transak"
+    if provider_key == PAYGATE_PROVIDER_KEY:
+        return "paygate"
+    return provider_key
+
+
+def _build_wallet_checkout_method_rows(deposit_options: list[dict]) -> list[dict]:
+    available_keys = {
+        method_key
+        for option in deposit_options
+        for method_key in str(option.get("checkout_method_keys") or "").split()
+        if method_key
+    }
+    rows = []
+    for key, definition in WALLET_CHECKOUT_METHODS.items():
+        if key not in available_keys:
+            continue
+        row = dict(definition)
+        row["key"] = key
+        row["order"] = int(row.get("order") or 100)
+        rows.append(row)
+    rows.sort(key=lambda item: (item["order"], item["label"]))
+    return rows
 
 
 def _decorate_wallet_deposit_option(option: dict) -> dict:
@@ -603,6 +663,34 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
         "network_label") or chain
     network_group_icon_path = network_group.get("icon_path") or ""
     network_group_order = int(network_group.get("order") or 100)
+
+    checkout_method_keys = _wallet_checkout_method_keys(
+        provider_key=provider_key,
+        provider_id=provider_id,
+        payment_method_type=payment_method_type,
+    )
+    checkout_provider_key = _wallet_checkout_provider_key(
+        provider_key=provider_key,
+        provider_id=provider_id,
+        payment_method_type=payment_method_type,
+    )
+    checkout_provider = WALLET_CHECKOUT_PROVIDERS.get(checkout_provider_key, {})
+    checkout_provider_label = (
+        checkout_provider.get("label")
+        or decorated.get("payment_method_label")
+        or checkout_provider_key
+    )
+    checkout_provider_order = int(checkout_provider.get("order") or 100)
+    if provider_key == MTPERELIN_PROVIDER_KEY:
+        checkout_provider_option_label = payment_currency
+    else:
+        checkout_provider_option_label = (
+            decorated.get("route_label")
+            or decorated.get("network_display")
+            or decorated.get("payment_method_label")
+            or payment_currency
+        )
+
     decorated.update(
         {
             "payment_group_key": group_key,
@@ -625,6 +713,11 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
             "network_group_label": network_group_label,
             "network_group_icon_path": network_group_icon_path,
             "network_group_order": network_group_order,
+            "checkout_method_keys": " ".join(checkout_method_keys),
+            "checkout_provider_key": checkout_provider_key,
+            "checkout_provider_label": checkout_provider_label,
+            "checkout_provider_order": checkout_provider_order,
+            "checkout_provider_option_label": checkout_provider_option_label,
         }
     )
 
@@ -2220,6 +2313,7 @@ def wallet(request):
         "wallet_deposit_request_url": reverse("wallet_deposit_request"),
         "wallet_withdrawal_request_url": reverse("wallet_withdrawal_request"),
         "deposit_options": deposit_options,
+        "wallet_checkout_methods": _build_wallet_checkout_method_rows(deposit_options),
         "recent_deposit_session_rows": recent_deposit_session_rows,
         "activity_rows": activity_rows,
         "token_pack_rows": token_pack_rows,
