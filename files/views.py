@@ -155,12 +155,17 @@ from ledger.fiat import (
 )
 from ledger.providers.malum import MALUM_CHAIN, MALUM_PROVIDER_KEY
 from ledger.providers.paygate import PAYGATE_CHAIN, PAYGATE_PROVIDER_KEY
+from ledger.providers.skillflow import SKILLFLOW_CHAIN, SKILLFLOW_PROVIDER_KEY
 from ledger.providers.dfx import DFX_PROVIDER_KEY
 from ledger.providers.mtpelerin import MTPERELIN_PROVIDER_KEY
 from ledger.providers.banxa import BANXA_PROVIDER_KEY
 from ledger.provider_deposits import (
     get_malum_deposit_option,
     open_malum_deposit_session,
+)
+from ledger.skillflow_deposits import (
+    get_skillflow_deposit_option,
+    open_skillflow_deposit_session,
 )
 from ledger.paygate_deposits import (
     get_paygate_deposit_options,
@@ -259,11 +264,12 @@ WALLET_REQUEST_TYPE_ICON_MAP = {
 PROVIDER_CHECKOUT_KEYS = {
     MALUM_PROVIDER_KEY,
     PAYGATE_PROVIDER_KEY,
+    SKILLFLOW_PROVIDER_KEY,
     DFX_PROVIDER_KEY,
     MTPERELIN_PROVIDER_KEY,
     BANXA_PROVIDER_KEY,
 }
-PROVIDER_CHECKOUT_CHAINS = {MALUM_CHAIN, PAYGATE_CHAIN}
+PROVIDER_CHECKOUT_CHAINS = {MALUM_CHAIN, PAYGATE_CHAIN, SKILLFLOW_CHAIN}
 
 
 def _is_provider_checkout_session(session) -> bool:
@@ -551,7 +557,9 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
     provider_id = str(decorated.get("paygate_provider_id") or "").strip().lower()
     payment_method_type = str(decorated.get("payment_method_type") or "").strip().lower()
 
-    if provider_key == BANXA_PROVIDER_KEY:
+    if provider_key == SKILLFLOW_PROVIDER_KEY:
+        group_key = "skillflow_card"
+    elif provider_key == BANXA_PROVIDER_KEY:
         group_key = "banxa_card"
     elif provider_key == DFX_PROVIDER_KEY:
         group_key = "dfx_bank"
@@ -638,6 +646,17 @@ def _build_wallet_deposit_options() -> list[dict]:
             {
                 **malum_option,
                 "min_amount_display": _format_canonical_stable_amount(malum_option["min_amount"]),
+            }
+        )
+
+    skillflow_option = get_skillflow_deposit_option()
+    if skillflow_option is not None:
+        options.append(
+            {
+                **skillflow_option,
+                "min_amount_display": _format_canonical_stable_amount(
+                    skillflow_option["min_amount"]
+                ),
             }
         )
 
@@ -1342,6 +1361,22 @@ def wallet_deposit_request(request):
                 actor=request.user,
                 wallet=wallet_obj,
                 token_pack=token_pack,
+            )
+            provider = (session.metadata or {}).get("payment_provider") or {}
+            checkout_url = (provider.get("checkout_url") or "").strip()
+            if checkout_url and session.status == DepositSession.STATUS_AWAITING_PAYMENT:
+                return redirect(checkout_url)
+            return redirect("wallet_deposit_session", public_id=session.public_id)
+
+        if selected_option.get("payment_method_type") == "provider" and selected_option.get(
+            "provider_key"
+        ) == SKILLFLOW_PROVIDER_KEY:
+            session = open_skillflow_deposit_session(
+                actor=request.user,
+                wallet=wallet_obj,
+                token_pack=token_pack,
+                payment_price_bps=payment_price_bps,
+                payment_price_fixed_canonical=payment_price_fixed_canonical,
             )
             provider = (session.metadata or {}).get("payment_provider") or {}
             checkout_url = (provider.get("checkout_url") or "").strip()
