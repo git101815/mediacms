@@ -63,17 +63,17 @@ LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
 # per format and each format must sum to exactly 100.
 TABUNDER_COOLDOWN_SECONDS = 180
 PREROLLS_COOLDOWN_SECONDS = 30
-POPUNDER_ADS_ENABLED = False
+POPUNDER_ADS_ENABLED = True
 IN_VIDEO_ADS_ENABLED = False
 ADS_PROVIDER_WEIGHTS = {
     "popunder": {
-        "internal": 50,
-        "clickaine": 50,
+        "internal": 0,
+        "clickaine": 100,
         "partner": 0,
     },
     "in_video": {
-        "internal": 50,
-        "clickaine": 50,
+        "internal": 0,
+        "clickaine": 100,
         "partner": 0,
     },
 }
@@ -183,7 +183,7 @@ PAYGATE_PROVIDER_MIN_CANONICAL_STABLE_AMOUNTS = {
 WALLET_FIAT_USD_RATES = {
     "USD": "1",
     # EUR/USD: one EUR is worth 1.12 USD.
-    "EUR": "1.12",
+    "EUR": "1.14",
     # CHF/USD: one CHF is worth
     "CHF": "1.2"
 }
