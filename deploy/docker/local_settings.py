@@ -85,16 +85,6 @@ CLICKAINE_VAST_ENABLED = True
 CLICKAINE_VAST_URL = (
     "https://36707.badylenicesist.com/v2/a/prl/vst/261578"
 )
-ADS_PARTNER_POPUNDER_OFFERS = [
-    {
-        "weight": 50,
-        "url_template": "https://track.gpsecureads.com/556564ae-1588-4c3a-a795-4684cf4d1da0?var1=celebfakessodaigr&var2=tab&var3=CLICKID",
-    },
-    {
-        "weight": 50,
-        "url_template": "https://www.instabang.com/tours/?t=best&id=celebfakesgpigr&cmp=tab&ad_id=CLICKID",
-    },
-]
 
 # ads-min-bids-by-type-v3
 # Human USD amounts. Keep strings to avoid float rounding.

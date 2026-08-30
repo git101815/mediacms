@@ -133,8 +133,11 @@ def provider_weights(ad_format):
     )
 
 
+
 def _partner_popunder_offers():
-    raw = _setting("ADS_PARTNER_POPUNDER_OFFERS")
+    raw = getattr(settings, "ADS_PARTNER_POPUNDER_OFFERS", ())
+    if raw in (None, ()):
+        return []
     if not isinstance(raw, (list, tuple)):
         raise ImproperlyConfigured(
             "ADS_PARTNER_POPUNDER_OFFERS must be a list"
@@ -145,17 +148,25 @@ def _partner_popunder_offers():
         label = f"ADS_PARTNER_POPUNDER_OFFERS[{index}]"
         if not isinstance(item, dict):
             raise ImproperlyConfigured(f"{label} must be a dict")
+
+        original_template = str(item.get("url_template") or "").strip()
         _http_url(
-            str(item.get("url_template") or "").replace("CLICKID", "probe"),
+            original_template.replace("CLICKID", "probe"),
             setting_name=f"{label}.url_template",
         )
-        original_template = str(item.get("url_template") or "").strip()
+
         try:
             weight = Decimal(str(item.get("weight", 0)))
         except (InvalidOperation, TypeError, ValueError) as exc:
-            raise ImproperlyConfigured(f"{label}.weight must be numeric") from exc
+            raise ImproperlyConfigured(
+                f"{label}.weight must be numeric"
+            ) from exc
+
         if not weight.is_finite() or weight < 0:
-            raise ImproperlyConfigured(f"{label}.weight must be >= 0")
+            raise ImproperlyConfigured(
+                f"{label}.weight must be >= 0"
+            )
+
         if weight > 0:
             offers.append(
                 {
@@ -164,11 +175,9 @@ def _partner_popunder_offers():
                 }
             )
 
-    if not offers:
-        raise ImproperlyConfigured(
-            "ADS_PARTNER_POPUNDER_OFFERS must contain at least one positive-weight offer"
-        )
     return offers
+
+
 
 
 def eligible_provider_weights(ad_format):
@@ -178,20 +187,23 @@ def eligible_provider_weights(ad_format):
 
     weights = provider_weights(ad_format)
     clickaine_enabled = False
+    partner_enabled = False
 
     if ad_format == FORMAT_POPUNDER:
         clickaine_enabled = bool(_setting("CLICKAINE_POPUNDER_ENABLED"))
         if weights[PROVIDER_CLICKAINE] > 0 and clickaine_enabled:
             _http_url_setting("CLICKAINE_POPUNDER_SCRIPT_URL")
+
         if weights[PROVIDER_PARTNER] > 0:
-            _partner_popunder_offers()
+            partner_enabled = bool(_partner_popunder_offers())
     else:
         clickaine_enabled = bool(_setting("CLICKAINE_VAST_ENABLED"))
         if weights[PROVIDER_CLICKAINE] > 0 and clickaine_enabled:
             _http_url_setting("CLICKAINE_VAST_URL")
         if weights[PROVIDER_PARTNER] > 0:
             raise ImproperlyConfigured(
-                "partner has no in-video/VAST adapter; set its in_video weight to 0"
+                "partner has no in-video/VAST adapter; "
+                "set its in_video weight to 0"
             )
 
     eligible = {}
@@ -200,10 +212,14 @@ def eligible_provider_weights(ad_format):
             continue
         if provider == PROVIDER_CLICKAINE and not clickaine_enabled:
             continue
-        if ad_format == FORMAT_IN_VIDEO and provider == PROVIDER_PARTNER:
+        if ad_format == FORMAT_POPUNDER:
+            if provider == PROVIDER_PARTNER and not partner_enabled:
+                continue
+        elif provider == PROVIDER_PARTNER:
             continue
         eligible[provider] = weight
     return eligible
+
 
 
 def has_eligible_provider(ad_format):
@@ -242,13 +258,20 @@ def clickaine_vast_url():
     return _http_url_setting("CLICKAINE_VAST_URL")
 
 
+
 def partner_popunder_url(*, rng=None, click_id=None):
     offers = _partner_popunder_offers()
+    if not offers:
+        raise ImproperlyConfigured(
+            "partner popunder has no configured offers"
+        )
+
     total = sum((offer["weight"] for offer in offers), Decimal("0"))
     random_source = rng or random.random
     bucket = Decimal(str(random_source())) * total
     cursor = Decimal("0")
     selected = offers[-1]
+
     for offer in offers:
         cursor += offer["weight"]
         if bucket < cursor:

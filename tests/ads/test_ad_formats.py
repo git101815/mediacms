@@ -173,8 +173,12 @@ def test_popunder_cpc_ecpm_uses_structural_full_ctr():
     assert campaign_ecpm_microtokens(campaign) == 2_000_000
 
 
+
+@override_settings(IN_VIDEO_ADS_ENABLED=True)
 def test_vmap_contains_pre_mid_post(client):
-    response = client.get("/api/v1/ads/vmap/")
+    with patch("ads.views.has_eligible_provider", return_value=True):
+        response = client.get("/api/v1/ads/vmap/")
+
     assert response.status_code == 200
     body = response.content.decode()
     assert 'timeOffset="start"' in body
@@ -185,13 +189,23 @@ def test_vmap_contains_pre_mid_post(client):
     assert 'breakId="postroll"' in body
 
 
-@override_settings(ADS_MIDROLL_TIME_OFFSET="33%")
+
+
+@override_settings(
+    IN_VIDEO_ADS_ENABLED=True,
+    ADS_MIDROLL_TIME_OFFSET="33%",
+)
 def test_vmap_midroll_offset_is_configurable(client):
-    response = client.get("/api/v1/ads/vmap/")
+    with patch("ads.views.has_eligible_provider", return_value=True):
+        response = client.get("/api/v1/ads/vmap/")
+
     assert response.status_code == 200
     assert 'timeOffset="33%"' in response.content.decode()
 
 
+
+
+@override_settings(IN_VIDEO_ADS_ENABLED=True)
 def test_vast_wrapper_tracks_direct_impression_and_click(client):
     candidate = {
         "campaign_id": 10,
@@ -200,10 +214,17 @@ def test_vast_wrapper_tracks_direct_impression_and_click(client):
         "vast_url": "https://ads.example/external-vast.xml",
         "creative_url": "",
     }
-    with patch("ads.views.reserve", return_value=candidate):
+    with (
+        patch(
+            "ads.views.weighted_provider_order",
+            return_value=["internal"],
+        ),
+        patch("ads.views.reserve", return_value=candidate),
+    ):
         response = client.get(
             "/api/v1/ads/vast/video_preroll/"
         )
+
     assert response.status_code == 200
     body = response.content.decode()
     assert "external-vast.xml" in body

@@ -141,6 +141,27 @@ def test_in_video_rejects_positive_partner_weight_without_vast_adapter():
         eligible_provider_weights(FORMAT_IN_VIDEO)
 
 
+@override_settings(
+    **{
+        **BASE_SETTINGS,
+        "ADS_PROVIDER_WEIGHTS": {
+            **BASE_SETTINGS["ADS_PROVIDER_WEIGHTS"],
+            "popunder": {
+                "internal": 80,
+                "clickaine": 0,
+                "partner": 20,
+            },
+        },
+        "ADS_PARTNER_POPUNDER_OFFERS": [],
+    }
+)
+def test_unconfigured_partner_is_skipped_without_disabling_other_popunder_providers():
+    assert eligible_provider_weights(FORMAT_POPUNDER) == {
+        "internal": Decimal("80")
+    }
+    assert weighted_provider_order(FORMAT_POPUNDER) == ["internal"]
+
+
 @override_settings(**BASE_SETTINGS)
 def test_partner_offer_is_resolved_server_side():
     url = partner_popunder_url(rng=lambda: 0.1, click_id="abc 123")

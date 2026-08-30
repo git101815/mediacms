@@ -63,11 +63,22 @@ def test_popunder_never_installs_invisible_click_overlays():
     assert "createOverlayFor" not in url_adapter
 
 
+
 def test_popunder_does_not_consume_original_click_when_popup_is_blocked():
     url_adapter = _source("templates/ads/popunder_url.html")
-    popup_check = url_adapter.index("if (!looksUsable(cloneHandle))")
-    consume = url_adapter.index("consumeOriginalEvent(event, triggerEventName)")
-    assert popup_check < consume
+    start = url_adapter.index("function openTrueTabunder(")
+    end = url_adapter.index("\n  function shouldIgnoreTarget", start)
+    body = url_adapter[start:end]
+
+    popup_check = body.index("if (!looksUsable(cloneHandle))")
+    blocked_return = body.index("return false;", popup_check)
+    consume = body.index(
+        "consumeOriginalEvent(event, triggerEventName)",
+        blocked_return,
+    )
+
+    assert popup_check < blocked_return < consume
+
 
 
 def test_media_template_keeps_popunder_adapters_behind_one_gate():
