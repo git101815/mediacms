@@ -56,6 +56,7 @@ class TestWeeklyQuestHardening(BaseLedgerTestCase):
             if fragments:
                 return platform, str(fragments[0])
         self.fail("Weekly quest config needs at least one unfurl UA for this test")
+        return "", ""
 
     def _chest_key(self) -> str:
         return next(iter(config.get_reward_chest_definitions()))
