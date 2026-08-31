@@ -23,7 +23,22 @@ CREATOR_EMAIL_EVENT_SUBSCRIPTION_RENEWED = "subscription_renewed"
 
 DEFAULT_CREATOR_PURCHASE_EMAIL_ENABLED = True
 DEFAULT_CREATOR_NEW_SUBSCRIPTION_EMAIL_ENABLED = True
-DEFAULT_CREATOR_RENEWAL_EMAIL_ENABLED = False
+DEFAULT_CREATOR_RENEWAL_EMAIL_ENABLED = True
+
+CREATOR_EMAIL_PREFERENCE_FIELDS = {
+    CREATOR_EMAIL_EVENT_MEDIA_PURCHASE: (
+        "notification_on_premium_purchases",
+        True,
+    ),
+    CREATOR_EMAIL_EVENT_SUBSCRIPTION_STARTED: (
+        "notification_on_new_subscriptions",
+        True,
+    ),
+    CREATOR_EMAIL_EVENT_SUBSCRIPTION_RENEWED: (
+        "notification_on_subscription_renewals",
+        False,
+    ),
+}
 DEFAULT_CREATOR_EMAIL_RECOVERY_ENABLED = True
 DEFAULT_CREATOR_EMAIL_RECOVERY_GRACE_SECONDS = 120
 DEFAULT_CREATOR_EMAIL_RECOVERY_BATCH_SIZE = 100
@@ -56,6 +71,14 @@ def creator_email_event_enabled(event_type: str) -> bool:
             DEFAULT_CREATOR_RENEWAL_EMAIL_ENABLED,
         )
     return False
+
+
+def creator_email_preference_enabled(*, creator, event_type: str) -> bool:
+    field = CREATOR_EMAIL_PREFERENCE_FIELDS.get(event_type)
+    if field is None:
+        return False
+    field_name, default = field
+    return bool(getattr(creator, field_name, default))
 
 
 def _non_negative_int_setting(name: str, default: int, *, minimum: int = 0) -> int:
@@ -177,6 +200,11 @@ def queue_creator_transactional_email(
     payload: dict,
 ) -> LedgerOutbox | None:
     if not creator_email_event_enabled(event_type):
+        return None
+    if not creator_email_preference_enabled(
+        creator=creator,
+        event_type=event_type,
+    ):
         return None
 
     recipient_email = str(getattr(creator, "email", "") or "").strip()

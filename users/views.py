@@ -412,6 +412,9 @@ class UserDetail(APIView):
         user.last_login = None
         user.referral_code = None
         user.notification_on_comments = False
+        user.notification_on_premium_purchases = False
+        user.notification_on_new_subscriptions = False
+        user.notification_on_subscription_renewals = False
         user.allow_contact = False
         user.is_active = False
         user.is_staff = False
@@ -439,6 +442,9 @@ class UserDetail(APIView):
                 "last_login",
                 "referral_code",
                 "notification_on_comments",
+                "notification_on_premium_purchases",
+                "notification_on_new_subscriptions",
+                "notification_on_subscription_renewals",
                 "allow_contact",
                 "is_active",
                 "is_staff",

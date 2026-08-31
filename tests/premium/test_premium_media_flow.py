@@ -361,6 +361,48 @@ def test_purchase_with_tokens_creates_purchase_unlock_ledger_entries_and_balance
 
 
 @pytest.mark.django_db
+def test_creator_can_disable_premium_purchase_email(
+    django_user_model,
+    settings,
+    django_capture_on_commit_callbacks,
+):
+    settings.PREMIUM_CREATOR_PURCHASE_EMAIL_ENABLED = True
+
+    creator = django_user_model.objects.create_user(
+        username="creator_purchase_email_off",
+        email="creator-purchase-off@example.com",
+        notification_on_premium_purchases=False,
+    )
+    buyer = django_user_model.objects.create_user(
+        username="buyer_purchase_email_off"
+    )
+    media = create_test_media(
+        user=creator,
+        friendly_token="purchaseemailoff",
+    )
+    create_ready_asset(media=media, price_tokens=PRICE_TOKENS)
+    fund_user_wallet(buyer, 1_000 * 10**6)
+    fund_user_wallet(creator, 0)
+
+    with patch(
+        "premium.tasks.dispatch_creator_email_outbox_event.delay"
+    ) as enqueue_email:
+        with django_capture_on_commit_callbacks(execute=True):
+            result = purchase_premium_media_with_tokens(
+                actor=buyer,
+                media=media,
+            )
+
+    purchase = MediaPurchase.objects.get(user=buyer, media=media)
+    assert result["purchased"] is True
+    assert LedgerOutbox.objects.filter(
+        txn=purchase.txn,
+        topic=CREATOR_EMAIL_TOPIC,
+    ).exists() is False
+    enqueue_email.assert_not_called()
+
+
+@pytest.mark.django_db
 def test_purchase_commit_survives_creator_email_broker_enqueue_failure(
     django_user_model,
     settings,
