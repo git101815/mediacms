@@ -39,6 +39,21 @@ class User(AbstractUser):
         "Whether you will receive email notifications for comments added to your content",
         default=True,
     )
+    notification_on_premium_purchases = models.BooleanField(
+        "Email me when someone purchases my premium content",
+        default=True,
+        help_text="Receive an email for each new premium content sale.",
+    )
+    notification_on_new_subscriptions = models.BooleanField(
+        "Email me when someone starts a subscription",
+        default=True,
+        help_text="Receive an email when a new subscriber starts a paid creator subscription.",
+    )
+    notification_on_subscription_renewals = models.BooleanField(
+        "Email me when a subscription renews",
+        default=False,
+        help_text="Receive an email when an existing paid subscription renews.",
+    )
     location = models.CharField("Location", max_length=250, blank=True)
     is_editor = models.BooleanField("MediaCMS Editor", default=False, db_index=True)
     is_manager = models.BooleanField("MediaCMS Manager", default=False, db_index=True)

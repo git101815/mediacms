@@ -76,6 +76,9 @@ class UserForm(forms.ModelForm):
             "global_media_description",
             "logo",
             "notification_on_comments",
+            "notification_on_premium_purchases",
+            "notification_on_new_subscriptions",
+            "notification_on_subscription_renewals",
             "is_featured",
             "advancedUser",
             "is_manager",
@@ -118,6 +121,9 @@ class UserForm(forms.ModelForm):
             self.fields.pop("dfans_url")
             self.fields.pop("subscriptions_enabled")
             self.fields.pop("subscription_price")
+            self.fields.pop("notification_on_premium_purchases")
+            self.fields.pop("notification_on_new_subscriptions")
+            self.fields.pop("notification_on_subscription_renewals")
             return
 
         plan = CreatorSubscriptionPlan.objects.filter(

@@ -431,9 +431,11 @@ PREMIUM_MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024 * 1024
 
 # Creator transactional monetization emails. These are operator settings,
 # intentionally kept in Python config rather than environment variables.
+# Operator kill-switches. Individual creator choices are stored on User
+# and are checked in addition to these global switches.
 PREMIUM_CREATOR_PURCHASE_EMAIL_ENABLED = True
 PREMIUM_CREATOR_NEW_SUBSCRIPTION_EMAIL_ENABLED = True
-PREMIUM_CREATOR_RENEWAL_EMAIL_ENABLED = False
+PREMIUM_CREATOR_RENEWAL_EMAIL_ENABLED = True
 PREMIUM_CREATOR_EMAIL_RECOVERY_ENABLED = True
 PREMIUM_CREATOR_EMAIL_RECOVERY_GRACE_SECONDS = 120
 PREMIUM_CREATOR_EMAIL_RECOVERY_BATCH_SIZE = 100
