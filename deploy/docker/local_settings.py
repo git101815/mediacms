@@ -251,7 +251,7 @@ BANXA_SETTLEMENT_ROUTE_PREFERENCES = (
 BANXA_PAYMENT_TTL_SECONDS = 7 * 24 * 60 * 60
 
 WALLET_PAYMENT_METHOD_PRICE_BPS = {
-    "skillflow_card": 0,
+    "skillflow_card": 2000,
     "paypal_us": 600,
     "revolut_eu": 500,
     "transak_card": 600,

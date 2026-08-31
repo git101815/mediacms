@@ -4225,8 +4225,11 @@ def provision_deposit_addresses_batch(*, actor, address_rows):
     }
 
 def list_available_deposit_options() -> list[dict]:
+    # DepositAddress rows are route templates for newly derived session
+    # addresses. An older template may still be marked allocated, but its route
+    # remains usable; only retired templates disable a route.
     rows = (
-        DepositAddress.objects.filter(status=DepositAddress.STATUS_AVAILABLE)
+        DepositAddress.objects.exclude(status=DepositAddress.STATUS_RETIRED)
         .order_by(
             "chain",
             "asset_code",

@@ -163,11 +163,11 @@ WALLET_ROUTE_ONCHAIN_DECIMALS = {
 }
 
 WALLET_PAYMENT_GROUPS = {
-    "skillflow_card": {"label": "Card (Skillflow)", "icon_label": "Card", "icon_path": "images/wallet/google_apple_card.svg", "order": 15},
+    "skillflow_card": {"label": "Card (Skillflow)", "icon_label": "Card", "icon_path": "images/wallet/card.svg", "order": 15},
     "paypal_us": {"label": "PayPal (US only)", "icon_label": "PayPal", "icon_path": "images/wallet/paypal.svg", "order": 20},
     "revolut_eu": {"label": "Revolut (EU only)", "icon_label": "Revolut", "icon_path": "images/wallet/revolut.svg", "order": 30},
-    "transak_card": {"label": "Card / Apple Pay / Google Pay (Transak)", "icon_label": "Transak", "icon_path": "images/wallet/google_apple_card.svg", "order": 35},
-    "banxa_card": {"label": "Card / Apple Pay / Google Pay (Banxa)", "icon_label": "Banxa", "icon_path": "images/wallet/google_apple_card.svg", "order": 36},
+    "transak_card": {"label": "Card / Apple Pay / Google Pay (Transak)", "icon_label": "Transak", "icon_path": "images/wallet/card.svg", "order": 35},
+    "banxa_card": {"label": "Card / Apple Pay / Google Pay (Banxa)", "icon_label": "Banxa", "icon_path": "images/wallet/card.svg", "order": 36},
     "dfx_bank": {"label": "Bank transfer (DFX)", "icon_label": "SEPA", "icon_path": "images/wallet/sepa.svg", "order": 40},
     "mtpelerin_eur": {"label": "Bank transfer (Mt Pelerin · EUR)", "icon_label": "BANK", "icon_path": "images/wallet/bank.svg", "order": 50},
     "mtpelerin_usd": {"label": "Bank transfer (Mt Pelerin · USD)", "icon_label": "SWIFT", "icon_path": "images/wallet/bank.svg", "order": 51},
@@ -188,13 +188,13 @@ WALLET_CHECKOUT_METHODS = {
     "apple_pay": {
         "label": "Apple Pay",
         "icon_label": "Apple Pay",
-        "icon_path": "images/wallet/google_apple_card.svg",
+        "icon_path": "images/wallet/apple_pay.svg",
         "order": 20,
     },
     "google_pay": {
         "label": "Google Pay",
         "icon_label": "Google Pay",
-        "icon_path": "images/wallet/google_apple_card.svg",
+        "icon_path": "images/wallet/google_pay.svg",
         "order": 30,
     },
     "paypal": {
@@ -221,7 +221,7 @@ WALLET_CHECKOUT_METHODS = {
         "label": "Crypto",
         "icon_label": "Crypto",
         "icon_path": "images/wallet/crypto.svg",
-        "order": 70,
+        "order": 0,
     },
 }
 
