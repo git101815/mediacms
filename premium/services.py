@@ -28,6 +28,11 @@ from ledger.services import (
     record_wallet_velocity,
 )
 
+from .notifications import (
+    CREATOR_EMAIL_EVENT_MEDIA_PURCHASE,
+    queue_creator_transactional_email,
+)
+
 from .models import (
     CreatorSubscription,
     CreatorSubscriptionPlan,

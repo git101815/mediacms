@@ -172,7 +172,7 @@ def test_initial_subscription_payment_creates_balanced_ledger_and_paid_period(
     creator_wallet = fund_wallet(creator, 0)
     period_start = timezone.now().replace(microsecond=0)
 
-    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay") as enqueue_email:
+    with patch("premium.notifications.current_app.send_task") as enqueue_email:
         with django_capture_on_commit_callbacks(execute=True):
             result = subscribe_at(actor=subscriber, plan=plan, when=period_start)
 
@@ -220,7 +220,11 @@ def test_initial_subscription_payment_creates_balanced_ledger_and_paid_period(
     assert email_event.payload["subscriber_username"] == subscriber.username
     assert email_event.payload["plan_name"] == plan.name
     assert email_event.payload["creator_amount"] == 8 * TOKEN_SCALE
-    enqueue_email.assert_called_once_with(email_event.id)
+    enqueue_email.assert_called_once_with(
+        "premium.tasks.dispatch_creator_email_outbox_event",
+        args=[email_event.id],
+        queue="short_tasks",
+    )
 
 
 @pytest.mark.django_db
@@ -249,7 +253,7 @@ def test_creator_can_disable_new_subscription_email(
     fund_wallet(creator, 0)
 
     with patch(
-        "premium.tasks.dispatch_creator_email_outbox_event.delay"
+        "premium.notifications.current_app.send_task"
     ) as enqueue_email:
         with django_capture_on_commit_callbacks(execute=True):
             result = subscribe_at(
@@ -712,7 +716,7 @@ def test_renewal_email_is_controlled_by_creator_preference(
     subscription = first.subscription
 
     assert creator.notification_on_subscription_renewals is False
-    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay") as enqueue_email:
+    with patch("premium.notifications.current_app.send_task") as enqueue_email:
         with django_capture_on_commit_callbacks(execute=True):
             disabled_result = renew_at(
                 subscription=subscription,
@@ -728,7 +732,7 @@ def test_renewal_email_is_controlled_by_creator_preference(
     creator.save(update_fields=["notification_on_subscription_renewals"])
     subscription.refresh_from_db()
 
-    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay") as enqueue_email:
+    with patch("premium.notifications.current_app.send_task") as enqueue_email:
         with django_capture_on_commit_callbacks(execute=True):
             result = renew_at(
                 subscription=subscription,
@@ -740,7 +744,11 @@ def test_renewal_email_is_controlled_by_creator_preference(
         topic=CREATOR_EMAIL_TOPIC,
     )
     assert event.payload["event_type"] == CREATOR_EMAIL_EVENT_SUBSCRIPTION_RENEWED
-    enqueue_email.assert_called_once_with(event.id)
+    enqueue_email.assert_called_once_with(
+        "premium.tasks.dispatch_creator_email_outbox_event",
+        args=[event.id],
+        queue="short_tasks",
+    )
 
 
 @pytest.mark.django_db

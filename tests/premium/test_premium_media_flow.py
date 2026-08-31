@@ -303,7 +303,7 @@ def test_purchase_with_tokens_creates_purchase_unlock_ledger_entries_and_balance
     buyer_wallet = fund_user_wallet(buyer, 1_000 * 10**6)
     creator_wallet = fund_user_wallet(creator, 0)
 
-    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay") as enqueue_email:
+    with patch("premium.notifications.current_app.send_task") as enqueue_email:
         with django_capture_on_commit_callbacks(execute=True):
             result = purchase_premium_media_with_tokens(actor=buyer, media=media)
 
@@ -347,7 +347,11 @@ def test_purchase_with_tokens_creates_purchase_unlock_ledger_entries_and_balance
     assert email_event.payload["buyer_username"] == buyer.username
     assert email_event.payload["media_title"] == media.title
     assert email_event.payload["creator_amount"] == 400 * 10**6
-    enqueue_email.assert_called_once_with(email_event.id)
+    enqueue_email.assert_called_once_with(
+        "premium.tasks.dispatch_creator_email_outbox_event",
+        args=[email_event.id],
+        queue="short_tasks",
+    )
 
     delivery = deliver_creator_email_outbox_event(email_event.id)
     email_event.refresh_from_db()
@@ -385,7 +389,7 @@ def test_creator_can_disable_premium_purchase_email(
     fund_user_wallet(creator, 0)
 
     with patch(
-        "premium.tasks.dispatch_creator_email_outbox_event.delay"
+        "premium.notifications.current_app.send_task"
     ) as enqueue_email:
         with django_capture_on_commit_callbacks(execute=True):
             result = purchase_premium_media_with_tokens(
@@ -421,7 +425,7 @@ def test_purchase_commit_survives_creator_email_broker_enqueue_failure(
     fund_user_wallet(creator, 0)
 
     with patch(
-        "premium.tasks.dispatch_creator_email_outbox_event.delay",
+        "premium.notifications.current_app.send_task",
         side_effect=RuntimeError("broker unavailable"),
     ):
         with django_capture_on_commit_callbacks(execute=True):
@@ -457,7 +461,7 @@ def test_creator_email_recovery_requeues_stale_pending_event(
     fund_user_wallet(buyer, 1_000 * 10**6)
     fund_user_wallet(creator, 0)
 
-    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay"):
+    with patch("premium.notifications.current_app.send_task"):
         with django_capture_on_commit_callbacks(execute=True):
             purchase_premium_media_with_tokens(actor=buyer, media=media)
 
@@ -499,7 +503,7 @@ def test_creator_email_dead_letter_uses_ledger_save_signals(
     fund_user_wallet(buyer, 1_000 * 10**6)
     fund_user_wallet(creator, 0)
 
-    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay"):
+    with patch("premium.notifications.current_app.send_task"):
         with django_capture_on_commit_callbacks(execute=True):
             purchase_premium_media_with_tokens(actor=buyer, media=media)
 

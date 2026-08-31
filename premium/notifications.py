@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 from decimal import Decimal
 
+from celery import current_app
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, get_connection
 from django.db import transaction
@@ -176,11 +177,10 @@ def _build_email_context(payload: dict) -> dict:
 
 def _safe_enqueue_creator_email_outbox_event(event_id: int) -> bool:
     try:
-        from celery import current_app
-
         current_app.send_task(
             "premium.tasks.dispatch_creator_email_outbox_event",
             args=[int(event_id)],
+            queue="short_tasks",
         )
         return True
     except Exception:
