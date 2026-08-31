@@ -176,9 +176,12 @@ def _build_email_context(payload: dict) -> dict:
 
 def _safe_enqueue_creator_email_outbox_event(event_id: int) -> bool:
     try:
-        from .tasks import dispatch_creator_email_outbox_event
+        from celery import current_app
 
-        dispatch_creator_email_outbox_event.delay(int(event_id))
+        current_app.send_task(
+            "premium.tasks.dispatch_creator_email_outbox_event",
+            args=[int(event_id)],
+        )
         return True
     except Exception:
         # The purchase/subscription has already committed at this point.
