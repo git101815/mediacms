@@ -350,9 +350,17 @@ def award_referral_for_purchase(*, purchase_txn_id: int) -> dict:
     user_wallet.promotional_balance = (
         int(user_wallet.promotional_balance) + reward_units
     )
+    user_wallet.restricted_promotional_balance = (
+        int(user_wallet.restricted_promotional_balance) + reward_units
+    )
     issuance_wallet.balance = int(issuance_wallet.balance) - reward_units
     user_wallet.save(
-        update_fields=["balance", "promotional_balance", "updated_at"]
+        update_fields=[
+            "balance",
+            "promotional_balance",
+            "restricted_promotional_balance",
+            "updated_at",
+        ]
     )
     issuance_wallet.save(update_fields=["balance", "updated_at"])
 
@@ -379,6 +387,7 @@ def award_referral_for_purchase(*, purchase_txn_id: int) -> dict:
         wallet=user_wallet,
         delta=reward_units,
         promotional_delta=reward_units,
+        restricted_promotional_delta=reward_units,
         balance_after=user_wallet.balance,
     )
     LedgerEntry.objects.create(

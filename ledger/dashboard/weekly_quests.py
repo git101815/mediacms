@@ -11,6 +11,7 @@ from datetime import date, datetime, time, timedelta
 from urllib.parse import urlparse
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core import signing
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
@@ -497,14 +498,6 @@ def _referer_host(request) -> str:
     return (urlparse(value).hostname or "").lower()
 
 
-def _host_matches_platform(host: str, platform: str) -> bool:
-    for expected in config.QUEST_BOARD_SOCIAL_HOSTS.get(platform, ()):  # exact or subdomain
-        expected = str(expected or "").strip().lower()
-        if host == expected or host.endswith(f".{expected}"):
-            return True
-    return False
-
-
 def _is_platform_unfurl(request, platform: str) -> bool:
     user_agent = str(request.META.get("HTTP_USER_AGENT") or "").lower()
     return any(
@@ -512,16 +505,6 @@ def _is_platform_unfurl(request, platform: str) -> bool:
         for fragment in config.QUEST_BOARD_UNFURL_USER_AGENTS.get(platform, ())
         if str(fragment or "").strip()
     )
-
-
-def _video_platform_verified(request, campaign: QuestShareCampaign) -> bool:
-    host = _referer_host(request)
-    if host and _host_matches_platform(host, campaign.expected_platform):
-        return True
-    if campaign.preview_seen_at is None:
-        return False
-    window = timedelta(seconds=int(config.QUEST_BOARD_UNFURL_WINDOW_SECONDS))
-    return campaign.preview_seen_at >= timezone.now() - window
 
 
 def build_share_redirect_response(*, request, public_id):
@@ -549,17 +532,17 @@ def build_share_redirect_response(*, request, public_id):
         return redirect(target)
 
     visitor_token, _created = _visitor_token(request)
-    platform_verified = (
-        campaign.campaign_type == QuestShareCampaign.TYPE_SITE
-        or _video_platform_verified(request, campaign)
-    )
     attribution = signing.dumps(
         {
             "campaign": str(campaign.public_id),
             "cycle": campaign.cycle_key,
             "landing": target,
             "issued_at": int(timezone.now().timestamp()),
-            "platform_verified": bool(platform_verified),
+            "tracked_platform": (
+                campaign.expected_platform
+                if campaign.campaign_type == QuestShareCampaign.TYPE_VIDEO
+                else ""
+            ),
             "referer_host": _referer_host(request),
         },
         salt=ATTRIBUTION_SIGNING_SALT,
@@ -607,24 +590,34 @@ def _page_is_eligible(page: str) -> bool:
 
 
 def _owner_identity_matches(
-    *, campaign: QuestShareCampaign, network_hash: str, fingerprint_hash: str, visitor_hash: str
+    *,
+    campaign: QuestShareCampaign,
+    fingerprint_hash: str,
+    visitor_hash: str,
 ) -> bool:
     return QuestOwnerIdentity.objects.filter(
         user_id=campaign.owner_id,
         cycle_key=campaign.cycle_key,
     ).filter(
-        Q(network_hash=network_hash)
-        | Q(fingerprint_hash=fingerprint_hash)
+        Q(fingerprint_hash=fingerprint_hash)
         | Q(visitor_hash=visitor_hash)
     ).exists()
 
 
-def _definition_for_campaign(campaign: QuestShareCampaign) -> WeeklyQuestDefinition:
-    cycle = _cycle_from_key(campaign.cycle_key)
-    for definition in get_weekly_definitions(user=campaign.owner, cycle=cycle):
-        if definition.key == campaign.quest_key:
-            return definition
-    raise ValidationError("The campaign quest is not active")
+def _qualification_identity_exists(
+    *,
+    campaign: QuestShareCampaign,
+    fingerprint_hash: str,
+    visitor_hash: str,
+) -> bool:
+    return QuestQualifiedVisit.objects.filter(
+        cycle_key=campaign.cycle_key,
+        campaign__owner_id=campaign.owner_id,
+        campaign__quest_key=campaign.quest_key,
+    ).filter(
+        Q(fingerprint_hash=fingerprint_hash)
+        | Q(visitor_hash=visitor_hash)
+    ).exists()
 
 
 def _format_progress_text(
@@ -745,19 +738,33 @@ def _quest_progress(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinitio
             ),
         }
     if definition.condition == "video_share":
-        current = int(
-            own_visits.filter(
-                campaign__quest_key=definition.key,
-                qualification_type=QuestQualifiedVisit.TYPE_VIDEO_PLATFORM,
-            ).exists()
+        current = own_visits.filter(
+            campaign__quest_key=definition.key,
+            qualification_type=QuestQualifiedVisit.TYPE_VIDEO_PLATFORM,
+        ).count()
+        displayed_current = min(current, definition.target)
+        complete = current >= definition.target
+        progress_text = (
+            definition.progress_complete_text
+            if complete
+            else _format_progress_text(
+                definition=definition,
+                template=definition.progress_pending_text,
+                values={
+                    "current": displayed_current,
+                    "target": definition.target,
+                },
+            )
         )
-        complete = bool(current)
         return {
-            "current": current,
+            "current": displayed_current,
             "target": definition.target,
             "complete": complete,
-            "progress_percent": 100 if complete else 0,
-            "progress_text": definition.progress_complete_text if complete else definition.progress_pending_text,
+            "progress_percent": min(
+                100,
+                current * 100 // definition.target,
+            ),
+            "progress_text": progress_text,
         }
     if definition.condition.startswith("community_"):
         return _community_progress(user=user, cycle=cycle, definition=definition)
@@ -768,8 +775,25 @@ def _grant_source_ref(*, user_id: int, cycle_key: str, quest_key: str) -> str:
     return f"weekly-quest:{cycle_key}:user:{int(user_id)}:quest:{quest_key}"
 
 
+def _reward_grant_for_quest(
+    *,
+    user,
+    cycle: QuestCycle,
+    definition: WeeklyQuestDefinition,
+):
+    return RewardChestGrant.objects.filter(
+        user=user,
+        source_type="weekly_quest",
+        source_ref=_grant_source_ref(
+            user_id=user.pk,
+            cycle_key=cycle.key,
+            quest_key=definition.key,
+        ),
+    ).first()
+
+
 def _ensure_reward_grant(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinition):
-    return grant_reward_chest(
+    grant = grant_reward_chest(
         user=user,
         chest_key=definition.chest_key,
         source_type="weekly_quest",
@@ -783,23 +807,15 @@ def _ensure_reward_grant(*, user, cycle: QuestCycle, definition: WeeklyQuestDefi
             "quest_key": definition.key,
             "quest_title": definition.title,
         },
+        expires_at=cycle.ends_at,
     )
-
-
-def _grant_completed_campaign_quest(campaign: QuestShareCampaign):
-    cycle = _cycle_from_key(campaign.cycle_key)
-    definition = _definition_for_campaign(campaign)
-    progress = _quest_progress(
-        user=campaign.owner,
-        cycle=cycle,
-        definition=definition,
-    )
-    if progress["complete"]:
-        _ensure_reward_grant(
-            user=campaign.owner,
-            cycle=cycle,
-            definition=definition,
-        )
+    if (
+        grant.status == RewardChestGrant.STATUS_PENDING
+        and grant.expires_at is None
+    ):
+        grant.expires_at = cycle.ends_at
+        grant.save(update_fields=["expires_at"])
+    return grant
 
 
 @transaction.atomic
@@ -833,7 +849,6 @@ def record_navigation(*, request, fingerprint: str, page: str) -> dict:
 
     if _owner_identity_matches(
         campaign=campaign,
-        network_hash=network_hash,
         fingerprint_hash=browser_hash,
         visitor_hash=browser_visitor_hash,
     ):
@@ -853,12 +868,26 @@ def record_navigation(*, request, fingerprint: str, page: str) -> dict:
         qualification_type = QuestQualifiedVisit.TYPE_SITE_SECOND_PAGE
         second_page = page
     else:
-        if not attribution.get("platform_verified") or page != landing:
+        if page != landing:
             return {"qualified": False, "visitor_token": visitor_token, "clear_attribution": False}
         qualification_type = QuestQualifiedVisit.TYPE_VIDEO_PLATFORM
 
     try:
         with transaction.atomic():
+            user_model = get_user_model()
+            user_model.objects.select_for_update().only("pk").get(
+                pk=campaign.owner_id
+            )
+            if _qualification_identity_exists(
+                campaign=campaign,
+                fingerprint_hash=browser_hash,
+                visitor_hash=browser_visitor_hash,
+            ):
+                return {
+                    "qualified": False,
+                    "visitor_token": visitor_token,
+                    "clear_attribution": True,
+                }
             visit = QuestQualifiedVisit.objects.create(
                 campaign=campaign,
                 cycle_key=cycle.key,
@@ -873,7 +902,6 @@ def record_navigation(*, request, fingerprint: str, page: str) -> dict:
     except IntegrityError:
         return {"qualified": False, "visitor_token": visitor_token, "clear_attribution": True}
 
-    _grant_completed_campaign_quest(campaign)
     return {
         "qualified": True,
         "visit_id": visit.pk,
@@ -894,11 +922,24 @@ def _countdown_label(cycle: QuestCycle) -> str:
 
 def _weekly_row(*, user, cycle: QuestCycle, definition: WeeklyQuestDefinition) -> dict:
     progress = _quest_progress(user=user, cycle=cycle, definition=definition)
-    grant = None
-    if progress["complete"]:
-        grant = _ensure_reward_grant(user=user, cycle=cycle, definition=definition)
+    grant = _reward_grant_for_quest(
+        user=user,
+        cycle=cycle,
+        definition=definition,
+    )
     claimed = bool(grant and grant.status == RewardChestGrant.STATUS_OPENED)
-    can_claim = bool(grant and grant.status == RewardChestGrant.STATUS_PENDING)
+    now = timezone.now()
+    pending_openable = bool(
+        grant
+        and grant.status == RewardChestGrant.STATUS_PENDING
+        and (grant.expires_at is None or grant.expires_at > now)
+    )
+    can_claim = bool(
+        progress["complete"]
+        and not claimed
+        and now < cycle.ends_at
+        and (grant is None or pending_openable)
+    )
 
     if claimed:
         button_label = str(config.QUEST_BOARD_WEEKLY_CLAIMED_LABEL)
@@ -1228,6 +1269,8 @@ def prepare_weekly_quest_reward(
 ) -> dict:
     user = _require_user(user)
     cycle = _cycle_from_key(cycle_key)
+    if timezone.now() >= cycle.ends_at:
+        raise ValidationError("This weekly quest cycle has ended")
     definition = next(
         (
             row

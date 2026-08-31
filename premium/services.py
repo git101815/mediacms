@@ -21,11 +21,16 @@ from ledger.models import (
 from ledger.services import (
     _create_outbox_event,
     _require_wallet_not_blocked,
-    consume_promotional_tokens_for_internal_spend,
+    consume_promotional_tokens_for_internal_spend_provenance,
     enforce_wallet_velocity_limits,
     get_system_wallet,
     get_wallet_available_balance,
     record_wallet_velocity,
+)
+
+from .notifications import (
+    CREATOR_EMAIL_EVENT_MEDIA_PURCHASE,
+    queue_creator_transactional_email,
 )
 
 from .models import (
@@ -390,9 +395,11 @@ def purchase_premium_media_with_tokens(*, actor, media: Media) -> dict:
         ).encode("utf-8")
     ).hexdigest()
 
-    promotional_spent = consume_promotional_tokens_for_internal_spend(
-        buyer_wallet,
-        price_tokens,
+    promotional_spent, restricted_promotional_spent = (
+        consume_promotional_tokens_for_internal_spend_provenance(
+            buyer_wallet,
+            price_tokens,
+        )
     )
     creator_promotional_amount = (
         (creator_amount * promotional_spent) // price_tokens
@@ -412,7 +419,12 @@ def purchase_premium_media_with_tokens(*, actor, media: Media) -> dict:
     platform_wallet.balance = int(platform_wallet.balance) + platform_amount
 
     buyer_wallet.save(
-        update_fields=["balance", "promotional_balance", "updated_at"]
+        update_fields=[
+            "balance",
+            "promotional_balance",
+            "restricted_promotional_balance",
+            "updated_at",
+        ]
     )
     creator_wallet.save(
         update_fields=["balance", "promotional_balance", "updated_at"]
@@ -434,6 +446,7 @@ def purchase_premium_media_with_tokens(*, actor, media: Media) -> dict:
             "creator_amount": creator_amount,
             "platform_amount": platform_amount,
             "promotional_spent_units": promotional_spent,
+            "restricted_promotional_spent_units": restricted_promotional_spent,
             "paid_spent_units": paid_spent,
             "withdrawable_spent_units": paid_spent,
             "creator_promotional_units": creator_promotional_amount,
@@ -449,6 +462,7 @@ def purchase_premium_media_with_tokens(*, actor, media: Media) -> dict:
         wallet=buyer_wallet,
         delta=-price_tokens,
         promotional_delta=-promotional_spent,
+        restricted_promotional_delta=-restricted_promotional_spent,
         balance_after=buyer_wallet.balance,
     )
 
@@ -504,6 +518,20 @@ def purchase_premium_media_with_tokens(*, actor, media: Media) -> dict:
             "price_tokens": price_tokens,
         },
         metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+    queue_creator_transactional_email(
+        txn=txn,
+        event_type=CREATOR_EMAIL_EVENT_MEDIA_PURCHASE,
+        creator=media.user,
+        payload={
+            "buyer_username": str(user.username or ""),
+            "media_id": media.pk,
+            "media_title": str(media.title or ""),
+            "media_url_path": media.get_absolute_url(),
+            "price_tokens": price_tokens,
+            "creator_amount": creator_amount,
+        },
     )
 
     return {

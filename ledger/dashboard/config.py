@@ -179,49 +179,49 @@ WALLET_PAYMENT_GROUPS = {
 # backwards-compatible. The buy flow renders these methods first, then the
 # compatible provider(s).
 WALLET_CHECKOUT_METHODS = {
+    "crypto": {
+        "label": "Crypto",
+        "icon_label": "Crypto",
+        "icon_path": "images/wallet/crypto.svg",
+        "order": 10,
+    },
     "card": {
         "label": "Credit / Debit Card",
         "icon_label": "Card",
         "icon_path": "images/wallet/card.svg",
-        "order": 10,
+        "order": 20,
     },
     "apple_pay": {
         "label": "Apple Pay",
         "icon_label": "Apple Pay",
         "icon_path": "images/wallet/apple_pay.svg",
-        "order": 20,
+        "order": 30,
     },
     "google_pay": {
         "label": "Google Pay",
         "icon_label": "Google Pay",
         "icon_path": "images/wallet/google_pay.svg",
-        "order": 30,
+        "order": 40,
     },
     "paypal": {
         "label": "PayPal",
         "subtitle": "US only",
         "icon_label": "PayPal",
         "icon_path": "images/wallet/paypal.svg",
-        "order": 40,
+        "order": 50,
     },
     "revolut": {
         "label": "Revolut",
         "subtitle": "EU only",
         "icon_label": "Revolut",
         "icon_path": "images/wallet/revolut.svg",
-        "order": 50,
+        "order": 60,
     },
     "bank_transfer": {
         "label": "Bank transfer",
         "icon_label": "Bank",
         "icon_path": "images/wallet/bank.svg",
-        "order": 60,
-    },
-    "crypto": {
-        "label": "Crypto",
-        "icon_label": "Crypto",
-        "icon_path": "images/wallet/crypto.svg",
-        "order": 0,
+        "order": 70,
     },
 }
 

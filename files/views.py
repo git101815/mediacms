@@ -524,6 +524,49 @@ WALLET_CRYPTO_NETWORK_GROUPS = wallet_config.get_wallet_crypto_network_groups()
 PAYGATE_PROVIDER_PAYMENT_GROUPS = wallet_config.WALLET_PAYGATE_PROVIDER_PAYMENT_GROUPS
 
 
+def _build_wallet_withdrawal_options() -> dict[str, list[dict]]:
+    route_pairs = set(ROUTE_ONCHAIN_DECIMALS)
+    routed_assets = {asset_code for _, asset_code in route_pairs}
+    routed_chains = {chain for chain, _ in route_pairs}
+
+    assets = []
+    for asset_code, definition in WALLET_CRYPTO_ASSET_GROUPS.items():
+        if asset_code not in routed_assets:
+            continue
+        assets.append(
+            {
+                "code": asset_code,
+                "label": definition.get("label") or asset_code,
+                "order": int(definition.get("order") or 100),
+            }
+        )
+    assets.sort(key=lambda item: (item["order"], item["label"]))
+
+    asset_order = {item["code"]: item["order"] for item in assets}
+    networks = []
+    for chain, definition in WALLET_CRYPTO_NETWORK_GROUPS.items():
+        if chain not in routed_chains:
+            continue
+        supported_assets = sorted(
+            (
+                asset_code
+                for route_chain, asset_code in route_pairs
+                if route_chain == chain
+            ),
+            key=lambda asset_code: (asset_order.get(asset_code, 100), asset_code),
+        )
+        networks.append(
+            {
+                "chain": chain,
+                "label": definition.get("label") or _get_network_display_label(chain),
+                "order": int(definition.get("order") or 100),
+                "supported_assets": " ".join(supported_assets),
+            }
+        )
+    networks.sort(key=lambda item: (item["order"], item["label"]))
+
+    return {"assets": assets, "networks": networks}
+
 
 def _get_wallet_payment_price_bps(group_key: str) -> int:
     configured = getattr(settings, "WALLET_PAYMENT_METHOD_PRICE_BPS", {}) or {}
@@ -1079,6 +1122,16 @@ def _build_wallet_request_rows(wallet: TokenWallet, *, active_status: str = WALL
 
     rows = []
     for wallet_request in wallet_requests[:WALLET_PAGE_SIZE]:
+        payout_asset_code = (
+            wallet_request.payout_asset_code or ""
+        ).strip().upper()
+        payout_chain = (wallet_request.payout_chain or "").strip().lower()
+        payout_route_label = ""
+        if payout_asset_code and payout_chain:
+            payout_route_label = (
+                f"{payout_asset_code} · {_get_network_display_label(payout_chain)}"
+            )
+
         rows.append(
             {
                 "created_at": wallet_request.created_at,
@@ -1091,6 +1144,9 @@ def _build_wallet_request_rows(wallet: TokenWallet, *, active_status: str = WALL
                 "status_icon": WALLET_REQUEST_STATUS_ICON_MAP.get(wallet_request.status, "info"),
                 "amount_display": _format_platform_token_amount(wallet_request.amount),
                 "notes": wallet_request.notes,
+                "payout_asset_code": payout_asset_code,
+                "payout_chain": payout_chain,
+                "payout_route_label": payout_route_label,
                 "destination_address": wallet_request.destination_address,
                 "hold_amount_display": _format_platform_token_amount(wallet_request.hold.amount) if wallet_request.hold_id else "",
             }
@@ -1820,6 +1876,8 @@ def wallet_withdrawal_request(request):
         active_tab=return_tab,
     )
     amount = request.POST.get("amount", "").strip()
+    payout_asset_code = request.POST.get("payout_asset_code", "").strip()
+    payout_chain = request.POST.get("payout_chain", "").strip()
     destination_address = request.POST.get("destination_address", "").strip()
     notes = request.POST.get("notes", "").strip()
     if not getattr(request.user, "advancedUser", False):
@@ -1831,6 +1889,8 @@ def wallet_withdrawal_request(request):
             wallet=wallet_obj,
             amount=amount,
             destination_address=destination_address,
+            payout_asset_code=payout_asset_code,
+            payout_chain=payout_chain,
             notes=notes,
             metadata={"source": "wallet_ui"},
         )
@@ -2107,6 +2167,7 @@ def _build_guest_wallet_context(request) -> dict:
     login_url = _build_wallet_login_url(request)
     page_obj = Paginator([], WALLET_PAGE_SIZE).get_page(page_number)
     ad_free_price_tokens = get_ad_free_lifetime_price_tokens()
+    withdrawal_options = _build_wallet_withdrawal_options()
 
     wallet_actions = {
         "can_deposit": True,
@@ -2163,6 +2224,8 @@ def _build_guest_wallet_context(request) -> dict:
         "wallet_withdrawal_request_url": reverse(
             "wallet_withdrawal_request"
         ),
+        "withdrawal_crypto_assets": withdrawal_options["assets"],
+        "withdrawal_crypto_networks": withdrawal_options["networks"],
         "deposit_options": [],
         "recent_deposit_session_rows": [],
         "activity_rows": [],
@@ -2286,6 +2349,7 @@ def wallet(request):
     )
     deposit_options = _build_wallet_deposit_options()
     token_pack_rows = _build_wallet_token_pack_rows()
+    withdrawal_options = _build_wallet_withdrawal_options()
 
     if not deposit_options or not token_pack_rows:
         wallet_actions["can_deposit"] = False
@@ -2330,6 +2394,8 @@ def wallet(request):
         "wallet_filters_querystring": _build_wallet_querystring(tab=active_tab, status=active_status),
         "wallet_deposit_request_url": reverse("wallet_deposit_request"),
         "wallet_withdrawal_request_url": reverse("wallet_withdrawal_request"),
+        "withdrawal_crypto_assets": withdrawal_options["assets"],
+        "withdrawal_crypto_networks": withdrawal_options["networks"],
         "deposit_options": deposit_options,
         "wallet_checkout_methods": _build_wallet_checkout_method_rows(deposit_options),
         "recent_deposit_session_rows": recent_deposit_session_rows,

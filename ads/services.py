@@ -13,7 +13,7 @@ from ledger.models import (
     TokenWallet,
 )
 from ledger.services import (
-    consume_promotional_tokens_for_internal_spend,
+    consume_promotional_tokens_for_internal_spend_provenance,
     get_system_wallet,
 )
 
@@ -132,10 +132,12 @@ def _post_batch_to_ledger(batch):
             if existing_txn:
                 ledger_txn = existing_txn
             else:
-                promotional_spent = consume_promotional_tokens_for_internal_spend(
-                    wallet,
-                    amount,
-                    reserve_unsettled_ads=False,
+                promotional_spent, restricted_promotional_spent = (
+                    consume_promotional_tokens_for_internal_spend_provenance(
+                        wallet,
+                        amount,
+                        reserve_unsettled_ads=False,
+                    )
                 )
                 paid_spent = amount - promotional_spent
                 with suppress_wallet_runtime_sync():
@@ -144,6 +146,7 @@ def _post_batch_to_ledger(batch):
                         update_fields=[
                             "balance",
                             "promotional_balance",
+                            "restricted_promotional_balance",
                             "updated_at",
                         ]
                     )
@@ -164,6 +167,7 @@ def _post_batch_to_ledger(batch):
                         "clicks": int(batch.clicks),
                         "amount_microtokens": amount,
                         "promotional_spent_units": promotional_spent,
+                        "restricted_promotional_spent_units": restricted_promotional_spent,
                         "paid_spent_units": paid_spent,
                         "withdrawable_spent_units": paid_spent,
                     },
@@ -174,6 +178,7 @@ def _post_batch_to_ledger(batch):
                     wallet=wallet,
                     delta=-amount,
                     promotional_delta=-promotional_spent,
+                    restricted_promotional_delta=-restricted_promotional_spent,
                     balance_after=wallet.balance,
                 )
                 LedgerEntry.objects.create(

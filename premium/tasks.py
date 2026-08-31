@@ -1,15 +1,23 @@
 import logging
 import os
 import shutil
+from datetime import timedelta
 
 from celery import shared_task
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.files import File
+from django.utils import timezone
 
 from files.models import Media
+from ledger.models import LedgerOutbox
 
+from .notifications import (
+    deliver_creator_email_outbox_event,
+    get_recoverable_creator_email_event_ids,
+    record_creator_email_delivery_failure,
+)
 from .services import replace_creator_premium_asset_file
 
 
@@ -315,3 +323,108 @@ def finalize_premium_upload(
     )
 
     return success_status
+
+@shared_task(
+    bind=True,
+    name="premium.tasks.dispatch_creator_email_outbox_event",
+    queue="short_tasks",
+    acks_late=True,
+    reject_on_worker_lost=True,
+    max_retries=5,
+)
+def dispatch_creator_email_outbox_event(self, event_id: int):
+    try:
+        return deliver_creator_email_outbox_event(int(event_id))
+    except LedgerOutbox.DoesNotExist:
+        logger.warning(
+            "Creator email outbox event no longer exists event_id=%s",
+            event_id,
+        )
+        return {"sent": False, "reason": "missing", "event_id": int(event_id)}
+    except Exception as exc:
+        retry_count = int(self.request.retries)
+        max_retries = int(self.max_retries or 0)
+        final_failure = retry_count >= max_retries
+        now = timezone.now()
+        countdown = min(60 * (2**retry_count), 15 * 60)
+        retry_at = (
+            None
+            if final_failure
+            else now + timedelta(seconds=countdown)
+        )
+
+        try:
+            event = record_creator_email_delivery_failure(
+                event_id=int(event_id),
+                error_message=str(exc),
+                final_failure=final_failure,
+                retry_at=retry_at,
+            )
+        except LedgerOutbox.DoesNotExist:
+            logger.warning(
+                "Creator email outbox event disappeared while recording "
+                "failure event_id=%s",
+                event_id,
+            )
+            return {
+                "sent": False,
+                "reason": "missing",
+                "event_id": int(event_id),
+            }
+
+        # A duplicate/recovery task may have completed or terminally failed the
+        # row while this task was waiting for its DB lock. Never downgrade it.
+        if event.status == LedgerOutbox.STATUS_DISPATCHED:
+            return {
+                "sent": False,
+                "reason": "already_dispatched",
+                "event_id": int(event_id),
+            }
+        if event.status == LedgerOutbox.STATUS_DEAD_LETTERED:
+            logger.exception(
+                "Creator transactional email dead-lettered event_id=%s",
+                event_id,
+            )
+            return {
+                "sent": False,
+                "reason": "dead_lettered",
+                "event_id": int(event_id),
+            }
+
+        logger.warning(
+            "Retrying creator transactional email event_id=%s retry=%s countdown=%s",
+            event_id,
+            retry_count + 1,
+            countdown,
+        )
+        raise self.retry(exc=exc, countdown=countdown)
+
+
+@shared_task(
+    name="premium.tasks.recover_creator_email_outbox",
+    queue="short_tasks",
+)
+def recover_creator_email_outbox():
+    event_ids = get_recoverable_creator_email_event_ids()
+    enqueued = 0
+    enqueue_failures = 0
+
+    for event_id in event_ids:
+        try:
+            dispatch_creator_email_outbox_event.delay(int(event_id))
+            enqueued += 1
+        except Exception:
+            # Keep the durable row untouched. The next beat run will find it
+            # again after the broker is healthy.
+            enqueue_failures += 1
+            logger.exception(
+                "Failed to recover creator email outbox event_id=%s",
+                event_id,
+            )
+
+    return {
+        "candidates": len(event_ids),
+        "enqueued": enqueued,
+        "enqueue_failures": enqueue_failures,
+    }
+

@@ -548,9 +548,17 @@ def claim_quest_reward(*, user, quest_key: str) -> dict:
     user_wallet.promotional_balance = (
         int(user_wallet.promotional_balance) + amount
     )
+    user_wallet.restricted_promotional_balance = (
+        int(user_wallet.restricted_promotional_balance) + amount
+    )
     issuance_wallet.balance = int(issuance_wallet.balance) - amount
     user_wallet.save(
-        update_fields=["balance", "promotional_balance", "updated_at"]
+        update_fields=[
+            "balance",
+            "promotional_balance",
+            "restricted_promotional_balance",
+            "updated_at",
+        ]
     )
     issuance_wallet.save(update_fields=["balance", "updated_at"])
 
@@ -575,6 +583,7 @@ def claim_quest_reward(*, user, quest_key: str) -> dict:
         wallet=user_wallet,
         delta=amount,
         promotional_delta=amount,
+        restricted_promotional_delta=amount,
         balance_after=user_wallet.balance,
     )
     LedgerOutbox.objects.create(

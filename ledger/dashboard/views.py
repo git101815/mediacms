@@ -374,7 +374,13 @@ def wallet_claim_daily_reward(request):
 
     try:
         if wants_json and not confirming:
-            prepared = prepare_daily_reward_chest(user=request.user)
+            prepared = prepare_daily_reward_chest(
+                user=request.user,
+                grant_public_id=(
+                    str(request.POST.get("grant_public_id") or "").strip()
+                    or None
+                ),
+            )
             result = None
         else:
             result = claim_daily_reward(

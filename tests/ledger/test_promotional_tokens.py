@@ -61,6 +61,8 @@ class PromotionalTokenAccountingTests(TestCase):
             wallet=self.wallet,
             amount="400",
             destination_address="test-destination",
+            payout_asset_code="USDT",
+            payout_chain="ethereum",
         )
         self.wallet.refresh_from_db()
         request.hold.refresh_from_db()
@@ -78,6 +80,8 @@ class PromotionalTokenAccountingTests(TestCase):
                 wallet=self.wallet,
                 amount="541",
                 destination_address="test-destination",
+                payout_asset_code="USDT",
+                payout_chain="ethereum",
             )
 
     @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=0)
@@ -97,6 +101,8 @@ class PromotionalTokenAccountingTests(TestCase):
             wallet=self.wallet,
             amount="600",
             destination_address="first-destination",
+            payout_asset_code="USDT",
+            payout_chain="ethereum",
         )
         self.assertEqual(first.metadata["cash_reserved_units"], 300 * SCALE)
         self.assertEqual(first.metadata["promotional_reserved_units"], 300 * SCALE)
@@ -108,6 +114,8 @@ class PromotionalTokenAccountingTests(TestCase):
                 wallet=self.wallet,
                 amount="1",
                 destination_address="second-destination",
+                payout_asset_code="USDT",
+                payout_chain="ethereum",
             )
 
     @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=101)

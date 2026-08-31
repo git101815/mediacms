@@ -20,11 +20,17 @@ from ledger.models import (
 from ledger.services import (
     _create_outbox_event,
     _require_wallet_not_blocked,
-    consume_promotional_tokens_for_internal_spend,
+    consume_promotional_tokens_for_internal_spend_provenance,
     enforce_wallet_velocity_limits,
     get_system_wallet,
     get_wallet_available_balance,
     record_wallet_velocity,
+)
+
+from .notifications import (
+    CREATOR_EMAIL_EVENT_SUBSCRIPTION_RENEWED,
+    CREATOR_EMAIL_EVENT_SUBSCRIPTION_STARTED,
+    queue_creator_transactional_email,
 )
 
 from .models import (
@@ -224,6 +230,7 @@ def _create_subscription_payment(
     subscription: CreatorSubscription,
     plan: CreatorSubscriptionPlan,
     period_start,
+    creator_email_event_type: str | None = None,
 ) -> CreatorSubscriptionPeriod:
     if plan.creator_id != subscription.creator_id:
         raise ValidationError(
@@ -302,9 +309,11 @@ def _create_subscription_payment(
         ).encode("utf-8")
     ).hexdigest()
 
-    promotional_spent = consume_promotional_tokens_for_internal_spend(
-        buyer_wallet,
-        price_tokens,
+    promotional_spent, restricted_promotional_spent = (
+        consume_promotional_tokens_for_internal_spend_provenance(
+            buyer_wallet,
+            price_tokens,
+        )
     )
     creator_promotional_amount = (
         (creator_amount * promotional_spent) // price_tokens
@@ -324,7 +333,12 @@ def _create_subscription_payment(
     platform_wallet.balance = int(platform_wallet.balance) + platform_amount
 
     buyer_wallet.save(
-        update_fields=["balance", "promotional_balance", "updated_at"]
+        update_fields=[
+            "balance",
+            "promotional_balance",
+            "restricted_promotional_balance",
+            "updated_at",
+        ]
     )
     creator_wallet.save(
         update_fields=["balance", "promotional_balance", "updated_at"]
@@ -349,6 +363,7 @@ def _create_subscription_payment(
             "creator_amount": creator_amount,
             "platform_amount": platform_amount,
             "promotional_spent_units": promotional_spent,
+            "restricted_promotional_spent_units": restricted_promotional_spent,
             "paid_spent_units": paid_spent,
             "withdrawable_spent_units": paid_spent,
             "creator_promotional_units": creator_promotional_amount,
@@ -364,6 +379,7 @@ def _create_subscription_payment(
         wallet=buyer_wallet,
         delta=-price_tokens,
         promotional_delta=-promotional_spent,
+        restricted_promotional_delta=-restricted_promotional_spent,
         balance_after=buyer_wallet.balance,
     )
 
@@ -436,6 +452,26 @@ def _create_subscription_payment(
         },
         metadata_version=LEDGER_METADATA_VERSION,
     )
+
+    if creator_email_event_type:
+        queue_creator_transactional_email(
+            txn=txn,
+            event_type=creator_email_event_type,
+            creator=creator,
+            payload={
+                "subscriber_username": str(user.username or ""),
+                "subscription_id": subscription.pk,
+                "plan_id": plan.pk,
+                "plan_name": str(plan.name or ""),
+                "billing_period_days": billing_period_days,
+                "period_start": period_start.isoformat(),
+                "period_end": period_end.isoformat(),
+                "period_start_display": timezone.localtime(period_start).strftime("%Y-%m-%d"),
+                "period_end_display": timezone.localtime(period_end).strftime("%Y-%m-%d"),
+                "price_tokens": price_tokens,
+                "creator_amount": creator_amount,
+            },
+        )
 
     grant_period_release_unlocks(period=period)
     return period
@@ -529,6 +565,7 @@ def subscribe_to_creator_with_tokens(
         subscription=subscription,
         plan=plan,
         period_start=period_start,
+        creator_email_event_type=CREATOR_EMAIL_EVENT_SUBSCRIPTION_STARTED,
     )
 
     return {
@@ -648,6 +685,7 @@ def renew_creator_subscription_with_tokens(*, subscription_id: int) -> dict:
             subscription=subscription,
             plan=subscription.plan,
             period_start=period_start,
+            creator_email_event_type=CREATOR_EMAIL_EVENT_SUBSCRIPTION_RENEWED,
         )
     except ValidationError as exc:
         subscription.status = CreatorSubscription.STATUS_PAST_DUE

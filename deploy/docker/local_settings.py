@@ -377,6 +377,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60.0,
         "options": {"queue": "short_tasks"},
     },
+    "premium_recover_creator_emails": {
+        "task": "premium.tasks.recover_creator_email_outbox",
+        "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
+    },
     "push_all_media_to_storj": {
         "task": "push_all_media_to_storj",
         "schedule": timedelta(minutes=5),
@@ -423,6 +428,17 @@ PREMIUM_S3_SECRET_ACCESS_KEY = os.getenv("PREMIUM_S3_SECRET_ACCESS_KEY", "").str
 PREMIUM_S3_UPLOAD_PREFIX = "premium-media"
 PREMIUM_SIGNED_URL_TTL_SECONDS = 900
 PREMIUM_MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024 * 1024
+
+# Creator transactional monetization emails. These are operator settings,
+# intentionally kept in Python config rather than environment variables.
+# Operator kill-switches. Individual creator choices are stored on User
+# and are checked in addition to these global switches.
+PREMIUM_CREATOR_PURCHASE_EMAIL_ENABLED = True
+PREMIUM_CREATOR_NEW_SUBSCRIPTION_EMAIL_ENABLED = True
+PREMIUM_CREATOR_RENEWAL_EMAIL_ENABLED = True
+PREMIUM_CREATOR_EMAIL_RECOVERY_ENABLED = True
+PREMIUM_CREATOR_EMAIL_RECOVERY_GRACE_SECONDS = 120
+PREMIUM_CREATOR_EMAIL_RECOVERY_BATCH_SIZE = 100
 
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@celebfakes.ru")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "mail.smtpbackend.ru")

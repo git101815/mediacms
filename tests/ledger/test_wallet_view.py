@@ -323,6 +323,8 @@ class TestWalletViewFunctional(BaseLedgerTestCase):
             reverse("wallet_withdrawal_request"),
             {
                 "amount": "120",
+                "payout_asset_code": "USDT",
+                "payout_chain": "ethereum",
                 "destination_address": "0xabc123",
                 "notes": "First withdrawal",
             },
@@ -338,9 +340,21 @@ class TestWalletViewFunctional(BaseLedgerTestCase):
             WalletRequest.STATUS_PENDING,
         )
         self.assertEqual(request_row.amount, 120_000_000)
+        self.assertEqual(request_row.payout_asset_code, "USDT")
+        self.assertEqual(request_row.payout_chain, "ethereum")
         self.assertEqual(
             request_row.destination_address,
             "0xabc123",
+        )
+        self.assertEqual(request_row.metadata["payout_asset_code"], "USDT")
+        self.assertEqual(request_row.metadata["payout_chain"], "ethereum")
+        self.assertEqual(
+            request_row.hold.metadata["payout_asset_code"],
+            "USDT",
+        )
+        self.assertEqual(
+            request_row.hold.metadata["payout_chain"],
+            "ethereum",
         )
         self.assertIsNotNone(request_row.hold)
 
@@ -356,12 +370,36 @@ class TestWalletViewFunctional(BaseLedgerTestCase):
             reverse("wallet_withdrawal_request"),
             {
                 "amount": "10",
+                "payout_asset_code": "USDT",
+                "payout_chain": "ethereum",
                 "destination_address": "0xabc",
                 "notes": "",
             },
         )
 
         self.assertEqual(response.status_code, 302)
+        self.assertFalse(WalletRequest.objects.exists())
+        self.w1.refresh_from_db()
+        self.assertEqual(self.w1.held_balance, 0)
+
+    def test_wallet_rejects_unsupported_withdrawal_crypto_network_pair(self):
+        self._enable_creator_withdrawals(self.u1)
+        self._credit_wallet(100_000_000)
+        self.client.force_login(self.u1)
+
+        response = self.client.post(
+            reverse("wallet_withdrawal_request"),
+            {
+                "amount": "10",
+                "payout_asset_code": "BNB",
+                "payout_chain": "ethereum",
+                "destination_address": "0xabc",
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("open_modal=withdraw", response.url)
         self.assertFalse(WalletRequest.objects.exists())
         self.w1.refresh_from_db()
         self.assertEqual(self.w1.held_balance, 0)
@@ -375,6 +413,8 @@ class TestWalletViewFunctional(BaseLedgerTestCase):
             reverse("wallet_withdrawal_request"),
             {
                 "amount": "150",
+                "payout_asset_code": "USDT",
+                "payout_chain": "ethereum",
                 "destination_address": "0xabc",
                 "notes": "",
             },

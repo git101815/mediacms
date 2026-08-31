@@ -30,7 +30,7 @@ from ledger.services import (
     enforce_wallet_velocity_limits,
     get_system_wallet,
     get_wallet_available_balance,
-    consume_promotional_tokens_for_internal_spend,
+    consume_promotional_tokens_for_internal_spend_provenance,
     record_wallet_velocity,
 )
 
@@ -277,14 +277,21 @@ def create_generation_request(*, actor, prompt, resolution=None) -> AIGeneration
         }
     )
 
-    promotional_spent = consume_promotional_tokens_for_internal_spend(
-        buyer_wallet, price_tokens
+    promotional_spent, restricted_promotional_spent = (
+        consume_promotional_tokens_for_internal_spend_provenance(
+            buyer_wallet, price_tokens
+        )
     )
     paid_spent = price_tokens - promotional_spent
     buyer_wallet.balance = int(buyer_wallet.balance) - price_tokens
     platform_wallet.balance = int(platform_wallet.balance) + price_tokens
     buyer_wallet.save(
-        update_fields=["balance", "promotional_balance", "updated_at"]
+        update_fields=[
+            "balance",
+            "promotional_balance",
+            "restricted_promotional_balance",
+            "updated_at",
+        ]
     )
     platform_wallet.save(update_fields=["balance", "updated_at"])
 
@@ -300,6 +307,7 @@ def create_generation_request(*, actor, prompt, resolution=None) -> AIGeneration
             "user_id": user.pk,
             "price_tokens": price_tokens,
             "promotional_spent_units": promotional_spent,
+            "restricted_promotional_spent_units": restricted_promotional_spent,
             "paid_spent_units": paid_spent,
             "withdrawable_spent_units": paid_spent,
         },
@@ -311,6 +319,7 @@ def create_generation_request(*, actor, prompt, resolution=None) -> AIGeneration
         wallet=buyer_wallet,
         delta=-price_tokens,
         promotional_delta=-promotional_spent,
+        restricted_promotional_delta=-restricted_promotional_spent,
         balance_after=buyer_wallet.balance,
     )
     LedgerEntry.objects.create(

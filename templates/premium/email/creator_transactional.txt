@@ -1,0 +1,18 @@
+Hi {{ creator_display_name }},
+
+{% if event_type == "media_purchase" %}{{ buyer_username }} purchased "{{ media_title }}".
+Price paid: {{ price_tokens_display }} tokens
+Wallet credit: {{ creator_amount_display }} tokens
+{% if media_url %}Content: {{ media_url }}
+{% endif %}{% elif event_type == "subscription_started" %}{{ subscriber_username }} subscribed to your {{ plan_name }} plan.
+Price paid: {{ price_tokens_display }} tokens
+Wallet credit: {{ creator_amount_display }} tokens
+Period: {{ period_start_display }} to {{ period_end_display }}
+{% elif event_type == "subscription_renewed" %}{{ subscriber_username }} renewed their {{ plan_name }} subscription.
+Price paid: {{ price_tokens_display }} tokens
+Wallet credit: {{ creator_amount_display }} tokens
+Period: {{ period_start_display }} to {{ period_end_display }}
+{% endif %}
+View your wallet: {{ wallet_url }}
+
+Wallet credit is shown in platform tokens. Cash-out eligibility is calculated separately by the wallet.

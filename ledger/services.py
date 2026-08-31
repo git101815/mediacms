@@ -38,6 +38,7 @@ from datetime import timedelta
 import os
 from bip_utils import Bip44, Bip44Changes, Bip44Coins
 from django.conf import settings
+from ledger.dashboard import config as wallet_config
 from ledger.native_quoted import (
     NATIVE_QUOTED_AMOUNT_SEMANTICS,
     build_native_valuation_metadata,
@@ -346,17 +347,23 @@ def get_wallet_promotional_balance(wallet: TokenWallet) -> int:
     return max(0, min(int(wallet.promotional_balance), int(wallet.balance)))
 
 
+def get_wallet_restricted_promotional_balance(wallet: TokenWallet) -> int:
+    if wallet.wallet_type != TokenWallet.TYPE_USER:
+        return 0
+    promotional = get_wallet_promotional_balance(wallet)
+    return max(
+        0,
+        min(int(wallet.restricted_promotional_balance), promotional),
+    )
+
+
 def _split_amount_by_funding_proportion(
     *,
     cash_units: int,
     promotional_units: int,
     amount: int,
 ) -> tuple[int, int]:
-    """Split an amount into paid/promotional units using the source composition.
-
-    All values are integer token units. Rounding is deterministic and differs
-    from the exact mathematical ratio by at most one smallest token unit.
-    """
+    """Split an amount into paid/promotional units using source composition."""
     cash_units = max(0, int(cash_units))
     promotional_units = max(0, int(promotional_units))
     amount = int(amount)
@@ -378,18 +385,44 @@ def _split_amount_by_funding_proportion(
     return cash_amount, promotional_amount
 
 
+def _split_amount_by_funding_components(
+    *,
+    cash_units: int,
+    earned_promotional_units: int,
+    restricted_promotional_units: int,
+    amount: int,
+) -> tuple[int, int, int]:
+    """Split while preserving both promotional and restricted proportions."""
+    cash_units = max(0, int(cash_units))
+    earned_promotional_units = max(0, int(earned_promotional_units))
+    restricted_promotional_units = max(0, int(restricted_promotional_units))
+    promotional_units = earned_promotional_units + restricted_promotional_units
+
+    cash_amount, promotional_amount = _split_amount_by_funding_proportion(
+        cash_units=cash_units,
+        promotional_units=promotional_units,
+        amount=amount,
+    )
+    earned_amount, restricted_amount = _split_amount_by_funding_proportion(
+        cash_units=earned_promotional_units,
+        promotional_units=restricted_promotional_units,
+        amount=promotional_amount,
+    )
+    return cash_amount, earned_amount, restricted_amount
+
+
 def _allocate_promotional_component_proportionally(
     *,
     promotional_units: int,
     credits: list[tuple[int, int]],
 ) -> dict[int, int]:
-    """Allocate a promotional component across positive credits proportionally.
-
-    ``credits`` is ``[(wallet_id, amount), ...]`` and may include system
-    wallets. The returned allocations sum exactly to ``promotional_units``.
-    """
+    """Allocate one provenance component across positive credits exactly."""
     promotional_units = max(0, int(promotional_units))
-    positive = [(int(wallet_id), int(amount)) for wallet_id, amount in credits if int(amount) > 0]
+    positive = [
+        (int(wallet_id), int(amount))
+        for wallet_id, amount in credits
+        if int(amount) > 0
+    ]
     total = sum(amount for _wallet_id, amount in positive)
     if promotional_units == 0:
         return {wallet_id: 0 for wallet_id, _amount in positive}
@@ -429,6 +462,14 @@ def get_max_promotional_withdrawal_percent() -> int:
     return value
 
 
+def _wallet_owner_is_creator(wallet: TokenWallet) -> bool:
+    # MediaCMS creator accounts are represented by users.User.advancedUser.
+    if wallet.wallet_type != TokenWallet.TYPE_USER or not wallet.user_id:
+        return False
+
+    return bool(getattr(wallet.user, "advancedUser", False))
+
+
 def _get_wallet_unsettled_ads_reservation(wallet: TokenWallet) -> int:
     if wallet.wallet_type != TokenWallet.TYPE_USER or not wallet.user_id:
         return 0
@@ -438,11 +479,6 @@ def _get_wallet_unsettled_ads_reservation(wallet: TokenWallet) -> int:
     except Exception:
         user = None
 
-    # Unsettled Ads spend remains reserved even if advertiserUser is later
-    # removed. Campaigns are retained in the database, so their existence is
-    # the durable indicator that this wallet can still have Redis-metered spend
-    # waiting for settlement. Superusers can also own Ads campaigns without
-    # advertiserUser.
     has_ads_exposure = bool(
         user is not None
         and (
@@ -457,29 +493,31 @@ def _get_wallet_unsettled_ads_reservation(wallet: TokenWallet) -> int:
     try:
         from ads.runtime import get_account_unsettled_microtokens
 
-        return max(
-            0,
-            int(get_account_unsettled_microtokens(wallet.user_id)),
-        )
+        return max(0, int(get_account_unsettled_microtokens(wallet.user_id)))
     except Exception as exc:
         raise ValidationError(
             "Advertising balance is temporarily unavailable"
         ) from exc
 
 
-def _get_wallet_available_funding_before_ads(
+def _get_wallet_available_funding_components_before_ads(
     wallet: TokenWallet,
-) -> tuple[int, int]:
-    """Return currently unreserved ``(cash, promotional)`` units."""
+) -> tuple[int, int, int]:
+    """Return unreserved (cash, earned promo, restricted promo) units."""
     promotional_total = get_wallet_promotional_balance(wallet)
+    restricted_total = get_wallet_restricted_promotional_balance(wallet)
+    earned_total = promotional_total - restricted_total
     cash_total = max(0, int(wallet.balance) - promotional_total)
     total_held = max(0, int(wallet.held_balance))
 
     if wallet.wallet_type != TokenWallet.TYPE_USER or wallet.pk is None:
-        return max(0, cash_total - total_held), 0
+        return max(0, cash_total - total_held), 0, 0
 
     explicit_cash = 0
-    explicit_promotional = 0
+    explicit_earned = 0
+    explicit_restricted = 0
+    legacy_promotional = 0
+
     for hold in LedgerHold.objects.filter(
         wallet_id=wallet.pk,
         released=False,
@@ -487,50 +525,123 @@ def _get_wallet_available_funding_before_ads(
         hold_metadata = hold.metadata or {}
         has_cash = "cash_reserved_units" in hold_metadata
         has_promotional = "promotional_reserved_units" in hold_metadata
-        if not has_cash and not has_promotional:
+        has_restricted = "restricted_promotional_reserved_units" in hold_metadata
+        if not has_cash and not has_promotional and not has_restricted:
             continue
         if not has_cash or not has_promotional:
             raise ValidationError("Withdrawal hold funding metadata is incomplete")
         try:
             hold_cash = int(hold_metadata["cash_reserved_units"])
             hold_promotional = int(hold_metadata["promotional_reserved_units"])
+            hold_restricted = (
+                int(hold_metadata["restricted_promotional_reserved_units"])
+                if has_restricted
+                else None
+            )
         except (TypeError, ValueError) as exc:
             raise ValidationError("Withdrawal hold funding metadata is invalid") from exc
+
         if (
             hold_cash < 0
             or hold_promotional < 0
             or hold_cash + hold_promotional != int(hold.amount)
         ):
             raise ValidationError("Withdrawal hold funding split is invalid")
-        explicit_cash += hold_cash
-        explicit_promotional += hold_promotional
 
-    explicit_total = explicit_cash + explicit_promotional
-    if explicit_total > total_held:
-        raise ValidationError("Wallet hold funding exceeds held balance")
-    if explicit_cash > cash_total or explicit_promotional > promotional_total:
-        raise ValidationError("Reserved withdrawal funding exceeds wallet funding")
+        explicit_cash += hold_cash
+        if hold_restricted is None:
+            legacy_promotional += hold_promotional
+        else:
+            if hold_restricted < 0 or hold_restricted > hold_promotional:
+                raise ValidationError("Withdrawal hold restricted funding is invalid")
+            explicit_restricted += hold_restricted
+            explicit_earned += hold_promotional - hold_restricted
+
+    if explicit_cash > cash_total:
+        raise ValidationError("Reserved withdrawal cash exceeds wallet funding")
+    if explicit_earned > earned_total or explicit_restricted > restricted_total:
+        raise ValidationError("Reserved withdrawal provenance exceeds wallet funding")
 
     cash_available = cash_total - explicit_cash
-    promotional_available = promotional_total - explicit_promotional
-    unclassified_held = total_held - explicit_total
+    earned_available = earned_total - explicit_earned
+    restricted_available = restricted_total - explicit_restricted
 
-    if unclassified_held > cash_available + promotional_available:
+    if legacy_promotional > earned_available + restricted_available:
+        raise ValidationError("Legacy withdrawal holds exceed promotional funding")
+    legacy_earned, legacy_restricted = _split_amount_by_funding_proportion(
+        cash_units=earned_available,
+        promotional_units=restricted_available,
+        amount=legacy_promotional,
+    )
+    earned_available -= legacy_earned
+    restricted_available -= legacy_restricted
+
+    classified_held = (
+        explicit_cash
+        + explicit_earned
+        + explicit_restricted
+        + legacy_promotional
+    )
+    if classified_held > total_held:
+        raise ValidationError("Wallet hold funding exceeds held balance")
+    unclassified_held = total_held - classified_held
+
+    if unclassified_held > cash_available + earned_available + restricted_available:
         raise ValidationError("Wallet held balance exceeds wallet funding")
 
-    # Generic holds predate explicit provenance metadata. Reserve them in the
-    # same proportion as the currently unreserved wallet funding.
-    unclassified_cash, unclassified_promotional = (
-        _split_amount_by_funding_proportion(
+    unclassified_cash, unclassified_earned, unclassified_restricted = (
+        _split_amount_by_funding_components(
             cash_units=cash_available,
-            promotional_units=promotional_available,
+            earned_promotional_units=earned_available,
+            restricted_promotional_units=restricted_available,
             amount=unclassified_held,
         )
     )
     cash_available -= unclassified_cash
-    promotional_available -= unclassified_promotional
+    earned_available -= unclassified_earned
+    restricted_available -= unclassified_restricted
 
-    return max(0, cash_available), max(0, promotional_available)
+    return (
+        max(0, cash_available),
+        max(0, earned_available),
+        max(0, restricted_available),
+    )
+
+
+def _get_wallet_available_funding_components(
+    wallet: TokenWallet,
+    *,
+    reserve_unsettled_ads: bool = True,
+) -> tuple[int, int, int]:
+    cash_available, earned_available, restricted_available = (
+        _get_wallet_available_funding_components_before_ads(wallet)
+    )
+    if not reserve_unsettled_ads:
+        return cash_available, earned_available, restricted_available
+
+    unsettled_ads = _get_wallet_unsettled_ads_reservation(wallet)
+    reserved_ads = min(
+        unsettled_ads,
+        cash_available + earned_available + restricted_available,
+    )
+    ads_cash, ads_earned, ads_restricted = _split_amount_by_funding_components(
+        cash_units=cash_available,
+        earned_promotional_units=earned_available,
+        restricted_promotional_units=restricted_available,
+        amount=reserved_ads,
+    )
+    return (
+        max(0, cash_available - ads_cash),
+        max(0, earned_available - ads_earned),
+        max(0, restricted_available - ads_restricted),
+    )
+
+
+def _get_wallet_available_funding_before_ads(
+    wallet: TokenWallet,
+) -> tuple[int, int]:
+    cash, earned, restricted = _get_wallet_available_funding_components_before_ads(wallet)
+    return cash, earned + restricted
 
 
 def _get_wallet_available_funding(
@@ -538,28 +649,49 @@ def _get_wallet_available_funding(
     *,
     reserve_unsettled_ads: bool = True,
 ) -> tuple[int, int]:
-    cash_available, promotional_available = _get_wallet_available_funding_before_ads(wallet)
-    if not reserve_unsettled_ads:
-        return cash_available, promotional_available
-
-    unsettled_ads = _get_wallet_unsettled_ads_reservation(wallet)
-    reserved_ads = min(
-        unsettled_ads,
-        cash_available + promotional_available,
+    cash, earned, restricted = _get_wallet_available_funding_components(
+        wallet,
+        reserve_unsettled_ads=reserve_unsettled_ads,
     )
-    ads_cash, ads_promotional = _split_amount_by_funding_proportion(
-        cash_units=cash_available,
-        promotional_units=promotional_available,
-        amount=reserved_ads,
-    )
-    cash_available -= ads_cash
-    promotional_available -= ads_promotional
-    return max(0, cash_available), max(0, promotional_available)
+    return cash, earned + restricted
 
 
 def get_wallet_available_balance(wallet: TokenWallet) -> int:
-    cash_available, promotional_available = _get_wallet_available_funding(wallet)
-    return max(0, cash_available + promotional_available)
+    cash, earned, restricted = _get_wallet_available_funding_components(wallet)
+    return max(0, cash + earned + restricted)
+
+
+def consume_promotional_tokens_for_internal_spend_provenance(
+    wallet: TokenWallet,
+    amount: int,
+    *,
+    reserve_unsettled_ads: bool = True,
+) -> tuple[int, int]:
+    """Consume promo proportionally and return (promo, restricted promo)."""
+    normalized_amount = int(amount)
+    if normalized_amount < 0:
+        raise ValidationError("Internal spend amount cannot be negative")
+    if wallet.wallet_type != TokenWallet.TYPE_USER or normalized_amount == 0:
+        return 0, 0
+
+    cash, earned, restricted = _get_wallet_available_funding_components(
+        wallet,
+        reserve_unsettled_ads=reserve_unsettled_ads,
+    )
+    _cash_spent, earned_spent, restricted_spent = (
+        _split_amount_by_funding_components(
+            cash_units=cash,
+            earned_promotional_units=earned,
+            restricted_promotional_units=restricted,
+            amount=normalized_amount,
+        )
+    )
+    promotional_spent = earned_spent + restricted_spent
+    wallet.promotional_balance = int(wallet.promotional_balance) - promotional_spent
+    wallet.restricted_promotional_balance = (
+        int(wallet.restricted_promotional_balance) - restricted_spent
+    )
+    return promotional_spent, restricted_spent
 
 
 def consume_promotional_tokens_for_internal_spend(
@@ -568,59 +700,58 @@ def consume_promotional_tokens_for_internal_spend(
     *,
     reserve_unsettled_ads: bool = True,
 ) -> int:
-    """Consume the proportional promotional component of an internal spend."""
-    normalized_amount = int(amount)
-    if normalized_amount < 0:
-        raise ValidationError("Internal spend amount cannot be negative")
-    if wallet.wallet_type != TokenWallet.TYPE_USER or normalized_amount == 0:
-        return 0
-
-    cash_available, promotional_available = _get_wallet_available_funding(
-        wallet,
-        reserve_unsettled_ads=reserve_unsettled_ads,
+    promotional_spent, _restricted_spent = (
+        consume_promotional_tokens_for_internal_spend_provenance(
+            wallet,
+            amount,
+            reserve_unsettled_ads=reserve_unsettled_ads,
+        )
     )
-    _cash_spent, promotional_spent = _split_amount_by_funding_proportion(
-        cash_units=cash_available,
-        promotional_units=promotional_available,
-        amount=normalized_amount,
-    )
-    wallet.promotional_balance = int(wallet.promotional_balance) - promotional_spent
     return promotional_spent
 
 
+def _withdrawal_eligible_funding(wallet: TokenWallet) -> tuple[int, int, int]:
+    cash, earned, restricted = _get_wallet_available_funding_components(wallet)
+    if _wallet_owner_is_creator(wallet):
+        return cash, earned, 0
+    return cash, earned, restricted
+
+
 def get_wallet_withdrawable_balance(wallet: TokenWallet) -> int:
-    """Return the maximum new withdrawal allowed by the configured promo ratio."""
+    """Return max withdrawal, excluding a creator's own restricted rewards."""
     if wallet.wallet_type != TokenWallet.TYPE_USER:
         return get_wallet_available_balance(wallet)
 
-    cash_available, promotional_available = _get_wallet_available_funding(wallet)
+    cash, earned, restricted = _withdrawal_eligible_funding(wallet)
+    promotional_available = earned + restricted
     percent = get_max_promotional_withdrawal_percent()
     if percent <= 0:
-        return cash_available
+        return cash
     if percent >= 100:
-        return cash_available + promotional_available
+        return cash + promotional_available
 
-    max_by_cash_ratio = (cash_available * 100) // (100 - percent)
-    return max(0, min(cash_available + promotional_available, max_by_cash_ratio))
+    max_by_cash_ratio = (cash * 100) // (100 - percent)
+    return max(0, min(cash + promotional_available, max_by_cash_ratio))
 
 
 def _split_wallet_withdrawal_funding(
     wallet: TokenWallet,
     amount: int,
-) -> tuple[int, int, int]:
-    """Return ``(cash, promotional, percent)`` for a new withdrawal."""
+) -> tuple[int, int, int, int]:
+    """Return (cash, promotional, restricted promotional, percent)."""
     normalized_amount = int(amount)
     if normalized_amount <= 0:
         raise ValidationError("Withdrawal amount must be greater than zero")
 
     percent = get_max_promotional_withdrawal_percent()
     if wallet.allow_negative:
-        return normalized_amount, 0, percent
+        return normalized_amount, 0, 0, percent
 
-    cash_available, promotional_available = _get_wallet_available_funding(wallet)
+    cash, earned, restricted = _withdrawal_eligible_funding(wallet)
+    promotional_available = earned + restricted
     try:
         natural_cash, natural_promotional = _split_amount_by_funding_proportion(
-            cash_units=cash_available,
+            cash_units=cash,
             promotional_units=promotional_available,
             amount=normalized_amount,
         )
@@ -630,9 +761,15 @@ def _split_wallet_withdrawal_funding(
     max_promotional_for_amount = (normalized_amount * percent) // 100
     promotional_reserved = min(natural_promotional, max_promotional_for_amount)
     cash_reserved = normalized_amount - promotional_reserved
-    if cash_reserved > cash_available:
+    if cash_reserved > cash:
         raise ValidationError("Insufficient withdrawable balance")
-    return cash_reserved, promotional_reserved, percent
+
+    _earned_reserved, restricted_reserved = _split_amount_by_funding_proportion(
+        cash_units=earned,
+        promotional_units=restricted,
+        amount=promotional_reserved,
+    )
+    return cash_reserved, promotional_reserved, restricted_reserved, percent
 
 
 def _require_wallet_not_blocked(wallet: TokenWallet):
@@ -2079,6 +2216,27 @@ def create_wallet_deposit_request(
     return wallet_request
 
 
+def _normalize_wallet_withdrawal_route(
+    *,
+    payout_asset_code: str,
+    payout_chain: str,
+) -> tuple[str, str]:
+    normalized_asset = (payout_asset_code or "").strip().upper()
+    normalized_chain = (payout_chain or "").strip().lower()
+
+    if not normalized_asset:
+        raise ValidationError("Payout crypto is required")
+    if not normalized_chain:
+        raise ValidationError("Payout network is required")
+    if (
+        normalized_chain,
+        normalized_asset,
+    ) not in wallet_config.WALLET_ROUTE_ONCHAIN_DECIMALS:
+        raise ValidationError("Unsupported payout crypto/network combination")
+
+    return normalized_asset, normalized_chain
+
+
 @transaction.atomic
 def create_wallet_withdrawal_request(
     *,
@@ -2086,6 +2244,8 @@ def create_wallet_withdrawal_request(
     wallet: TokenWallet,
     amount,
     destination_address: str,
+    payout_asset_code: str,
+    payout_chain: str,
     notes: str = "",
     metadata=None,
 ) -> WalletRequest:
@@ -2102,6 +2262,10 @@ def create_wallet_withdrawal_request(
     destination_address = (destination_address or "").strip()
     if not destination_address:
         raise ValidationError("Destination address is required")
+    payout_asset_code, payout_chain = _normalize_wallet_withdrawal_route(
+        payout_asset_code=payout_asset_code,
+        payout_chain=payout_chain,
+    )
 
     enforce_wallet_velocity_limits(
         wallet=wallet,
@@ -2109,16 +2273,22 @@ def create_wallet_withdrawal_request(
         amount=normalized_amount,
     )
 
-    cash_reserved, promotional_reserved, promotional_percent = (
-        _split_wallet_withdrawal_funding(wallet, normalized_amount)
-    )
+    (
+        cash_reserved,
+        promotional_reserved,
+        restricted_promotional_reserved,
+        promotional_percent,
+    ) = _split_wallet_withdrawal_funding(wallet, normalized_amount)
 
     reference = _build_wallet_request_reference("wdr")
     request_metadata = {
         **metadata,
         "cash_reserved_units": cash_reserved,
         "promotional_reserved_units": promotional_reserved,
+        "restricted_promotional_reserved_units": restricted_promotional_reserved,
         "promotional_withdrawal_percent": promotional_percent,
+        "payout_asset_code": payout_asset_code,
+        "payout_chain": payout_chain,
     }
 
     wallet.held_balance += normalized_amount
@@ -2145,6 +2315,8 @@ def create_wallet_withdrawal_request(
         status=WalletRequest.STATUS_PENDING,
         amount=normalized_amount,
         asset_code="TOKENS",
+        payout_asset_code=payout_asset_code,
+        payout_chain=payout_chain,
         destination_address=destination_address,
         reference=reference,
         notes=notes,
@@ -2158,18 +2330,19 @@ def create_wallet_withdrawal_request(
 
 def _get_wallet_request_withdrawal_funding_split(
     wallet_request: WalletRequest,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     amount = int(wallet_request.amount)
     metadata = wallet_request.metadata or {}
-    split_keys = {
+    legacy_keys = {
         "cash_reserved_units",
         "promotional_reserved_units",
         "promotional_withdrawal_percent",
     }
-    present = split_keys.intersection(metadata)
+    restricted_key = "restricted_promotional_reserved_units"
+    present = legacy_keys.intersection(metadata)
     if not present:
-        return amount, 0, 0
-    if present != split_keys:
+        return amount, 0, 0, 0
+    if present != legacy_keys:
         raise ValidationError("Withdrawal request funding metadata is incomplete")
 
     try:
@@ -2179,9 +2352,23 @@ def _get_wallet_request_withdrawal_funding_split(
     except (TypeError, ValueError) as exc:
         raise ValidationError("Withdrawal request funding metadata is invalid") from exc
 
+    if restricted_key not in metadata:
+        if promotional_reserved > 0:
+            raise ValidationError(
+                "Legacy promotional withdrawal request must be recreated"
+            )
+        restricted_reserved = 0
+    else:
+        try:
+            restricted_reserved = int(metadata[restricted_key])
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Withdrawal request restricted funding is invalid") from exc
+
     if (
         cash_reserved < 0
         or promotional_reserved < 0
+        or restricted_reserved < 0
+        or restricted_reserved > promotional_reserved
         or cash_reserved + promotional_reserved != amount
         or promotional_percent < 0
         or promotional_percent > 100
@@ -2194,15 +2381,17 @@ def _get_wallet_request_withdrawal_funding_split(
         hold_has_split = (
             "cash_reserved_units" in hold_metadata
             or "promotional_reserved_units" in hold_metadata
+            or restricted_key in hold_metadata
         )
         if hold_has_split and (
             int(hold_metadata.get("cash_reserved_units", -1)) != cash_reserved
             or int(hold_metadata.get("promotional_reserved_units", -1)) != promotional_reserved
+            or int(hold_metadata.get(restricted_key, -1)) != restricted_reserved
             or int(hold_metadata.get("promotional_withdrawal_percent", -1)) != promotional_percent
         ):
             raise ValidationError("Withdrawal request and hold funding metadata disagree")
 
-    return cash_reserved, promotional_reserved, promotional_percent
+    return cash_reserved, promotional_reserved, restricted_reserved, promotional_percent
 
 
 def _get_wallet_request_for_update(*, actor, wallet_request) -> WalletRequest:
@@ -2296,9 +2485,12 @@ def complete_wallet_withdrawal_request(
     if not normalized_payout_txid:
         raise ValidationError("Payout txid is required")
 
-    cash_reserved, promotional_reserved, promotional_percent = (
-        _get_wallet_request_withdrawal_funding_split(wallet_request)
-    )
+    (
+        cash_reserved,
+        promotional_reserved,
+        restricted_promotional_reserved,
+        promotional_percent,
+    ) = _get_wallet_request_withdrawal_funding_split(wallet_request)
     _release_wallet_request_hold(actor=actor, wallet_request=wallet_request)
 
     wallet = TokenWallet.objects.select_for_update().get(id=wallet_request.wallet_id)
@@ -2323,9 +2515,13 @@ def complete_wallet_withdrawal_request(
             "payout_txid": normalized_payout_txid,
             "cash_withdrawn_units": cash_reserved,
             "promotional_withdrawn_units": promotional_reserved,
+            "restricted_promotional_withdrawn_units": restricted_promotional_reserved,
             "promotional_withdrawal_percent": promotional_percent,
         },
         promotional_deltas={wallet.id: -promotional_reserved},
+        restricted_promotional_deltas={
+            wallet.id: -restricted_promotional_reserved
+        },
     )
 
     now = timezone.now()
@@ -2426,8 +2622,9 @@ def apply_ledger_transaction(
     memo="",
     metadata=None,
     promotional_deltas=None,
+    restricted_promotional_deltas=None,
 ):
-    """Apply a balanced ledger transaction with optional explicit provenance."""
+    """Apply a balanced ledger transaction with explicit nested provenance."""
 
     _require_perm(actor, "ledger.can_apply_raw_ledger_transaction")
     created_by = _resolve_created_by(actor=actor, created_by=created_by)
@@ -2461,6 +2658,19 @@ def apply_ledger_transaction(
                 + int(promotional_delta)
             )
 
+    normalized_restricted_overrides = {}
+    if restricted_promotional_deltas:
+        for wallet_key, restricted_delta in restricted_promotional_deltas.items():
+            wallet_id = int(getattr(wallet_key, "id", wallet_key))
+            if wallet_id not in aggregated or int(aggregated[wallet_id]) == 0:
+                raise ValidationError(
+                    "Restricted promotional provenance references a wallet without an entry"
+                )
+            normalized_restricted_overrides[wallet_id] = (
+                normalized_restricted_overrides.get(wallet_id, 0)
+                + int(restricted_delta)
+            )
+
     if len(normalized_entries) < 2:
         raise ValidationError("A ledger transaction must have at least two balanced entries")
 
@@ -2479,6 +2689,13 @@ def apply_ledger_transaction(
             [wallet_id, promotional_delta]
             for wallet_id, promotional_delta in sorted(
                 normalized_promotional_overrides.items()
+            )
+        ]
+    if normalized_restricted_overrides:
+        payload["restricted_promotional_deltas"] = [
+            [wallet_id, restricted_delta]
+            for wallet_id, restricted_delta in sorted(
+                normalized_restricted_overrides.items()
             )
         ]
     payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -2532,34 +2749,70 @@ def apply_ledger_transaction(
     promotional_deltas_by_wallet = {
         wallet_id: 0 for wallet_id, _delta in normalized_entries
     }
+    restricted_deltas_by_wallet = {
+        wallet_id: 0 for wallet_id, _delta in normalized_entries
+    }
 
-    # Every ordinary user outflow preserves the source wallet composition.
-    # Withdrawal overrides are the only exception because their promotional
-    # component is capped by the operator-configured withdrawal percentage.
     promotional_outflow = 0
+    restricted_outflow = 0
     for wallet_id, delta in normalized_entries:
         w = locked[wallet_id]
         if delta >= 0 or w.wallet_type != TokenWallet.TYPE_USER:
             continue
+
+        cash_available, earned_available, restricted_available = (
+            _get_wallet_available_funding_components(w)
+        )
+        promotional_available = earned_available + restricted_available
+
+        creator_transfer = (
+            action == LEDGER_ACTION_TRANSFER and _wallet_owner_is_creator(w)
+        )
         if wallet_id in normalized_promotional_overrides:
             promotional_spent = max(
-                0,
-                -int(normalized_promotional_overrides[wallet_id]),
+                0, -int(normalized_promotional_overrides[wallet_id])
             )
         elif action == LEDGER_ACTION_WITHDRAWAL:
-            _cash, promotional_spent, _percent = _split_wallet_withdrawal_funding(
-                w,
-                abs(delta),
+            (
+                _cash,
+                promotional_spent,
+                _restricted,
+                _percent,
+            ) = _split_wallet_withdrawal_funding(w, abs(delta))
+        elif creator_transfer:
+            _cash_spent, promotional_spent = _split_amount_by_funding_proportion(
+                cash_units=cash_available,
+                promotional_units=earned_available,
+                amount=abs(delta),
             )
         else:
-            cash_available, promotional_available = _get_wallet_available_funding(w)
             _cash_spent, promotional_spent = _split_amount_by_funding_proportion(
                 cash_units=cash_available,
                 promotional_units=promotional_available,
                 amount=abs(delta),
             )
+
+        if wallet_id in normalized_restricted_overrides:
+            restricted_spent = max(
+                0, -int(normalized_restricted_overrides[wallet_id])
+            )
+        elif creator_transfer:
+            restricted_spent = 0
+        else:
+            _earned_spent, restricted_spent = _split_amount_by_funding_proportion(
+                cash_units=earned_available,
+                promotional_units=restricted_available,
+                amount=promotional_spent,
+            )
+        if creator_transfer and restricted_spent:
+            raise ValidationError(
+                "Creators cannot transfer their restricted promotional rewards"
+            )
+
         promotional_deltas_by_wallet[wallet_id] = -promotional_spent
+        restricted_deltas_by_wallet[wallet_id] = -restricted_spent
         promotional_outflow += promotional_spent
+        restricted_outflow += restricted_spent
 
     credit_allocations = _allocate_promotional_component_proportionally(
         promotional_units=promotional_outflow,
@@ -2569,6 +2822,15 @@ def apply_ledger_transaction(
             if delta > 0
         ],
     )
+    restricted_credit_allocations = _allocate_promotional_component_proportionally(
+        promotional_units=restricted_outflow,
+        credits=[
+            (wallet_id, int(credit_allocations.get(wallet_id, 0)))
+            for wallet_id, delta in normalized_entries
+            if delta > 0
+        ],
+    )
+
     for wallet_id, delta in normalized_entries:
         if delta <= 0:
             continue
@@ -2577,23 +2839,32 @@ def apply_ledger_transaction(
             promotional_deltas_by_wallet[wallet_id] = int(
                 credit_allocations.get(wallet_id, 0)
             )
+            restricted_deltas_by_wallet[wallet_id] = int(
+                restricted_credit_allocations.get(wallet_id, 0)
+            )
 
     for wallet_id, promotional_delta in normalized_promotional_overrides.items():
         promotional_deltas_by_wallet[wallet_id] = int(promotional_delta)
+    for wallet_id, restricted_delta in normalized_restricted_overrides.items():
+        restricted_deltas_by_wallet[wallet_id] = int(restricted_delta)
 
     for wallet_id, delta in normalized_entries:
         w = locked[wallet_id]
         _require_wallet_not_blocked(w)
 
         has_promotional_override = wallet_id in normalized_promotional_overrides
+        has_restricted_override = wallet_id in normalized_restricted_overrides
         promotional_delta = int(promotional_deltas_by_wallet.get(wallet_id, 0))
+        restricted_delta = int(restricted_deltas_by_wallet.get(wallet_id, 0))
 
-        if w.wallet_type != TokenWallet.TYPE_USER and promotional_delta != 0:
+        if w.wallet_type != TokenWallet.TYPE_USER and (
+            promotional_delta != 0 or restricted_delta != 0
+        ):
             raise ValidationError("System wallet entries cannot carry promotional provenance")
-        if delta > 0 and not (0 <= promotional_delta <= delta):
-            raise ValidationError("Invalid promotional credit component")
-        if delta < 0 and not (delta <= promotional_delta <= 0):
-            raise ValidationError("Invalid promotional debit component")
+        if delta > 0 and not (0 <= restricted_delta <= promotional_delta <= delta):
+            raise ValidationError("Invalid promotional credit provenance")
+        if delta < 0 and not (delta <= promotional_delta <= restricted_delta <= 0):
+            raise ValidationError("Invalid promotional debit provenance")
 
         if delta < 0:
             debit_amount = abs(delta)
@@ -2604,19 +2875,24 @@ def apply_ledger_transaction(
             )
 
             if w.wallet_type == TokenWallet.TYPE_USER:
-                if has_promotional_override:
-                    cash_available, promotional_available = _get_wallet_available_funding(w)
+                if has_promotional_override or has_restricted_override:
+                    cash_available, earned_available, restricted_available = (
+                        _get_wallet_available_funding_components(w)
+                    )
                     promotional_debit = max(0, -promotional_delta)
+                    restricted_debit = max(0, -restricted_delta)
+                    earned_debit = promotional_debit - restricted_debit
                     cash_debit = debit_amount - promotional_debit
                     if (
                         not w.allow_negative
                         and (
-                            promotional_debit > promotional_available
+                            restricted_debit > restricted_available
+                            or earned_debit > earned_available
                             or cash_debit > cash_available
                         )
                     ):
                         raise ValidationError(
-                            "Insufficient funding for reserved promotional split"
+                            "Insufficient funding for reserved provenance split"
                         )
                 else:
                     if (
@@ -2628,18 +2904,27 @@ def apply_ledger_transaction(
         new_balance = w.balance + delta
         available_after = new_balance - int(w.held_balance)
         new_promotional_balance = int(w.promotional_balance) + promotional_delta
+        new_restricted_balance = (
+            int(w.restricted_promotional_balance) + restricted_delta
+        )
 
         if not w.allow_negative and available_after < 0:
             raise ValidationError("Insufficient available funds")
         if w.wallet_type == TokenWallet.TYPE_USER and not (
-            0 <= new_promotional_balance <= new_balance
+            0 <= new_restricted_balance <= new_promotional_balance <= new_balance
         ):
-            raise ValidationError("Invalid promotional balance after transaction")
+            raise ValidationError("Invalid promotional provenance after transaction")
 
         w.balance = new_balance
         w.promotional_balance = new_promotional_balance
+        w.restricted_promotional_balance = new_restricted_balance
         w.save(
-            update_fields=["balance", "promotional_balance", "updated_at"]
+            update_fields=[
+                "balance",
+                "promotional_balance",
+                "restricted_promotional_balance",
+                "updated_at",
+            ]
         )
 
         LedgerEntry.objects.create(
@@ -2647,6 +2932,7 @@ def apply_ledger_transaction(
             wallet=w,
             delta=delta,
             promotional_delta=promotional_delta,
+            restricted_promotional_delta=restricted_delta,
             balance_after=new_balance,
         )
 
@@ -2726,7 +3012,12 @@ def reverse_ledger_transaction(
             "kind": resolved_reversal_kind,
             "memo": memo,
             "entries": [
-                [entry.wallet_id, -entry.delta, -entry.promotional_delta]
+                [
+                    entry.wallet_id,
+                    -entry.delta,
+                    -entry.promotional_delta,
+                    -entry.restricted_promotional_delta,
+                ]
                 for entry in original_entries
             ],
             "metadata": payload_metadata,
@@ -2782,22 +3073,32 @@ def reverse_ledger_transaction(
         w = locked[entry.wallet_id]
         delta = -entry.delta
         promotional_delta = -int(entry.promotional_delta)
+        restricted_delta = -int(entry.restricted_promotional_delta)
         new_balance = w.balance + delta
         new_promotional_balance = int(w.promotional_balance) + promotional_delta
+        new_restricted_balance = (
+            int(w.restricted_promotional_balance) + restricted_delta
+        )
 
         if not w.allow_negative and new_balance < 0:
             raise ValidationError("Insufficient funds")
         if w.wallet_type == TokenWallet.TYPE_USER and not (
-            0 <= new_promotional_balance <= new_balance
+            0 <= new_restricted_balance <= new_promotional_balance <= new_balance
         ):
             raise ValidationError(
-                "Cannot reverse transaction without violating promotional funding provenance"
+                "Cannot reverse transaction without violating promotional provenance"
             )
 
         w.balance = new_balance
         w.promotional_balance = new_promotional_balance
+        w.restricted_promotional_balance = new_restricted_balance
         w.save(
-            update_fields=["balance", "promotional_balance", "updated_at"]
+            update_fields=[
+                "balance",
+                "promotional_balance",
+                "restricted_promotional_balance",
+                "updated_at",
+            ]
         )
 
         LedgerEntry.objects.create(
@@ -2805,6 +3106,7 @@ def reverse_ledger_transaction(
             wallet=w,
             delta=delta,
             promotional_delta=promotional_delta,
+            restricted_promotional_delta=restricted_delta,
             balance_after=new_balance,
         )
     _create_outbox_event(
@@ -5988,15 +6290,22 @@ def purchase_ad_free_lifetime(*, actor) -> dict:
         ).encode("utf-8")
     ).hexdigest()
 
-    promotional_spent = consume_promotional_tokens_for_internal_spend(
-        wallet, price_tokens
+    promotional_spent, restricted_promotional_spent = (
+        consume_promotional_tokens_for_internal_spend_provenance(
+            wallet, price_tokens
+        )
     )
     paid_spent = price_tokens - promotional_spent
     wallet.balance = int(wallet.balance) - price_tokens
     platform_wallet.balance = int(platform_wallet.balance) + price_tokens
 
     wallet.save(
-        update_fields=["balance", "promotional_balance", "updated_at"]
+        update_fields=[
+            "balance",
+            "promotional_balance",
+            "restricted_promotional_balance",
+            "updated_at",
+        ]
     )
     platform_wallet.save(update_fields=["balance", "updated_at"])
 
@@ -6011,6 +6320,7 @@ def purchase_ad_free_lifetime(*, actor) -> dict:
             "price_tokens": price_tokens,
             "user_id": user.pk,
             "promotional_spent_units": promotional_spent,
+            "restricted_promotional_spent_units": restricted_promotional_spent,
             "paid_spent_units": paid_spent,
             "withdrawable_spent_units": paid_spent,
         },
@@ -6022,6 +6332,7 @@ def purchase_ad_free_lifetime(*, actor) -> dict:
         wallet=wallet,
         delta=-price_tokens,
         promotional_delta=-promotional_spent,
+        restricted_promotional_delta=-restricted_promotional_spent,
         balance_after=wallet.balance,
     )
     LedgerEntry.objects.create(
