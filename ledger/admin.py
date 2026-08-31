@@ -151,6 +151,8 @@ class WalletRequestAdmin(admin.ModelAdmin):
         "status",
         "amount",
         "asset_code",
+        "payout_asset_code",
+        "payout_chain",
         "reference",
         "destination_address",
         "payout_txid",
@@ -159,7 +161,13 @@ class WalletRequestAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
-    list_filter = ("request_type", "status", "asset_code")
+    list_filter = (
+        "request_type",
+        "status",
+        "asset_code",
+        "payout_asset_code",
+        "payout_chain",
+    )
     search_fields = (
         "reference",
         "wallet__user__username",
@@ -175,6 +183,8 @@ class WalletRequestAdmin(admin.ModelAdmin):
         "status",
         "amount",
         "asset_code",
+        "payout_asset_code",
+        "payout_chain",
         "destination_address",
         "reference",
         "notes",
@@ -201,6 +211,8 @@ class WalletRequestAdmin(admin.ModelAdmin):
                     "status",
                     "amount",
                     "asset_code",
+                    "payout_asset_code",
+                    "payout_chain",
                     "destination_address",
                     "reference",
                     "notes",

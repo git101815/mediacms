@@ -298,6 +298,12 @@ class WalletRequest(models.Model):
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
     amount = models.BigIntegerField()
     asset_code = models.CharField(max_length=16, default="TOKENS")
+    payout_asset_code = models.CharField(
+        max_length=16, blank=True, default="", db_index=True
+    )
+    payout_chain = models.CharField(
+        max_length=32, blank=True, default="", db_index=True
+    )
     destination_address = models.CharField(max_length=255, blank=True)
     reference = models.CharField(max_length=64, unique=True, db_index=True)
     notes = models.TextField(blank=True)

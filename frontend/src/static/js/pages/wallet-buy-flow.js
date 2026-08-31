@@ -1540,9 +1540,43 @@
   const withdrawForm = document.querySelector('[data-wallet-withdraw-form]');
   if (withdrawForm) {
     const amountInput = withdrawForm.querySelector('[data-wallet-withdraw-amount]');
+    const assetSelect = withdrawForm.querySelector('[data-wallet-withdraw-asset]');
+    const networkSelect = withdrawForm.querySelector('[data-wallet-withdraw-network]');
     const percentButtons = Array.from(
       withdrawForm.querySelectorAll('[data-wallet-withdraw-percent]')
     );
+
+    function syncWithdrawalNetworks() {
+      if (!assetSelect || !networkSelect) {
+        return;
+      }
+
+      const selectedAsset = String(assetSelect.value || '').trim().toUpperCase();
+      Array.from(networkSelect.options).forEach(function (option) {
+        if (!option.value) {
+          option.hidden = false;
+          option.disabled = false;
+          return;
+        }
+
+        const supportedAssets = String(
+          option.getAttribute('data-wallet-supported-assets') || ''
+        ).trim().split(/\s+/).filter(Boolean);
+        const compatible = Boolean(selectedAsset) && supportedAssets.indexOf(selectedAsset) !== -1;
+        option.hidden = !compatible;
+        option.disabled = !compatible;
+      });
+
+      const selectedNetworkOption = networkSelect.options[networkSelect.selectedIndex];
+      if (!selectedAsset || !selectedNetworkOption || selectedNetworkOption.disabled) {
+        networkSelect.value = '';
+      }
+    }
+
+    if (assetSelect && networkSelect) {
+      assetSelect.addEventListener('change', syncWithdrawalNetworks);
+      syncWithdrawalNetworks();
+    }
 
     function formatUnitsToDisplayAmount(units) {
       const normalizedUnits = Math.max(0, parseInt(units || 0, 10));

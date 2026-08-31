@@ -393,6 +393,9 @@
                   {% if row.notes %}{{ row.notes }}{% else %}Cash out request{% endif %}
                 </div>
 
+                {% if row.payout_route_label %}
+                <div class="wallet-ui__card-meta">Payout {{ row.payout_route_label }}</div>
+                {% endif %}
                 {% if row.destination_address %}
                 <div class="wallet-ui__card-meta">Destination {{ row.destination_address }}</div>
                 {% endif %}
@@ -452,6 +455,9 @@
                   </span>
                 </div>
                 <div class="wallet-ui__card-title">Cash out{% if row.notes %} · {{ row.notes }}{% endif %}</div>
+                {% if row.payout_route_label %}
+                <div class="wallet-ui__card-meta">Payout {{ row.payout_route_label }}</div>
+                {% endif %}
                 {% if row.destination_address %}
                 <div class="wallet-ui__card-meta">Destination {{ row.destination_address }}</div>
                 {% endif %}
@@ -923,6 +929,30 @@
       {% csrf_token %}
       <input type="hidden" name="return_tab" value="{{ active_tab }}">
       <input type="hidden" name="return_status" value="{{ active_status }}">
+
+      <label class="wallet-field">
+        <span class="wallet-field__label">Crypto</span>
+        <select name="payout_asset_code" class="wallet-field__input" data-wallet-withdraw-asset required>
+          <option value="">Select crypto</option>
+          {% for asset in withdrawal_crypto_assets %}
+          <option value="{{ asset.code }}">{{ asset.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="wallet-field">
+        <span class="wallet-field__label">Network</span>
+        <select name="payout_chain" class="wallet-field__input" data-wallet-withdraw-network required>
+          <option value="">Select network</option>
+          {% for network in withdrawal_crypto_networks %}
+          <option
+            value="{{ network.chain }}"
+            data-wallet-supported-assets="{{ network.supported_assets }}"
+          >{{ network.label }}</option>
+          {% endfor %}
+        </select>
+        <span class="wallet-field__hint">Only networks supported for the selected crypto are shown.</span>
+      </label>
 
       <label class="wallet-field">
         <span class="wallet-field__label">Destination wallet</span>

@@ -38,6 +38,7 @@ from datetime import timedelta
 import os
 from bip_utils import Bip44, Bip44Changes, Bip44Coins
 from django.conf import settings
+from ledger.dashboard import config as wallet_config
 from ledger.native_quoted import (
     NATIVE_QUOTED_AMOUNT_SEMANTICS,
     build_native_valuation_metadata,
@@ -2215,6 +2216,27 @@ def create_wallet_deposit_request(
     return wallet_request
 
 
+def _normalize_wallet_withdrawal_route(
+    *,
+    payout_asset_code: str,
+    payout_chain: str,
+) -> tuple[str, str]:
+    normalized_asset = (payout_asset_code or "").strip().upper()
+    normalized_chain = (payout_chain or "").strip().lower()
+
+    if not normalized_asset:
+        raise ValidationError("Payout crypto is required")
+    if not normalized_chain:
+        raise ValidationError("Payout network is required")
+    if (
+        normalized_chain,
+        normalized_asset,
+    ) not in wallet_config.WALLET_ROUTE_ONCHAIN_DECIMALS:
+        raise ValidationError("Unsupported payout crypto/network combination")
+
+    return normalized_asset, normalized_chain
+
+
 @transaction.atomic
 def create_wallet_withdrawal_request(
     *,
@@ -2222,6 +2244,8 @@ def create_wallet_withdrawal_request(
     wallet: TokenWallet,
     amount,
     destination_address: str,
+    payout_asset_code: str,
+    payout_chain: str,
     notes: str = "",
     metadata=None,
 ) -> WalletRequest:
@@ -2238,6 +2262,10 @@ def create_wallet_withdrawal_request(
     destination_address = (destination_address or "").strip()
     if not destination_address:
         raise ValidationError("Destination address is required")
+    payout_asset_code, payout_chain = _normalize_wallet_withdrawal_route(
+        payout_asset_code=payout_asset_code,
+        payout_chain=payout_chain,
+    )
 
     enforce_wallet_velocity_limits(
         wallet=wallet,
@@ -2259,6 +2287,8 @@ def create_wallet_withdrawal_request(
         "promotional_reserved_units": promotional_reserved,
         "restricted_promotional_reserved_units": restricted_promotional_reserved,
         "promotional_withdrawal_percent": promotional_percent,
+        "payout_asset_code": payout_asset_code,
+        "payout_chain": payout_chain,
     }
 
     wallet.held_balance += normalized_amount
@@ -2285,6 +2315,8 @@ def create_wallet_withdrawal_request(
         status=WalletRequest.STATUS_PENDING,
         amount=normalized_amount,
         asset_code="TOKENS",
+        payout_asset_code=payout_asset_code,
+        payout_chain=payout_chain,
         destination_address=destination_address,
         reference=reference,
         notes=notes,

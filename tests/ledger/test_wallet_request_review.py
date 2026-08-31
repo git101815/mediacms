@@ -34,6 +34,8 @@ class TestWalletRequestReview(BaseLedgerTestCase):
             wallet=self.w1,
             amount="1.5",
             destination_address="0xreject000000000000000000000000000000000001",
+            payout_asset_code="USDT",
+            payout_chain="ethereum",
             notes="Reject this one",
         )
 
@@ -71,6 +73,8 @@ class TestWalletRequestReview(BaseLedgerTestCase):
             wallet=self.w1,
             amount="2",
             destination_address="0xcomplete0000000000000000000000000000000001",
+            payout_asset_code="USDT",
+            payout_chain="ethereum",
             notes="Complete this one",
         )
 
@@ -122,6 +126,8 @@ class TestWalletRequestReview(BaseLedgerTestCase):
             wallet=self.w1,
             amount="6",
             destination_address="0xratio000000000000000000000000000000000001",
+            payout_asset_code="USDT",
+            payout_chain="ethereum",
         )
         self.assertEqual(wallet_request.metadata["cash_reserved_units"], 3_000_000)
         self.assertEqual(wallet_request.metadata["promotional_reserved_units"], 3_000_000)
