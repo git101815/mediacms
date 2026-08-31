@@ -462,11 +462,11 @@ def get_max_promotional_withdrawal_percent() -> int:
 
 
 def _wallet_owner_is_creator(wallet: TokenWallet) -> bool:
+    # MediaCMS creator accounts are represented by users.User.advancedUser.
     if wallet.wallet_type != TokenWallet.TYPE_USER or not wallet.user_id:
         return False
-    from files.models import Media
 
-    return Media.objects.filter(user_id=wallet.user_id).exists()
+    return bool(getattr(wallet.user, "advancedUser", False))
 
 
 def _get_wallet_unsettled_ads_reservation(wallet: TokenWallet) -> int:

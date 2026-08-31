@@ -1,5 +1,3 @@
-from unittest import mock
-
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
@@ -42,9 +40,11 @@ class RestrictedPromotionalRuntimeTests(TestCase):
             ]
         )
 
-    @mock.patch("ledger.services._wallet_owner_is_creator", return_value=True)
     @override_settings(LEDGER_MAX_PROMOTIONAL_WITHDRAWAL_PERCENT=50)
-    def test_creator_cannot_withdraw_own_restricted_rewards(self, _creator):
+    def test_creator_cannot_withdraw_own_restricted_rewards(self):
+        self.user.advancedUser = True
+        self.user.save(update_fields=["advancedUser"])
+
         # Generic 100-token hold reserves 30 cash, 20 earned promo and 50
         # restricted promo. Creator withdrawal can use only 270 cash + 180
         # earned promo = 450.
@@ -112,8 +112,10 @@ class RestrictedPromotionalLedgerTests(BaseLedgerTestCase):
             175 * SCALE,
         )
 
-    @mock.patch("ledger.services._wallet_owner_is_creator", return_value=True)
-    def test_creator_transfer_does_not_move_restricted_rewards(self, _creator):
+    def test_creator_transfer_does_not_move_restricted_rewards(self):
+        self.u1.advancedUser = True
+        self.u1.save(update_fields=["advancedUser"])
+
         txn = apply_ledger_transaction(
             actor=self.operator,
             kind="transfer",
