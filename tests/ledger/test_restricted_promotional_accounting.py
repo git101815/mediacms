@@ -54,6 +54,8 @@ class RestrictedPromotionalRuntimeTests(TestCase):
             wallet=self.wallet,
             amount="450",
             destination_address="creator-earned-only",
+            payout_asset_code="USDT",
+            payout_chain="ethereum",
         )
         self.assertEqual(request.metadata["cash_reserved_units"], 270 * SCALE)
         self.assertEqual(request.metadata["promotional_reserved_units"], 180 * SCALE)
