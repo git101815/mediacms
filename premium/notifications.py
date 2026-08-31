@@ -1,9 +1,11 @@
 import logging
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, get_connection
 from django.db import transaction
+from django.db.models import Q
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
@@ -22,6 +24,9 @@ CREATOR_EMAIL_EVENT_SUBSCRIPTION_RENEWED = "subscription_renewed"
 DEFAULT_CREATOR_PURCHASE_EMAIL_ENABLED = True
 DEFAULT_CREATOR_NEW_SUBSCRIPTION_EMAIL_ENABLED = True
 DEFAULT_CREATOR_RENEWAL_EMAIL_ENABLED = False
+DEFAULT_CREATOR_EMAIL_RECOVERY_ENABLED = True
+DEFAULT_CREATOR_EMAIL_RECOVERY_GRACE_SECONDS = 120
+DEFAULT_CREATOR_EMAIL_RECOVERY_BATCH_SIZE = 100
 PLATFORM_TOKEN_DECIMALS = 6
 
 
@@ -51,6 +56,51 @@ def creator_email_event_enabled(event_type: str) -> bool:
             DEFAULT_CREATOR_RENEWAL_EMAIL_ENABLED,
         )
     return False
+
+
+def _non_negative_int_setting(name: str, default: int, *, minimum: int = 0) -> int:
+    try:
+        value = int(getattr(settings, name, default))
+    except (TypeError, ValueError):
+        value = int(default)
+    return max(int(minimum), value)
+
+
+def get_recoverable_creator_email_event_ids(*, at=None) -> list[int]:
+    if not _setting_enabled(
+        "PREMIUM_CREATOR_EMAIL_RECOVERY_ENABLED",
+        DEFAULT_CREATOR_EMAIL_RECOVERY_ENABLED,
+    ):
+        return []
+
+    now = at or timezone.now()
+    grace_seconds = _non_negative_int_setting(
+        "PREMIUM_CREATOR_EMAIL_RECOVERY_GRACE_SECONDS",
+        DEFAULT_CREATOR_EMAIL_RECOVERY_GRACE_SECONDS,
+    )
+    batch_size = _non_negative_int_setting(
+        "PREMIUM_CREATOR_EMAIL_RECOVERY_BATCH_SIZE",
+        DEFAULT_CREATOR_EMAIL_RECOVERY_BATCH_SIZE,
+        minimum=1,
+    )
+    stale_before = now - timedelta(seconds=grace_seconds)
+
+    return list(
+        LedgerOutbox.objects.filter(topic=CREATOR_EMAIL_TOPIC)
+        .filter(
+            Q(
+                status=LedgerOutbox.STATUS_PENDING,
+                created_at__lte=stale_before,
+            )
+            | Q(
+                status=LedgerOutbox.STATUS_FAILED,
+                next_retry_at__isnull=False,
+                next_retry_at__lte=stale_before,
+            )
+        )
+        .order_by("created_at", "id")
+        .values_list("id", flat=True)[:batch_size]
+    )
 
 
 def _format_token_units(value) -> str:
@@ -101,6 +151,24 @@ def _build_email_context(payload: dict) -> dict:
     }
 
 
+def _safe_enqueue_creator_email_outbox_event(event_id: int) -> bool:
+    try:
+        from .tasks import dispatch_creator_email_outbox_event
+
+        dispatch_creator_email_outbox_event.delay(int(event_id))
+        return True
+    except Exception:
+        # The purchase/subscription has already committed at this point.
+        # A broker outage must not turn a successful financial operation into
+        # an HTTP 500. Celery beat will recover the still-pending outbox row.
+        logger.exception(
+            "Failed to enqueue creator transactional email event_id=%s; "
+            "periodic recovery will retry it",
+            event_id,
+        )
+        return False
+
+
 def queue_creator_transactional_email(
     *,
     txn: LedgerTransaction,
@@ -130,17 +198,67 @@ def queue_creator_transactional_email(
         metadata_version=LEDGER_METADATA_VERSION,
     )
 
-    def _enqueue(event_id=event.pk):
-        from .tasks import dispatch_creator_email_outbox_event
-
-        dispatch_creator_email_outbox_event.delay(event_id)
-
-    transaction.on_commit(_enqueue)
+    transaction.on_commit(
+        lambda event_id=event.pk: _safe_enqueue_creator_email_outbox_event(event_id),
+        robust=True,
+    )
     return event
 
 
+@transaction.atomic
+def record_creator_email_delivery_failure(
+    *,
+    event_id: int,
+    error_message: str,
+    final_failure: bool,
+    retry_at=None,
+) -> LedgerOutbox:
+    event = LedgerOutbox.objects.select_for_update().get(
+        pk=int(event_id),
+        topic=CREATOR_EMAIL_TOPIC,
+    )
+    if event.status in {
+        LedgerOutbox.STATUS_DISPATCHED,
+        LedgerOutbox.STATUS_DEAD_LETTERED,
+    }:
+        return event
+
+    now = timezone.now()
+    error_text = str(error_message or "")[:4000]
+    event.fail_count = int(event.fail_count or 0) + 1
+    event.last_error = error_text
+    event.last_attempt_at = now
+
+    update_fields = [
+        "status",
+        "fail_count",
+        "last_error",
+        "last_attempt_at",
+        "next_retry_at",
+    ]
+    if final_failure:
+        event.status = LedgerOutbox.STATUS_DEAD_LETTERED
+        event.dead_lettered_at = now
+        event.dead_letter_reason = (
+            f"Creator transactional email retries exhausted: {error_text}"
+        )[:2000]
+        event.next_retry_at = None
+        update_fields.extend(["dead_lettered_at", "dead_letter_reason"])
+    else:
+        event.status = LedgerOutbox.STATUS_FAILED
+        event.next_retry_at = retry_at
+
+    # Use save(), not QuerySet.update(): ledger.signals relies on pre_save /
+    # post_save to emit the critical admin alert on a dead-letter transition.
+    event.save(update_fields=update_fields)
+    return event
+
+
+@transaction.atomic
 def deliver_creator_email_outbox_event(event_id: int) -> dict:
-    event = LedgerOutbox.objects.get(pk=event_id)
+    # Serialize delivery attempts for one outbox row. Recovery and a normal
+    # Celery retry can overlap; only one worker may perform the SMTP send.
+    event = LedgerOutbox.objects.select_for_update().get(pk=event_id)
     if event.topic != CREATOR_EMAIL_TOPIC:
         raise ValueError("Outbox event is not a creator transactional email")
     if event.status == LedgerOutbox.STATUS_DISPATCHED:
@@ -189,11 +307,18 @@ def deliver_creator_email_outbox_event(event_id: int) -> dict:
         raise RuntimeError("Creator transactional email was not accepted by the email backend")
 
     now = timezone.now()
-    LedgerOutbox.objects.filter(pk=event.pk).update(
-        status=LedgerOutbox.STATUS_DISPATCHED,
-        dispatched_at=now,
-        last_attempt_at=now,
-        next_retry_at=None,
-        last_error="",
+    event.status = LedgerOutbox.STATUS_DISPATCHED
+    event.dispatched_at = now
+    event.last_attempt_at = now
+    event.next_retry_at = None
+    event.last_error = ""
+    event.save(
+        update_fields=[
+            "status",
+            "dispatched_at",
+            "last_attempt_at",
+            "next_retry_at",
+            "last_error",
+        ]
     )
     return {"sent": True, "event_id": event.id}

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -15,7 +16,9 @@ from premium.notifications import (
     CREATOR_EMAIL_EVENT_MEDIA_PURCHASE,
     CREATOR_EMAIL_TOPIC,
     deliver_creator_email_outbox_event,
+    record_creator_email_delivery_failure,
 )
+from premium.tasks import recover_creator_email_outbox
 from premium.services import (
     build_premium_media_state,
     build_premium_playback_payload,
@@ -355,6 +358,129 @@ def test_purchase_with_tokens_creates_purchase_unlock_ledger_entries_and_balance
     assert mail.outbox[0].subject == "You made a sale"
     assert "buyer_purchase" in mail.outbox[0].body
     assert "400 tokens" in mail.outbox[0].body
+
+
+@pytest.mark.django_db
+def test_purchase_commit_survives_creator_email_broker_enqueue_failure(
+    django_user_model,
+    settings,
+    django_capture_on_commit_callbacks,
+):
+    settings.PREMIUM_CREATOR_PURCHASE_EMAIL_ENABLED = True
+
+    creator = django_user_model.objects.create_user(
+        username="creator_broker_down",
+        email="creator-broker-down@example.com",
+    )
+    buyer = django_user_model.objects.create_user(username="buyer_broker_down")
+    media = create_test_media(user=creator, friendly_token="brokerdownpremium")
+    create_ready_asset(media=media, price_tokens=PRICE_TOKENS)
+    fund_user_wallet(buyer, 1_000 * 10**6)
+    fund_user_wallet(creator, 0)
+
+    with patch(
+        "premium.tasks.dispatch_creator_email_outbox_event.delay",
+        side_effect=RuntimeError("broker unavailable"),
+    ):
+        with django_capture_on_commit_callbacks(execute=True):
+            result = purchase_premium_media_with_tokens(actor=buyer, media=media)
+
+    assert result["purchased"] is True
+    purchase = MediaPurchase.objects.get(user=buyer, media=media)
+    email_event = LedgerOutbox.objects.get(
+        txn=purchase.txn,
+        topic=CREATOR_EMAIL_TOPIC,
+    )
+    assert email_event.status == LedgerOutbox.STATUS_PENDING
+
+
+@pytest.mark.django_db
+def test_creator_email_recovery_requeues_stale_pending_event(
+    django_user_model,
+    settings,
+    django_capture_on_commit_callbacks,
+):
+    settings.PREMIUM_CREATOR_PURCHASE_EMAIL_ENABLED = True
+    settings.PREMIUM_CREATOR_EMAIL_RECOVERY_ENABLED = True
+    settings.PREMIUM_CREATOR_EMAIL_RECOVERY_GRACE_SECONDS = 60
+    settings.PREMIUM_CREATOR_EMAIL_RECOVERY_BATCH_SIZE = 20
+
+    creator = django_user_model.objects.create_user(
+        username="creator_recovery",
+        email="creator-recovery@example.com",
+    )
+    buyer = django_user_model.objects.create_user(username="buyer_recovery")
+    media = create_test_media(user=creator, friendly_token="recoverypremium")
+    create_ready_asset(media=media, price_tokens=PRICE_TOKENS)
+    fund_user_wallet(buyer, 1_000 * 10**6)
+    fund_user_wallet(creator, 0)
+
+    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay"):
+        with django_capture_on_commit_callbacks(execute=True):
+            result = purchase_premium_media_with_tokens(actor=buyer, media=media)
+
+    purchase = MediaPurchase.objects.get(user=buyer, media=media)
+    email_event = LedgerOutbox.objects.get(
+        txn=purchase.txn,
+        topic=CREATOR_EMAIL_TOPIC,
+    )
+    LedgerOutbox.objects.filter(pk=email_event.pk).update(
+        created_at=timezone.now() - timedelta(minutes=5),
+    )
+
+    with patch(
+        "premium.tasks.dispatch_creator_email_outbox_event.delay"
+    ) as recovered_enqueue:
+        recovery = recover_creator_email_outbox()
+
+    assert recovery["candidates"] == 1
+    assert recovery["enqueued"] == 1
+    assert recovery["enqueue_failures"] == 0
+    recovered_enqueue.assert_called_once_with(email_event.id)
+
+
+@pytest.mark.django_db
+def test_creator_email_dead_letter_uses_ledger_save_signals(
+    django_user_model,
+    settings,
+    django_capture_on_commit_callbacks,
+):
+    settings.PREMIUM_CREATOR_PURCHASE_EMAIL_ENABLED = True
+
+    creator = django_user_model.objects.create_user(
+        username="creator_dead_letter",
+        email="creator-dead-letter@example.com",
+    )
+    buyer = django_user_model.objects.create_user(username="buyer_dead_letter")
+    media = create_test_media(user=creator, friendly_token="deadletterpremium")
+    create_ready_asset(media=media, price_tokens=PRICE_TOKENS)
+    fund_user_wallet(buyer, 1_000 * 10**6)
+    fund_user_wallet(creator, 0)
+
+    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay"):
+        with django_capture_on_commit_callbacks(execute=True):
+            result = purchase_premium_media_with_tokens(actor=buyer, media=media)
+
+    purchase = MediaPurchase.objects.get(user=buyer, media=media)
+    email_event = LedgerOutbox.objects.get(
+        txn=purchase.txn,
+        topic=CREATOR_EMAIL_TOPIC,
+    )
+
+    with patch("ledger.signals._queue_admin_notification") as admin_notification:
+        record_creator_email_delivery_failure(
+            event_id=email_event.id,
+            error_message="smtp unavailable",
+            final_failure=True,
+        )
+
+    email_event.refresh_from_db()
+    assert email_event.status == LedgerOutbox.STATUS_DEAD_LETTERED
+    assert email_event.fail_count == 1
+    assert "smtp unavailable" in email_event.dead_letter_reason
+    admin_notification.assert_called_once()
+    assert admin_notification.call_args.args[0] == "ledger.outbox_dead_lettered"
+    assert admin_notification.call_args.args[1]["object_id"] == email_event.id
 
 
 @pytest.mark.django_db

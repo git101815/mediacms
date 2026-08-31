@@ -509,6 +509,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60.0,
         "options": {"queue": "short_tasks"},
     },
+    "premium_recover_creator_emails": {
+        "task": "premium.tasks.recover_creator_email_outbox",
+        "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
+    },
     "get_list_of_popular_media": {
         "task": "get_list_of_popular_media",
         "schedule": crontab(minute=1, hour="*/10"),
