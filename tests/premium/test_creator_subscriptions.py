@@ -1153,7 +1153,14 @@ def test_promotional_subscription_payment_stays_promotional_for_creator(
 
     buyer_wallet = fund_wallet(subscriber, 10 * TOKEN_SCALE)
     buyer_wallet.promotional_balance = 6 * TOKEN_SCALE
-    buyer_wallet.save(update_fields=["promotional_balance", "updated_at"])
+    buyer_wallet.restricted_promotional_balance = 6 * TOKEN_SCALE
+    buyer_wallet.save(
+        update_fields=[
+            "promotional_balance",
+            "restricted_promotional_balance",
+            "updated_at",
+        ]
+    )
     creator_wallet = fund_wallet(creator, 0)
 
     result = subscribe_at(
@@ -1174,6 +1181,8 @@ def test_promotional_subscription_payment_stays_promotional_for_creator(
     buyer_entry = LedgerEntry.objects.get(txn=txn, wallet=buyer_wallet)
     creator_entry = LedgerEntry.objects.get(txn=txn, wallet=creator_wallet)
     assert buyer_entry.promotional_delta == -6 * TOKEN_SCALE
+    assert buyer_entry.restricted_promotional_delta == buyer_entry.promotional_delta
+    assert creator_entry.restricted_promotional_delta == 0
     assert creator_entry.promotional_delta == 4_800_000
     assert txn.metadata["promotional_spent_units"] == 6 * TOKEN_SCALE
     assert txn.metadata["paid_spent_units"] == 4 * TOKEN_SCALE

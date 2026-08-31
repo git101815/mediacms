@@ -170,6 +170,10 @@ class TokenWallet(models.Model):
     # transfers. Withdrawals may include this component only up to the
     # operator-configured promotional withdrawal ratio.
     promotional_balance = models.BigIntegerField(default=0)
+    # Subset of promotional_balance that was issued directly to this wallet by
+    # platform rewards. It remains distinct from promotional-origin revenue a
+    # creator earns from a customer's purchase.
+    restricted_promotional_balance = models.BigIntegerField(default=0)
     allow_negative = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
@@ -219,6 +223,10 @@ class TokenWallet(models.Model):
                 name="tokenwallet_promotional_balance_gte_0",
             ),
             models.CheckConstraint(
+                condition=models.Q(restricted_promotional_balance__gte=0),
+                name="tokenwallet_restricted_promotional_balance_gte_0",
+            ),
+            models.CheckConstraint(
                 condition=(
                     models.Q(wallet_type=SYSTEM_WALLET_TYPE, promotional_balance=0)
                     | (
@@ -234,6 +242,23 @@ class TokenWallet(models.Model):
                     )
                 ),
                 name="tokenwallet_promotional_balance_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        wallet_type=SYSTEM_WALLET_TYPE,
+                        restricted_promotional_balance=0,
+                    )
+                    | (
+                        models.Q(wallet_type=USER_WALLET_TYPE)
+                        & models.Q(
+                            promotional_balance__gte=models.F(
+                                "restricted_promotional_balance"
+                            )
+                        )
+                    )
+                ),
+                name="tokenwallet_restricted_promotional_balance_valid",
             ),
             models.CheckConstraint(
                 condition=models.Q(balance__gte=models.F("held_balance")) | models.Q(allow_negative=True),
@@ -420,6 +445,9 @@ class LedgerEntry(ImmutableLedgerRow):
     # its absolute value can never exceed the total entry delta. System-wallet
     # entries always use zero. This makes funding provenance auditable.
     promotional_delta = models.BigIntegerField(default=0)
+    # Subset of promotional_delta that carries platform-issued restricted
+    # provenance. Same-sign and never larger than promotional_delta.
+    restricted_promotional_delta = models.BigIntegerField(default=0)
     balance_after = models.BigIntegerField()
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
 
@@ -448,6 +476,30 @@ class LedgerEntry(ImmutableLedgerRow):
                     )
                 ),
                 name="ledgerentry_promotional_delta_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(restricted_promotional_delta=0)
+                    | (
+                        models.Q(promotional_delta__gt=0)
+                        & models.Q(restricted_promotional_delta__gt=0)
+                        & models.Q(
+                            restricted_promotional_delta__lte=models.F(
+                                "promotional_delta"
+                            )
+                        )
+                    )
+                    | (
+                        models.Q(promotional_delta__lt=0)
+                        & models.Q(restricted_promotional_delta__lt=0)
+                        & models.Q(
+                            restricted_promotional_delta__gte=models.F(
+                                "promotional_delta"
+                            )
+                        )
+                    )
+                ),
+                name="ledgerentry_restricted_promotional_delta_valid",
             ),
         ]
         permissions = [

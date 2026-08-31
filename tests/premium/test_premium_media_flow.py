@@ -548,7 +548,14 @@ def test_promotional_purchase_stays_promotional_for_creator(
 
     buyer_wallet = fund_user_wallet(buyer, PRICE_TOKENS)
     buyer_wallet.promotional_balance = 300 * 10**6
-    buyer_wallet.save(update_fields=["promotional_balance", "updated_at"])
+    buyer_wallet.restricted_promotional_balance = 300 * 10**6
+    buyer_wallet.save(
+        update_fields=[
+            "promotional_balance",
+            "restricted_promotional_balance",
+            "updated_at",
+        ]
+    )
     creator_wallet = fund_user_wallet(creator, 0)
 
     result = purchase_premium_media_with_tokens(actor=buyer, media=media)
@@ -566,6 +573,8 @@ def test_promotional_purchase_stays_promotional_for_creator(
     buyer_entry = LedgerEntry.objects.get(txn=txn, wallet=buyer_wallet)
     creator_entry = LedgerEntry.objects.get(txn=txn, wallet=creator_wallet)
     assert buyer_entry.promotional_delta == -300 * 10**6
+    assert buyer_entry.restricted_promotional_delta == buyer_entry.promotional_delta
+    assert creator_entry.restricted_promotional_delta == 0
     assert creator_entry.promotional_delta == 240 * 10**6
     assert txn.metadata["promotional_spent_units"] == 300 * 10**6
     assert txn.metadata["paid_spent_units"] == 200 * 10**6
