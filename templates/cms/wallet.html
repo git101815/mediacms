@@ -151,6 +151,16 @@
               {% for reward in daily_rewards.window %}<i{% if reward.status == 'claimed' %} class="is-claimed"{% elif reward.status == 'current' %} class="is-current"{% endif %}></i>{% endfor %}
             </div>
             <div class="wallet-game-panel__footer">
+              {% if daily_rewards.pending_chest %}
+              <form method="post" action="{{ daily_rewards.claim_url }}" style="display:contents" data-wallet-chest-claim-form data-wallet-chest-source="daily-reward-pending">
+                {% csrf_token %}
+                <input type="hidden" name="grant_public_id" value="{{ daily_rewards.pending_chest.grant_public_id }}">
+                <button type="submit" class="wallet-game-button wallet-game-button--secondary" data-wallet-action="open-pending-daily">
+                  Open {{ daily_rewards.pending_chest.chest_label }}
+                  <img src="{% static daily_rewards.pending_chest.button_image_path %}" alt="">
+                </button>
+              </form>
+              {% endif %}
               <form method="post" action="{{ daily_rewards.claim_url }}" style="display:contents"{% if daily_rewards.current_reward.kind == 'chest' %} data-wallet-chest-claim-form data-wallet-chest-source="daily-reward"{% endif %}>
                 {% csrf_token %}
                 <button type="submit" class="wallet-game-button wallet-game-button--primary" data-wallet-action="claim-daily"{% if not daily_rewards.can_claim %} disabled{% endif %}>

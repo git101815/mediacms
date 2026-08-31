@@ -300,15 +300,11 @@ class QuestQualifiedVisit(models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["cycle_key", "visitor_hash"],
-                name="quest_visit_cycle_visitor_unique",
+                fields=["campaign", "visitor_hash"],
+                name="quest_visit_campaign_vid_uniq",
             ),
             models.UniqueConstraint(
-                fields=["cycle_key", "network_hash"],
-                name="quest_visit_cycle_network_unique",
-            ),
-            models.UniqueConstraint(
-                fields=["cycle_key", "fingerprint_hash"],
-                name="quest_visit_cycle_fp_unique",
+                fields=["campaign", "fingerprint_hash"],
+                name="quest_visit_campaign_fp_uniq",
             ),
         ]
