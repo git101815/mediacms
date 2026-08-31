@@ -560,7 +560,6 @@ def _claim_chest_reward(
                     config.DAILY_REWARD_CONFIG_VERSION
                 ),
             },
-            expires_at=cycle_reset_at,
         )
     else:
         grant = prepared_grant
