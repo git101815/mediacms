@@ -1,15 +1,23 @@
 import logging
 import os
 import shutil
+from datetime import timedelta
 
 from celery import shared_task
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.files import File
+from django.db.models import F
+from django.utils import timezone
 
 from files.models import Media
+from ledger.models import LedgerOutbox
 
+from .notifications import (
+    CREATOR_EMAIL_TOPIC,
+    deliver_creator_email_outbox_event,
+)
 from .services import replace_creator_premium_asset_file
 
 
@@ -315,3 +323,73 @@ def finalize_premium_upload(
     )
 
     return success_status
+
+@shared_task(
+    bind=True,
+    name="premium.tasks.dispatch_creator_email_outbox_event",
+    queue="short_tasks",
+    acks_late=True,
+    reject_on_worker_lost=True,
+    max_retries=5,
+)
+def dispatch_creator_email_outbox_event(self, event_id: int):
+    try:
+        return deliver_creator_email_outbox_event(int(event_id))
+    except LedgerOutbox.DoesNotExist:
+        logger.warning(
+            "Creator email outbox event no longer exists event_id=%s",
+            event_id,
+        )
+        return {"sent": False, "reason": "missing", "event_id": int(event_id)}
+    except Exception as exc:
+        retry_count = int(self.request.retries)
+        max_retries = int(self.max_retries or 0)
+        final_failure = retry_count >= max_retries
+        now = timezone.now()
+        countdown = min(60 * (2**retry_count), 15 * 60)
+
+        updates = {
+            "fail_count": F("fail_count") + 1,
+            "last_error": str(exc)[:4000],
+            "last_attempt_at": now,
+            "status": (
+                LedgerOutbox.STATUS_DEAD_LETTERED
+                if final_failure
+                else LedgerOutbox.STATUS_FAILED
+            ),
+            "next_retry_at": (
+                None
+                if final_failure
+                else now + timedelta(seconds=countdown)
+            ),
+        }
+        if final_failure:
+            updates["dead_lettered_at"] = now
+            updates["dead_letter_reason"] = "creator transactional email retries exhausted"
+
+        LedgerOutbox.objects.filter(
+            pk=event_id,
+            topic=CREATOR_EMAIL_TOPIC,
+        ).exclude(
+            status=LedgerOutbox.STATUS_DISPATCHED,
+        ).update(**updates)
+
+        if not final_failure:
+            logger.warning(
+                "Retrying creator transactional email event_id=%s retry=%s countdown=%s",
+                event_id,
+                retry_count + 1,
+                countdown,
+            )
+            raise self.retry(exc=exc, countdown=countdown)
+
+        logger.exception(
+            "Creator transactional email dead-lettered event_id=%s",
+            event_id,
+        )
+        return {
+            "sent": False,
+            "reason": "dead_lettered",
+            "event_id": int(event_id),
+        }
+

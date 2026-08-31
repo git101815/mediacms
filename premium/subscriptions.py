@@ -27,6 +27,12 @@ from ledger.services import (
     record_wallet_velocity,
 )
 
+from .notifications import (
+    CREATOR_EMAIL_EVENT_SUBSCRIPTION_RENEWED,
+    CREATOR_EMAIL_EVENT_SUBSCRIPTION_STARTED,
+    queue_creator_transactional_email,
+)
+
 from .models import (
     CreatorSubscription,
     CreatorSubscriptionPeriod,
@@ -224,6 +230,7 @@ def _create_subscription_payment(
     subscription: CreatorSubscription,
     plan: CreatorSubscriptionPlan,
     period_start,
+    creator_email_event_type: str | None = None,
 ) -> CreatorSubscriptionPeriod:
     if plan.creator_id != subscription.creator_id:
         raise ValidationError(
@@ -446,6 +453,26 @@ def _create_subscription_payment(
         metadata_version=LEDGER_METADATA_VERSION,
     )
 
+    if creator_email_event_type:
+        queue_creator_transactional_email(
+            txn=txn,
+            event_type=creator_email_event_type,
+            creator=creator,
+            payload={
+                "subscriber_username": str(user.username or ""),
+                "subscription_id": subscription.pk,
+                "plan_id": plan.pk,
+                "plan_name": str(plan.name or ""),
+                "billing_period_days": billing_period_days,
+                "period_start": period_start.isoformat(),
+                "period_end": period_end.isoformat(),
+                "period_start_display": timezone.localtime(period_start).strftime("%Y-%m-%d"),
+                "period_end_display": timezone.localtime(period_end).strftime("%Y-%m-%d"),
+                "price_tokens": price_tokens,
+                "creator_amount": creator_amount,
+            },
+        )
+
     grant_period_release_unlocks(period=period)
     return period
 
@@ -538,6 +565,7 @@ def subscribe_to_creator_with_tokens(
         subscription=subscription,
         plan=plan,
         period_start=period_start,
+        creator_email_event_type=CREATOR_EMAIL_EVENT_SUBSCRIPTION_STARTED,
     )
 
     return {
@@ -657,6 +685,7 @@ def renew_creator_subscription_with_tokens(*, subscription_id: int) -> dict:
             subscription=subscription,
             plan=subscription.plan,
             period_start=period_start,
+            creator_email_event_type=CREATOR_EMAIL_EVENT_SUBSCRIPTION_RENEWED,
         )
     except ValidationError as exc:
         subscription.status = CreatorSubscription.STATUS_PAST_DUE

@@ -28,6 +28,11 @@ from ledger.services import (
     record_wallet_velocity,
 )
 
+from .notifications import (
+    CREATOR_EMAIL_EVENT_MEDIA_PURCHASE,
+    queue_creator_transactional_email,
+)
+
 from .models import (
     CreatorSubscription,
     CreatorSubscriptionPlan,
@@ -513,6 +518,20 @@ def purchase_premium_media_with_tokens(*, actor, media: Media) -> dict:
             "price_tokens": price_tokens,
         },
         metadata_version=LEDGER_METADATA_VERSION,
+    )
+
+    queue_creator_transactional_email(
+        txn=txn,
+        event_type=CREATOR_EMAIL_EVENT_MEDIA_PURCHASE,
+        creator=media.user,
+        payload={
+            "buyer_username": str(user.username or ""),
+            "media_id": media.pk,
+            "media_title": str(media.title or ""),
+            "media_url_path": media.get_absolute_url(),
+            "price_tokens": price_tokens,
+            "creator_amount": creator_amount,
+        },
     )
 
     return {

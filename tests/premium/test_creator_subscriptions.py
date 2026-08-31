@@ -9,7 +9,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from files.models import Media
-from ledger.models import LedgerEntry, LedgerTransaction, TokenWallet
+from ledger.models import LedgerEntry, LedgerOutbox, LedgerTransaction, TokenWallet
+from premium.notifications import (
+    CREATOR_EMAIL_EVENT_SUBSCRIPTION_RENEWED,
+    CREATOR_EMAIL_EVENT_SUBSCRIPTION_STARTED,
+    CREATOR_EMAIL_TOPIC,
+)
 from premium.models import (
     CreatorSubscription,
     CreatorSubscriptionPeriod,
@@ -149,10 +154,17 @@ def form_payload(user, **overrides):
 def test_initial_subscription_payment_creates_balanced_ledger_and_paid_period(
     django_user_model,
     settings,
+    django_capture_on_commit_callbacks,
 ):
     settings.PREMIUM_SUBSCRIPTION_CREATOR_SHARE_BPS = 8000
+    settings.PREMIUM_CREATOR_NEW_SUBSCRIPTION_EMAIL_ENABLED = True
 
-    creator = create_user(django_user_model, "sub_creator_payment", creator=True)
+    creator = create_user(
+        django_user_model,
+        "sub_creator_payment",
+        creator=True,
+        email="sub-creator@example.com",
+    )
     subscriber = create_user(django_user_model, "sub_buyer_payment")
     plan = create_plan(creator, price_tokens=10 * TOKEN_SCALE)
 
@@ -160,7 +172,9 @@ def test_initial_subscription_payment_creates_balanced_ledger_and_paid_period(
     creator_wallet = fund_wallet(creator, 0)
     period_start = timezone.now().replace(microsecond=0)
 
-    result = subscribe_at(actor=subscriber, plan=plan, when=period_start)
+    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay") as enqueue_email:
+        with django_capture_on_commit_callbacks(execute=True):
+            result = subscribe_at(actor=subscriber, plan=plan, when=period_start)
 
     buyer_wallet.refresh_from_db()
     creator_wallet.refresh_from_db()
@@ -196,6 +210,17 @@ def test_initial_subscription_payment_creates_balanced_ledger_and_paid_period(
     entries = list(LedgerEntry.objects.filter(txn=txn))
     assert len(entries) == 3
     assert sum(entry.delta for entry in entries) == 0
+
+    email_event = LedgerOutbox.objects.get(
+        txn=txn,
+        topic=CREATOR_EMAIL_TOPIC,
+    )
+    assert email_event.payload["event_type"] == CREATOR_EMAIL_EVENT_SUBSCRIPTION_STARTED
+    assert email_event.payload["recipient_email"] == "sub-creator@example.com"
+    assert email_event.payload["subscriber_username"] == subscriber.username
+    assert email_event.payload["plan_name"] == plan.name
+    assert email_event.payload["creator_amount"] == 8 * TOKEN_SCALE
+    enqueue_email.assert_called_once_with(email_event.id)
 
 
 @pytest.mark.django_db
@@ -618,6 +643,55 @@ def test_remote_encoding_callback_does_not_redate_existing_release_candidate(
     assert response.status_code == 200
     assert PremiumMediaRelease.objects.filter(media=media).exists() is False
     enqueue.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_renewal_email_is_separate_and_disabled_unless_enabled(
+    django_user_model,
+    settings,
+    django_capture_on_commit_callbacks,
+):
+    creator = create_user(
+        django_user_model,
+        "sub_creator_renew_email",
+        creator=True,
+        email="renew-creator@example.com",
+    )
+    subscriber = create_user(django_user_model, "sub_buyer_renew_email")
+    plan = create_plan(creator)
+    fund_wallet(subscriber, 100 * TOKEN_SCALE)
+    fund_wallet(creator, 0)
+
+    start = timezone.now().replace(microsecond=0)
+    settings.PREMIUM_CREATOR_NEW_SUBSCRIPTION_EMAIL_ENABLED = False
+    first = subscribe_at(actor=subscriber, plan=plan, when=start)["period"]
+    subscription = first.subscription
+
+    settings.PREMIUM_CREATOR_RENEWAL_EMAIL_ENABLED = False
+    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay") as enqueue_email:
+        with django_capture_on_commit_callbacks(execute=True):
+            disabled_result = renew_at(subscription=subscription, when=first.period_end)
+    assert LedgerOutbox.objects.filter(
+        txn=disabled_result["period"].txn,
+        topic=CREATOR_EMAIL_TOPIC,
+    ).exists() is False
+    enqueue_email.assert_not_called()
+
+    subscription.refresh_from_db()
+    settings.PREMIUM_CREATOR_RENEWAL_EMAIL_ENABLED = True
+    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay") as enqueue_email:
+        with django_capture_on_commit_callbacks(execute=True):
+            result = renew_at(
+                subscription=subscription,
+                when=subscription.current_period_end,
+            )
+
+    event = LedgerOutbox.objects.get(
+        txn=result["period"].txn,
+        topic=CREATOR_EMAIL_TOPIC,
+    )
+    assert event.payload["event_type"] == CREATOR_EMAIL_EVENT_SUBSCRIPTION_RENEWED
+    enqueue_email.assert_called_once_with(event.id)
 
 
 @pytest.mark.django_db

@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+from django.core import mail
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory
@@ -8,8 +9,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from files.models import Media
-from ledger.models import LedgerEntry, LedgerTransaction, TokenWallet
+from ledger.models import LedgerEntry, LedgerOutbox, LedgerTransaction, TokenWallet
 from premium.models import MediaPurchase, PremiumMediaAsset, PremiumMediaUnlock
+from premium.notifications import (
+    CREATOR_EMAIL_EVENT_MEDIA_PURCHASE,
+    CREATOR_EMAIL_TOPIC,
+    deliver_creator_email_outbox_event,
+)
 from premium.services import (
     build_premium_media_state,
     build_premium_playback_payload,
@@ -274,10 +280,19 @@ def test_update_premium_settings_switches_draft_to_ready_and_sets_price(django_u
 
 
 @pytest.mark.django_db
-def test_purchase_with_tokens_creates_purchase_unlock_ledger_entries_and_balances(django_user_model, settings):
+def test_purchase_with_tokens_creates_purchase_unlock_ledger_entries_and_balances(
+    django_user_model,
+    settings,
+    django_capture_on_commit_callbacks,
+):
     settings.PREMIUM_CREATOR_SHARE_BPS = 8000
+    settings.PREMIUM_CREATOR_PURCHASE_EMAIL_ENABLED = True
+    settings.CELERY_EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
-    creator = django_user_model.objects.create_user(username="creator_purchase")
+    creator = django_user_model.objects.create_user(
+        username="creator_purchase",
+        email="creator-purchase@example.com",
+    )
     buyer = django_user_model.objects.create_user(username="buyer_purchase")
     media = create_test_media(user=creator, friendly_token="purchasepremium")
     create_ready_asset(media=media, price_tokens=PRICE_TOKENS)
@@ -285,7 +300,9 @@ def test_purchase_with_tokens_creates_purchase_unlock_ledger_entries_and_balance
     buyer_wallet = fund_user_wallet(buyer, 1_000 * 10**6)
     creator_wallet = fund_user_wallet(creator, 0)
 
-    result = purchase_premium_media_with_tokens(actor=buyer, media=media)
+    with patch("premium.tasks.dispatch_creator_email_outbox_event.delay") as enqueue_email:
+        with django_capture_on_commit_callbacks(execute=True):
+            result = purchase_premium_media_with_tokens(actor=buyer, media=media)
 
     buyer_wallet.refresh_from_db()
     creator_wallet.refresh_from_db()
@@ -317,6 +334,27 @@ def test_purchase_with_tokens_creates_purchase_unlock_ledger_entries_and_balance
     entries = list(LedgerEntry.objects.filter(txn=txn))
     assert len(entries) == 3
     assert sum(entry.delta for entry in entries) == 0
+
+    email_event = LedgerOutbox.objects.get(
+        txn=txn,
+        topic=CREATOR_EMAIL_TOPIC,
+    )
+    assert email_event.payload["event_type"] == CREATOR_EMAIL_EVENT_MEDIA_PURCHASE
+    assert email_event.payload["recipient_email"] == "creator-purchase@example.com"
+    assert email_event.payload["buyer_username"] == buyer.username
+    assert email_event.payload["media_title"] == media.title
+    assert email_event.payload["creator_amount"] == 400 * 10**6
+    enqueue_email.assert_called_once_with(email_event.id)
+
+    delivery = deliver_creator_email_outbox_event(email_event.id)
+    email_event.refresh_from_db()
+    assert delivery["sent"] is True
+    assert email_event.status == LedgerOutbox.STATUS_DISPATCHED
+    assert len(mail.outbox) == 1
+    assert mail.outbox[0].to == ["creator-purchase@example.com"]
+    assert mail.outbox[0].subject == "You made a sale"
+    assert "buyer_purchase" in mail.outbox[0].body
+    assert "400 tokens" in mail.outbox[0].body
 
 
 @pytest.mark.django_db

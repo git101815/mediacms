@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <body>
+    <p>Hi {{ creator_display_name }},</p>
+
+    <h2>{{ headline }}</h2>
+
+    {% if event_type == "media_purchase" %}
+      <p><strong>{{ buyer_username }}</strong> purchased <strong>{{ media_title }}</strong>.</p>
+      <p>Price paid: <strong>{{ price_tokens_display }} tokens</strong><br>
+      Wallet credit: <strong>{{ creator_amount_display }} tokens</strong></p>
+      {% if media_url %}<p><a href="{{ media_url }}">View content</a></p>{% endif %}
+    {% elif event_type == "subscription_started" %}
+      <p><strong>{{ subscriber_username }}</strong> subscribed to your <strong>{{ plan_name }}</strong> plan.</p>
+      <p>Price paid: <strong>{{ price_tokens_display }} tokens</strong><br>
+      Wallet credit: <strong>{{ creator_amount_display }} tokens</strong><br>
+      Period: {{ period_start_display }} to {{ period_end_display }}</p>
+    {% elif event_type == "subscription_renewed" %}
+      <p><strong>{{ subscriber_username }}</strong> renewed their <strong>{{ plan_name }}</strong> subscription.</p>
+      <p>Price paid: <strong>{{ price_tokens_display }} tokens</strong><br>
+      Wallet credit: <strong>{{ creator_amount_display }} tokens</strong><br>
+      Period: {{ period_start_display }} to {{ period_end_display }}</p>
+    {% endif %}
+
+    <p><a href="{{ wallet_url }}">View your wallet</a></p>
+    <p><small>Wallet credit is shown in platform tokens. Cash-out eligibility is calculated separately by the wallet.</small></p>
+  </body>
+</html>

@@ -424,6 +424,12 @@ PREMIUM_S3_UPLOAD_PREFIX = "premium-media"
 PREMIUM_SIGNED_URL_TTL_SECONDS = 900
 PREMIUM_MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024 * 1024
 
+# Creator transactional monetization emails. These are operator settings,
+# intentionally kept in Python config rather than environment variables.
+PREMIUM_CREATOR_PURCHASE_EMAIL_ENABLED = True
+PREMIUM_CREATOR_NEW_SUBSCRIPTION_EMAIL_ENABLED = True
+PREMIUM_CREATOR_RENEWAL_EMAIL_ENABLED = False
+
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@celebfakes.ru")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "mail.smtpbackend.ru")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
