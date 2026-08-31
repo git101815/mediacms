@@ -501,7 +501,7 @@ def test_creator_email_dead_letter_uses_ledger_save_signals(
 
     with patch("premium.tasks.dispatch_creator_email_outbox_event.delay"):
         with django_capture_on_commit_callbacks(execute=True):
-            result = purchase_premium_media_with_tokens(actor=buyer, media=media)
+            purchase_premium_media_with_tokens(actor=buyer, media=media)
 
     purchase = MediaPurchase.objects.get(user=buyer, media=media)
     email_event = LedgerOutbox.objects.get(
