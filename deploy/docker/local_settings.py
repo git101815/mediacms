@@ -55,7 +55,6 @@ AI_GENERATION_N8N_WAKE_SECRET = os.getenv(
     "",
 ).strip()
 
-LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
 
 # Advertising delivery controls. This is the single source of truth for
 # provider rotation and ad cooldowns. Format kill-switches stop the whole
@@ -413,10 +412,6 @@ CELERY_BEAT_SCHEDULE = {
     "maintenance_sync_celebrities_ws": {
         "task": "maintenance_sync_celebrities_ws",
         "schedule": crontab(hour=1, minute=30),
-    },
-    "maintenance_recover_orphan_deposit_addresses": {
-        "task": "maintenance_recover_orphan_deposit_addresses",
-        "schedule": crontab(hour=2, minute=0),
     },
     "maintenance_backup_database": {
         "task": "maintenance_backup_database",

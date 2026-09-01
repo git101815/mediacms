@@ -99,6 +99,7 @@ from ledger.models import (
     WalletRequest,
     DepositSession,
     DepositSweepJob,
+    OrphanDepositRecoveryAudit,
     TokenPack,
 )
 from ledger.services import (
@@ -189,6 +190,10 @@ from ledger.banxa_deposits import (
 from ledger.internal_api import (
     authenticate_internal_deposit_request,
     authenticate_internal_sweeper_request,
+)
+from ledger.orphan_recovery import (
+    claim_orphan_recovery_candidates,
+    record_orphan_recovery_result,
 )
 from .serializers import (
     CategorySerializer,
@@ -4215,6 +4220,79 @@ def internal_deposit_watchlist(request):
         return JsonResponse({"error": str(exc)}, status=503)
 
     return JsonResponse({"results": results})
+
+
+@csrf_exempt
+@require_POST
+def internal_orphan_recovery_claim(request):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        option_rows = _parse_required_list(payload, "options")
+        limit = min(
+            _parse_required_int({"limit": payload.get("limit", 20)}, "limit"),
+            200,
+        )
+        older_than_hours = _parse_required_int(
+            {"older_than_hours": payload.get("older_than_hours", 72)},
+            "older_than_hours",
+        )
+        lease_seconds = min(
+            _parse_required_int(
+                {"lease_seconds": payload.get("lease_seconds", 7200)},
+                "lease_seconds",
+            ),
+            21600,
+        )
+        results = claim_orphan_recovery_candidates(
+            actor=actor,
+            service_name=service_name,
+            option_rows=option_rows,
+            limit=limit,
+            older_than_hours=older_than_hours,
+            lease_seconds=lease_seconds,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+
+    return JsonResponse({"results": results})
+
+
+@csrf_exempt
+@require_POST
+def internal_orphan_recovery_result(request, session_public_id):
+    try:
+        actor, payload, service_name = authenticate_internal_sweeper_request(request)
+        claim_token = _parse_required_string(payload, "claim_token")
+        audit = record_orphan_recovery_result(
+            actor=actor,
+            service_name=service_name,
+            session_public_id=session_public_id,
+            claim_token=claim_token,
+            payload=payload,
+        )
+    except DjangoPermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+    except DjangoValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except DepositSession.DoesNotExist:
+        return JsonResponse({"error": "Deposit session not found"}, status=404)
+    except OrphanDepositRecoveryAudit.DoesNotExist:
+        return JsonResponse({"error": "Orphan recovery audit not found"}, status=404)
+
+    return JsonResponse(
+        {
+            "session_public_id": str(session_public_id),
+            "status": audit.status,
+            "finalized_at": audit.finalized_at.isoformat() if audit.finalized_at else None,
+        }
+    )
+
 
 @csrf_exempt
 @require_POST

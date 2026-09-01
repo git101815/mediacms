@@ -1561,25 +1561,6 @@ def maintenance_sync_celebrities_ws():
 
 
 @task(
-    name="maintenance_recover_orphan_deposit_addresses",
-    queue="long_tasks",
-    soft_time_limit=60 * 30,
-)
-def maintenance_recover_orphan_deposit_addresses():
-    enabled = bool(getattr(settings, "LEDGER_ORPHAN_RECOVERY_TASK_ENABLED", False))
-    if not enabled:
-        logger.info("orphan deposit address recovery skipped because LEDGER_ORPHAN_RECOVERY_TASK_ENABLED is false")
-        return {
-            "skipped": True,
-            "reason": "LEDGER_ORPHAN_RECOVERY_TASK_ENABLED is false",
-        }
-
-    result = _run_management_command("recover_orphan_deposit_addresses")
-    logger.info("recover_orphan_deposit_addresses completed")
-    return result
-
-
-@task(
     name="maintenance_backup_database",
     queue="long_tasks",
     soft_time_limit=60 * 30,

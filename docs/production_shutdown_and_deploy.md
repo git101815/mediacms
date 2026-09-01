@@ -13,3 +13,5 @@ Database changes deployed while the old web is serving must follow expand/contra
 Malum and Skillflow webhooks remain authoritative. This hardening does not introduce a provider-status substitute. The production web redundancy is intended to reduce callback unavailability, while existing webhook idempotency remains the protection against retries.
 
 RunPod is different: MediaCMS stores the asynchronous RunPod job id. The worker now returns the signed callback payload even when the callback HTTP request cannot reach MediaCMS, and a periodic reconciler can retrieve that signed payload through RunPod job status and apply the same idempotent callback state transition.
+
+Orphan deposit recovery is owned by `sweeper_service`, not Celery. The Django side only leases candidates and persists `OrphanDepositRecoveryAudit`; mnemonics, funding keys, RPC calls, signing, and broadcasts remain inside the sweeper container. The worker uses the existing authenticated runtime-price service for ETH/BNB/POL profitability checks.
