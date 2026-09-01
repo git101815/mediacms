@@ -1687,6 +1687,184 @@ def maintenance_backup_database():
         if tmp_path.exists():
             tmp_path.unlink()
 
+
+def _decode_runpod_output(value):
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+        return decoded if isinstance(decoded, dict) else None
+    return None
+
+
+def _apply_reconciled_runpod_output(media, output):
+    from files.remote_encoding import verify_signature
+    from files.remote_encoding_views import apply_remote_encoding_payload
+
+    payload = _decode_runpod_output(output)
+    if not payload:
+        return False
+
+    signature = payload.pop("signature", "")
+    if not signature or not verify_signature(payload, signature):
+        logger.error(
+            "RunPod reconciliation rejected unsigned/invalid output token=%s",
+            media.friendly_token,
+        )
+        return False
+
+    apply_remote_encoding_payload(media, payload)
+    return True
+
+
+@task(
+    name="reconcile_remote_encodings",
+    queue="short_tasks",
+    soft_time_limit=120,
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
+def reconcile_remote_encodings(limit=None):
+    if not getattr(settings, "REMOTE_ENCODING_ENABLED", False):
+        return {"checked": 0, "recovered": 0, "failed": 0}
+
+    from urllib.error import HTTPError
+    from files.remote_encoding import get_runpod_job_status
+
+    limit = int(
+        limit
+        or getattr(settings, "REMOTE_ENCODING_RECONCILE_BATCH_SIZE", 50)
+    )
+    if limit <= 0:
+        return {"checked": 0, "recovered": 0, "failed": 0}
+
+    rows = list(
+        Encoding.objects.filter(
+            worker="runpod",
+            status="running",
+        )
+        .exclude(task_id="")
+        .values("task_id", "media_id", "add_date")
+        .order_by("add_date")[: max(limit * 8, limit)]
+    )
+
+    jobs = {}
+    for row in rows:
+        job_id = str(row["task_id"] or "").strip()
+        if job_id and job_id not in jobs:
+            jobs[job_id] = row
+        if len(jobs) >= limit:
+            break
+
+    checked = recovered = failed = 0
+    now = timezone.now()
+    ttl_seconds = max(
+        1,
+        int(getattr(settings, "RUNPOD_JOB_TTL_MS", 172800000) or 172800000) // 1000,
+    )
+
+    for job_id, row in jobs.items():
+        checked += 1
+        try:
+            status_payload = get_runpod_job_status(job_id)
+        except HTTPError as exc:
+            if exc.code == 404 and row["add_date"] <= now - timedelta(seconds=ttl_seconds):
+                message = "RunPod job expired before MediaCMS could reconcile its result"
+                affected = Encoding.objects.filter(
+                    worker="runpod",
+                    status="running",
+                    task_id=job_id,
+                )
+                media_ids = list(affected.values_list("media_id", flat=True).distinct())
+                affected.update(status="fail", logs=message)
+                for media_id in media_ids:
+                    if not Encoding.objects.filter(
+                        media_id=media_id,
+                        worker="runpod",
+                        status="running",
+                    ).exists():
+                        Media.objects.filter(
+                            pk=media_id,
+                            listable=False,
+                            encoding_status="running",
+                        ).update(encoding_status="fail")
+                failed += 1
+            else:
+                logger.warning(
+                    "RunPod reconciliation HTTP error job_id=%s status=%s",
+                    job_id,
+                    exc.code,
+                )
+            continue
+        except Exception:
+            logger.exception("RunPod reconciliation lookup failed job_id=%s", job_id)
+            continue
+
+        state = str(status_payload.get("status") or "").upper()
+        media = Media.objects.filter(pk=row["media_id"]).first()
+        if media is None:
+            continue
+
+        if state == "COMPLETED":
+            try:
+                if _apply_reconciled_runpod_output(media, status_payload.get("output")):
+                    recovered += 1
+                else:
+                    logger.error(
+                        "RunPod reconciliation completed without usable output job_id=%s",
+                        job_id,
+                    )
+            except Exception:
+                logger.exception(
+                    "RunPod reconciliation apply failed job_id=%s token=%s",
+                    job_id,
+                    media.friendly_token,
+                )
+            continue
+
+        if state in {"FAILED", "CANCELLED", "TIMED_OUT", "ERROR"}:
+            output = status_payload.get("output")
+            try:
+                if output and _apply_reconciled_runpod_output(media, output):
+                    recovered += 1
+                    continue
+            except Exception:
+                logger.exception(
+                    "RunPod reconciliation failed-output apply error job_id=%s",
+                    job_id,
+                )
+
+            message = str(
+                status_payload.get("error")
+                or status_payload.get("message")
+                or f"RunPod job ended with status {state}"
+            )
+            affected = Encoding.objects.filter(
+                worker="runpod",
+                status="running",
+                task_id=job_id,
+            )
+            media_ids = list(affected.values_list("media_id", flat=True).distinct())
+            affected.update(status="fail", logs=message)
+            for media_id in media_ids:
+                if not Encoding.objects.filter(
+                    media_id=media_id,
+                    worker="runpod",
+                    status="running",
+                ).exists():
+                    Media.objects.filter(
+                        pk=media_id,
+                        listable=False,
+                        encoding_status="running",
+                    ).update(encoding_status="fail")
+            failed += 1
+
+    return {"checked": checked, "recovered": recovered, "failed": failed}
+
+
 def _mark_remote_media_failed(media, message):
     Encoding.objects.filter(
         media=media,

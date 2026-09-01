@@ -22,8 +22,13 @@ def close_db_pool_on_fork(**_):
 
 
 app.conf.beat_schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", {})
-app.conf.broker_transport_options = {"visibility_timeout": 60 * 60 * 24}  # 1 day
-# http://docs.celeryproject.org/en/latest/getting-started/brokers/redis.html#redis-caveats
+app.conf.broker_transport_options = getattr(
+    settings,
+    "CELERY_BROKER_TRANSPORT_OPTIONS",
+    {"visibility_timeout": 3 * 60 * 60},
+)
+# Keep the visibility timeout bounded so a future late-acked idempotent task
+# cannot remain invisible for an entire day after a worker loss.
 
 # setting this to settings.py file only is not respected. Setting here too
 app.conf.task_always_eager = settings.CELERY_TASK_ALWAYS_EAGER

@@ -1,4 +1,4 @@
-name: mediacms-staging
+name: ${COMPOSE_PROJECT_NAME:-mediacms-staging}
 
 x-mediacms-app: &mediacms_app
   image: mediacms-local:staging
@@ -14,6 +14,10 @@ x-mediacms-db-env: &mediacms_db_env
   POSTGRES_USER: mediacms
   POSTGRES_DB: mediacms
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  REDIS_LOCATION: ${REDIS_LOCATION:-redis://redis:6379/1}
+  REDIS_CACHE_LOCATION: ${REDIS_CACHE_LOCATION:-redis://redis:6379/4}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/3}
 
 services:
   migrations:
@@ -41,7 +45,7 @@ services:
       RUNPOD_API_KEY: ${RUNPOD_API_KEY}
       DFX_WALLET_POOL_JSON: ${DFX_WALLET_POOL_JSON}
     command: "./deploy/docker/prestart.sh"
-    restart: on-failure
+    restart: "no"
     depends_on:
       redis:
         condition: service_healthy
@@ -49,6 +53,7 @@ services:
         condition: service_healthy
 
   web:
+    stop_grace_period: 90s
     <<: *mediacms_app
     deploy:
       replicas: 1
@@ -118,6 +123,7 @@ services:
       retries: 12
 
   deposit_service:
+    stop_grace_period: 2m
     profiles:
       - crypto-workers
     build:
@@ -181,6 +187,7 @@ services:
     restart: unless-stopped
 
   dfx_signer_service:
+    stop_grace_period: 30s
     expose:
       - "8080"
     healthcheck:
@@ -218,6 +225,7 @@ services:
     restart: unless-stopped
 
   sweeper_service:
+    stop_grace_period: 2m
     profiles:
       - crypto-workers
     build:
@@ -290,6 +298,7 @@ services:
     restart: unless-stopped
 
   celery_beat:
+    stop_grace_period: 30s
     <<: *mediacms_app
     volumes:
       - ./:/home/mediacms.io/mediacms/
@@ -316,6 +325,7 @@ services:
     restart: unless-stopped
 
   celery_worker:
+    stop_grace_period: 2h10m
     <<: *mediacms_app
     deploy:
       replicas: 1
@@ -364,6 +374,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   db:
+    stop_grace_period: 60s
     image: postgres:17.2-alpine
     volumes:
       - ../postgres_data:/var/lib/postgresql/data/
@@ -379,13 +390,21 @@ services:
       timeout: 5s
       retries: 5
   redis:
+    stop_grace_period: 60s
     image: redis:alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     restart: always
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
+
+volumes:
+  redis_data:
+    name: ${REDIS_VOLUME_NAME:-mediacms-staging-redis-data}
 
 secrets:
   sweeper_evm_mnemonic:

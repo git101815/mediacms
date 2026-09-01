@@ -1,4 +1,4 @@
-name: mediacms-prod
+name: ${COMPOSE_PROJECT_NAME:-mediacms-prod}
 
 x-mediacms-app: &mediacms_app
   image: mediacms-local:prod
@@ -12,6 +12,10 @@ x-mediacms-db-env: &mediacms_db_env
   POSTGRES_USER: mediacms
   POSTGRES_DB: mediacms
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  REDIS_LOCATION: ${REDIS_LOCATION:-redis://redis:6379/1}
+  REDIS_CACHE_LOCATION: ${REDIS_CACHE_LOCATION:-redis://redis:6379/4}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/3}
 
 services:
   migrations:
@@ -45,7 +49,7 @@ services:
       DFX_WALLET_POOL_JSON: ${DFX_WALLET_POOL_JSON}
 
     command: "./deploy/docker/prestart.sh"
-    restart: on-failure
+    restart: "no"
     depends_on:
       redis:
         condition: service_healthy
@@ -53,11 +57,12 @@ services:
         condition: service_healthy
 
   web:
+    stop_grace_period: 90s
     <<: *mediacms_app
     mem_limit: 4g
     mem_reservation: 2g
     deploy:
-      replicas: 1
+      replicas: 2
     volumes:
       - ./:/home/mediacms.io/mediacms/
     environment:
@@ -123,6 +128,7 @@ services:
       start_period: 20s
 
   dfx_signer_service:
+    stop_grace_period: 30s
     build:
       context: .
       dockerfile: ./sweeper_service/Dockerfile
@@ -162,6 +168,7 @@ services:
     restart: unless-stopped
 
   deposit_service:
+    stop_grace_period: 2m
     build:
       context: .
       dockerfile: ./deposit_service/Dockerfile
@@ -227,6 +234,7 @@ services:
     restart: unless-stopped
 
   sweeper_service:
+    stop_grace_period: 2m
     build:
       context: .
       dockerfile: ./sweeper_service/Dockerfile
@@ -304,6 +312,7 @@ services:
     restart: unless-stopped
 
   celery_beat:
+    stop_grace_period: 30s
     <<: *mediacms_app
     mem_limit: 512m
     mem_reservation: 128m
@@ -337,6 +346,7 @@ services:
     restart: unless-stopped
 
   celery_worker:
+    stop_grace_period: 2h10m
     <<: *mediacms_app
     mem_limit: 14g
     mem_reservation: 6g
@@ -390,6 +400,7 @@ services:
     restart: unless-stopped
 
   db:
+    stop_grace_period: 60s
     image: postgres:17.2-alpine
     mem_limit: 4g
     mem_reservation: 1g
@@ -408,10 +419,14 @@ services:
       retries: 5
 
   redis:
+    stop_grace_period: 60s
     image: redis:alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     mem_limit: 512m
     mem_reservation: 128m
     restart: always
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -419,6 +434,7 @@ services:
       retries: 3
 
   cloudflared:
+    stop_grace_period: 30s
     image: cloudflare/cloudflared:latest
     mem_limit: 256m
     mem_reservation: 64m
@@ -429,6 +445,10 @@ services:
     depends_on:
       web:
         condition: service_healthy
+
+volumes:
+  redis_data:
+    name: ${REDIS_VOLUME_NAME:-mediacms-prod-redis-data}
 
 secrets:
   sweeper_evm_mnemonic:

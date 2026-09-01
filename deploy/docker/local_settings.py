@@ -283,6 +283,9 @@ PAYGATE_USER_AGENT = (
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 REDIS_LOCATION = os.getenv("REDIS_LOCATION", "redis://redis:6379/1")
+REDIS_CACHE_LOCATION = os.getenv("REDIS_CACHE_LOCATION", "redis://redis:6379/4")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_LOCATION)
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/3")
 
 DEFAULT_THEME = "dark"
 REPORTED_TIMES_THRESHOLD = 5
@@ -337,11 +340,18 @@ ALLOW_VIDEO_TRIMMER = False
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_CACHE_LOCATION,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+    },
+    "legacy_sessions": {
+        "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_LOCATION,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },
-    }
+    },
 }
 
 CELERY_BEAT_SCHEDULE = {
@@ -374,6 +384,11 @@ CELERY_BEAT_SCHEDULE = {
     },
     "ai_generation_nudge_worker": {
         "task": "ai_generation.tasks.nudge_ai_generation_worker",
+        "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
+    },
+    "reconcile_remote_encodings": {
+        "task": "reconcile_remote_encodings",
         "schedule": 60.0,
         "options": {"queue": "short_tasks"},
     },
@@ -453,8 +468,7 @@ SUPPORT_EMAIL_LIST = ["support@celebfakes.ru"]
 
 MEDIA_URL = "https://medias.celebfakes.ru/mediafiles/"
 
-BROKER_URL = REDIS_LOCATION
-CELERY_RESULT_BACKEND = BROKER_URL
+BROKER_URL = CELERY_BROKER_URL
 
 MP4HLS_COMMAND = "/home/mediacms.io/bento4/bin/mp4hls"
 MP4DASH_COMMAND = "/home/mediacms.io/bento4/bin/mp4dash"
@@ -466,6 +480,8 @@ REMOTE_ENCODING_PUBLIC_BASE_URL = "https://medias.celebfakes.ru/mediafiles"
 REMOTE_ENCODING_OUTPUT_PREFIX = "hls"
 REMOTE_ENCODING_HLS_SEGMENT_SECONDS = 4
 REMOTE_ENCODING_UPLOAD_CONCURRENCY = 8
+REMOTE_ENCODING_RECONCILE_BATCH_SIZE = 50
+REMOTE_ENCODING_RUNPOD_STATUS_TIMEOUT_SECONDS = 15
 REMOTE_ENCODING_SUBMIT_DELAY_SECONDS = 1 * 60
 REMOTE_ENCODING_STORJ_WAIT_RETRY_SECONDS = 60
 REMOTE_ENCODING_STORJ_WAIT_MAX_RETRIES = 15

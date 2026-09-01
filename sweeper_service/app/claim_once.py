@@ -1,4 +1,5 @@
 import logging
+import signal
 import time
 import json
 from datetime import datetime, timedelta, timezone as dt_timezone
@@ -1820,15 +1821,32 @@ def main() -> None:
         shared_secret=config.shared_secret,
         timeout=config.internal_api_timeout_seconds,
     )
+    stop_requested = False
+
+    def _request_stop(signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+        logging.info("sweeper_service action=shutdown-requested signal=%s", signum)
+
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
+
     try:
-        while True:
+        while not stop_requested:
             try:
                 run_once(client=client, config=config)
             except Exception:
                 logging.exception("sweeper_service cycle failed")
-            time.sleep(config.poll_interval_seconds)
+
+            if stop_requested:
+                break
+            remaining = max(0, int(config.poll_interval_seconds))
+            while remaining and not stop_requested:
+                time.sleep(min(1, remaining))
+                remaining -= 1
     finally:
         client.close()
+        logging.info("sweeper_service action=shutdown-complete")
 
 
 if __name__ == "__main__":
