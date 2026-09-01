@@ -598,6 +598,20 @@ def _process_candidate(*, client, config, candidate: dict, option_index: dict, p
             "sweeper_service action=orphan_recovery_candidate_failed session=%s",
             candidate.get("session_public_id"),
         )
+
+        # A broadcast progress callback persists its txid before sender-nonce
+        # confirmation. If anything fails after that callback, assignment to the
+        # local txid variable may never complete. Never let the retryable-error
+        # report erase a txid that was already persisted into existing_audit.
+        durable_txids = candidate.get("existing_audit") or {}
+        funding_txid = funding_txid or str(durable_txids.get("funding_txid") or "")
+        token_sweep_txid = token_sweep_txid or str(
+            durable_txids.get("token_sweep_txid") or ""
+        )
+        native_sweep_txid = native_sweep_txid or str(
+            durable_txids.get("native_sweep_txid") or ""
+        )
+
         try:
             return _report(
                 client,
