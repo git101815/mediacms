@@ -1048,16 +1048,18 @@ def ads_popunder(request):
 @never_cache
 @require_POST
 def ads_popunder_consume(request):
-    mark_cooldown(request, FORMAT_POPUNDER)
-    return _no_store(HttpResponse(status=204))
+    response = _no_store(HttpResponse(status=204))
+    mark_cooldown(request, response, FORMAT_POPUNDER)
+    return response
 
 
 @never_cache
 @require_GET
 def clickaine_vast_impression(request):
+    response = _no_store(HttpResponse(status=204))
     if request.GET.get("slot") == AdCampaign.PLACEMENT_PREROLL:
-        mark_cooldown(request, FORMAT_IN_VIDEO)
-    return _no_store(HttpResponse(status=204))
+        mark_cooldown(request, response, FORMAT_IN_VIDEO)
+    return response
 
 
 
@@ -1065,13 +1067,14 @@ def clickaine_vast_impression(request):
 @require_GET
 def direct_ad_impression(request, token):
     payload = _load_ad_event_token(token)
+    response = _no_store(HttpResponse(status=204))
     if payload.get("s") == AdCampaign.PLACEMENT_PREROLL:
-        mark_cooldown(request, FORMAT_IN_VIDEO)
+        mark_cooldown(request, response, FORMAT_IN_VIDEO)
     try:
         record_impression(payload)
     except Exception:
         pass
-    return _no_store(HttpResponse(status=204))
+    return response
 
 
 
@@ -1093,8 +1096,9 @@ def direct_ad_open(request, token):
     if not target.startswith(("http://", "https://")):
         raise Http404
 
+    response = redirect(target)
     if payload.get("s") == AdCampaign.PLACEMENT_POPUNDER:
-        mark_cooldown(request, FORMAT_POPUNDER)
+        mark_cooldown(request, response, FORMAT_POPUNDER)
 
     try:
         record_impression(payload)
@@ -1104,7 +1108,7 @@ def direct_ad_open(request, token):
         record_click(payload)
     except Exception:
         pass
-    return redirect(target)
+    return response
 
 
 

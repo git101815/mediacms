@@ -522,6 +522,8 @@ def test_popunder_open_records_impression_then_click_and_redirects(
     assert response.status_code == 302
     assert response.url == "https://example.com/landing"
     assert order == ["impression", "click"]
+    assert "mediacms_ads_popunder_cd" in response.cookies
+    assert "sessionid" not in response.cookies
 
 
 def test_popunder_open_still_redirects_if_accounting_is_down(
