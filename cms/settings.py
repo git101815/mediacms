@@ -763,6 +763,7 @@ if TESTING:
         TESTING_DATABASE_NAME
     )
 
+    TESTING_LIVE_REDIS_LOCATION = str(REDIS_LOCATION)
     _testing_live_redis_locations = [
         str(REDIS_CACHE_LOCATION),
         str(CELERY_BROKER_URL),

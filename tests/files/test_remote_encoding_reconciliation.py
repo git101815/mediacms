@@ -12,7 +12,7 @@ from files.tasks import _apply_reconciled_runpod_output
 def test_reconciler_applies_signed_runpod_result(media_factory, profile_factory, encoding_factory):
     media = media_factory()
     profile = profile_factory(codec="h264", resolution=720)
-    encoding = encoding_factory(media, profile, status="running", progress=0)
+    encoding = encoding_factory(media=media, profile=profile, status="running", progress=0)
     type(encoding).objects.filter(pk=encoding.pk).update(worker="runpod", task_id="job-1")
 
     payload = {
@@ -42,7 +42,7 @@ def test_reconciler_applies_signed_runpod_result(media_factory, profile_factory,
 def test_reconciler_rejects_unsigned_output(media_factory, profile_factory, encoding_factory):
     media = media_factory()
     profile = profile_factory(codec="h264", resolution=720)
-    encoding = encoding_factory(media, profile, status="running", progress=0)
+    encoding = encoding_factory(media=media, profile=profile, status="running", progress=0)
     type(encoding).objects.filter(pk=encoding.pk).update(worker="runpod", task_id="job-2")
 
     output = {

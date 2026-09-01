@@ -2,7 +2,7 @@
 
 Normal production deployments must use `deploy/scripts/prod_deploy.sh`. They must not use `docker compose down` and must never combine deployment with `--remove-orphans`.
 
-The first deployment of the Redis durability change requires a one-time migration because the old Redis container had no persistent `/data` mount. Run `CONFIRM_REDIS_MIGRATION=mediacms-prod deploy/scripts/prod_migrate_redis_persistence.sh`. That migration intentionally freezes ingress around Redis `SAVE` and the data copy so no queued task can disappear between the snapshot and container replacement. Later deployments do not perform this outage.
+The first deployment of the Redis durability change requires a one-time migration because the old Redis container had no persistent `/data` mount. Run `CONFIRM_REDIS_MIGRATION=mediacms-prod deploy/scripts/prod_migrate_redis_persistence.sh`. That migration intentionally freezes ingress, creates an RDB backup, enables AOF on the still-running Redis with `CONFIG SET appendonly yes`, waits for the initial AOF rewrite to finish successfully, and only then stops Redis and copies `/data` to the durable volume. Later deployments do not perform this outage.
 
 A full maintenance shutdown uses `CONFIRM_SHUTDOWN=mediacms-prod deploy/scripts/prod_shutdown.sh`. It stops Beat, drains Celery, lets the crypto workers finish their current iteration, then stops ingress/web and finally Redis/PostgreSQL. The final `compose down` only removes already-quiescent containers and never uses `--remove-orphans`.
 

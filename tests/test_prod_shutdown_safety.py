@@ -60,3 +60,48 @@ def test_migrations_do_not_restart_forever():
         compose = _read(filename)
         migrations = compose.split("  migrations:\n", 1)[1].split("\n  web:", 1)[0]
         assert 'restart: "no"' in migrations
+
+
+def test_health_wait_counts_exited_containers_and_exact_replicas():
+    common = _read("deploy/scripts/prod_common.sh")
+    deploy = _read("deploy/scripts/prod_deploy.sh")
+    assert 'service_container_ids_all() { compose ps -a -q "$1"' in common
+    assert '${#ids[@]} == expected' in common
+    assert "wait_healthy web 300 3" in deploy
+    assert "wait_healthy web 300 2" in deploy
+
+
+def test_preflight_failure_is_not_ignored():
+    common = _read("deploy/scripts/prod_common.sh")
+    assert "python manage.py prod_preflight || true" not in common
+    assert "docker exec -i -w /home/mediacms.io/mediacms" in common
+    assert "Production preflight requires at least one running web container" in common
+
+
+def test_celery_drain_checks_redis_queue_even_without_worker():
+    common = _read("deploy/scripts/prod_common.sh")
+    assert "celery_queue_count()" in common
+    assert "Celery worker is not running while" in common
+    assert "Could not reliably inspect active/reserved Celery work" in common
+
+
+def test_redis_migration_enables_live_aof_before_stopping_redis():
+    migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
+    enable = migration.index("CONFIG SET appendonly yes")
+    stop = migration.index("compose stop redis")
+    assert enable < stop
+    assert "aof_rewrite_in_progress" in migration
+    assert "aof_rewrite_scheduled" in migration
+    assert "aof_last_bgrewrite_status" in migration
+    assert "preserving copied Redis data" in migration
+    assert "compose_crypto stop deposit_service" in migration
+    assert "compose_crypto stop sweeper_service" in migration
+
+
+def test_crypto_workers_stop_before_signer_recreate_and_restart_after_health():
+    deploy = _read("deploy/scripts/prod_deploy.sh")
+    stop_worker = deploy.index("compose_crypto stop deposit_service")
+    signer_up = deploy.index("compose_crypto up -d --no-deps dfx_signer_service")
+    signer_health = deploy.index("wait_healthy dfx_signer_service 180 1")
+    worker_up = deploy.index("compose_crypto up -d --no-deps deposit_service")
+    assert stop_worker < signer_up < signer_health < worker_up

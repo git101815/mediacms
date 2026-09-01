@@ -23,12 +23,22 @@ compose() { "${COMPOSE[@]}" "$@"; }
 compose_crypto() { "${COMPOSE[@]}" --profile crypto-workers "$@"; }
 service_exists() { compose --profile crypto-workers config --services | grep -Fxq "$1"; }
 service_container_ids() { compose ps -q "$1" 2>/dev/null || true; }
+service_container_ids_all() { compose ps -a -q "$1" 2>/dev/null || true; }
 
 wait_healthy() {
-  local service="$1" timeout="${2:-300}" deadline=$((SECONDS + timeout))
+  local service="$1"
+  local timeout="${2:-300}"
+  local expected="${3:-1}"
+  local deadline=$((SECONDS + timeout))
+
+  [[ "$expected" =~ ^[1-9][0-9]*$ ]] || {
+    echo "Invalid expected replica count '$expected' for service '$service'" >&2
+    return 2
+  }
+
   while (( SECONDS < deadline )); do
-    mapfile -t ids < <(service_container_ids "$service")
-    if (( ${#ids[@]} > 0 )); then
+    mapfile -t ids < <(service_container_ids_all "$service")
+    if (( ${#ids[@]} == expected )); then
       local all_ok=1 cid state health
       for cid in "${ids[@]}"; do
         state="$(docker inspect -f '{{.State.Status}}' "$cid")"
@@ -42,56 +52,113 @@ wait_healthy() {
     fi
     sleep 2
   done
-  echo "Service '$service' did not become healthy" >&2
-  compose ps "$service" >&2 || true
+
+  echo "Service '$service' did not reach exactly $expected running/healthy replica(s)" >&2
+  compose ps -a "$service" >&2 || true
   return 1
 }
 
 prod_preflight() {
   local web_id
   web_id="$(service_container_ids web | head -n1)"
-  if [[ -n "$web_id" ]]; then
-    compose exec -T web python manage.py prod_preflight || true
+  if [[ -z "$web_id" ]]; then
+    echo "Production preflight requires at least one running web container" >&2
+    return 1
   fi
+  docker exec -i -w /home/mediacms.io/mediacms "$web_id" python manage.py prod_preflight
 }
 
-celery_work_count() {
-  local worker_id
-  worker_id="$(service_container_ids celery_worker | head -n1)"
-  if [[ -z "$worker_id" ]]; then
-    echo 0
-    return
+celery_queue_count() {
+  local web_id
+  web_id="$(service_container_ids web | head -n1)"
+  if [[ -z "$web_id" ]]; then
+    echo "Cannot inspect Celery queues without a running web container" >&2
+    return 1
   fi
-  compose exec -T celery_worker python - <<'__CELERY_COUNT_PY__'
-from cms.celery import app
+
+  docker exec -i -w /home/mediacms.io/mediacms "$web_id" python - <<'__CELERY_QUEUE_COUNT_PY__'
 from django.conf import settings
 from redis import Redis
 
-count = 0
-inspect = app.control.inspect(timeout=2.0)
-for method_name in ("active", "reserved"):
-    try:
-        rows = getattr(inspect, method_name)() or {}
-    except Exception:
-        rows = {}
-    count += sum(len(items or []) for items in rows.values())
-
 client = Redis.from_url(settings.BROKER_URL)
 try:
-    count += int(client.llen("short_tasks"))
-    count += int(client.llen("long_tasks"))
+    count = int(client.llen("short_tasks")) + int(client.llen("long_tasks"))
 finally:
     client.close()
 print(count)
-__CELERY_COUNT_PY__
+__CELERY_QUEUE_COUNT_PY__
+}
+
+celery_active_reserved_count() {
+  local worker_id web_id
+  worker_id="$(service_container_ids celery_worker | head -n1)"
+  if [[ -z "$worker_id" ]]; then
+    echo 0
+    return 0
+  fi
+
+  web_id="$(service_container_ids web | head -n1)"
+  if [[ -z "$web_id" ]]; then
+    echo "Cannot inspect active Celery work without a running web container" >&2
+    return 1
+  fi
+
+  docker exec -i -w /home/mediacms.io/mediacms "$web_id" python - <<'__CELERY_ACTIVE_COUNT_PY__'
+from cms.celery import app
+
+inspect = app.control.inspect(timeout=3.0)
+active = inspect.active()
+reserved = inspect.reserved()
+if active is None or reserved is None or (not active and not reserved):
+    raise SystemExit("No Celery worker inspection response")
+print(
+    sum(len(items or []) for items in active.values())
+    + sum(len(items or []) for items in reserved.values())
+)
+__CELERY_ACTIVE_COUNT_PY__
+}
+
+celery_work_count() {
+  local queued active_reserved worker_id
+
+  if ! queued="$(celery_queue_count)"; then
+    return 1
+  fi
+  [[ "$queued" =~ ^[0-9]+$ ]] || {
+    echo "Unexpected Celery queue count: '$queued'" >&2
+    return 1
+  }
+
+  worker_id="$(service_container_ids celery_worker | head -n1)"
+  if [[ -z "$worker_id" ]]; then
+    if (( queued > 0 )); then
+      echo "Celery worker is not running while $queued queued task(s) remain; refusing drain" >&2
+      return 1
+    fi
+    echo 0
+    return 0
+  fi
+
+  if ! active_reserved="$(celery_active_reserved_count)"; then
+    echo "Could not reliably inspect active/reserved Celery work; refusing drain" >&2
+    return 1
+  fi
+  [[ "$active_reserved" =~ ^[0-9]+$ ]] || {
+    echo "Unexpected Celery active/reserved count: '$active_reserved'" >&2
+    return 1
+  }
+
+  echo $((queued + active_reserved))
 }
 
 drain_celery() {
   service_exists celery_beat && compose stop celery_beat >/dev/null || true
   local deadline=$((SECONDS + DRAIN_TIMEOUT_SECONDS)) count
+
   while (( SECONDS < deadline )); do
-    count="$(celery_work_count | tail -n1 | tr -dc '0-9')"
-    count="${count:-0}"
+    if ! count="$(celery_work_count)"; then
+      return 1
+    fi
     if (( count == 0 )); then
       compose stop celery_worker >/dev/null || true
       return 0
@@ -99,6 +166,7 @@ drain_celery() {
     echo "Waiting for Celery drain: $count active/reserved/queued"
     sleep 5
   done
+
   echo "Celery did not drain within ${DRAIN_TIMEOUT_SECONDS}s; refusing destructive restart" >&2
   return 1
 }
