@@ -32,7 +32,7 @@ def test_celery_is_foreground_and_has_warm_stop_contract():
 
 
 def test_normal_deploy_never_uses_compose_down_or_remove_orphans():
-    deploy = _read("deploy/scripts/prod_deploy.sh")
+    deploy = _read("deploy/scripts/prod_rolling_update.sh")
     assert "compose down" not in deploy
     assert "--remove-orphans" not in deploy
 
@@ -63,12 +63,13 @@ def test_migrations_do_not_restart_forever():
 
 
 def test_health_wait_counts_exited_containers_and_exact_replicas():
-    common = _read("deploy/scripts/prod_common.sh")
-    deploy = _read("deploy/scripts/prod_deploy.sh")
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    prod = _read("deploy/scripts/prod_rolling_update.sh")
     assert 'service_container_ids_all() { compose ps -a -q "$1"' in common
     assert '${#ids[@]} == expected' in common
-    assert "wait_healthy web 300 3" in deploy
-    assert "wait_healthy web 300 2" in deploy
+    assert "temporary=$((EXPECTED_WEB_REPLICAS + 1))" in common
+    assert '"production"' in prod
+    assert '"scaled"' in prod
 
 
 def test_preflight_failure_is_not_ignored():
@@ -98,10 +99,11 @@ def test_redis_migration_enables_live_aof_before_stopping_redis():
     assert "compose_crypto stop sweeper_service" in migration
 
 
-def test_crypto_workers_stop_before_signer_recreate_and_restart_after_health():
-    deploy = _read("deploy/scripts/prod_deploy.sh")
-    stop_worker = deploy.index("compose_crypto stop deposit_service")
-    signer_up = deploy.index("compose_crypto up -d --no-deps dfx_signer_service")
-    signer_health = deploy.index("wait_healthy dfx_signer_service 180 1")
-    worker_up = deploy.index("compose_crypto up -d --no-deps deposit_service")
-    assert stop_worker < signer_up < signer_health < worker_up
+def test_crypto_worker_updates_are_ordered_around_signer_health():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    main = common.split("rolling_update_main()", 1)[1]
+    stop_worker = main.index("stop_crypto_loops_if_needed")
+    signer_update = main.index("update_signer_if_needed")
+    web_update = main.index("update_web\n")
+    restart_worker = main.index("restart_crypto_loops_if_needed")
+    assert stop_worker < signer_update < web_update < restart_worker

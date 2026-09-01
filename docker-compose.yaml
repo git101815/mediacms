@@ -60,7 +60,10 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ./static:/home/mediacms.io/mediacms/static
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       ENABLE_CELERY_BEAT: "no"
@@ -342,7 +345,10 @@ services:
     deploy:
       replicas: 1
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ./static:/home/mediacms.io/mediacms/static
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       ENABLE_UWSGI: "no"
