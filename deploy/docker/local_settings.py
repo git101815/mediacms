@@ -156,7 +156,7 @@ MALUM_PAYMENT_TTL_SECONDS = "3600"
 MALUM_BUYER_PAYS_FEES = "false"
 MALUM_MERCHANT_PAYS_GW_FEES = "false"
 
-SKILLFLOW_ENABLED = "true"
+SKILLFLOW_ENABLED = "false" #deactivate for now
 SKILLFLOW_PARTNER_KEY = os.getenv("SKILLFLOW_PARTNER_KEY", "").strip()
 SKILLFLOW_WEBHOOK_SECRET = os.getenv("SKILLFLOW_WEBHOOK_SECRET", "").strip()
 SKILLFLOW_API_BASE_URL = "https://payments.skillflow.store"
