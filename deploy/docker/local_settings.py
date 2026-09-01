@@ -404,6 +404,7 @@ CELERY_BEAT_SCHEDULE = {
     "ledger_expire_stale_deposit_sessions": {
         "task": "ledger_expire_stale_deposit_sessions",
         "schedule": crontab(hour=1, minute=45),
+        "options": {"queue": "short_tasks"},
     },
     "maintenance_sync_categories_ws": {
         "task": "maintenance_sync_categories_ws",
