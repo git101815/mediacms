@@ -1,11 +1,18 @@
 name: ${COMPOSE_PROJECT_NAME:-mediacms-prod}
 
+x-bounded-logging: &bounded_logging
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 x-mediacms-app: &mediacms_app
   image: mediacms-local:prod
   pull_policy: never
   build:
     context: .
     dockerfile: ./Dockerfile
+  logging: *bounded_logging
 
 x-mediacms-db-env: &mediacms_db_env
   POSTGRES_HOST: db
@@ -128,6 +135,7 @@ services:
       start_period: 20s
 
   dfx_signer_service:
+    logging: *bounded_logging
     stop_grace_period: 30s
     build:
       context: .
@@ -168,6 +176,7 @@ services:
     restart: unless-stopped
 
   deposit_service:
+    logging: *bounded_logging
     stop_grace_period: 2m
     build:
       context: .
@@ -234,6 +243,7 @@ services:
     restart: unless-stopped
 
   sweeper_service:
+    logging: *bounded_logging
     stop_grace_period: 15m
     build:
       context: .
@@ -337,6 +347,7 @@ services:
       ENABLE_CELERY_SHORT: "no"
       ENABLE_CELERY_LONG: "no"
       ENABLE_MIGRATIONS: "no"
+      CELERY_LOG_LEVEL: ${CELERY_LOG_LEVEL:-WARNING}
 
       AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME:-mediafiles}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
@@ -372,6 +383,7 @@ services:
       ENABLE_NGINX: "no"
       ENABLE_CELERY_BEAT: "no"
       ENABLE_MIGRATIONS: "no"
+      CELERY_LOG_LEVEL: ${CELERY_LOG_LEVEL:-WARNING}
       SECRET_KEY: ${SECRET_KEY}
       LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
 
@@ -414,6 +426,7 @@ services:
     restart: unless-stopped
 
   db:
+    logging: *bounded_logging
     stop_grace_period: 60s
     image: postgres:17.2-alpine
     mem_limit: 4g
@@ -433,6 +446,7 @@ services:
       retries: 5
 
   redis:
+    logging: *bounded_logging
     stop_grace_period: 60s
     image: redis:alpine
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
@@ -448,6 +462,7 @@ services:
       retries: 3
 
   cloudflared:
+    logging: *bounded_logging
     stop_grace_period: 30s
     image: cloudflare/cloudflared:latest
     mem_limit: 256m

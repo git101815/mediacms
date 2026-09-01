@@ -425,8 +425,13 @@ else:
         "handlers": {
             "file": {
                 "level": "ERROR",
-                "class": "logging.FileHandler",
+                "class": "cms.logging_handlers.ProcessSafeRotatingFileHandler",
                 "filename": error_filename,
+                # Five files total (current + 4 backups) caps debug logs near 100 MiB.
+                "maxBytes": 20 * 1024 * 1024,
+                "backupCount": 4,
+                "encoding": "utf-8",
+                "delay": True,
             },
         },
         "loggers": {
