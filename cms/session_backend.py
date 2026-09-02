@@ -33,10 +33,12 @@ class SessionStore(CachedDBSessionStore):
                 try:
                     self.save(must_create=True)
                 except (CreateError, IntegrityError):
-                    # Another request can migrate the same session concurrently.
-                    logger.debug(
-                        "Session %s was migrated concurrently",
-                        session_key,
-                    )
+                    # Another request may have migrated or deleted the same
+                    # session. Never return the stale Redis value in that race:
+                    # PostgreSQL is now authoritative.
+                    logger.debug("Session %s was migrated concurrently", session_key)
+                    legacy.delete(session_key)
+                    return super().load()
+                legacy.delete(session_key)
                 return data
         return super().load()

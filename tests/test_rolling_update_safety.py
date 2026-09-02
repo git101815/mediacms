@@ -71,28 +71,29 @@ def test_staging_updater_never_touches_dns_or_maintenance_switch():
         assert forbidden not in content
 
 
-def test_frontend_build_is_one_shot_and_additive():
+def test_frontend_build_is_one_shot_reproducible_and_release_scoped():
     common = _read("deploy/scripts/rolling_update_common.sh")
     assert "run --rm --no-deps frontend" in common
-    assert "npm install && npm run dist" in common
-    assert "cp -a frontend/dist/static/. static/" in common
+    assert "npm ci --no-audit --no-fund && npm run dist" in common
+    assert 'cp -a frontend/dist/static/. "$STATIC_RELEASE_DIR/"' in common
     assert "rm -rf static" not in common
 
 
-def test_app_processes_are_image_isolated_but_migrations_keep_explicit_checkout_mount():
+def test_app_and_migrations_are_image_isolated_with_release_static_snapshot():
     for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml"):
         compose = _read(compose_path)
         for service in ("web", "celery_worker", "celery_beat"):
             block = _service_block(compose, service)
             assert "- ./:/home/mediacms.io/mediacms/" not in block
-            assert "./static:/home/mediacms.io/mediacms/static" in block
+            assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" in block
             assert "./media_files:/home/mediacms.io/mediacms/media_files" in block
             assert "./logs:/home/mediacms.io/mediacms/logs" in block
             assert "./backup:/home/mediacms.io/mediacms/backup" in block
             assert 'io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"' in block
 
         migrations = _service_block(compose, "migrations")
-        assert "- ./:/home/mediacms.io/mediacms/" in migrations
+        assert "- ./:/home/mediacms.io/mediacms/" not in migrations
+        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static" in migrations
 
 
 def test_release_labels_cover_resumable_web_signer_and_workers():
@@ -167,12 +168,13 @@ def test_migration_checker_is_fail_closed_for_destructive_or_ambiguous_ops():
 def test_normal_isolated_release_builds_and_checks_before_celery_drain():
     common = _read("deploy/scripts/rolling_update_common.sh")
     main = common.split("rolling_update_main()", 1)[1]
-    build = main.index("build_required_images")
-    checker = main.index("check_pending_migrations")
     frontend = main.index("build_frontend_dist")
+    build = main.index("build_required_images")
+    snapshot = main.index("prepare_static_release")
+    checker = main.index("check_pending_migrations")
     normal_drain = main.index("if (( ! LEGACY_BOOTSTRAP )); then ensure_celery_drained; fi")
-    migrate = main.index("run_migrations")
-    assert build < checker < frontend < normal_drain < migrate
+    migrate = main.index("run_migrations_once")
+    assert frontend < build < snapshot < checker < normal_drain < migrate
 
 
 def test_legacy_bootstrap_quiesces_celery_before_building_new_checkout():
@@ -391,7 +393,8 @@ def test_rolling_requires_signer_and_production_ingress_health_before_marking_re
     common = _read("deploy/scripts/rolling_update_common.sh")
     assert "verify_runtime_dependencies()" in common
     verify = common.split("verify_runtime_dependencies()", 1)[1].split("legacy_preflight()", 1)[0]
-    assert "wait_healthy dfx_signer_service 60 1" in verify
+    assert "healthy_service_count dfx_signer_service" in verify
+    assert "production signer is not deployed" in verify
     assert '[[ "$ENVIRONMENT_NAME" == "production" ]]' in verify
     assert "wait_healthy cloudflared 60 1" in verify
     main = common.split("rolling_update_main()", 1)[1]
@@ -411,3 +414,71 @@ def test_docker_build_context_excludes_local_secrets_and_deploy_state():
         "deposit_service/data/state.json",
     ):
         assert entry in dockerignore
+
+
+
+def test_production_rolling_lock_is_shared_with_other_prod_mutations():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    prod_common = _read("deploy/scripts/prod_common.sh")
+    assert 'LOCK_FILE="$ROLLING_STATE_DIR/production.mutation.lock"' in common
+    assert 'PROD_MUTATION_LOCK_FILE="$PROD_STATE_DIR/production.mutation.lock"' in prod_common
+
+
+def test_inprogress_state_is_bound_to_exact_target_sha():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    assert "bind_progress_to_target()" in common
+    assert 'progress_set target_sha "$CURRENT_SHA"' in common
+    assert "unfinished deployment targets" in common
+
+
+def test_staging_does_not_require_an_undeployed_signer():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    verify = common.split("verify_runtime_dependencies()", 1)[1].split("legacy_preflight()", 1)[0]
+    assert 'elif (( signer_count > 0 )); then' in verify
+    assert "production signer is not deployed" in verify
+    assert "wait_healthy dfx_signer_service 60 1" not in verify
+
+
+def test_release_static_is_snapshot_mounted_not_live_checkout_static():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    assert 'STATIC_RELEASE_DIR="$ROLLING_STATE_DIR/static/$CURRENT_SHA"' in common
+    assert "prepare_static_release()" in common
+    assert "finalize_static_release()" in common
+    for filename in ("docker-compose.yaml", "docker-compose-cloudflare.yaml"):
+        compose = _read(filename)
+        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" in compose
+        for service in ("web", "celery_worker", "celery_beat"):
+            block = _service_block(compose, service)
+            assert "./static:/home/mediacms.io/mediacms/static" not in block
+
+
+def test_migrations_run_immutable_image_and_checker_changes_rebuild_it():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    classify = common.split("main_image_inputs_changed()", 1)[1].split("classify_compose_delta()", 1)[0]
+    assert "deploy/scripts/check_rolling_migrations.py" in classify
+    for filename in ("docker-compose.yaml", "docker-compose-cloudflare.yaml"):
+        migrations = _service_block(_read(filename), "migrations")
+        assert "./:/home/mediacms.io/mediacms/" not in migrations
+        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static" in migrations
+
+
+def test_frontend_build_is_lockfile_reproducible():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    gitignore = _read(".gitignore")
+    assert "frontend/package-lock.json" not in gitignore
+    assert "npm ci --no-audit --no-fund" in common
+    assert "npm install && npm run dist" not in common
+
+
+def test_static_only_changes_trigger_application_rotation():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    assert "STATIC_CHANGED=0" in common
+    assert "changed_matches '^static/'" in common
+    assert "MAIN_IMAGE_CHANGED || APP_CONFIG_CHANGED || FRONTEND_CHANGED || STATIC_CHANGED" in common
+
+
+def test_celery_release_labels_are_verified_after_restart():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    restart = common.split("restart_celery()", 1)[1].split("restart_crypto_after_update()", 1)[0]
+    assert "assert_current_release_service celery_worker 1" in restart
+    assert "assert_current_release_service celery_beat 1" in restart

@@ -7,6 +7,7 @@ STATE_FILE="$STATE_DIR/production.redis-migration.inprogress"
 COMPLETE_FILE="$STATE_DIR/production.redis-migration.complete"
 COPY_DIR="$STATE_DIR/production.redis-migration-copy"
 mkdir -p "$STATE_DIR"
+acquire_prod_mutation_lock
 
 state_get() {
   local key="$1" default="${2:-}" line
@@ -96,8 +97,9 @@ migration_failure_notice() {
 }
 trap migration_failure_notice EXIT
 
-if redis_is_persistent && [[ ! -f "$STATE_FILE" ]]; then
-  echo "Redis already uses durable volume '$REDIS_VOLUME'."
+if redis_is_persistent && [[ ! -f "$STATE_FILE" && -f "$COMPLETE_FILE" ]]; then
+  validate_persistent_redis
+  echo "Redis persistence migration is already complete on '$REDIS_VOLUME'."
   trap - EXIT
   exit 0
 fi
@@ -124,6 +126,22 @@ if [[ -n "$(git_repo status --porcelain --untracked-files=all)" ]]; then
   exit 2
 fi
 export MEDIACMS_RELEASE_SHA="$(git_repo rev-parse HEAD)"
+REDIS_STATIC_DIR="$STATE_DIR/static/$MEDIACMS_RELEASE_SHA"
+export MEDIACMS_STATIC_DIR="$REDIS_STATIC_DIR"
+
+# A persistent Redis volume without our completion marker may come from an
+# older version of this migration. Never silently infer completion; validate
+# the durable store and live application first, then adopt it explicitly under
+# the same CONFIRM_REDIS_MIGRATION gate used by the migration itself.
+if redis_is_persistent && [[ ! -f "$STATE_FILE" && ! -f "$COMPLETE_FILE" ]]; then
+  validate_persistent_redis
+  prod_preflight
+  printf '%s\n' "$MEDIACMS_RELEASE_SHA" > "${COMPLETE_FILE}.tmp.$$"
+  mv "${COMPLETE_FILE}.tmp.$$" "$COMPLETE_FILE"
+  trap - EXIT
+  echo "Validated and adopted existing durable Redis volume '$REDIS_VOLUME'."
+  exit 0
+fi
 
 phase="$(state_get phase 0)"
 [[ "$phase" =~ ^[0-9]+$ ]] || {
@@ -196,6 +214,21 @@ else
   state_set celery_beat_was_running "$celery_beat_running"
   state_set cloudflared_was_running "$cloudflared_running"
   set_phase 1
+fi
+
+# Build a release-owned static tree. Application containers never mount the
+# mutable checkout's ./static directly after this transition.
+if [[ ! -d "$REDIS_STATIC_DIR" ]]; then
+  (( phase < 80 )) || {
+    echo "Release static snapshot is missing after migrations were recorded complete; refusing unsafe reconstruction." >&2
+    exit 1
+  }
+  tmp_static="${REDIS_STATIC_DIR}.tmp.$$"
+  rm -rf "$tmp_static"
+  mkdir -p "$tmp_static"
+  cp -a static/. "$tmp_static/"
+  mkdir -p "$(dirname "$REDIS_STATIC_DIR")"
+  mv "$tmp_static" "$REDIS_STATIC_DIR"
 fi
 
 # Build everything we may recreate before the first required outage. A rerun
@@ -321,6 +354,21 @@ fi
 if (( phase < 80 )); then
   compose run --rm --no-deps migrations
   set_phase 80
+fi
+
+if (( phase < 85 )); then
+  [[ -f frontend/package-lock.json ]] || {
+    echo "frontend/package-lock.json is required for reproducible bootstrap assets" >&2
+    exit 2
+  }
+  docker compose -p mediacms-frontend-build -f docker-compose-dev.yaml run --rm --no-deps frontend \
+    bash -lc 'npm ci --no-audit --no-fund && npm run dist'
+  [[ -d frontend/dist/static ]] || {
+    echo "Frontend bootstrap build produced no frontend/dist/static" >&2
+    exit 1
+  }
+  cp -a frontend/dist/static/. "$REDIS_STATIC_DIR/"
+  set_phase 85
 fi
 
 if [[ "$signer_running" == 1 ]]; then

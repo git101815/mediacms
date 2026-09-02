@@ -23,7 +23,10 @@ services:
   migrations:
     <<: *mediacms_app
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       ENABLE_UWSGI: "no"
@@ -62,7 +65,7 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./static:/home/mediacms.io/mediacms/static
+      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup
@@ -326,7 +329,7 @@ services:
     stop_grace_period: 30s
     <<: *mediacms_app
     volumes:
-      - ./static:/home/mediacms.io/mediacms/static
+      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup
@@ -360,7 +363,7 @@ services:
     deploy:
       replicas: 1
     volumes:
-      - ./static:/home/mediacms.io/mediacms/static
+      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup

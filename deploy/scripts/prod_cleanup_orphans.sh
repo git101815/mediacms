@@ -2,6 +2,16 @@
 set -euo pipefail
 source "$(dirname "$0")/prod_common.sh"
 
+APPLY=0
+if [[ "${1:-}" == --apply ]]; then
+  APPLY=1
+  [[ "${CONFIRM_PROJECT:-}" == "$PROJECT" ]] || {
+    echo "Refusing removal: CONFIRM_PROJECT must equal '$PROJECT'." >&2
+    exit 2
+  }
+  acquire_prod_mutation_lock
+fi
+
 mapfile -t expected < <(compose --profile crypto-workers config --services)
 mapfile -t rows < <(docker ps -a \
   --filter "label=com.docker.compose.project=$PROJECT" \
@@ -27,15 +37,10 @@ fi
 printf 'Orphans for project %s:\n' "$PROJECT"
 printf '  %s\n' "${orphans[@]}"
 
-if [[ "${1:-}" != --apply ]]; then
+if (( ! APPLY )); then
   echo "Dry-run only. Re-run with --apply and CONFIRM_PROJECT=$PROJECT to remove them."
   exit 0
 fi
-
-[[ "${CONFIRM_PROJECT:-}" == "$PROJECT" ]] || {
-  echo "Refusing removal: CONFIRM_PROJECT must equal '$PROJECT'." >&2
-  exit 2
-}
 
 for row in "${orphans[@]}"; do
   IFS='|' read -r cid _service _name <<<"$row"

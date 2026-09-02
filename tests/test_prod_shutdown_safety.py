@@ -152,7 +152,8 @@ def test_redis_migration_is_resumable_and_does_not_fast_exit_after_partial_persi
     assert "production.redis-migration.complete" in migration
     assert "state_set phase" in migration
     assert "Resuming Redis migration at phase" in migration
-    assert 'if redis_is_persistent && [[ ! -f "$STATE_FILE" ]]' in migration
+    assert 'if redis_is_persistent && [[ ! -f "$STATE_FILE" && -f "$COMPLETE_FILE" ]]' in migration
+    assert 'if redis_is_persistent && [[ ! -f "$STATE_FILE" && ! -f "$COMPLETE_FILE" ]]' in migration
     assert "State was preserved in $STATE_FILE" in migration
 
 
@@ -204,3 +205,23 @@ def test_full_shutdown_requires_persistent_redis_and_legacy_safe_path():
     assert "Legacy bind-mounted application containers detected" in shutdown
     assert "stop_service_if_running celery_worker" in shutdown
     assert "container_has_repo_root_mount()" in common
+
+
+
+def test_all_destructive_prod_tools_share_one_mutation_lock():
+    common = _read("deploy/scripts/prod_common.sh")
+    assert "acquire_prod_mutation_lock()" in common
+    assert "production.mutation.lock" in common
+    for filename in (
+        "deploy/scripts/prod_shutdown.sh",
+        "deploy/scripts/prod_migrate_redis_persistence.sh",
+        "deploy/scripts/prod_cleanup_orphans.sh",
+    ):
+        assert "acquire_prod_mutation_lock" in _read(filename)
+
+
+def test_redis_migration_only_trusts_explicit_completion_marker():
+    migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
+    assert '-f "$COMPLETE_FILE"' in migration
+    assert "Validated and adopted existing durable Redis volume" in migration
+    assert "validate_persistent_redis" in migration

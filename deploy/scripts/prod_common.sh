@@ -8,6 +8,9 @@ PROJECT="${COMPOSE_PROJECT_NAME:-mediacms-prod}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose-cloudflare.yaml}"
 REDIS_VOLUME="${REDIS_VOLUME_NAME:-mediacms-prod-redis-data}"
 DRAIN_TIMEOUT_SECONDS="${DRAIN_TIMEOUT_SECONDS:-7500}"
+PROD_STATE_DIR="${ROLLING_STATE_DIR:-$PROD_ROOT/.deploy-state}"
+PROD_MUTATION_LOCK_FILE="$PROD_STATE_DIR/production.mutation.lock"
+PROD_MUTATION_LOCK_FD=""
 
 if [[ "$PROJECT" != "mediacms-prod" && "${ALLOW_NON_PROD_PROJECT:-0}" != "1" ]]; then
   echo "Refusing project '$PROJECT'; expected mediacms-prod" >&2
@@ -40,6 +43,19 @@ stop_crypto_service_if_running() {
   if service_is_running "$service"; then
     compose_crypto stop "$service" >/dev/null
   fi
+}
+
+acquire_prod_mutation_lock() {
+  command -v flock >/dev/null || {
+    echo "flock is required for production mutations" >&2
+    return 2
+  }
+  mkdir -p "$PROD_STATE_DIR"
+  exec {PROD_MUTATION_LOCK_FD}>"$PROD_MUTATION_LOCK_FILE"
+  flock -n "$PROD_MUTATION_LOCK_FD" || {
+    echo "Another production mutation (rolling update/shutdown/Redis migration/orphan cleanup) is already running." >&2
+    return 2
+  }
 }
 container_has_repo_root_mount() {
   local cid="$1"

@@ -206,3 +206,79 @@ class TestInternalOrphanRecoveryAPI(BaseLedgerTestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 403)
+
+
+    def test_pending_result_renews_claim_lease(self):
+        now = timezone.now()
+        session = self._make_session(now=now)
+        claim = self._claim(now_value=now, nonce="orphan-renew-claim", lease_seconds=120)
+        token = claim.json()["results"][0]["claim_token"]
+        payload = {
+            "claim_token": token,
+            "status": OrphanDepositRecoveryAudit.STATUS_PENDING_CHECK,
+            "decision_reason": "broadcast_progress",
+            "token_balance": 1,
+            "native_balance": 0,
+            "metadata": {"step": "funding"},
+        }
+        report_time = now + timedelta(seconds=100)
+        with patch("ledger.internal_api.timezone.now", return_value=report_time), patch(
+            "ledger.orphan_recovery.timezone.now", return_value=report_time
+        ):
+            response = self._post_signed(
+                "internal_orphan_recovery_result",
+                payload,
+                nonce="orphan-renew-result",
+                now_value=report_time,
+                url_kwargs={"session_public_id": session.public_id},
+            )
+        self.assertEqual(response.status_code, 200)
+        still_leased = self._claim(
+            now_value=now + timedelta(seconds=130),
+            nonce="orphan-renew-second-claim",
+            lease_seconds=120,
+        )
+        self.assertEqual(still_leased.json()["results"], [])
+
+    def test_result_rejects_negative_balances_and_reserved_metadata(self):
+        now = timezone.now()
+        session = self._make_session(now=now)
+        claim = self._claim(now_value=now, nonce="orphan-validation-claim")
+        token = claim.json()["results"][0]["claim_token"]
+        base = {
+            "claim_token": token,
+            "status": OrphanDepositRecoveryAudit.STATUS_PENDING_CHECK,
+            "decision_reason": "validation",
+            "token_balance": 0,
+            "native_balance": 0,
+            "metadata": {},
+        }
+        negative = dict(base, token_balance=-1)
+        response = self._post_signed(
+            "internal_orphan_recovery_result",
+            negative,
+            nonce="orphan-negative-result",
+            now_value=now,
+            url_kwargs={"session_public_id": session.public_id},
+        )
+        self.assertEqual(response.status_code, 400)
+
+        fractional = dict(base, token_balance=1.5)
+        response = self._post_signed(
+            "internal_orphan_recovery_result",
+            fractional,
+            nonce="orphan-fractional-result",
+            now_value=now,
+            url_kwargs={"session_public_id": session.public_id},
+        )
+        self.assertEqual(response.status_code, 400)
+
+        reserved = dict(base, metadata={CLAIM_METADATA_KEY: {"token": "forged"}})
+        response = self._post_signed(
+            "internal_orphan_recovery_result",
+            reserved,
+            nonce="orphan-reserved-result",
+            now_value=now,
+            url_kwargs={"session_public_id": session.public_id},
+        )
+        self.assertEqual(response.status_code, 400)

@@ -40,6 +40,8 @@ FRONTEND_BUILT=0
 DEPOSIT_WAS_RUNNING=""
 SWEEPER_WAS_RUNNING=""
 SIGNER_WAS_RUNNING=""
+STATIC_RELEASE_DIR=""
+STATIC_CHANGED=0
 
 configure_rolling_update() {
   PROJECT="$1"
@@ -57,7 +59,11 @@ configure_rolling_update() {
   FRONTEND_COMPOSE=(docker compose -p "$FRONTEND_BUILD_PROJECT" -f docker-compose-dev.yaml)
   STATE_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.release"
   INPROGRESS_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.inprogress"
-  LOCK_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.lock"
+  if [[ "$ENVIRONMENT_NAME" == "production" ]]; then
+    LOCK_FILE="$ROLLING_STATE_DIR/production.mutation.lock"
+  else
+    LOCK_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.lock"
+  fi
 }
 
 git_repo() { git -c "safe.directory=$ROLLING_ROOT" "$@"; }
@@ -112,6 +118,8 @@ require_environment() {
   fi
   CURRENT_SHA="$(git_repo rev-parse HEAD)"
   export MEDIACMS_RELEASE_SHA="$CURRENT_SHA"
+  STATIC_RELEASE_DIR="$ROLLING_STATE_DIR/static/$CURRENT_SHA"
+  export MEDIACMS_STATIC_DIR="$STATIC_RELEASE_DIR"
 }
 
 acquire_update_lock() {
@@ -201,14 +209,24 @@ app_preflight() {
 }
 
 verify_runtime_dependencies() {
-  if service_exists dfx_signer_service; then
-    wait_healthy dfx_signer_service 60 1 || die "dfx_signer_service is not healthy"
-  fi
-  if [[ "$ENVIRONMENT_NAME" == "production" ]] && service_exists cloudflared; then
-    wait_healthy cloudflared 60 1 || die "cloudflared ingress is not healthy"
+  local signer_count
+  signer_count="$(service_container_ids_all dfx_signer_service | grep -c . || true)"
+
+  if [[ "$ENVIRONMENT_NAME" == "production" ]]; then
+    if service_exists dfx_signer_service; then
+      (( signer_count >= 1 )) || die "production signer is not deployed"
+      (( $(healthy_service_count dfx_signer_service) >= 1 )) || die "dfx_signer_service has no healthy replica"
+    fi
+    if service_exists cloudflared; then
+      wait_healthy cloudflared 60 1 || die "cloudflared ingress is not healthy"
+    fi
+  elif (( signer_count > 0 )); then
+    # Staging may legitimately run without the optional crypto profile. If a
+    # signer is deployed, require at least one healthy replica, but do not make
+    # it a prerequisite for an otherwise web-only staging deployment.
+    (( $(healthy_service_count dfx_signer_service) >= 1 )) || die "deployed dfx_signer_service has no healthy replica"
   fi
 }
-
 legacy_preflight() {
   local count
   count="$(healthy_service_count web)"
@@ -258,6 +276,18 @@ progress_set() {
   mv "$tmp" "$INPROGRESS_FILE"
 }
 
+bind_progress_to_target() {
+  local saved
+  if [[ -f "$INPROGRESS_FILE" ]]; then
+    saved="$(progress_get target_sha '')"
+    [[ -n "$saved" ]] || die "unfinished deployment state has no target_sha; refusing ambiguous resume"
+    [[ "$saved" == "$CURRENT_SHA" ]] || \
+      die "unfinished deployment targets $saved but checkout is $CURRENT_SHA; restore that checkout or remove the state only after manual recovery"
+  else
+    progress_set target_sha "$CURRENT_SHA"
+  fi
+}
+
 load_release_delta() {
   BASE_SHA=""
   if [[ -f "$STATE_FILE" ]]; then
@@ -292,6 +322,9 @@ main_image_inputs_changed() {
   local path
   for path in "${CHANGED_FILES[@]}"; do
     case "$path" in
+      deploy/scripts/check_rolling_migrations.py)
+        return 0
+        ;;
       frontend/*|deposit_service/*|sweeper_service/*|runpod_worker/*|docs/*|tests/*|.github/*|maintenance/*|static/*|docker-compose*.yaml|deploy/scripts/*|*.md|.env.example|.gitignore)
         continue
         ;;
@@ -353,6 +386,7 @@ classify_release() {
   [[ -z "$BASE_SHA" ]] && first_run=1
 
   if (( first_run )) || changed_matches '^frontend/'; then FRONTEND_CHANGED=1; fi
+  if (( first_run )) || changed_matches '^static/'; then STATIC_CHANGED=1; fi
   if (( first_run )) || main_image_inputs_changed; then MAIN_IMAGE_CHANGED=1; fi
   if (( first_run )) || changed_matches '^deposit_service/(Dockerfile|requirements\.txt|app/)'; then DEPOSIT_IMAGE_CHANGED=1; fi
   if changed_matches '^deposit_service/config/'; then DEPOSIT_CONFIG_CHANGED=1; fi
@@ -379,7 +413,7 @@ classify_release() {
 }
 
 app_update_needed() {
-  (( MAIN_IMAGE_CHANGED || APP_CONFIG_CHANGED || FRONTEND_CHANGED ))
+  (( MAIN_IMAGE_CHANGED || APP_CONFIG_CHANGED || FRONTEND_CHANGED || STATIC_CHANGED ))
 }
 
 deposit_update_needed() { (( DEPOSIT_IMAGE_CHANGED || DEPOSIT_CONFIG_CHANGED )); }
@@ -392,6 +426,7 @@ print_plan() {
   echo "rolling-update[$ENVIRONMENT_NAME]: release ${BASE_SHA:-<unknown>} -> $CURRENT_SHA"
   echo "  changed tracked files: ${#CHANGED_FILES[@]}"
   echo "  frontend build:        $FRONTEND_CHANGED"
+  echo "  static snapshot:       $STATIC_CHANGED"
   echo "  main image rebuild:    $MAIN_IMAGE_CHANGED"
   echo "  app config recreate:   $APP_CONFIG_CHANGED"
   echo "  deposit image/config:  $DEPOSIT_IMAGE_CHANGED/$DEPOSIT_CONFIG_CHANGED"
@@ -425,17 +460,48 @@ check_pending_migrations() {
 build_frontend_dist() {
   (( FRONTEND_CHANGED )) || return 0
   echo "rolling-update[$ENVIRONMENT_NAME]: building frontend in an isolated one-shot dev container"
-  "${FRONTEND_COMPOSE[@]}" run --rm --no-deps frontend bash -lc 'npm install && npm run dist'
+  [[ -f frontend/package-lock.json ]] || die "frontend/package-lock.json is required for reproducible frontend builds"
+  "${FRONTEND_COMPOSE[@]}" run --rm --no-deps frontend bash -lc 'npm ci --no-audit --no-fund && npm run dist'
   [[ -d frontend/dist/static ]] || die "frontend build completed without frontend/dist/static"
   FRONTEND_BUILT=1
 }
 
-publish_frontend_dist() {
-  (( FRONTEND_BUILT )) || return 0
-  # Additive overlay: old hashed assets stay available throughout old/new overlap.
-  cp -a frontend/dist/static/. static/
+prepare_static_release() {
+  local prepared tmp
+  prepared="$(progress_get static_prepared 0)"
+  if [[ "$prepared" == 1 ]]; then
+    [[ -d "$STATIC_RELEASE_DIR" ]] || die "recorded static snapshot for $CURRENT_SHA is missing; refusing unsafe reconstruction after a partial deployment"
+    return 0
+  fi
+
+  tmp="${STATIC_RELEASE_DIR}.tmp.$$"
+  rm -rf "$tmp"
+  mkdir -p "$tmp"
+  cp -a static/. "$tmp/"
+  rm -rf "$STATIC_RELEASE_DIR"
+  mv "$tmp" "$STATIC_RELEASE_DIR"
+  progress_set static_prepared 1
 }
 
+finalize_static_release() {
+  local finalized
+  finalized="$(progress_get static_finalized 0)"
+  [[ -d "$STATIC_RELEASE_DIR" ]] || die "release static snapshot is missing"
+  if [[ "$finalized" == 1 ]]; then return 0; fi
+  if (( FRONTEND_BUILT )); then
+    cp -a frontend/dist/static/. "$STATIC_RELEASE_DIR/"
+  fi
+  progress_set static_finalized 1
+}
+
+run_migrations_once() {
+  if [[ "$(progress_get migrations_done 0)" == 1 ]]; then
+    echo "rolling-update[$ENVIRONMENT_NAME]: migrations already completed for $CURRENT_SHA"
+    return 0
+  fi
+  run_migrations
+  progress_set migrations_done 1
+}
 celery_queue_count() {
   local web_id
   web_id="$(find_healthy_web_id || true)"
@@ -721,10 +787,22 @@ update_web() {
   esac
 }
 
+assert_current_release_service() {
+  local service="$1" expected="${2:-1}" ids cid
+  mapfile -t ids < <(service_container_ids "$service")
+  (( ${#ids[@]} == expected )) || die "$service has ${#ids[@]} running replica(s), expected $expected"
+  for cid in "${ids[@]}"; do
+    container_is_healthy "$cid" || die "$service has an unhealthy replica"
+    [[ "$(container_release "$cid")" == "$CURRENT_SHA" ]] || die "$service is not running release $CURRENT_SHA"
+  done
+}
+
 restart_celery() {
   compose up -d --no-deps --force-recreate celery_worker celery_beat
   wait_healthy celery_worker 120 1
   wait_healthy celery_beat 120 1
+  assert_current_release_service celery_worker 1
+  assert_current_release_service celery_beat 1
   CELERY_DRAINED=0
   progress_set celery_drained 0
 }
@@ -740,6 +818,7 @@ restart_crypto_after_update() {
       compose_crypto start deposit_service >/dev/null || compose_crypto up -d --no-deps deposit_service
     fi
     wait_healthy deposit_service 120 1
+    if deposit_update_needed; then assert_current_release_service deposit_service 1; fi
   fi
 
   if (( SWEEPER_WAS_RUNNING )) || [[ "${CRYPTO_WORKERS:-0}" == 1 ]]; then
@@ -749,6 +828,7 @@ restart_crypto_after_update() {
       compose_crypto start sweeper_service >/dev/null || compose_crypto up -d --no-deps sweeper_service
     fi
     wait_healthy sweeper_service 120 1
+    if sweeper_update_needed; then assert_current_release_service sweeper_service 1; fi
   fi
 }
 
@@ -796,6 +876,7 @@ EOF_REDIS
     return 0
   fi
 
+  bind_progress_to_target
   classify_release
   print_plan
 
@@ -811,13 +892,16 @@ EOF_REDIS
   # before the first live-process change.
   if (( LEGACY_BOOTSTRAP )) && app_update_needed; then ensure_celery_drained; fi
 
+  build_frontend_dist
   build_required_images
   if app_update_needed; then
-    check_pending_migrations
-    build_frontend_dist
-    if (( ! LEGACY_BOOTSTRAP )); then ensure_celery_drained; fi
-    run_migrations
-    publish_frontend_dist
+    prepare_static_release
+    if [[ "$(progress_get migrations_done 0)" != 1 ]]; then
+      check_pending_migrations
+      if (( ! LEGACY_BOOTSTRAP )); then ensure_celery_drained; fi
+      run_migrations_once
+    fi
+    finalize_static_release
   fi
 
   if crypto_update_needed; then

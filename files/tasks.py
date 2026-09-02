@@ -1701,6 +1701,27 @@ def _apply_reconciled_runpod_output(media, output):
     return True
 
 
+def _fail_reconciled_runpod_job(job_id, message):
+    affected = Encoding.objects.filter(
+        worker="runpod",
+        status="running",
+        task_id=job_id,
+    )
+    media_ids = list(affected.values_list("media_id", flat=True).distinct())
+    affected.update(status="fail", logs=str(message))
+    for media_id in media_ids:
+        if not Encoding.objects.filter(
+            media_id=media_id,
+            worker="runpod",
+            status="running",
+        ).exists():
+            Media.objects.filter(
+                pk=media_id,
+                listable=False,
+                encoding_status="running",
+            ).update(encoding_status="fail")
+
+
 @task(
     name="reconcile_remote_encodings",
     queue="short_tasks",
@@ -1754,24 +1775,7 @@ def reconcile_remote_encodings(limit=None):
         except HTTPError as exc:
             if exc.code == 404 and row["add_date"] <= now - timedelta(seconds=ttl_seconds):
                 message = "RunPod job expired before MediaCMS could reconcile its result"
-                affected = Encoding.objects.filter(
-                    worker="runpod",
-                    status="running",
-                    task_id=job_id,
-                )
-                media_ids = list(affected.values_list("media_id", flat=True).distinct())
-                affected.update(status="fail", logs=message)
-                for media_id in media_ids:
-                    if not Encoding.objects.filter(
-                        media_id=media_id,
-                        worker="runpod",
-                        status="running",
-                    ).exists():
-                        Media.objects.filter(
-                            pk=media_id,
-                            listable=False,
-                            encoding_status="running",
-                        ).update(encoding_status="fail")
+                _fail_reconciled_runpod_job(job_id, message)
                 failed += 1
             else:
                 logger.warning(
@@ -1794,10 +1798,13 @@ def reconcile_remote_encodings(limit=None):
                 if _apply_reconciled_runpod_output(media, status_payload.get("output")):
                     recovered += 1
                 else:
+                    message = "RunPod job completed without a valid signed MediaCMS result"
                     logger.error(
                         "RunPod reconciliation completed without usable output job_id=%s",
                         job_id,
                     )
+                    _fail_reconciled_runpod_job(job_id, message)
+                    failed += 1
             except Exception:
                 logger.exception(
                     "RunPod reconciliation apply failed job_id=%s token=%s",
@@ -1823,24 +1830,7 @@ def reconcile_remote_encodings(limit=None):
                 or status_payload.get("message")
                 or f"RunPod job ended with status {state}"
             )
-            affected = Encoding.objects.filter(
-                worker="runpod",
-                status="running",
-                task_id=job_id,
-            )
-            media_ids = list(affected.values_list("media_id", flat=True).distinct())
-            affected.update(status="fail", logs=message)
-            for media_id in media_ids:
-                if not Encoding.objects.filter(
-                    media_id=media_id,
-                    worker="runpod",
-                    status="running",
-                ).exists():
-                    Media.objects.filter(
-                        pk=media_id,
-                        listable=False,
-                        encoding_status="running",
-                    ).update(encoding_status="fail")
+            _fail_reconciled_runpod_job(job_id, message)
             failed += 1
 
     return {"checked": checked, "recovered": recovered, "failed": failed}

@@ -7,6 +7,8 @@ source "$(dirname "$0")/prod_common.sh"
   exit 2
 }
 
+acquire_prod_mutation_lock
+
 if ! redis_is_persistent; then
   cat >&2 <<EOF_REDIS
 Refusing full production shutdown: Redis is not yet mounted on '$REDIS_VOLUME'.

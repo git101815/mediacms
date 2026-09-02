@@ -205,6 +205,7 @@ def claim_orphan_recovery_candidates(
                 "service": str(service_name),
                 "token": claim_token,
                 "expires_at": claim_until.isoformat(),
+                "lease_seconds": lease_seconds,
             }
             metadata["session_public_id"] = str(session.public_id)
 
@@ -263,6 +264,21 @@ def claim_orphan_recovery_candidates(
     return claimed
 
 
+def _nonnegative_int(value, *, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise ValidationError(f"{field_name} must be an integer")
+    try:
+        numeric = Decimal(str(0 if value in (None, "") else value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValidationError(f"{field_name} must be an integer") from exc
+    if not numeric.is_finite() or numeric != numeric.to_integral_value():
+        raise ValidationError(f"{field_name} must be an integer")
+    parsed = int(numeric)
+    if parsed < 0:
+        raise ValidationError(f"{field_name} must be >= 0")
+    return parsed
+
+
 def _decimal_or_none(value, *, field_name: str):
     if value is None or value == "":
         return None
@@ -270,8 +286,8 @@ def _decimal_or_none(value, *, field_name: str):
         parsed = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise ValidationError(f"{field_name} must be a decimal or null") from exc
-    if not parsed.is_finite():
-        raise ValidationError(f"{field_name} must be finite")
+    if not parsed.is_finite() or parsed < 0:
+        raise ValidationError(f"{field_name} must be finite and >= 0")
     return parsed
 
 
@@ -321,7 +337,28 @@ def record_orphan_recovery_result(
     worker_metadata = payload.get("metadata") or {}
     if not isinstance(worker_metadata, dict):
         raise ValidationError("metadata must be an object")
-    if status != OrphanDepositRecoveryAudit.STATUS_PENDING_CHECK:
+    reserved_metadata = {CLAIM_METADATA_KEY, "session_public_id"}
+    if reserved_metadata.intersection(worker_metadata):
+        raise ValidationError("metadata contains reserved orphan-recovery keys")
+
+    if status == OrphanDepositRecoveryAudit.STATUS_PENDING_CHECK:
+        lease_value = claim.get("lease_seconds")
+        if lease_value not in (None, ""):
+            try:
+                lease_seconds = int(lease_value)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("Stored orphan recovery claim lease is invalid") from exc
+            if lease_seconds <= 0:
+                raise ValidationError("Stored orphan recovery claim lease is invalid")
+            claim = dict(claim)
+            claim["expires_at"] = (
+                timezone.now() + timezone.timedelta(seconds=lease_seconds)
+            ).isoformat()
+            metadata[CLAIM_METADATA_KEY] = claim
+        # Claims created by the immediately previous release have no stored
+        # lease_seconds. Preserve their existing expiry instead of breaking an
+        # in-flight financial recovery during deployment.
+    else:
         metadata.pop(CLAIM_METADATA_KEY, None)
     metadata.update(worker_metadata)
     metadata["session_public_id"] = str(session.public_id)
@@ -329,8 +366,8 @@ def record_orphan_recovery_result(
     audit.deposit_session = session
     audit.status = status
     audit.decision_reason = str(payload.get("decision_reason") or "").strip()[:64]
-    audit.last_token_balance = int(payload.get("token_balance") or 0)
-    audit.last_native_balance = int(payload.get("native_balance") or 0)
+    audit.last_token_balance = _nonnegative_int(payload.get("token_balance"), field_name="token_balance")
+    audit.last_native_balance = _nonnegative_int(payload.get("native_balance"), field_name="native_balance")
     audit.last_token_value_usd = _decimal_or_none(
         payload.get("token_value_usd"), field_name="token_value_usd"
     )
