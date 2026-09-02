@@ -74,6 +74,34 @@ def test_prod_docker_logs_are_bounded_for_every_service():
         assert "logging: *bounded_logging" in _service_block(compose, service)
 
 
+def test_staging_docker_logs_are_bounded_for_every_service():
+    compose = _read("docker-compose.yaml")
+    assert "x-bounded-logging: &bounded_logging" in compose
+    assert "driver: local" in compose
+    assert 'max-size: "20m"' in compose
+    assert 'max-file: "5"' in compose
+
+    app_anchor = compose.split("x-mediacms-app: &mediacms_app", 1)[1].split(
+        "x-mediacms-db-env:", 1
+    )[0]
+    assert "logging: *bounded_logging" in app_anchor
+
+    inherited = ("migrations", "web", "celery_beat", "celery_worker")
+    for service in inherited:
+        assert "<<: *mediacms_app" in _service_block(compose, service)
+
+    explicit = (
+        "staging_ingress",
+        "dfx_signer_service",
+        "deposit_service",
+        "sweeper_service",
+        "db",
+        "redis",
+    )
+    for service in explicit:
+        assert "logging: *bounded_logging" in _service_block(compose, service)
+
+
 def test_debug_log_is_process_safe_and_bounded():
     settings = _read("cms/settings.py")
     assert '"class": "cms.logging_handlers.ProcessSafeRotatingFileHandler"' in settings

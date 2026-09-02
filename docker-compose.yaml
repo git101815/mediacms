@@ -1,11 +1,18 @@
 name: ${COMPOSE_PROJECT_NAME:-mediacms-staging}
 
+x-bounded-logging: &bounded_logging
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 x-mediacms-app: &mediacms_app
   image: mediacms-local:staging
   pull_policy: never
   build:
     context: .
     dockerfile: ./Dockerfile
+  logging: *bounded_logging
 
 
 x-mediacms-db-env: &mediacms_db_env
@@ -132,6 +139,7 @@ services:
 
 
   staging_ingress:
+    logging: *bounded_logging
     # Stable port owner for true 1 -> 2 -> healthcheck -> 1 staging web rolls.
     # Nginx >= 1.27.3 supports open-source dynamic DNS re-resolution for
     # upstream servers; use a current stable pinned version rather than latest.
@@ -154,6 +162,7 @@ services:
     restart: unless-stopped
 
   deposit_service:
+    logging: *bounded_logging
     labels:
       io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 2m
@@ -220,6 +229,7 @@ services:
     restart: unless-stopped
 
   dfx_signer_service:
+    logging: *bounded_logging
     labels:
       io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 30s
@@ -260,6 +270,7 @@ services:
     restart: unless-stopped
 
   sweeper_service:
+    logging: *bounded_logging
     labels:
       io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 15m
@@ -436,6 +447,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   db:
+    logging: *bounded_logging
     stop_grace_period: 60s
     image: postgres:17.2-alpine
     volumes:
@@ -452,6 +464,7 @@ services:
       timeout: 5s
       retries: 5
   redis:
+    logging: *bounded_logging
     stop_grace_period: 60s
     image: redis:alpine
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
