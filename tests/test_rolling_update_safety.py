@@ -535,3 +535,39 @@ def test_dev_frontend_and_ci_use_committed_lockfile():
     ci = _read(".github/workflows/ci.yml")
     assert "npm ci --no-audit --no-fund && npm run start" in dev
     assert "run: npm ci --no-audit --no-fund" in ci
+
+def test_entrypoint_never_mutates_readonly_release_static_mount():
+    entrypoint = _read("deploy/docker/entrypoint.sh")
+    assert "find /home/mediacms.io/mediacms" not in entrypoint
+    assert 'APP_ROOT=/home/mediacms.io/mediacms' in entrypoint
+    assert '"$APP_ROOT/static"' not in entrypoint
+    assert 'chown -R www-data:"$TARGET_GID" "$path"' in entrypoint
+
+
+def test_entrypoint_chowns_only_runtime_writable_directories():
+    entrypoint = _read("deploy/docker/entrypoint.sh")
+    ownership = entrypoint.split(
+        "# Only runtime data directories need write ownership for www-data.", 1
+    )[1].split("chmod +x", 1)[0]
+    for directory in ("logs", "media_files", "backup"):
+        assert f'"$APP_ROOT/{directory}"' in ownership
+    assert "static" not in ownership
+
+
+def test_collectstatic_writer_keeps_static_mount_writable_but_runtime_mounts_readonly():
+    prestart = _read("deploy/docker/prestart.sh")
+    assert "python manage.py collectstatic --noinput" in prestart
+
+    for compose_path in (
+        "docker-compose-cloudflare.yaml",
+        "docker-compose.yaml",
+        "docker-compose-dev.yaml",
+    ):
+        compose = _read(compose_path)
+        migrations = _service_block(compose, "migrations")
+        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static" in migrations
+        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" not in migrations
+
+        for service in ("web", "celery_worker", "celery_beat"):
+            runtime = _service_block(compose, service)
+            assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" in runtime
