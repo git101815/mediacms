@@ -124,8 +124,8 @@ def test_reconciler_rotates_checked_running_jobs_by_update_date(
     media_factory, profile_factory, encoding_factory, monkeypatch
 ):
     profile = profile_factory(codec="h264", resolution=720)
-    media_old = media_factory()
-    media_next = media_factory()
+    media_old = media_factory(friendly_token="runpod-fairness-oldest")
+    media_next = media_factory(friendly_token="runpod-fairness-next")
     old = encoding_factory(media=media_old, profile=profile, status="running", progress=0)
     next_encoding = encoding_factory(
         media=media_next, profile=profile, status="running", progress=0
