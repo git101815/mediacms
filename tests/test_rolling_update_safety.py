@@ -81,6 +81,37 @@ def test_frontend_build_is_image_verified_reproducible_and_release_scoped():
     assert 'cp -a frontend/dist/static/. "$STATIC_RELEASE_DIR/"' in common
 
 
+def test_every_application_release_rebuilds_frontend_for_fresh_static_snapshot():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    build = common.split("build_frontend_dist()", 1)[1].split("prepare_static_release()", 1)[0]
+    assert "frontend_build_needed() { app_update_needed; }" in common
+    assert "frontend_build_needed || return 0" in build
+    assert "(( FRONTEND_CHANGED )) || return 0" not in build
+    assert 'cp -a frontend/dist/static/. "$STATIC_RELEASE_DIR/"' in common
+
+
+def test_backend_only_release_requires_frontend_build_but_crypto_only_does_not():
+    script = (
+        "source deploy/scripts/rolling_update_common.sh\n"
+        "MAIN_IMAGE_CHANGED=1\n"
+        "APP_CONFIG_CHANGED=0\n"
+        "FRONTEND_CHANGED=0\n"
+        "STATIC_CHANGED=0\n"
+        "DEPOSIT_IMAGE_CHANGED=0\n"
+        "DEPOSIT_CONFIG_CHANGED=0\n"
+        "SWEEPER_IMAGE_CHANGED=0\n"
+        "SWEEPER_CONFIG_CHANGED=0\n"
+        "SIGNER_IMAGE_CHANGED=0\n"
+        "SIGNER_CONFIG_CHANGED=0\n"
+        "frontend_build_needed || exit 11\n"
+        "MAIN_IMAGE_CHANGED=0\n"
+        "DEPOSIT_IMAGE_CHANGED=1\n"
+        "if frontend_build_needed; then exit 12; fi\n"
+    )
+    result = _bash(script)
+    assert result.returncode == 0, result.stderr
+
+
 def test_prod_app_and_migrations_are_image_isolated_with_release_static_snapshot():
     for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml"):
         compose = _read(compose_path)

@@ -416,6 +416,11 @@ app_update_needed() {
   (( MAIN_IMAGE_CHANGED || APP_CONFIG_CHANGED || FRONTEND_CHANGED || STATIC_CHANGED ))
 }
 
+# Every application release creates a fresh static snapshot. The frontend
+# bundle is not a Django static source, so every application release must
+# rebuild/copy it even when only backend code or app config changed.
+frontend_build_needed() { app_update_needed; }
+
 deposit_update_needed() { (( DEPOSIT_IMAGE_CHANGED || DEPOSIT_CONFIG_CHANGED )); }
 sweeper_update_needed() { (( SWEEPER_IMAGE_CHANGED || SWEEPER_CONFIG_CHANGED )); }
 signer_update_needed() { (( SIGNER_IMAGE_CHANGED || SIGNER_CONFIG_CHANGED )); }
@@ -423,10 +428,14 @@ crypto_update_needed() { deposit_update_needed || sweeper_update_needed || signe
 stack_update_needed() { app_update_needed || crypto_update_needed; }
 
 print_plan() {
+  local app_release=0
+  app_update_needed && app_release=1
   echo "rolling-update[$ENVIRONMENT_NAME]: release ${BASE_SHA:-<unknown>} -> $CURRENT_SHA"
   echo "  changed tracked files: ${#CHANGED_FILES[@]}"
-  echo "  frontend build:        $FRONTEND_CHANGED"
-  echo "  static snapshot:       $STATIC_CHANGED"
+  echo "  frontend source change: $FRONTEND_CHANGED"
+  echo "  frontend build:         $app_release"
+  echo "  static source change:   $STATIC_CHANGED"
+  echo "  static snapshot:        $app_release"
   echo "  main image rebuild:    $MAIN_IMAGE_CHANGED"
   echo "  app config recreate:   $APP_CONFIG_CHANGED"
   echo "  deposit image/config:  $DEPOSIT_IMAGE_CHANGED/$DEPOSIT_CONFIG_CHANGED"
@@ -458,7 +467,7 @@ check_pending_migrations() {
 }
 
 build_frontend_dist() {
-  (( FRONTEND_CHANGED )) || return 0
+  frontend_build_needed || return 0
   echo "rolling-update[$ENVIRONMENT_NAME]: building reproducible frontend image and dist"
   [[ -f frontend/package-lock.json ]] || die "frontend/package-lock.json is required for reproducible frontend builds"
   "${FRONTEND_COMPOSE[@]}" build frontend
