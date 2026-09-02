@@ -99,6 +99,32 @@ def test_redis_migration_enables_live_aof_before_stopping_redis():
     assert "compose_crypto stop sweeper_service" in migration
 
 
+
+
+def test_redis_migration_builds_target_images_before_quiescing_legacy_stack():
+    migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
+    release = migration.index('export MEDIACMS_RELEASE_SHA="$(git rev-parse HEAD)"')
+    build_web = migration.index("compose build web")
+    legacy_stop = migration.index("service_exists celery_beat && compose stop celery_beat")
+    assert release < build_web < legacy_stop
+    assert "compose_crypto build deposit_service" in migration
+    assert "compose_crypto build dfx_signer_service" in migration
+    assert "compose_crypto build sweeper_service" in migration
+    assert "Legacy bind-mounted application containers detected" in migration
+
+
+def test_redis_migration_recreates_image_isolated_services_with_verified_release_labels():
+    migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
+    assert "assert_release_label()" in migration
+    assert "compose up -d --no-deps --force-recreate web" in migration
+    assert "compose up -d --no-deps --force-recreate celery_worker celery_beat" in migration
+    assert "compose_crypto up -d --no-deps --force-recreate deposit_service" in migration
+    assert "compose_crypto up -d --no-deps --force-recreate sweeper_service" in migration
+    assert "assert_release_label web" in migration
+    assert "assert_release_label celery_worker" in migration
+    assert "assert_release_label celery_beat" in migration
+
+
 def test_crypto_worker_updates_are_ordered_around_signer_health():
     common = _read("deploy/scripts/rolling_update_common.sh")
     main = common.split("rolling_update_main()", 1)[1]

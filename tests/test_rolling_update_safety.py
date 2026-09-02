@@ -334,3 +334,26 @@ def test_compose_change_classifier_reports_service_and_top_level_changes(tmp_pat
     )
     assert "top-level" in result.stdout.splitlines()
     assert "service:web" in result.stdout.splitlines()
+
+def test_compose_classifier_failure_is_fail_closed(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python3"
+    fake_python.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+
+    script = textwrap.dedent(
+        "source deploy/scripts/rolling_update_common.sh\n"
+        "ENVIRONMENT_NAME=test\n"
+        "BASE_SHA=deadbeef\n"
+        "COMPOSE_FILE=docker-compose-cloudflare.yaml\n"
+        "changed_matches() { return 0; }\n"
+        "classify_compose_delta\n"
+    )
+    result = _bash(
+        script,
+        env={"PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"},
+    )
+    assert result.returncode == 2
+    assert "failed to classify docker-compose-cloudflare.yaml changes" in result.stderr
+

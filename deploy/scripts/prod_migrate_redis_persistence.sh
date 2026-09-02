@@ -20,14 +20,82 @@ __NOTICE__
   exit 2
 }
 
-prod_preflight
+command -v git >/dev/null || {
+  echo "git is required for the image-isolated Redis bootstrap" >&2
+  exit 2
+}
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  echo "Tracked working-tree changes are present; commit/stash them before Redis migration." >&2
+  exit 2
+fi
+export MEDIACMS_RELEASE_SHA="$(git rev-parse HEAD)"
+
+container_has_repo_root_mount() {
+  local cid="$1"
+  docker inspect -f '{{range .Mounts}}{{if eq .Destination "/home/mediacms.io/mediacms"}}yes{{end}}{{end}}' "$cid" 2>/dev/null | grep -q yes
+}
+
+legacy_app_mounts=0
+for service in web celery_beat celery_worker; do
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] || continue
+    if container_has_repo_root_mount "$cid"; then
+      legacy_app_mounts=1
+      break 2
+    fi
+  done < <(service_container_ids_all "$service")
+done
+
+if [[ "$legacy_app_mounts" == 1 ]]; then
+  # After git pull, legacy containers already expose the new checkout. Do not
+  # launch fresh Django/Celery inspection processes inside them before schema
+  # migration. Require at least one Docker-healthy web process instead.
+  legacy_web_healthy=0
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] || continue
+    state="$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || true)"
+    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || true)"
+    if [[ "$state" == running && ( "$health" == healthy || "$health" == none ) ]]; then
+      legacy_web_healthy=1
+      break
+    fi
+  done < <(service_container_ids web)
+  [[ "$legacy_web_healthy" == 1 ]] || {
+    echo "Legacy Redis bootstrap requires at least one healthy web container." >&2
+    exit 1
+  }
+  echo "Legacy bind-mounted application containers detected; using Docker-only preflight."
+else
+  prod_preflight
+fi
 
 deposit_running=0
 sweeper_running=0
+signer_running=0
 [[ -n "$(service_container_ids deposit_service)" ]] && deposit_running=1
 [[ -n "$(service_container_ids sweeper_service)" ]] && sweeper_running=1
+[[ -n "$(service_container_ids dfx_signer_service)" ]] && signer_running=1
 
-drain_celery
+# Build every image that this one-time procedure may recreate while ingress is
+# still live. Once web/Celery stop mounting the checkout, restarting from an old
+# local image would otherwise silently roll the application backwards.
+echo "Building target release images before Redis migration outage: $MEDIACMS_RELEASE_SHA"
+compose build web
+[[ "$deposit_running" == 1 ]] && compose_crypto build deposit_service
+if [[ "$signer_running" == 1 || "$sweeper_running" == 1 ]]; then
+  compose_crypto build dfx_signer_service
+fi
+[[ "$sweeper_running" == 1 ]] && compose_crypto build sweeper_service
+
+if [[ "$legacy_app_mounts" == 1 ]]; then
+  # Warm TERM shutdown finishes active tasks; queued tasks remain in Redis and
+  # are copied into the durable volume. Avoid executing new checkout code in
+  # the legacy containers.
+  service_exists celery_beat && compose stop celery_beat >/dev/null || true
+  [[ -n "$(service_container_ids celery_worker | head -n1)" ]] && compose stop celery_worker >/dev/null || true
+else
+  drain_celery
+fi
 
 # Financial loops also publish state through the internal web API. Quiesce them
 # before taking web down, preserving exactly the subset that was running.
@@ -130,25 +198,60 @@ fi
 # The migration service is a one-shot gate and no longer retries forever.
 compose run --rm migrations
 
-compose up -d web
+assert_release_label() {
+  local service="$1" cid actual found=0
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] || continue
+    found=1
+    actual="$(docker inspect -f '{{ index .Config.Labels "io.mediacms.release" }}' "$cid" 2>/dev/null || true)"
+    if [[ "$actual" != "$MEDIACMS_RELEASE_SHA" ]]; then
+      echo "Service '$service' restarted with release label '$actual', expected '$MEDIACMS_RELEASE_SHA'." >&2
+      return 1
+    fi
+  done < <(service_container_ids "$service")
+  [[ "$found" == 1 ]] || {
+    echo "Service '$service' has no running container to verify release label." >&2
+    return 1
+  }
+}
+
+# Recreate the signer first when it was part of the live stack. `--no-deps`
+# prevents a web start from implicitly recreating an unbuilt dependency.
+if [[ "$signer_running" == 1 ]]; then
+  compose_crypto up -d --no-deps --force-recreate dfx_signer_service
+  wait_healthy dfx_signer_service 180 1
+  assert_release_label dfx_signer_service
+fi
+
+compose up -d --no-deps --force-recreate web
 if [[ "$COMPOSE_FILE" == *cloudflare* ]]; then
   wait_healthy web 300 2
 else
   wait_healthy web 300 1
 fi
+assert_release_label web
+
 service_exists cloudflared && compose up -d cloudflared || true
-compose up -d celery_worker celery_beat
+
+compose up -d --no-deps --force-recreate celery_worker celery_beat
 wait_healthy celery_worker 120 1
 wait_healthy celery_beat 120 1
+assert_release_label celery_worker
+assert_release_label celery_beat
 
 if [[ "$deposit_running" == 1 ]]; then
-  compose_crypto up -d --no-deps deposit_service
+  compose_crypto up -d --no-deps --force-recreate deposit_service
   wait_healthy deposit_service 120 1
+  assert_release_label deposit_service
 fi
 if [[ "$sweeper_running" == 1 ]]; then
-  wait_healthy dfx_signer_service 180 1
-  compose_crypto up -d --no-deps sweeper_service
+  [[ "$signer_running" == 1 ]] || {
+    echo "Sweeper was running but signer was not; refusing to restart an inconsistent financial stack." >&2
+    exit 1
+  }
+  compose_crypto up -d --no-deps --force-recreate sweeper_service
   wait_healthy sweeper_service 120 1
+  assert_release_label sweeper_service
 fi
 
 migration_complete=1

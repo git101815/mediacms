@@ -288,7 +288,14 @@ classify_compose_delta() {
   [[ -n "$BASE_SHA" ]] || return 0
   changed_matches "^${COMPOSE_FILE//./\\.}$" || return 0
 
-  local part service
+  # Process substitution does not propagate the producer's exit status to the
+  # while loop. Capture the classifier first so any parser/git failure is
+  # fail-closed instead of being mistaken for "no Compose changes".
+  local part service compose_delta
+  if ! compose_delta="$(python3 deploy/scripts/classify_compose_changes.py "$BASE_SHA" "$COMPOSE_FILE")"; then
+    die "failed to classify $COMPOSE_FILE changes; refusing unattended rolling update"
+  fi
+
   while IFS= read -r part; do
     [[ -n "$part" ]] || continue
     if [[ "$part" == top-level ]]; then
@@ -319,7 +326,7 @@ classify_compose_delta() {
         die "$COMPOSE_FILE changes unsupported service '$service'; refusing to mark it deployed"
         ;;
     esac
-  done < <(python3 deploy/scripts/classify_compose_changes.py "$BASE_SHA" "$COMPOSE_FILE")
+  done <<<"$compose_delta"
 }
 
 classify_release() {
