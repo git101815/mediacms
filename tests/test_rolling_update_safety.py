@@ -185,8 +185,19 @@ def test_runpod_worker_is_outside_rolling_stack_scope():
 
 def test_migration_checker_uses_current_checkout_migrations_service():
     common = _read("deploy/scripts/rolling_update_common.sh")
+    checker = _read("deploy/scripts/check_rolling_migrations.py")
+
     assert "compose run --rm --no-deps migrations python deploy/scripts/check_rolling_migrations.py" in common
     assert "compose run --rm --no-deps web python deploy/scripts/check_rolling_migrations.py" not in common
+
+    # Executing a Python file by path sets sys.path[0] to deploy/scripts,
+    # so an isolated production image must add the repository root itself
+    # before importing cms.settings.
+    assert "REPO_ROOT = Path(__file__).resolve().parents[2]" in checker
+    assert "sys.path.insert(0, repo_root_str)" in checker
+    assert checker.index("sys.path.insert(0, repo_root_str)") < checker.index(
+        'os.environ.setdefault("DJANGO_SETTINGS_MODULE", "cms.settings")'
+    )
 
 
 def test_migration_checker_is_fail_closed_for_destructive_or_ambiguous_ops():

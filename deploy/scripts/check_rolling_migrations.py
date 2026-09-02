@@ -9,6 +9,20 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
+
+# This checker is intentionally executed as a file inside the isolated
+# migrations image:
+#
+#   python deploy/scripts/check_rolling_migrations.py
+#
+# In that invocation Python puts deploy/scripts/, not the repository root, at
+# sys.path[0]. Make the application package importable explicitly instead of
+# relying on a bind mount, the caller's cwd, or an ambient PYTHONPATH.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+repo_root_str = str(REPO_ROOT)
+if repo_root_str not in sys.path:
+    sys.path.insert(0, repo_root_str)
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "cms.settings")
 
