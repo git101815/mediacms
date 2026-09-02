@@ -4251,12 +4251,12 @@ def internal_orphan_recovery_claim(request):
             older_than_hours=older_than_hours,
             lease_seconds=lease_seconds,
         )
-    except DjangoPermissionDenied as exc:
-        return JsonResponse({"error": str(exc)}, status=403)
-    except DjangoValidationError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-    except ImproperlyConfigured as exc:
-        return JsonResponse({"error": str(exc)}, status=503)
+    except DjangoPermissionDenied:
+        return JsonResponse({"error": "permission_denied"}, status=403)
+    except DjangoValidationError:
+        return JsonResponse({"error": "invalid_request"}, status=400)
+    except ImproperlyConfigured:
+        return JsonResponse({"error": "service_unavailable"}, status=503)
 
     return JsonResponse({"results": results})
 
@@ -4274,12 +4274,12 @@ def internal_orphan_recovery_result(request, session_public_id):
             claim_token=claim_token,
             payload=payload,
         )
-    except DjangoPermissionDenied as exc:
-        return JsonResponse({"error": str(exc)}, status=403)
-    except DjangoValidationError as exc:
-        return JsonResponse({"error": str(exc)}, status=400)
-    except ImproperlyConfigured as exc:
-        return JsonResponse({"error": str(exc)}, status=503)
+    except DjangoPermissionDenied:
+        return JsonResponse({"error": "permission_denied"}, status=403)
+    except DjangoValidationError:
+        return JsonResponse({"error": "invalid_request"}, status=400)
+    except ImproperlyConfigured:
+        return JsonResponse({"error": "service_unavailable"}, status=503)
     except DepositSession.DoesNotExist:
         return JsonResponse({"error": "Deposit session not found"}, status=404)
     except OrphanDepositRecoveryAudit.DoesNotExist:

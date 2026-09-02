@@ -1,8 +1,10 @@
 import json
+import uuid
 from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -206,6 +208,44 @@ class TestInternalOrphanRecoveryAPI(BaseLedgerTestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 403)
+
+
+    def test_orphan_recovery_endpoints_do_not_expose_exception_details(self):
+        endpoint_cases = (
+            ("internal_orphan_recovery_claim", None),
+            (
+                "internal_orphan_recovery_result",
+                {"session_public_id": uuid.uuid4()},
+            ),
+        )
+        exception_cases = (
+            (PermissionDenied, 403, "permission_denied"),
+            (ValidationError, 400, "invalid_request"),
+            (ImproperlyConfigured, 503, "service_unavailable"),
+        )
+
+        for view_name, kwargs in endpoint_cases:
+            for exception_type, expected_status, expected_error in exception_cases:
+                sensitive_detail = (
+                    f"sensitive-{view_name}-{exception_type.__name__}-internal-detail"
+                )
+                with self.subTest(view=view_name, exception=exception_type.__name__):
+                    with patch(
+                        "files.views.authenticate_internal_sweeper_request",
+                        side_effect=exception_type(sensitive_detail),
+                    ):
+                        response = self.client.post(
+                            reverse(view_name, kwargs=kwargs),
+                            data="{}",
+                            content_type="application/json",
+                        )
+
+                    self.assertEqual(response.status_code, expected_status)
+                    self.assertEqual(response.json(), {"error": expected_error})
+                    self.assertNotIn(
+                        sensitive_detail,
+                        response.content.decode("utf-8"),
+                    )
 
 
     def test_pending_result_renews_claim_lease(self):
