@@ -55,8 +55,51 @@ POSTGRES_DATA_DIR="${PROD_POSTGRES_DATA_DIR:-$ROLLING_ROOT/../postgres_data}"
 [[ -f "$POSTGRES_DATA_DIR/PG_VERSION" ]] || \
   die "refusing cold start: expected existing production PostgreSQL data at $POSTGRES_DATA_DIR/PG_VERSION"
 
+cold_start_pre_mutation_resume_safe() {
+  local saved="$1" key service
+
+  [[ "$(progress_get cold_start 0)" == 1 ]] || return 1
+
+  # Once any release mutation has started, the target SHA is immutable. These
+  # markers are written only after the corresponding mutating phase.
+  for key in static_prepared static_finalized migrations_done celery_drained; do
+    [[ "$(progress_get "$key" 0)" == 0 ]] || return 1
+  done
+
+  # Defend against a crash in the tiny window after the static directory rename
+  # but before static_prepared was persisted.
+  [[ ! -d "$ROLLING_STATE_DIR/static/$saved" ]] || return 1
+
+  # PostgreSQL and Redis may already have been started by the cold-start
+  # preflight. No application/runtime service may have been started yet.
+  for service in web celery_beat celery_worker dfx_signer_service deposit_service sweeper_service cloudflared; do
+    service_is_running "$service" && return 1
+  done
+
+  return 0
+}
+
+retarget_pre_mutation_cold_start_if_needed() {
+  local saved
+  [[ -f "$INPROGRESS_FILE" ]] || return 0
+
+  saved="$(progress_get target_sha '')"
+  [[ -n "$saved" ]] || \
+    die "unfinished cold-start state has no target_sha; refusing ambiguous resume"
+  [[ "$saved" != "$CURRENT_SHA" ]] || return 0
+
+  if ! cold_start_pre_mutation_resume_safe "$saved"; then
+    die "unfinished cold start targets $saved and has crossed the safe retarget boundary; restore that checkout or recover manually"
+  fi
+
+  echo "prod-start: safely retargeting pre-mutation cold start $saved -> $CURRENT_SHA"
+  progress_set previous_target_sha "$saved"
+  progress_set target_sha "$CURRENT_SHA"
+}
+
 # Do not hijack an interrupted rolling deployment. A failed cold start, however,
-# is deliberately resumable with the same production.inprogress file.
+# is resumable. It may be retargeted to a bug-fix commit only while still before
+# the first application mutation.
 if [[ -f "$INPROGRESS_FILE" ]] && [[ "$(progress_get cold_start 0)" != 1 ]]; then
   die "production.inprogress belongs to another deployment mode; resolve/resume that deployment before cold start"
 fi
@@ -67,6 +110,7 @@ if service_is_running web && [[ "$(progress_get cold_start 0)" != 1 ]]; then
   die "production web is already running; use deploy/scripts/prod_rolling_update.sh"
 fi
 
+retarget_pre_mutation_cold_start_if_needed
 bind_progress_to_target
 progress_set cold_start 1
 

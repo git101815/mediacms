@@ -185,8 +185,19 @@ def test_runpod_worker_is_outside_rolling_stack_scope():
 
 def test_migration_checker_uses_current_checkout_migrations_service():
     common = _read("deploy/scripts/rolling_update_common.sh")
+    checker = _read("deploy/scripts/check_rolling_migrations.py")
+
     assert "compose run --rm --no-deps migrations python deploy/scripts/check_rolling_migrations.py" in common
     assert "compose run --rm --no-deps web python deploy/scripts/check_rolling_migrations.py" not in common
+
+    # Executing a Python file by path sets sys.path[0] to deploy/scripts,
+    # so an isolated production image must add the repository root itself
+    # before importing cms.settings.
+    assert "REPO_ROOT = Path(__file__).resolve().parents[2]" in checker
+    assert "sys.path.insert(0, repo_root_str)" in checker
+    assert checker.index("sys.path.insert(0, repo_root_str)") < checker.index(
+        'os.environ.setdefault("DJANGO_SETTINGS_MODULE", "cms.settings")'
+    )
 
 
 def test_migration_checker_is_fail_closed_for_destructive_or_ambiguous_ops():
@@ -907,3 +918,45 @@ def test_static_gc_runs_only_on_success_paths_after_release_state_or_noop_gate()
     assert final_static_record < final_record
     final_gc = main.rindex("cleanup_static_releases")
     assert final_record < final_gc
+
+def test_cold_start_retarget_is_allowed_only_before_any_application_mutation():
+    start = _read("deploy/scripts/prod_start.sh")
+
+    assert "cold_start_pre_mutation_resume_safe()" in start
+    assert "retarget_pre_mutation_cold_start_if_needed()" in start
+    assert 'progress_set previous_target_sha "$saved"' in start
+    assert 'progress_set target_sha "$CURRENT_SHA"' in start
+
+    helper = start.split("cold_start_pre_mutation_resume_safe()", 1)[1].split(
+        "retarget_pre_mutation_cold_start_if_needed()", 1
+    )[0]
+    for marker in (
+        "static_prepared",
+        "static_finalized",
+        "migrations_done",
+        "celery_drained",
+    ):
+        assert marker in helper
+    assert '$ROLLING_STATE_DIR/static/$saved' in helper
+
+    # DB/Redis are explicitly allowed because the failed preflight may already
+    # have started them. Every application/runtime service must still be down.
+    assert "for service in web celery_beat celery_worker dfx_signer_service deposit_service sweeper_service cloudflared" in helper
+    assert " db " not in helper
+    assert " redis " not in helper
+
+    retarget_call = start.rindex("\nretarget_pre_mutation_cold_start_if_needed\n")
+    bind_call = start.rindex("\nbind_progress_to_target\n")
+    assert retarget_call < bind_call
+
+
+def test_cold_start_retarget_preserves_empty_redis_confirmation_state():
+    start = _read("deploy/scripts/prod_start.sh")
+    retarget = start.split("retarget_pre_mutation_cold_start_if_needed()", 1)[1].split(
+        "# Do not hijack an interrupted rolling deployment.", 1
+    )[0]
+
+    # Retargeting changes only SHA metadata. It must not erase the confirmation
+    # needed when the first failed cold start established a new empty Redis.
+    assert 'rm -f "$INPROGRESS_FILE"' not in retarget
+    assert "redis_empty_reset_confirmed" not in retarget
