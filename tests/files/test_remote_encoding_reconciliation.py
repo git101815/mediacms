@@ -1,6 +1,8 @@
 from copy import deepcopy
+from datetime import timedelta
 
 import pytest
+from django.utils import timezone
 from django.test import override_settings
 
 from files.remote_encoding import build_runpod_status_url, sign_payload
@@ -113,3 +115,45 @@ def test_completed_runpod_job_with_invalid_applied_payload_is_finalized_failed(
     assert result["failed"] == 1
     assert encoding.status == "fail"
     assert "invalid MediaCMS result" in encoding.logs
+
+
+
+@pytest.mark.django_db
+@override_settings(REMOTE_ENCODING_ENABLED=True)
+def test_reconciler_rotates_checked_running_jobs_by_update_date(
+    media_factory, profile_factory, encoding_factory, monkeypatch
+):
+    profile = profile_factory(codec="h264", resolution=720)
+    media_old = media_factory()
+    media_next = media_factory()
+    old = encoding_factory(media=media_old, profile=profile, status="running", progress=0)
+    next_encoding = encoding_factory(
+        media=media_next, profile=profile, status="running", progress=0
+    )
+
+    now = timezone.now()
+    type(old).objects.filter(pk=old.pk).update(
+        worker="runpod",
+        task_id="job-oldest",
+        update_date=now - timedelta(hours=2),
+    )
+    type(next_encoding).objects.filter(pk=next_encoding.pk).update(
+        worker="runpod",
+        task_id="job-next",
+        update_date=now - timedelta(hours=1),
+    )
+
+    calls = []
+
+    def running_status(job_id):
+        calls.append(job_id)
+        return {"status": "RUNNING"}
+
+    monkeypatch.setattr("files.remote_encoding.get_runpod_job_status", running_status)
+
+    first = reconcile_remote_encodings(limit=1)
+    second = reconcile_remote_encodings(limit=1)
+
+    assert first["checked"] == 1
+    assert second["checked"] == 1
+    assert calls == ["job-oldest", "job-next"]

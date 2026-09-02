@@ -148,7 +148,7 @@ def test_production_web_converges_with_at_most_one_extra_replica():
     prod = _read("deploy/scripts/prod_rolling_update.sh")
     staging = _read("deploy/scripts/staging_rolling_update.sh")
     assert '"scaled"' in prod
-    assert '"single"' in staging
+    assert '"scaled"' in staging
     assert "temporary=$((EXPECTED_WEB_REPLICAS + 1))" in common
     assert "current_release_healthy_count web" in common
     assert "cannot free a web scale slot" in common
@@ -694,3 +694,155 @@ def test_dev_celery_framework_noise_is_targeted_and_logs_are_bounded():
 
     assert "CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True" in settings_py
     assert "broker_connection_retry_on_startup" in celery_py
+
+
+
+def test_staging_has_stable_functional_ingress_and_true_scaled_web_roll():
+    staging_compose = _read("docker-compose.yaml")
+    staging_updater = _read("deploy/scripts/staging_rolling_update.sh")
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    ingress_conf = _read("deploy/docker/staging_ingress.conf")
+
+    web = _service_block(staging_compose, "web")
+    ingress = _service_block(staging_compose, "staging_ingress")
+
+    assert '"scaled"' in staging_updater
+    assert '"80:80"' not in web
+    assert 'expose:\n      - "80"' in web
+    assert '"80:80"' in ingress
+    assert "nginx:1.30.4-alpine" in ingress
+    assert "staging_ingress.conf:/etc/nginx/nginx.conf:ro" in ingress
+    assert "wget -q -O /dev/null http://127.0.0.1/" in ingress
+
+    # Dynamic Docker DNS is what keeps a stable ingress useful while web IDs
+    # change underneath it. The upload contract must not regress either.
+    assert "resolver 127.0.0.11 valid=1s ipv6=off" in ingress_conf
+    assert "server web:80 resolve" in ingress_conf
+    assert "client_max_body_size 5800M" in ingress_conf
+    assert "proxy_request_buffering off" in ingress_conf
+    assert "proxy_next_upstream" in ingress_conf
+
+    assert "STAGING_INGRESS_CHANGED=0" in common
+    assert "STAGING_INGRESS_VALIDATED=0" in common
+    assert "prepare_staging_ingress()" in common
+    assert "compose run --rm --no-deps --entrypoint nginx staging_ingress" in common
+    assert "compose create --no-deps staging_ingress" not in common
+    assert "STAGING_INGRESS_PRECREATED" not in common
+    assert "ensure_staging_ingress()" in common
+    assert "require_staging_ingress_healthy()" in common
+    assert "staging_ingress)" in common
+
+    main = common.split("rolling_update_main()", 1)[1]
+    assert main.index("prepare_staging_ingress") < main.index("update_web")
+    assert main.index("update_web") < main.rindex("ensure_staging_ingress")
+    assert main.rindex("require_staging_ingress_healthy") < main.rindex("record_release")
+
+
+def test_prestart_failed_migration_is_fail_closed_and_password_is_not_logged(tmp_path):
+    prestart = _read("deploy/docker/prestart.sh")
+    assert prestart.startswith("#!/bin/bash\nset -e\n")
+    assert "Created admin user with password" not in prestart
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python"
+    fake_python.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [[ \"$1\" == \"-c\" ]]; then echo generatedpass; exit 0; fi\n"
+        "if [[ \"$1\" == \"manage.py\" && \"$2\" == \"migrate\" ]]; then exit 41; fi\n"
+        "exit 99\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}:{env.get('PATH', '')}",
+            "ENABLE_MIGRATIONS": "yes",
+            "ADMIN_USER": "admin",
+            "ADMIN_EMAIL": "admin@example.invalid",
+        }
+    )
+    result = subprocess.run(
+        ["bash", "deploy/docker/prestart.sh"],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert result.returncode == 41
+    assert "RUNNING COLLECTSTATIC" not in result.stdout
+
+
+def test_static_release_gc_preserves_live_states_and_recent_rollbacks(tmp_path):
+    state = tmp_path / "state"
+    static_root = state / "static"
+    static_root.mkdir(parents=True)
+
+    current = "a" * 40
+    prod = "b" * 40
+    inprogress = "c" * 40
+    recent_1 = "d" * 40
+    recent_2 = "e" * 40
+    old_1 = "1" * 40
+    old_2 = "2" * 40
+
+    # Oldest -> newest. Protected snapshots survive regardless of age; two
+    # additional recent snapshots are retained as rollback candidates.
+    ordered = [old_1, prod, old_2, inprogress, recent_1, recent_2, current]
+    base = 1_700_000_000
+    for offset, sha in enumerate(ordered):
+        directory = static_root / sha
+        directory.mkdir()
+        os.utime(directory, (base + offset, base + offset))
+
+    (state / "staging.release").write_text(current + "\n", encoding="utf-8")
+    (state / "production.release").write_text(prod + "\n", encoding="utf-8")
+    (state / "production.redis-migration.inprogress").write_text(
+        f"target_sha={inprogress}\nphase=80\n", encoding="utf-8"
+    )
+
+    stale_tmp = static_root / f"{old_1}.tmp.123"
+    stale_tmp.mkdir()
+    os.utime(stale_tmp, (base, base))
+    protected_tmp = static_root / f"{inprogress}.tmp.456"
+    protected_tmp.mkdir()
+    os.utime(protected_tmp, (base, base))
+
+    script = (
+        "source deploy/scripts/rolling_update_common.sh\n"
+        f"CURRENT_SHA={current}\n"
+        "ENVIRONMENT_NAME=test\n"
+        "STATIC_RELEASE_KEEP_COUNT=2\n"
+        "STATIC_TMP_MAX_AGE_MINUTES=1\n"
+        "cleanup_static_releases\n"
+    )
+    result = _bash(script, env={"ROLLING_STATE_DIR": str(state)})
+    assert result.returncode == 0, result.stderr
+
+    assert (static_root / current).is_dir()
+    assert (static_root / prod).is_dir()
+    assert (static_root / inprogress).is_dir()
+    assert (static_root / recent_1).is_dir()
+    assert (static_root / recent_2).is_dir()
+    assert not (static_root / old_1).exists()
+    assert not (static_root / old_2).exists()
+    assert not stale_tmp.exists()
+    assert protected_tmp.exists()
+
+
+def test_static_gc_runs_only_on_success_paths_after_release_state_or_noop_gate():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    main = common.split("rolling_update_main()", 1)[1]
+    assert "cleanup_static_releases()" in common
+    assert 'STATIC_RELEASE_KEEP_COUNT="${STATIC_RELEASE_KEEP_COUNT:-3}"' in common
+    assert '"$ROLLING_STATE_DIR"/*.release' in common
+    assert '"$ROLLING_STATE_DIR"/*.inprogress' in common
+    assert '"$ROLLING_STATE_DIR"/*.complete' in common
+
+    final_record = main.rindex("record_release")
+    final_gc = main.rindex("cleanup_static_releases")
+    assert final_record < final_gc

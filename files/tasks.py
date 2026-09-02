@@ -1722,6 +1722,17 @@ def _fail_reconciled_runpod_job(job_id, message):
             ).update(encoding_status="fail")
 
 
+def _touch_reconciled_runpod_job(job_id):
+    # update_date is already an auto_now field on Encoding. Explicit QuerySet
+    # updates do not run auto_now, so touch it here after every reconciliation
+    # attempt. This gives round-robin-ish fairness without adding schema/state.
+    return Encoding.objects.filter(
+        worker="runpod",
+        status="running",
+        task_id=job_id,
+    ).update(update_date=timezone.now())
+
+
 @task(
     name="reconcile_remote_encodings",
     queue="short_tasks",
@@ -1749,8 +1760,8 @@ def reconcile_remote_encodings(limit=None):
             status="running",
         )
         .exclude(task_id="")
-        .values("task_id", "media_id", "add_date")
-        .order_by("add_date")[: max(limit * 8, limit)]
+        .values("task_id", "media_id", "add_date", "update_date", "id")
+        .order_by("update_date", "id")[: max(limit * 8, limit)]
     )
 
     jobs = {}
@@ -1787,6 +1798,11 @@ def reconcile_remote_encodings(limit=None):
         except Exception:
             logger.exception("RunPod reconciliation lookup failed job_id=%s", job_id)
             continue
+        finally:
+            # A checked job moves to the back even after a transient lookup
+            # failure. Terminal jobs are already status=fail/success and the
+            # helper intentionally ignores them.
+            _touch_reconciled_runpod_job(job_id)
 
         state = str(status_payload.get("status") or "").upper()
         media = Media.objects.filter(pk=row["media_id"]).first()

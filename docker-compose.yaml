@@ -62,8 +62,8 @@ services:
     <<: *mediacms_app
     deploy:
       replicas: 1
-    ports:
-      - "80:80"
+    expose:
+      - "80"
     volumes:
       - ${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro
       - ./media_files:/home/mediacms.io/mediacms/media_files
@@ -129,6 +129,29 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+
+  staging_ingress:
+    # Stable port owner for true 1 -> 2 -> healthcheck -> 1 staging web rolls.
+    # Nginx >= 1.27.3 supports open-source dynamic DNS re-resolution for
+    # upstream servers; use a current stable pinned version rather than latest.
+    image: nginx:1.30.4-alpine
+    stop_grace_period: 30s
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/docker/staging_ingress.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      # Functional check: this request traverses staging_ingress -> web.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
 
   deposit_service:
     labels:

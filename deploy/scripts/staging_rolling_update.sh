@@ -8,7 +8,7 @@ configure_rolling_update \
   "${REDIS_VOLUME_NAME:-mediacms-staging-redis-data}" \
   "staging" \
   1 \
-  "single" \
+  "scaled" \
   0 \
   "staging"
 

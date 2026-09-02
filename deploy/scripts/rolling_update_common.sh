@@ -42,6 +42,12 @@ SWEEPER_WAS_RUNNING=""
 SIGNER_WAS_RUNNING=""
 STATIC_RELEASE_DIR=""
 STATIC_CHANGED=0
+STAGING_INGRESS_CHANGED=0
+STAGING_INGRESS_VALIDATED=0
+# Keep a few completed snapshots for rollback in addition to every snapshot
+# protected by a release/in-progress state file.
+STATIC_RELEASE_KEEP_COUNT="${STATIC_RELEASE_KEEP_COUNT:-3}"
+STATIC_TMP_MAX_AGE_MINUTES="${STATIC_TMP_MAX_AGE_MINUTES:-1440}"
 
 configure_rolling_update() {
   PROJECT="$1"
@@ -226,6 +232,12 @@ verify_runtime_dependencies() {
     # it a prerequisite for an otherwise web-only staging deployment.
     (( $(healthy_service_count dfx_signer_service) >= 1 )) || die "deployed dfx_signer_service has no healthy replica"
   fi
+
+  # During the one-time topology migration staging_ingress is not running yet.
+  # After it exists, its healthcheck is end-to-end through the web service.
+  if [[ "$ENVIRONMENT_NAME" == "staging" ]] && service_exists staging_ingress && service_is_running staging_ingress; then
+    wait_healthy staging_ingress 90 1 || die "staging ingress is not serving the web application"
+  fi
 }
 legacy_preflight() {
   local count
@@ -325,6 +337,10 @@ main_image_inputs_changed() {
       deploy/scripts/check_rolling_migrations.py)
         return 0
         ;;
+      deploy/docker/staging_ingress.conf)
+        # Stable staging infrastructure, not an input of the MediaCMS image.
+        continue
+        ;;
       frontend/*|deposit_service/*|sweeper_service/*|runpod_worker/*|docs/*|tests/*|.github/*|maintenance/*|docker-compose*.yaml|deploy/scripts/*|*.md|.env.example|.gitignore)
         continue
         ;;
@@ -368,6 +384,11 @@ classify_compose_delta() {
       dfx_signer_service)
         SIGNER_CONFIG_CHANGED=1
         ;;
+      staging_ingress)
+        [[ "$ENVIRONMENT_NAME" == "staging" ]] || \
+          die "$COMPOSE_FILE unexpectedly defines staging_ingress outside staging"
+        STAGING_INGRESS_CHANGED=1
+        ;;
       db|redis)
         die "$COMPOSE_FILE changes live $service; PostgreSQL/Redis are intentionally outside rolling application updates"
         ;;
@@ -388,6 +409,11 @@ classify_release() {
   if (( first_run )) || changed_matches '^frontend/'; then FRONTEND_CHANGED=1; fi
   if (( first_run )) || changed_matches '^static/'; then STATIC_CHANGED=1; fi
   if (( first_run )) || main_image_inputs_changed; then MAIN_IMAGE_CHANGED=1; fi
+  if [[ "$ENVIRONMENT_NAME" == "staging" ]]; then
+    if (( first_run )) || changed_matches '^deploy/docker/staging_ingress\.conf$'; then
+      STAGING_INGRESS_CHANGED=1
+    fi
+  fi
   if (( first_run )) || changed_matches '^deposit_service/(Dockerfile|requirements\.txt|app/)'; then DEPOSIT_IMAGE_CHANGED=1; fi
   if changed_matches '^deposit_service/config/'; then DEPOSIT_CONFIG_CHANGED=1; fi
   if (( first_run )) || changed_matches '^sweeper_service/(Dockerfile|requirements\.txt|app/)'; then
@@ -424,8 +450,9 @@ frontend_build_needed() { app_update_needed; }
 deposit_update_needed() { (( DEPOSIT_IMAGE_CHANGED || DEPOSIT_CONFIG_CHANGED )); }
 sweeper_update_needed() { (( SWEEPER_IMAGE_CHANGED || SWEEPER_CONFIG_CHANGED )); }
 signer_update_needed() { (( SIGNER_IMAGE_CHANGED || SIGNER_CONFIG_CHANGED )); }
+staging_ingress_update_needed() { (( STAGING_INGRESS_CHANGED )); }
 crypto_update_needed() { deposit_update_needed || sweeper_update_needed || signer_update_needed; }
-stack_update_needed() { app_update_needed || crypto_update_needed; }
+stack_update_needed() { app_update_needed || crypto_update_needed || staging_ingress_update_needed; }
 
 print_plan() {
   local app_release=0
@@ -441,6 +468,7 @@ print_plan() {
   echo "  deposit image/config:  $DEPOSIT_IMAGE_CHANGED/$DEPOSIT_CONFIG_CHANGED"
   echo "  sweeper image/config:  $SWEEPER_IMAGE_CHANGED/$SWEEPER_CONFIG_CHANGED"
   echo "  signer image/config:   $SIGNER_IMAGE_CHANGED/$SIGNER_CONFIG_CHANGED"
+  echo "  staging ingress:       $STAGING_INGRESS_CHANGED"
   echo "  legacy bootstrap:      $LEGACY_BOOTSTRAP"
 }
 
@@ -450,6 +478,50 @@ build_required_images() {
   if (( SWEEPER_IMAGE_CHANGED || SIGNER_IMAGE_CHANGED )); then
     compose_crypto build dfx_signer_service sweeper_service
   fi
+  if staging_ingress_update_needed; then
+    # Pull before touching live application processes.
+    compose pull staging_ingress
+  fi
+}
+
+staging_ingress_configured() {
+  [[ "$ENVIRONMENT_NAME" == "staging" ]] && service_exists staging_ingress
+}
+
+prepare_staging_ingress() {
+  staging_ingress_configured || return 0
+  if service_is_running staging_ingress && ! staging_ingress_update_needed; then return 0; fi
+
+  echo "rolling-update[$ENVIRONMENT_NAME]: validating stable staging ingress config without binding :80"
+  # docker compose run does not publish service ports unless explicitly requested.
+  compose run --rm --no-deps --entrypoint nginx staging_ingress \
+    -t -c /etc/nginx/nginx.conf
+  STAGING_INGRESS_VALIDATED=1
+}
+
+ensure_staging_ingress() {
+  staging_ingress_configured || return 0
+
+  if service_is_running staging_ingress; then
+    if staging_ingress_update_needed; then
+      (( STAGING_INGRESS_VALIDATED )) || die "staging ingress config was not validated before recreate"
+      echo "rolling-update[$ENVIRONMENT_NAME]: applying staging ingress config"
+      compose up -d --no-deps --force-recreate staging_ingress
+    fi
+  else
+    (( STAGING_INGRESS_VALIDATED )) || prepare_staging_ingress
+    echo "rolling-update[$ENVIRONMENT_NAME]: starting stable staging ingress on :80"
+    compose up -d --no-deps staging_ingress
+  fi
+
+  wait_healthy staging_ingress 90 1 || die "staging ingress is not serving the web application"
+}
+
+require_staging_ingress_healthy() {
+  [[ "$ENVIRONMENT_NAME" == "staging" ]] || return 0
+  service_exists staging_ingress || die "staging compose is missing the stable staging_ingress service"
+  service_is_running staging_ingress || die "staging ingress is not running"
+  wait_healthy staging_ingress 90 1 || die "staging ingress is not serving the web application"
 }
 
 check_pending_migrations() {
@@ -852,6 +924,83 @@ restart_crypto_after_update() {
   fi
 }
 
+static_release_sha_valid() {
+  [[ "$1" =~ ^[0-9a-f]{40}$ ]]
+}
+
+cleanup_static_releases() {
+  local root="$ROLLING_STATE_DIR/static" state sha target dir name kept=0
+  [[ -d "$root" ]] || return 0
+
+  if ! [[ "$STATIC_RELEASE_KEEP_COUNT" =~ ^[0-9]+$ ]]; then
+    echo "rolling-update[$ENVIRONMENT_NAME]: WARNING invalid STATIC_RELEASE_KEEP_COUNT=$STATIC_RELEASE_KEEP_COUNT; skipping static GC" >&2
+    return 0
+  fi
+  if ! [[ "$STATIC_TMP_MAX_AGE_MINUTES" =~ ^[0-9]+$ ]]; then
+    echo "rolling-update[$ENVIRONMENT_NAME]: WARNING invalid STATIC_TMP_MAX_AGE_MINUTES=$STATIC_TMP_MAX_AGE_MINUTES; skipping static GC" >&2
+    return 0
+  fi
+
+  # The state directory is shared by staging/production on a checkout. Never
+  # prune another environment's current release, an interrupted target, or the
+  # release adopted by the one-time Redis persistence migration.
+  declare -A protected=()
+  if static_release_sha_valid "$CURRENT_SHA"; then protected["$CURRENT_SHA"]=1; fi
+
+  for state in "$ROLLING_STATE_DIR"/*.release "$ROLLING_STATE_DIR"/*.complete "$ROLLING_STATE_DIR"/*.inprogress; do
+    [[ -f "$state" ]] || continue
+    target="$(grep -E '^target_sha=' "$state" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+    if static_release_sha_valid "$target"; then
+      protected["$target"]=1
+      continue
+    fi
+    sha="$(tr -d '[:space:]' < "$state" 2>/dev/null || true)"
+    if static_release_sha_valid "$sha"; then protected["$sha"]=1; fi
+  done
+
+  mapfile -t snapshot_dirs < <(
+    find "$root" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null \
+      | sort -nr \
+      | cut -d' ' -f2-
+  )
+
+  for dir in "${snapshot_dirs[@]}"; do
+    name="${dir##*/}"
+    static_release_sha_valid "$name" || continue
+    [[ -n "${protected[$name]:-}" ]] && continue
+    if (( kept < STATIC_RELEASE_KEEP_COUNT )); then
+      kept=$((kept + 1))
+      continue
+    fi
+    if rm -rf -- "$dir"; then
+      echo "rolling-update[$ENVIRONMENT_NAME]: pruned old static snapshot $name"
+    else
+      echo "rolling-update[$ENVIRONMENT_NAME]: WARNING failed to prune static snapshot $name" >&2
+    fi
+  done
+
+  # A crash can leave <sha>.tmp.<pid> from prepare_static_release(). Remove only
+  # old temp dirs whose target SHA is not protected by any live/in-progress state.
+  for dir in "$root"/*.tmp.*; do
+    [[ -d "$dir" ]] || continue
+    name="${dir##*/}"
+    sha="${name%%.tmp.*}"
+    static_release_sha_valid "$sha" || continue
+    [[ -n "${protected[$sha]:-}" ]] && continue
+    if find "$dir" -maxdepth 0 -mmin "+$STATIC_TMP_MAX_AGE_MINUTES" -print -quit 2>/dev/null | grep -q .; then
+      if rm -rf -- "$dir"; then
+        echo "rolling-update[$ENVIRONMENT_NAME]: pruned stale static temp ${name}"
+      else
+        echo "rolling-update[$ENVIRONMENT_NAME]: WARNING failed to prune static temp ${name}" >&2
+      fi
+    fi
+  done
+
+  # Garbage collection is post-success housekeeping. A cleanup failure must not
+  # turn an already-recorded healthy release into an ambiguous failed deploy.
+  return 0
+}
+
 record_release() {
   mkdir -p "$ROLLING_STATE_DIR"
   local tmp="${STATE_FILE}.tmp.$$"
@@ -891,6 +1040,12 @@ EOF_REDIS
   load_release_delta
   if [[ -n "$BASE_SHA" && "$BASE_SHA" == "$CURRENT_SHA" && "${CRYPTO_WORKERS:-0}" != 1 ]]; then
     rm -f "$INPROGRESS_FILE"
+    if [[ "$ENVIRONMENT_NAME" == "staging" ]]; then
+      prepare_staging_ingress
+      ensure_staging_ingress
+      require_staging_ingress_healthy
+    fi
+    cleanup_static_releases
     echo "rolling-update[$ENVIRONMENT_NAME]: $CURRENT_SHA is already recorded as deployed; health/preflight OK"
     trap - EXIT
     return 0
@@ -901,7 +1056,13 @@ EOF_REDIS
   print_plan
 
   if ! stack_update_needed; then
+    if [[ "$ENVIRONMENT_NAME" == "staging" ]]; then
+      prepare_staging_ingress
+      ensure_staging_ingress
+      require_staging_ingress_healthy
+    fi
     record_release
+    cleanup_static_releases
     trap - EXIT
     echo "rolling-update[$ENVIRONMENT_NAME]: no Docker-stack component changed; release marker advanced only"
     return 0
@@ -914,6 +1075,10 @@ EOF_REDIS
 
   build_frontend_dist
   build_required_images
+  # On the first staging topology migration this validates the pinned ingress
+  # config in a one-shot container without publishing :80. The old web can keep
+  # serving until the new unbound web replica has passed its healthcheck.
+  prepare_staging_ingress
   if app_update_needed; then
     prepare_static_release
     if [[ "$(progress_get migrations_done 0)" != 1 ]]; then
@@ -934,11 +1099,17 @@ EOF_REDIS
     restart_celery
   fi
 
+  # Staging ingress owns host :80 only after web convergence. On subsequent
+  # releases it stays up while web performs the true 1 -> 2 -> health -> 1 roll.
+  ensure_staging_ingress
+
   if crypto_update_needed; then restart_crypto_after_update; fi
 
   app_preflight
   verify_runtime_dependencies
+  require_staging_ingress_healthy
   record_release
+  cleanup_static_releases
 
   trap - EXIT
   echo "rolling-update[$ENVIRONMENT_NAME]: complete at $CURRENT_SHA; PostgreSQL/Redis and DNS routing were untouched"
