@@ -1,0 +1,36 @@
+name: mediacms-dev
+
+# Optional source-bind override for interactive development. The default
+# docker-compose-dev.yaml intentionally stays production-parity so structural
+# tests exercise the same image/static isolation used in deployment.
+#
+# Usage:
+#   docker compose -f docker-compose-dev.yaml -f docker-compose-dev-live.yaml up
+services:
+  migrations:
+    volumes:
+      - ./:/home/mediacms.io/mediacms/
+
+  web:
+    volumes:
+      - ./:/home/mediacms.io/mediacms/
+
+  deposit_service:
+    volumes:
+      - ./deposit_service/app:/app/app
+
+  dfx_signer_service:
+    volumes:
+      - ./sweeper_service/app:/app/app
+
+  sweeper_service:
+    volumes:
+      - ./sweeper_service/app:/app/app
+
+  celery_beat:
+    volumes:
+      - ./:/home/mediacms.io/mediacms/
+
+  celery_worker:
+    volumes:
+      - ./:/home/mediacms.io/mediacms/

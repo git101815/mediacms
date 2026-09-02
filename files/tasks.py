@@ -1805,7 +1805,22 @@ def reconcile_remote_encodings(limit=None):
                     )
                     _fail_reconciled_runpod_job(job_id, message)
                     failed += 1
+            except ValueError as exc:
+                # Media/payload validation failures are permanent for a
+                # COMPLETED RunPod result. Finalize them instead of leaving the
+                # Encoding stuck in "running" forever.
+                message = f"RunPod job completed with invalid MediaCMS result: {exc}"
+                logger.error(
+                    "RunPod reconciliation rejected completed result job_id=%s token=%s error=%s",
+                    job_id,
+                    media.friendly_token,
+                    exc,
+                )
+                _fail_reconciled_runpod_job(job_id, message)
+                failed += 1
             except Exception:
+                # Unexpected infrastructure/DB failures may be transient, so
+                # keep those retryable instead of forcing a terminal failure.
                 logger.exception(
                     "RunPod reconciliation apply failed job_id=%s token=%s",
                     job_id,

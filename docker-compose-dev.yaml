@@ -1,5 +1,8 @@
 name: mediacms-dev
 
+# Default dev stack mirrors production process isolation. For source hot-reload,
+# layer docker-compose-dev-live.yaml on top of this file.
+
 x-mediacms-app: &mediacms_app
   image: mediacms-local:dev
   pull_policy: never
@@ -20,7 +23,10 @@ services:
   migrations:
     <<: *mediacms_app
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     command: "./deploy/docker/prestart.sh"
     environment:
       <<: *mediacms_db_env
@@ -57,7 +63,7 @@ services:
     volumes:
       - ${PWD}/frontend:/home/mediacms.io/mediacms/frontend/
     working_dir: /home/mediacms.io/mediacms/frontend/
-    command: bash -c "npm install && npm run start"
+    command: bash -c "npm ci --no-audit --no-fund && npm run start"
     env_file:
       - ${PWD}/frontend/.env
     ports:
@@ -66,6 +72,9 @@ services:
       - web
 
   web:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    stop_grace_period: 90s
     <<: *mediacms_app
     command: "python manage.py runserver 0.0.0.0:80"
     healthcheck:
@@ -123,7 +132,10 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -133,6 +145,9 @@ services:
         condition: service_healthy
 
   deposit_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    stop_grace_period: 2m
     profiles:
       - crypto-workers
     build:
@@ -191,7 +206,6 @@ services:
       POLYGON_RPC_URL_FALLBACK_1: ${POLYGON_RPC_URL_FALLBACK_1}
       POLYGON_RPC_URL_FALLBACK_2: ${POLYGON_RPC_URL_FALLBACK_2}
     volumes:
-      - ./deposit_service/app:/app/app
       - ./deposit_service/config:/app/config:ro
       - ./deposit_service/data:/data
     depends_on:
@@ -202,6 +216,9 @@ services:
     restart: unless-stopped
 
   dfx_signer_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    stop_grace_period: 30s
     expose:
       - "8080"
     healthcheck:
@@ -236,11 +253,11 @@ services:
         target: sweeper_evm_mnemonic
       - source: sweeper_evm_mnemonic_passphrase
         target: sweeper_evm_mnemonic_passphrase
-    volumes:
-      - ./sweeper_service/app:/app/app
     restart: unless-stopped
 
   sweeper_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 15m
     profiles:
       - crypto-workers
@@ -319,7 +336,6 @@ services:
       - source: polygon_sweeper_funding_private_key
         target: polygon_sweeper_funding_private_key
     volumes:
-      - ./sweeper_service/app:/app/app
       - ./sweeper_service/config:/app/config:ro
       - ./sweeper_service/data:/data
     depends_on:
@@ -330,9 +346,15 @@ services:
     restart: unless-stopped
 
   celery_beat:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    stop_grace_period: 30s
     <<: *mediacms_app
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       DEVELOPMENT_MODE: True
@@ -357,11 +379,17 @@ services:
     restart: unless-stopped
 
   celery_worker:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    stop_grace_period: 2h10m
     <<: *mediacms_app
     deploy:
       replicas: 1
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       DEVELOPMENT_MODE: True
@@ -397,6 +425,7 @@ services:
     restart: unless-stopped
 
   db:
+    stop_grace_period: 60s
     image: postgres:17.2-alpine
     volumes:
       - ../postgres_data:/var/lib/postgresql/data/
@@ -413,6 +442,7 @@ services:
       retries: 5
 
   redis:
+    stop_grace_period: 60s
     image: redis:alpine
     restart: always
     healthcheck:

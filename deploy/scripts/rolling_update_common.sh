@@ -812,23 +812,30 @@ restart_crypto_after_update() {
   capture_crypto_initial_state
 
   if (( DEPOSIT_WAS_RUNNING )) || [[ "${CRYPTO_WORKERS:-0}" == 1 ]]; then
-    if deposit_update_needed; then
+    # A signer rotation deliberately quiesces the financial loops. Recreate
+    # those loops instead of merely starting their old containers so they get
+    # the current release identity and a fresh signer dependency context.
+    if deposit_update_needed || signer_update_needed; then
       compose_crypto up -d --no-deps --force-recreate deposit_service
     elif [[ -z "$(service_container_ids deposit_service)" ]]; then
       compose_crypto start deposit_service >/dev/null || compose_crypto up -d --no-deps deposit_service
     fi
     wait_healthy deposit_service 120 1
-    if deposit_update_needed; then assert_current_release_service deposit_service 1; fi
+    if deposit_update_needed || signer_update_needed; then
+      assert_current_release_service deposit_service 1
+    fi
   fi
 
   if (( SWEEPER_WAS_RUNNING )) || [[ "${CRYPTO_WORKERS:-0}" == 1 ]]; then
-    if sweeper_update_needed; then
+    if sweeper_update_needed || signer_update_needed; then
       compose_crypto up -d --no-deps --force-recreate sweeper_service
     elif [[ -z "$(service_container_ids sweeper_service)" ]]; then
       compose_crypto start sweeper_service >/dev/null || compose_crypto up -d --no-deps sweeper_service
     fi
     wait_healthy sweeper_service 120 1
-    if sweeper_update_needed; then assert_current_release_service sweeper_service 1; fi
+    if sweeper_update_needed || signer_update_needed; then
+      assert_current_release_service sweeper_service 1
+    fi
   fi
 }
 

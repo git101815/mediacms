@@ -67,6 +67,7 @@ def test_runpod_status_url_quotes_job_id():
 
 
 @pytest.mark.django_db
+@override_settings(REMOTE_ENCODING_ENABLED=True)
 def test_completed_runpod_job_with_invalid_output_is_finalized_failed(
     media_factory, profile_factory, encoding_factory, monkeypatch
 ):
@@ -83,3 +84,32 @@ def test_completed_runpod_job_with_invalid_output_is_finalized_failed(
     assert result["failed"] == 1
     assert encoding.status == "fail"
     assert "valid signed MediaCMS result" in encoding.logs
+
+@pytest.mark.django_db
+@override_settings(REMOTE_ENCODING_ENABLED=True)
+def test_completed_runpod_job_with_invalid_applied_payload_is_finalized_failed(
+    media_factory, profile_factory, encoding_factory, monkeypatch
+):
+    media = media_factory()
+    profile = profile_factory(codec="h264", resolution=720)
+    encoding = encoding_factory(media=media, profile=profile, status="running", progress=0)
+    type(encoding).objects.filter(pk=encoding.pk).update(
+        worker="runpod", task_id="job-invalid-applied"
+    )
+    monkeypatch.setattr(
+        "files.remote_encoding.get_runpod_job_status",
+        lambda _job_id: {"status": "COMPLETED", "output": {"signed": True}},
+    )
+
+    def invalid_result(_media, _output):
+        raise ValueError("Media mismatch")
+
+    monkeypatch.setattr("files.tasks._apply_reconciled_runpod_output", invalid_result)
+
+    result = reconcile_remote_encodings(limit=1)
+    encoding.refresh_from_db()
+
+    assert result["checked"] == 1
+    assert result["failed"] == 1
+    assert encoding.status == "fail"
+    assert "invalid MediaCMS result" in encoding.logs

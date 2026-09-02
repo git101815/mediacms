@@ -80,7 +80,7 @@ def test_frontend_build_is_one_shot_reproducible_and_release_scoped():
 
 
 def test_app_and_migrations_are_image_isolated_with_release_static_snapshot():
-    for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml"):
+    for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml", "docker-compose-dev.yaml"):
         compose = _read(compose_path)
         for service in ("web", "celery_worker", "celery_beat"):
             block = _service_block(compose, service)
@@ -97,7 +97,7 @@ def test_app_and_migrations_are_image_isolated_with_release_static_snapshot():
 
 
 def test_release_labels_cover_resumable_web_signer_and_workers():
-    for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml"):
+    for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml", "docker-compose-dev.yaml"):
         compose = _read(compose_path)
         for service in (
             "web",
@@ -482,3 +482,56 @@ def test_celery_release_labels_are_verified_after_restart():
     restart = common.split("restart_celery()", 1)[1].split("restart_crypto_after_update()", 1)[0]
     assert "assert_current_release_service celery_worker 1" in restart
     assert "assert_current_release_service celery_beat 1" in restart
+
+
+def test_signer_rotation_recreates_and_relabels_active_financial_loops():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    restart = common.split("restart_crypto_after_update()", 1)[1].split(
+        "record_release()", 1
+    )[0]
+    assert "if deposit_update_needed || signer_update_needed; then" in restart
+    assert "if sweeper_update_needed || signer_update_needed; then" in restart
+    assert "compose_crypto up -d --no-deps --force-recreate deposit_service" in restart
+    assert "compose_crypto up -d --no-deps --force-recreate sweeper_service" in restart
+    assert "assert_current_release_service deposit_service 1" in restart
+    assert "assert_current_release_service sweeper_service 1" in restart
+
+
+def test_default_dev_compose_is_production_parity_and_live_mounts_are_explicit_override():
+    dev = _read("docker-compose-dev.yaml")
+    live = _read("docker-compose-dev-live.yaml")
+
+    for service in ("migrations", "web", "celery_worker", "celery_beat"):
+        assert "- ./:/home/mediacms.io/mediacms/" not in _service_block(dev, service)
+        assert "- ./:/home/mediacms.io/mediacms/" in _service_block(live, service)
+
+    for service, source_mount in (
+        ("deposit_service", "./deposit_service/app:/app/app"),
+        ("dfx_signer_service", "./sweeper_service/app:/app/app"),
+        ("sweeper_service", "./sweeper_service/app:/app/app"),
+    ):
+        assert source_mount not in _service_block(dev, service)
+        assert source_mount in _service_block(live, service)
+
+
+def test_dev_runtime_stop_grace_periods_match_production_contract():
+    dev = _read("docker-compose-dev.yaml")
+    expected = {
+        "web": "90s",
+        "deposit_service": "2m",
+        "dfx_signer_service": "30s",
+        "sweeper_service": "15m",
+        "celery_beat": "30s",
+        "celery_worker": "2h10m",
+        "db": "60s",
+        "redis": "60s",
+    }
+    for service, duration in expected.items():
+        assert f"stop_grace_period: {duration}" in _service_block(dev, service)
+
+
+def test_dev_frontend_and_ci_use_committed_lockfile():
+    dev = _read("docker-compose-dev.yaml")
+    ci = _read(".github/workflows/ci.yml")
+    assert "npm ci --no-audit --no-fund && npm run start" in dev
+    assert "run: npm ci --no-audit --no-fund" in ci
