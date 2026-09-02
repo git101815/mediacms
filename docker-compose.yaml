@@ -23,7 +23,7 @@ services:
   migrations:
     <<: *mediacms_app
     volumes:
-      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static
+      - ${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup
@@ -65,7 +65,7 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
+      - ${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup
@@ -329,7 +329,7 @@ services:
     stop_grace_period: 30s
     <<: *mediacms_app
     volumes:
-      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
+      - ${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup
@@ -363,7 +363,7 @@ services:
     deploy:
       replicas: 1
     volumes:
-      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
+      - ${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup

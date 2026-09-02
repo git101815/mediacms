@@ -325,7 +325,7 @@ main_image_inputs_changed() {
       deploy/scripts/check_rolling_migrations.py)
         return 0
         ;;
-      frontend/*|deposit_service/*|sweeper_service/*|runpod_worker/*|docs/*|tests/*|.github/*|maintenance/*|static/*|docker-compose*.yaml|deploy/scripts/*|*.md|.env.example|.gitignore)
+      frontend/*|deposit_service/*|sweeper_service/*|runpod_worker/*|docs/*|tests/*|.github/*|maintenance/*|docker-compose*.yaml|deploy/scripts/*|*.md|.env.example|.gitignore)
         continue
         ;;
       *)
@@ -386,7 +386,7 @@ classify_release() {
   [[ -z "$BASE_SHA" ]] && first_run=1
 
   if (( first_run )) || changed_matches '^frontend/'; then FRONTEND_CHANGED=1; fi
-  if (( first_run )) || changed_matches '^static_src/'; then STATIC_CHANGED=1; fi
+  if (( first_run )) || changed_matches '^static/'; then STATIC_CHANGED=1; fi
   if (( first_run )) || main_image_inputs_changed; then MAIN_IMAGE_CHANGED=1; fi
   if (( first_run )) || changed_matches '^deposit_service/(Dockerfile|requirements\.txt|app/)'; then DEPOSIT_IMAGE_CHANGED=1; fi
   if changed_matches '^deposit_service/config/'; then DEPOSIT_CONFIG_CHANGED=1; fi
@@ -476,7 +476,7 @@ prepare_static_release() {
   fi
 
   # STATIC_RELEASE_DIR is generated output, never a copy of the mutable
-  # checkout. Django collectstatic fills this clean directory from static_src/
+  # checkout. Django collectstatic fills this clean directory from static/
   # and installed-app finders during the migrations phase.
   tmp="${STATIC_RELEASE_DIR}.tmp.$$"
   rm -rf "$tmp"

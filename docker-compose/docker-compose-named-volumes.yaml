@@ -29,7 +29,7 @@ services:
       - "80:80"
     volumes:
       - media_store:/home/mediacms.io/mediacms/media_files/
-      - static_store:/home/mediacms.io/mediacms/static/
+      - static_store:/home/mediacms.io/mediacms/static_collected/
       - ./deploy/docker/local_settings.py:/home/mediacms.io/mediacms/deploy/docker/local_settings.py
     environment:
       ENABLE_CELERY_BEAT: 'no'
@@ -56,7 +56,7 @@ services:
       replicas: 1
     volumes:
       - media_store:/home/mediacms.io/mediacms/media_files/
-      - static_store:/home/mediacms.io/mediacms/static/
+      - static_store:/home/mediacms.io/mediacms/static_collected/
       - ./deploy/docker/local_settings.py:/home/mediacms.io/mediacms/deploy/docker/local_settings.py
     environment:
       ENABLE_UWSGI: 'no'

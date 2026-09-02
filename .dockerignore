@@ -69,5 +69,18 @@ frontend/dist/
 frontend/build/
 static_collected/
 
-# Django collectstatic output is runtime/release data; sources are in static_src/
-/static/
+# static/ is canonical source. Ignore only generated output and known
+# leftovers from the historical STATIC_ROOT=static/ configuration.
+static/admin/
+static/ckeditor/
+static/debug_toolbar/
+static/mptt/
+static/rest_framework/
+static/drf-yasg/
+static/jazzmin/
+static/css/
+static/js/
+static/vendor/
+static/favicons/browserconfig.xml
+static/favicons/site.webmanifest
+static/lib/gfonts/LICENSE.txt

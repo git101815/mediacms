@@ -217,7 +217,7 @@ else
 fi
 
 # Prepare a clean release-owned collectstatic output tree. Static sources
-# live in static_src/ inside the target image; migrations populate this mount.
+# live in static/ inside the target image; migrations populate static_collected/.
 if [[ ! -d "$REDIS_STATIC_DIR" ]]; then
   (( phase < 80 )) || {
     echo "Release static snapshot is missing after migrations were recorded complete; refusing unsafe reconstruction." >&2

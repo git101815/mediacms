@@ -87,7 +87,7 @@ def test_prod_app_and_migrations_are_image_isolated_with_release_static_snapshot
         for service in ("web", "celery_worker", "celery_beat"):
             block = _service_block(compose, service)
             assert "- ./:/home/mediacms.io/mediacms/" not in block
-            assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" in block
+            assert "${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro" in block
             assert "./media_files:/home/mediacms.io/mediacms/media_files" in block
             assert "./logs:/home/mediacms.io/mediacms/logs" in block
             assert "./backup:/home/mediacms.io/mediacms/backup" in block
@@ -95,7 +95,7 @@ def test_prod_app_and_migrations_are_image_isolated_with_release_static_snapshot
 
         migrations = _service_block(compose, "migrations")
         assert "- ./:/home/mediacms.io/mediacms/" not in migrations
-        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static" in migrations
+        assert "${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected" in migrations
 
 
 def test_release_labels_cover_resumable_web_signer_and_workers():
@@ -448,7 +448,7 @@ def test_release_static_is_snapshot_mounted_not_live_checkout_static():
     assert "finalize_static_release()" in common
     for filename in ("docker-compose.yaml", "docker-compose-cloudflare.yaml"):
         compose = _read(filename)
-        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" in compose
+        assert "${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro" in compose
         for service in ("web", "celery_worker", "celery_beat"):
             block = _service_block(compose, service)
             assert "./static:/home/mediacms.io/mediacms/static" not in block
@@ -461,7 +461,7 @@ def test_migrations_run_immutable_image_and_checker_changes_rebuild_it():
     for filename in ("docker-compose.yaml", "docker-compose-cloudflare.yaml"):
         migrations = _service_block(_read(filename), "migrations")
         assert "./:/home/mediacms.io/mediacms/" not in migrations
-        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static" in migrations
+        assert "${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected" in migrations
 
 
 def test_frontend_build_is_lockfile_reproducible():
@@ -475,8 +475,10 @@ def test_frontend_build_is_lockfile_reproducible():
 
 def test_static_source_changes_trigger_image_rebuild_and_application_rotation():
     common = _read("deploy/scripts/rolling_update_common.sh")
+    classifier = common.split("main_image_inputs_changed()", 1)[1].split("classify_compose_delta()", 1)[0]
     assert "STATIC_CHANGED=0" in common
-    assert "changed_matches '^static_src/'" in common
+    assert "changed_matches '^static/'" in common
+    assert "static/*|" not in classifier
     assert "MAIN_IMAGE_CHANGED || APP_CONFIG_CHANGED || FRONTEND_CHANGED || STATIC_CHANGED" in common
 
 
@@ -484,11 +486,13 @@ def test_release_static_snapshot_starts_empty_and_is_filled_by_collectstatic():
     common = _read("deploy/scripts/rolling_update_common.sh")
     redis_migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
     prepare = common.split("prepare_static_release()", 1)[1].split("finalize_static_release()", 1)[0]
-    assert "cp -a static/." not in prepare
-    assert "static_src/" in prepare
-    assert "cp -a static/." not in redis_migration
-    assert "static_src/" in redis_migration
 
+    assert "cp -a static/." not in prepare
+    assert 'mkdir -p "$tmp"' in prepare
+    assert "Django collectstatic fills this clean directory from static/" in prepare
+    assert "cp -a static/." not in redis_migration
+    assert "live in static/ inside the target image" in redis_migration
+    assert "populate static_collected/" in redis_migration
 
 def test_celery_release_labels_are_verified_after_restart():
     common = _read("deploy/scripts/rolling_update_common.sh")
@@ -580,41 +584,41 @@ def test_entrypoint_chowns_only_runtime_writable_directories():
     assert "static" not in ownership
 
 
-def test_collectstatic_has_distinct_versioned_source_and_generated_outputs():
+def test_collectstatic_has_canonical_source_and_distinct_generated_output():
     prestart = _read("deploy/docker/prestart.sh")
     dev = _read("docker-compose-dev.yaml")
     settings_py = _read("cms/settings.py")
     dev_settings = _read("cms/dev_settings.py")
     gitignore = _read(".gitignore")
     dockerignore = _read(".dockerignore")
+    nginx = _read("deploy/docker/nginx_http_only.conf")
 
     assert 'echo "RUNNING COLLECTSTATIC"' in prestart
     assert "python manage.py collectstatic --noinput" in prestart
     assert "ENABLE_COLLECTSTATIC" not in prestart
     assert "ENABLE_COLLECTSTATIC" not in _service_block(dev, "migrations")
-    assert 'STATICFILES_DIRS = [os.path.join(BASE_DIR, "static_src")]' in settings_py
-    assert "STATICFILES_DIRS = (os.path.join(BASE_DIR, 'static_src'),)" in dev_settings
+    assert 'STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]' in settings_py
+    assert 'STATIC_ROOT = os.path.join(BASE_DIR, "static_collected")' in settings_py
+    assert "STATICFILES_DIRS = (os.path.join(BASE_DIR, 'static'),)" in dev_settings
     assert "STATIC_ROOT = os.path.join(BASE_DIR, 'static_collected')" in dev_settings
-    assert "/static/" in gitignore
-    assert "/static/" in dockerignore
-
-    tracked_output = subprocess.run(
-        ["git", "ls-files", "--", "static"], cwd=ROOT, text=True, capture_output=True, check=True
-    ).stdout.splitlines()
-    assert not [rel for rel in tracked_output if (ROOT / rel).exists()]
-    assert (ROOT / "static_src/ads/ads.css").is_file()
-    assert not (ROOT / "static_src/vendor").exists()
+    assert "/static_collected/" in gitignore
+    assert "\n/static/\n" not in gitignore
+    assert "static_collected/" in dockerignore
+    assert "\n/static/\n" not in dockerignore
+    assert (ROOT / "static/ads/ads.css").is_file()
+    assert not (ROOT / "static_src").exists()
+    assert not (ROOT / "static/vendor").exists()
+    assert "alias /home/mediacms.io/mediacms/static_collected" in nginx
 
     for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml"):
         compose = _read(compose_path)
         migrations = _service_block(compose, "migrations")
-        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static" in migrations
-        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" not in migrations
+        assert "${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected" in migrations
+        assert "${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro" not in migrations
 
         for service in ("web", "celery_worker", "celery_beat"):
             runtime = _service_block(compose, service)
-            assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" in runtime
-
+            assert "${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro" in runtime
 
 def test_celery_beat_schedule_lives_on_writable_runtime_volume():
     beat = _read("deploy/docker/supervisord/supervisord-celery_beat.conf")
@@ -623,17 +627,16 @@ def test_celery_beat_schedule_lives_on_writable_runtime_volume():
 
 
 def test_redundant_nested_static_tree_is_removed_from_canonical_source():
-    assert not (ROOT / "static_src/static").exists()
+    assert not (ROOT / "static/static").exists()
     for rel in (
-        "static_src/images/social-media-icons/reddit.svg",
-        "static_src/images/social-media-icons/telegram.svg",
-        "static_src/images/social-media-icons/vk.svg",
-        "static_src/images/social-media-icons/whatsapp.svg",
-        "static_src/images/social-media-icons/x.svg",
-        "static_src/images/wallet/cf-token.png",
+        "static/images/social-media-icons/reddit.svg",
+        "static/images/social-media-icons/telegram.svg",
+        "static/images/social-media-icons/vk.svg",
+        "static/images/social-media-icons/whatsapp.svg",
+        "static/images/social-media-icons/x.svg",
+        "static/images/wallet/cf-token.png",
     ):
         assert (ROOT / rel).is_file()
-
 
 def test_dev_celery_framework_noise_is_targeted_and_logs_are_bounded():
     dev = _read("docker-compose-dev.yaml")

@@ -187,10 +187,11 @@ TEMP_DIRECTORY = "/tmp"  # Don't use a temp directory inside BASE_DIR!!!
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_URL = "/static/"  # where js/css files are served
 MEDIA_URL = "/media/"  # URL where uploaded media files are served
-# Never scan STATIC_ROOT as a source. static_src/ is versioned input; static/
-# is generated collectstatic output (or a per-release bind mount in Docker).
-STATICFILES_DIRS = [os.path.join(BASE_DIR, "static_src")]
-STATIC_ROOT = os.path.join(BASE_DIR, "static")
+# static/ is the canonical versioned source tree. collectstatic always writes
+# to a distinct output tree so sources are never masked or recursively scanned.
+# Docker mounts each immutable release snapshot at static_collected/.
+STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]
+STATIC_ROOT = os.path.join(BASE_DIR, "static_collected")
 # where uploaded + encoded media are stored
 MEDIA_ROOT = BASE_DIR + "/media_files/"
 
@@ -830,8 +831,8 @@ if TESTING:
     HLS_DIR = os.path.join(MEDIA_ROOT, "hls")
     STATIC_ROOT = os.path.join(TESTING_ROOT, "static_collected")
 
-    # Keep tests on the same source/output split as production.
-    STATICFILES_DIRS = [os.path.join(BASE_DIR, "static_src")]
+    # Keep tests on the same canonical-source/output split as production.
+    STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]
 
     TEMP_DIRECTORY = os.path.join(TESTING_ROOT, "tmp")
     DB_BACKUP_DIR = os.path.join(TESTING_ROOT, "backup")
