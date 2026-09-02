@@ -178,7 +178,9 @@ docker run --rm \
   redis:alpine \
   sh -ec 'rm -rf /target/* /target/.[!.]* /target/..?* 2>/dev/null || true; cp -a /source/. /target/; chown -R redis:redis /target'
 
-compose up -d db redis
+# PostgreSQL must remain the already-running instance. Only Redis is being
+# replaced here; --no-deps prevents Compose from converging/recreating DB.
+compose up -d --no-deps redis
 wait_healthy db 300 1
 wait_healthy redis 300 1
 
@@ -196,7 +198,7 @@ if [[ "$appendonly" != yes || "$appendfsync" != everysec || "$aof_enabled" != 1 
 fi
 
 # The migration service is a one-shot gate and no longer retries forever.
-compose run --rm migrations
+compose run --rm --no-deps migrations
 
 assert_release_label() {
   local service="$1" cid actual found=0

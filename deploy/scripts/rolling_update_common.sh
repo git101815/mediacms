@@ -518,7 +518,9 @@ ensure_celery_drained() {
 }
 
 run_migrations() {
-  compose run --rm migrations
+  # DB/Redis are deliberately outside application rolling updates.
+  # They are already healthy/running; never let `compose run` converge them.
+  compose run --rm --no-deps migrations
 }
 
 capture_crypto_initial_state() {

@@ -357,3 +357,9 @@ def test_compose_classifier_failure_is_fail_closed(tmp_path):
     assert result.returncode == 2
     assert "failed to classify docker-compose-cloudflare.yaml changes" in result.stderr
 
+def test_application_migrations_never_converge_db_or_redis_dependencies():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    run_migrations = common.split("run_migrations() {", 1)[1].split("\n}", 1)[0]
+    assert "compose run --rm --no-deps migrations" in run_migrations
+    assert "compose run --rm migrations" not in run_migrations
+

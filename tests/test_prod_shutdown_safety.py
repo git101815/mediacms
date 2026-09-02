@@ -125,6 +125,15 @@ def test_redis_migration_recreates_image_isolated_services_with_verified_release
     assert "assert_release_label celery_beat" in migration
 
 
+def test_redis_migration_never_converges_postgres_via_compose_up_or_migrations():
+    migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
+    assert "compose up -d --no-deps redis" in migration
+    assert "compose up -d db" not in migration
+    assert "compose up -d db redis" not in migration
+    assert "compose run --rm --no-deps migrations" in migration
+    assert "compose run --rm migrations" not in migration
+
+
 def test_crypto_worker_updates_are_ordered_around_signer_health():
     common = _read("deploy/scripts/rolling_update_common.sh")
     main = common.split("rolling_update_main()", 1)[1]
