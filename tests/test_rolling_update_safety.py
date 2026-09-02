@@ -79,8 +79,8 @@ def test_frontend_build_is_one_shot_reproducible_and_release_scoped():
     assert "rm -rf static" not in common
 
 
-def test_app_and_migrations_are_image_isolated_with_release_static_snapshot():
-    for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml", "docker-compose-dev.yaml"):
+def test_prod_app_and_migrations_are_image_isolated_with_release_static_snapshot():
+    for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml"):
         compose = _read(compose_path)
         for service in ("web", "celery_worker", "celery_beat"):
             block = _service_block(compose, service)
@@ -497,21 +497,27 @@ def test_signer_rotation_recreates_and_relabels_active_financial_loops():
     assert "assert_current_release_service sweeper_service 1" in restart
 
 
-def test_default_dev_compose_is_production_parity_and_live_mounts_are_explicit_override():
+def test_default_dev_compose_keeps_live_source_mounts_without_weakening_static_mounts():
     dev = _read("docker-compose-dev.yaml")
-    live = _read("docker-compose-dev-live.yaml")
 
     for service in ("migrations", "web", "celery_worker", "celery_beat"):
-        assert "- ./:/home/mediacms.io/mediacms/" not in _service_block(dev, service)
-        assert "- ./:/home/mediacms.io/mediacms/" in _service_block(live, service)
+        assert "- ./:/home/mediacms.io/mediacms/" in _service_block(dev, service)
+
+    migrations = _service_block(dev, "migrations")
+    assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static" in migrations
+    assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" not in migrations
+
+    for service in ("web", "celery_worker", "celery_beat"):
+        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" in _service_block(dev, service)
 
     for service, source_mount in (
         ("deposit_service", "./deposit_service/app:/app/app"),
         ("dfx_signer_service", "./sweeper_service/app:/app/app"),
         ("sweeper_service", "./sweeper_service/app:/app/app"),
     ):
-        assert source_mount not in _service_block(dev, service)
-        assert source_mount in _service_block(live, service)
+        assert source_mount in _service_block(dev, service)
+
+    assert not (ROOT / "docker-compose-dev-live.yaml").exists()
 
 
 def test_dev_runtime_stop_grace_periods_match_production_contract():
@@ -530,10 +536,20 @@ def test_dev_runtime_stop_grace_periods_match_production_contract():
         assert f"stop_grace_period: {duration}" in _service_block(dev, service)
 
 
-def test_dev_frontend_and_ci_use_committed_lockfile():
+def test_dev_frontend_reuses_dependencies_but_ci_stays_lockfile_strict():
     dev = _read("docker-compose-dev.yaml")
+    entrypoint = _read("frontend/dev-entrypoint.sh")
     ci = _read(".github/workflows/ci.yml")
-    assert "npm ci --no-audit --no-fund && npm run start" in dev
+
+    frontend = _service_block(dev, "frontend")
+    assert "command: bash ./dev-entrypoint.sh" in frontend
+    assert "frontend_node_modules:/home/mediacms.io/mediacms/frontend/node_modules" in frontend
+    assert "frontend_npm_cache:/root/.npm" in frontend
+    assert "npm ci --prefer-offline --no-audit --no-fund" in entrypoint
+    assert "package-lock.json" in entrypoint
+    assert "packages/scripts" in entrypoint
+    assert "packages/player" in entrypoint
+    assert "exec npm run start" in entrypoint
     assert "run: npm ci --no-audit --no-fund" in ci
 
 def test_entrypoint_never_mutates_readonly_release_static_mount():
@@ -554,15 +570,19 @@ def test_entrypoint_chowns_only_runtime_writable_directories():
     assert "static" not in ownership
 
 
-def test_collectstatic_writer_keeps_static_mount_writable_but_runtime_mounts_readonly():
+def test_collectstatic_runs_in_dev_with_separate_source_and_destination():
     prestart = _read("deploy/docker/prestart.sh")
-    assert "python manage.py collectstatic --noinput" in prestart
+    dev = _read("docker-compose-dev.yaml")
+    dev_settings = _read("cms/dev_settings.py")
 
-    for compose_path in (
-        "docker-compose-cloudflare.yaml",
-        "docker-compose.yaml",
-        "docker-compose-dev.yaml",
-    ):
+    assert 'echo "RUNNING COLLECTSTATIC"' in prestart
+    assert "python manage.py collectstatic --noinput" in prestart
+    assert "ENABLE_COLLECTSTATIC" not in prestart
+    assert "ENABLE_COLLECTSTATIC" not in _service_block(dev, "migrations")
+    assert "STATICFILES_DIRS = (os.path.join(BASE_DIR, 'static'),)" in dev_settings
+    assert "STATIC_ROOT = os.path.join(BASE_DIR, 'static_collected')" in dev_settings
+
+    for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml"):
         compose = _read(compose_path)
         migrations = _service_block(compose, "migrations")
         assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static" in migrations
@@ -571,3 +591,49 @@ def test_collectstatic_writer_keeps_static_mount_writable_but_runtime_mounts_rea
         for service in ("web", "celery_worker", "celery_beat"):
             runtime = _service_block(compose, service)
             assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" in runtime
+
+
+def test_celery_beat_schedule_lives_on_writable_runtime_volume():
+    beat = _read("deploy/docker/supervisord/supervisord-celery_beat.conf")
+    assert "user=www-data" in beat
+    assert "--schedule=/home/mediacms.io/mediacms/logs/celerybeat-schedule" in beat
+
+
+def test_redundant_nested_static_tree_is_removed():
+    assert not (ROOT / "static/static").exists()
+    for rel in (
+        "static/images/social-media-icons/reddit.svg",
+        "static/images/social-media-icons/telegram.svg",
+        "static/images/social-media-icons/vk.svg",
+        "static/images/social-media-icons/whatsapp.svg",
+        "static/images/social-media-icons/x.svg",
+        "static/images/wallet/cf-token.png",
+    ):
+        assert (ROOT / rel).is_file()
+
+
+def test_dev_celery_framework_noise_is_targeted_and_logs_are_bounded():
+    dev = _read("docker-compose-dev.yaml")
+    celery_py = _read("cms/celery.py")
+    settings_py = _read("cms/settings.py")
+
+    for service in ("celery_worker", "celery_beat"):
+        block = _service_block(dev, service)
+        assert "CELERY_FRAMEWORK_LOG_LEVEL: WARNING" in block
+        assert "driver: json-file" in block
+        assert 'max-size: "20m"' in block
+        assert 'max-file: "3"' in block
+
+    short_conf = _read("deploy/docker/supervisord/supervisord-celery_short.conf")
+    long_conf = _read("deploy/docker/supervisord/supervisord-celery_long.conf")
+    assert 'CELERY_LOG_LEVEL:-INFO' in short_conf
+    assert 'CELERY_LOG_LEVEL:-INFO' in long_conf
+    for logger_name in (
+        "celery.worker.strategy",
+        "celery.app.trace",
+        "celery.beat",
+    ):
+        assert logger_name in celery_py
+
+    assert "CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True" in settings_py
+    assert "broker_connection_retry_on_startup" in celery_py

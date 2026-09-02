@@ -23,9 +23,9 @@ if [ X"$ENABLE_MIGRATIONS" = X"yes" ]; then
         echo "Created admin user with password: $ADMIN_PASSWORD"
 
     fi
-    echo "RUNNING COLLECTSTATIC"
     python manage.py ensure_internal_service_actors
     python manage.py sync_internal_service_users
+    echo "RUNNING COLLECTSTATIC"
     python manage.py collectstatic --noinput
 
     # echo "Updating hostname ..."

@@ -503,6 +503,12 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_SOFT_TIME_LIMIT = 2 * 60 * 60
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERYD_PREFETCH_MULTIPLIER = 1
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+# Optional targeted suppression of Celery framework chatter. The worker root
+# level stays at INFO so task/application INFO logs remain visible.
+CELERY_FRAMEWORK_LOG_LEVEL = os.getenv(
+    "CELERY_FRAMEWORK_LOG_LEVEL", ""
+).strip().upper()
 CELERY_BROKER_VISIBILITY_TIMEOUT_SECONDS = int(
     os.getenv("CELERY_BROKER_VISIBILITY_TIMEOUT_SECONDS", str(3 * 60 * 60))
 )
