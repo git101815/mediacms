@@ -243,6 +243,155 @@ def _requested_encoding_ids_from_payload(payload):
     return sorted(ids)
 
 
+def apply_remote_encoding_payload(media, payload):
+    """Apply a verified RunPod result payload idempotently.
+
+    Signature verification belongs to the transport boundary (HTTP callback or
+    authenticated RunPod status lookup). This function owns only the DB/media
+    state transition so both delivery paths behave identically.
+    """
+    if payload.get("media_id") != media.id or payload.get("friendly_token") != media.friendly_token:
+        raise ValueError("Media mismatch")
+
+    if payload.get("status") != "success":
+        requested_encoding_ids = _requested_encoding_ids_from_payload(payload)
+
+        with transaction.atomic():
+            _update_encodings_from_payload(
+                media,
+                payload.get("encodings") or [],
+            )
+
+            nonfatal_skipped = [
+                item
+                for item in payload.get("skipped") or []
+                if (
+                    payload.get("mode") == "fill_missing_profiles"
+                    and item.get("reason") == "source_below_target_resolution"
+                )
+            ]
+            if nonfatal_skipped:
+                _delete_skipped_encodings(media, nonfatal_skipped)
+
+            if requested_encoding_ids:
+                Encoding.objects.filter(
+                    media=media,
+                    id__in=requested_encoding_ids,
+                ).exclude(status="success").update(
+                    status="fail",
+                    logs=payload.get("error", ""),
+                )
+            else:
+                # Legacy fallback only. New fill_missing payloads always send IDs.
+                Encoding.objects.filter(
+                    media=media,
+                    worker="runpod",
+                    status="running",
+                ).update(
+                    status="fail",
+                    logs=payload.get("error", ""),
+                )
+
+            media_update = _media_update_from_payload(payload.get("media") or {})
+
+            if payload.get("preserve_media_on_fail") is not True:
+                media_update["encoding_status"] = "fail"
+                media_update["listable"] = False
+
+            if media_update:
+                Media.objects.filter(pk=media.pk).update(**media_update)
+
+        return {"ok": True, "status": "fail"}
+
+    outputs = payload.get("outputs") or {}
+    encodings = payload.get("encodings") or []
+
+    output_specs = [
+        ("h264", "h264", "hls_file", _output_for(outputs, "h264")),
+        ("h265", "h265", "hls_hevc_file", _output_for(outputs, "h265", "hevc")),
+        ("av1", "av1", "hls_av1_file", _output_for(outputs, "av1")),
+    ]
+
+    with transaction.atomic():
+        (
+            was_listable,
+            current_state,
+            current_is_reviewed,
+        ) = (
+            Media.objects.select_for_update()
+            .values_list(
+                "listable",
+                "state",
+                "is_reviewed",
+            )
+            .get(pk=media.pk)
+        )
+        was_listable = bool(was_listable)
+
+        media_update = _media_update_from_payload(payload.get("media") or {})
+
+        preview_file_path = _update_encodings_from_payload(media, encodings)
+        if preview_file_path:
+            media_update["preview_file_path"] = preview_file_path
+
+        _delete_skipped_encodings(media, payload.get("skipped") or [])
+
+        merge_outputs = payload.get("merge_outputs") is True
+
+        for _output_key, codec, db_field, output in output_specs:
+            master_url = output.get("master_url", "")
+
+            if not master_url:
+                continue
+
+            if merge_outputs:
+                _merge_hls_renditions(
+                    media=media,
+                    codec=codec,
+                    master_file=master_url,
+                    renditions=output.get("renditions") or [],
+                )
+
+                if not getattr(media, db_field):
+                    media_update[db_field] = MediaHLSRendition.storage_path(master_url)
+            else:
+                MediaHLSRendition.replace_from_payload(
+                    media=media,
+                    codec=codec,
+                    master_file=master_url,
+                    renditions=output.get("renditions") or [],
+                )
+
+                media_update[db_field] = MediaHLSRendition.storage_path(master_url)
+
+        media_update["encoding_status"] = "success"
+        media_update["listable"] = (
+            current_state == "public"
+            and current_is_reviewed is True
+        )
+        became_listable = (
+            not was_listable
+            and bool(media_update["listable"])
+        )
+
+        Media.objects.filter(pk=media.pk).update(**media_update)
+
+        if became_listable:
+            transaction.on_commit(
+                lambda media_id=media.pk: (
+                    _record_premium_release_after_remote_publish(media_id)
+                )
+            )
+
+    return {
+        "ok": True,
+        "status": "success",
+        "h264": bool(_output_for(outputs, "h264").get("master_url")),
+        "h265": bool(_output_for(outputs, "h265", "hevc").get("master_url")),
+        "av1": bool(_output_for(outputs, "av1").get("master_url")),
+    }
+
+
 @csrf_exempt
 @require_POST
 def remote_encoding_callback(request, friendly_token):
@@ -261,156 +410,9 @@ def remote_encoding_callback(request, friendly_token):
     except Media.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Media not found"}, status=404)
 
-    if payload.get("media_id") != media.id or payload.get("friendly_token") != media.friendly_token:
-        return JsonResponse({"ok": False, "error": "Media mismatch"}, status=400)
-
-    if payload.get("status") != "success":
-        requested_encoding_ids = _requested_encoding_ids_from_payload(payload)
-
-        with transaction.atomic():
-            _update_encodings_from_payload(
-                media,
-                payload.get("encodings") or [],
-            )
-
-            nonfatal_skipped = [
-                item
-                for item in payload.get("skipped") or []
-                if (
-                    payload.get("mode") == "fill_missing_profiles"
-                    and item.get("reason")
-                    == "source_below_target_resolution"
-                )
-            ]
-            if nonfatal_skipped:
-                _delete_skipped_encodings(media, nonfatal_skipped)
-
-            if requested_encoding_ids:
-                Encoding.objects.filter(
-                    media=media,
-                    id__in=requested_encoding_ids,
-                ).exclude(status="success").update(
-                    status="fail",
-                    logs=payload.get("error", ""),
-                )
-            else:
-                # Legacy fallback only. New fill_missing payloads must always send IDs.
-                Encoding.objects.filter(
-                    media=media,
-                    worker="runpod",
-                    status="running",
-                ).update(
-                    status="fail",
-                    logs=payload.get("error", ""),
-                )
-
-            media_update = _media_update_from_payload(
-                payload.get("media") or {}
-            )
-
-            if payload.get("preserve_media_on_fail") is not True:
-                media_update["encoding_status"] = "fail"
-                media_update["listable"] = False
-
-            if media_update:
-                Media.objects.filter(pk=media.pk).update(**media_update)
-
-        return JsonResponse({"ok": True, "status": "fail"})
-
-    outputs = payload.get("outputs") or {}
-    encodings = payload.get("encodings") or []
-
-    output_specs = [
-        ("h264", "h264", "hls_file", _output_for(outputs, "h264")),
-        ("h265", "h265", "hls_hevc_file", _output_for(outputs, "h265", "hevc")),
-        ("av1", "av1", "hls_av1_file", _output_for(outputs, "av1")),
-    ]
-
     try:
-        with transaction.atomic():
-            # A remote callback uses QuerySet.update(), so Django's Media
-            # pre_save/post_save signals do not run. Lock the row and remember
-            # the real pre-callback value so only the first False -> True
-            # transition can become a subscription release.
-            (
-                was_listable,
-                current_state,
-                current_is_reviewed,
-            ) = (
-                Media.objects.select_for_update()
-                .values_list(
-                    "listable",
-                    "state",
-                    "is_reviewed",
-                )
-                .get(pk=media.pk)
-            )
-            was_listable = bool(was_listable)
-
-            media_update = _media_update_from_payload(payload.get("media") or {})
-
-            preview_file_path = _update_encodings_from_payload(media, encodings)
-            if preview_file_path:
-                media_update["preview_file_path"] = preview_file_path
-
-            _delete_skipped_encodings(media, payload.get("skipped") or [])
-
-            merge_outputs = payload.get("merge_outputs") is True
-
-            for _output_key, codec, db_field, output in output_specs:
-                master_url = output.get("master_url", "")
-
-                if not master_url:
-                    continue
-
-                if merge_outputs:
-                    _merge_hls_renditions(
-                        media=media,
-                        codec=codec,
-                        master_file=master_url,
-                        renditions=output.get("renditions") or [],
-                    )
-
-                    if not getattr(media, db_field):
-                        media_update[db_field] = MediaHLSRendition.storage_path(master_url)
-                else:
-                    MediaHLSRendition.replace_from_payload(
-                        media=media,
-                        codec=codec,
-                        master_file=master_url,
-                        renditions=output.get("renditions") or [],
-                    )
-
-                    media_update[db_field] = MediaHLSRendition.storage_path(master_url)
-
-            media_update["encoding_status"] = "success"
-            media_update["listable"] = (
-                current_state == "public"
-                and current_is_reviewed is True
-            )
-            became_listable = (
-                not was_listable
-                and bool(media_update["listable"])
-            )
-
-            Media.objects.filter(pk=media.pk).update(**media_update)
-
-            if became_listable:
-                transaction.on_commit(
-                    lambda media_id=media.pk: (
-                        _record_premium_release_after_remote_publish(media_id)
-                    )
-                )
-
+        result = apply_remote_encoding_payload(media, payload)
     except ValueError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 
-    return JsonResponse(
-        {
-            "ok": True,
-            "status": "success",
-            "h264": bool(_output_for(outputs, "h264").get("master_url")),
-            "h265": bool(_output_for(outputs, "h265", "hevc").get("master_url")),
-            "av1": bool(_output_for(outputs, "av1").get("master_url")),
-        }
-    )
+    return JsonResponse(result)

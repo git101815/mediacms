@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -321,6 +322,30 @@ def submit_runpod_job(media):
 
     with urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def build_runpod_status_url(job_id):
+    endpoint = str(settings.RUNPOD_ENDPOINT_URL or "").rstrip("/")
+    if not endpoint:
+        raise ValidationError("RUNPOD_ENDPOINT_URL is not configured")
+    if endpoint.endswith("/run"):
+        endpoint = endpoint[:-4]
+    return f"{endpoint}/status/{quote(str(job_id), safe='')}"
+
+
+def get_runpod_job_status(job_id):
+    request = Request(
+        build_runpod_status_url(job_id),
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {settings.RUNPOD_API_KEY}",
+        },
+        method="GET",
+    )
+    timeout = int(getattr(settings, "REMOTE_ENCODING_RUNPOD_STATUS_TIMEOUT_SECONDS", 15))
+    with urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
 
 
 def _profile_has_hls_rendition(media, profile):

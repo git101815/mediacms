@@ -185,9 +185,13 @@ SECRET_KEY = "2dii4cog7k=5n37$fz)8dst)kg(s3&10)^qa*gv(kk+nv-z&cu"
 
 TEMP_DIRECTORY = "/tmp"  # Don't use a temp directory inside BASE_DIR!!!
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATIC_URL = "/static/"  # where js/css files are stored on the filesystem
-MEDIA_URL = "/media/"  # URL where static files are served from the server
-STATIC_ROOT = BASE_DIR + "/static/"
+STATIC_URL = "/static/"  # where js/css files are served
+MEDIA_URL = "/media/"  # URL where uploaded media files are served
+# static/ is the canonical versioned source tree. collectstatic always writes
+# to a distinct output tree so sources are never masked or recursively scanned.
+# Docker mounts each immutable release snapshot at static_collected/.
+STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]
+STATIC_ROOT = os.path.join(BASE_DIR, "static_collected")
 # where uploaded + encoded media are stored
 MEDIA_ROOT = BASE_DIR + "/media_files/"
 
@@ -425,8 +429,13 @@ else:
         "handlers": {
             "file": {
                 "level": "ERROR",
-                "class": "logging.FileHandler",
+                "class": "cms.logging_handlers.ProcessSafeRotatingFileHandler",
                 "filename": error_filename,
+                # Five files total (current + 4 backups) caps debug logs near 100 MiB.
+                "maxBytes": 20 * 1024 * 1024,
+                "backupCount": 4,
+                "encoding": "utf-8",
+                "delay": True,
             },
         },
         "loggers": {
@@ -459,23 +468,38 @@ DATABASES = {
 }
 
 
-REDIS_LOCATION = "redis://127.0.0.1:6379/1"
+REDIS_LOCATION = os.getenv("REDIS_LOCATION", "redis://127.0.0.1:6379/1")
+REDIS_CACHE_LOCATION = os.getenv("REDIS_CACHE_LOCATION", "redis://127.0.0.1:6379/4")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_LOCATION)
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/3")
+
 CACHES = {
     "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_CACHE_LOCATION,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+    },
+    "legacy_sessions": {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_LOCATION,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },
-    }
+    },
 }
 
-SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+# cached_db makes PostgreSQL the source of truth. cms.session_backend also
+# imports pre-upgrade cache-only sessions on first use, avoiding a forced
+# logout when this hardening is deployed.
+SESSION_ENGINE = "cms.session_backend"
 SESSION_CACHE_ALIAS = "default"
 
 # CELERY STUFF
-BROKER_URL = REDIS_LOCATION
-CELERY_RESULT_BACKEND = BROKER_URL
+# BROKER_URL is retained because this fork configures Celery without a
+# namespace. CELERY_BROKER_URL is the explicit operator-facing setting.
+BROKER_URL = CELERY_BROKER_URL
 CELERY_ACCEPT_CONTENT = ["application/json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -483,12 +507,23 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_SOFT_TIME_LIMIT = 2 * 60 * 60
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERYD_PREFETCH_MULTIPLIER = 1
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+# Optional targeted suppression of Celery framework chatter. The worker root
+# level stays at INFO so task/application INFO logs remain visible.
+CELERY_FRAMEWORK_LOG_LEVEL = os.getenv(
+    "CELERY_FRAMEWORK_LOG_LEVEL", ""
+).strip().upper()
+CELERY_BROKER_VISIBILITY_TIMEOUT_SECONDS = int(
+    os.getenv("CELERY_BROKER_VISIBILITY_TIMEOUT_SECONDS", str(3 * 60 * 60))
+)
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "visibility_timeout": CELERY_BROKER_VISIBILITY_TIMEOUT_SECONDS,
+}
 
 DB_BACKUP_DIR = os.path.join(BASE_DIR, "backup")
 DB_BACKUP_KEEP_COUNT = 14
 PG_DUMP_COMMAND = "pg_dump"
 
-LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = False
 LEDGER_DEPOSIT_SESSION_EXPIRATION_TASK_LIMIT = 500
 
 CELERY_BEAT_SCHEDULE = {
@@ -506,6 +541,11 @@ CELERY_BEAT_SCHEDULE = {
     },
     "ai_generation_nudge_worker": {
         "task": "ai_generation.tasks.nudge_ai_generation_worker",
+        "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
+    },
+    "reconcile_remote_encodings": {
+        "task": "reconcile_remote_encodings",
         "schedule": 60.0,
         "options": {"queue": "short_tasks"},
     },
@@ -738,52 +778,61 @@ if TESTING:
     )
 
     TESTING_LIVE_REDIS_LOCATION = str(REDIS_LOCATION)
-    _testing_live_redis = urlsplit(TESTING_LIVE_REDIS_LOCATION)
-    _testing_live_redis_db = int(
-        (_testing_live_redis.path or "/0").strip("/") or 0
-    )
-    TESTING_REDIS_DB = int(
-        os.environ.get("TEST_REDIS_DB", "15")
-    )
+    _testing_live_redis_locations = [
+        str(REDIS_CACHE_LOCATION),
+        str(CELERY_BROKER_URL),
+        str(CELERY_RESULT_BACKEND),
+    ]
+    _testing_live_redis_dbs = {
+        int((urlsplit(location).path or "/0").strip("/") or 0)
+        for location in _testing_live_redis_locations
+    }
+    TESTING_REDIS_DB = int(os.environ.get("TEST_REDIS_DB", "15"))
 
-    if TESTING_REDIS_DB == _testing_live_redis_db:
+    if TESTING_REDIS_DB in _testing_live_redis_dbs:
         raise RuntimeError(
-            "TEST_REDIS_DB must differ from the live Redis DB "
-            f"({_testing_live_redis_db})."
+            "TEST_REDIS_DB must differ from every live Redis DB "
+            f"({_testing_live_redis_dbs})."
         )
 
-    REDIS_LOCATION = urlunsplit(
+    _testing_redis_base = urlsplit(str(REDIS_CACHE_LOCATION))
+    _testing_redis_location = urlunsplit(
         (
-            _testing_live_redis.scheme,
-            _testing_live_redis.netloc,
+            _testing_redis_base.scheme,
+            _testing_redis_base.netloc,
             f"/{TESTING_REDIS_DB}",
-            _testing_live_redis.query,
-            _testing_live_redis.fragment,
+            _testing_redis_base.query,
+            _testing_redis_base.fragment,
         )
     )
+    REDIS_LOCATION = _testing_redis_location
+    REDIS_CACHE_LOCATION = _testing_redis_location
+    CELERY_BROKER_URL = _testing_redis_location
+    CELERY_RESULT_BACKEND = _testing_redis_location
     CACHES = {
         "default": {
             "BACKEND": "django_redis.cache.RedisCache",
-            "LOCATION": REDIS_LOCATION,
+            "LOCATION": REDIS_CACHE_LOCATION,
             "OPTIONS": {
                 "CLIENT_CLASS": "django_redis.client.DefaultClient",
             },
-        }
+        },
+        "legacy_sessions": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_CACHE_LOCATION,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
+        },
     }
-    BROKER_URL = REDIS_LOCATION
-    CELERY_RESULT_BACKEND = REDIS_LOCATION
+    BROKER_URL = CELERY_BROKER_URL
 
     MEDIA_ROOT = os.path.join(TESTING_ROOT, "media")
     HLS_DIR = os.path.join(MEDIA_ROOT, "hls")
     STATIC_ROOT = os.path.join(TESTING_ROOT, "static_collected")
 
-    # BASE_DIR/static is a canonical source directory in this fork (for
-    # example static/ads/ads.css). In production nginx serves it directly.
-    # During tests STATIC_ROOT is redirected to TESTING_ROOT, so expose the
-    # repository static directory to Django's FileSystemFinder explicitly.
-    STATICFILES_DIRS = [
-        os.path.join(BASE_DIR, "static"),
-    ]
+    # Keep tests on the same canonical-source/output split as production.
+    STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]
 
     TEMP_DIRECTORY = os.path.join(TESTING_ROOT, "tmp")
     DB_BACKUP_DIR = os.path.join(TESTING_ROOT, "backup")

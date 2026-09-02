@@ -1,5 +1,4 @@
 cli-tool/.env
-frontend/package-lock.json
 media_files/encoded/
 media_files/original/
 media_files/hls/
@@ -13,7 +12,7 @@ cms/local_settings.py
 yt.readme.md
 /frontend-tools/video-editor/node_modules
 /frontend-tools/video-editor/client/node_modules
-/static_collected
+/static_collected/
 /frontend-tools/video-editor-v1
 frontend-tools/.DS_Store
 static/video_editor/videos/sample-video-30s.mp4
@@ -30,7 +29,7 @@ celerybeat-schedule-wal
 /backup
 .idea/
 deposit_service/data/state.json
-# Django collectstatic/vendor outputs
+# Legacy collectstatic outputs from the old STATIC_ROOT=static/ layout
 static/admin/
 static/ckeditor/
 static/debug_toolbar/
@@ -40,8 +39,8 @@ static/drf-yasg/
 static/jazzmin/
 static/css/
 static/js/
-static/lib/file-uploader/
-static/lib/video-js/
+static/vendor/
 static/favicons/browserconfig.xml
 static/favicons/site.webmanifest
 static/lib/gfonts/LICENSE.txt
+.deploy-state/

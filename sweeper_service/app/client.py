@@ -92,6 +92,39 @@ class MediaCMSInternalClient:
         )
         return result["results"]
 
+    def claim_orphan_recovery_candidates(
+        self,
+        *,
+        options: list[dict],
+        limit: int,
+        older_than_hours: int,
+        lease_seconds: int,
+    ) -> list[dict]:
+        result = self.post_signed(
+            "/api/internal/ledger/orphan-recovery/claim",
+            {
+                "options": options,
+                "limit": int(limit),
+                "older_than_hours": int(older_than_hours),
+                "lease_seconds": int(lease_seconds),
+            },
+        )
+        return result["results"]
+
+    def record_orphan_recovery_result(
+        self,
+        *,
+        session_public_id: str,
+        claim_token: str,
+        result: dict,
+    ) -> dict:
+        payload = dict(result)
+        payload["claim_token"] = str(claim_token)
+        return self.post_signed(
+            f"/api/internal/ledger/orphan-recovery/{session_public_id}/result",
+            payload,
+        )
+
     @staticmethod
     def _require_claim_token(claim_token: str) -> str:
         normalized = str(claim_token or "").strip()

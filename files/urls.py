@@ -147,6 +147,16 @@ urlpatterns = [
         name="internal_deposit_watchlist",
     ),
     re_path(
+        r"^api/internal/ledger/orphan-recovery/claim$",
+        views.internal_orphan_recovery_claim,
+        name="internal_orphan_recovery_claim",
+    ),
+    path(
+        "api/internal/ledger/orphan-recovery/<uuid:session_public_id>/result",
+        views.internal_orphan_recovery_result,
+        name="internal_orphan_recovery_result",
+    ),
+    re_path(
         r"^api/internal/ledger/sweep-jobs/claim$",
         views.internal_sweep_jobs_claim,
         name="internal_sweep_jobs_claim",

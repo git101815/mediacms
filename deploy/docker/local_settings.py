@@ -55,7 +55,6 @@ AI_GENERATION_N8N_WAKE_SECRET = os.getenv(
     "",
 ).strip()
 
-LEDGER_ORPHAN_RECOVERY_TASK_ENABLED = True
 
 # Advertising delivery controls. This is the single source of truth for
 # provider rotation and ad cooldowns. Format kill-switches stop the whole
@@ -156,7 +155,7 @@ MALUM_PAYMENT_TTL_SECONDS = "3600"
 MALUM_BUYER_PAYS_FEES = "false"
 MALUM_MERCHANT_PAYS_GW_FEES = "false"
 
-SKILLFLOW_ENABLED = "true"
+SKILLFLOW_ENABLED = "false" #deactivate for now
 SKILLFLOW_PARTNER_KEY = os.getenv("SKILLFLOW_PARTNER_KEY", "").strip()
 SKILLFLOW_WEBHOOK_SECRET = os.getenv("SKILLFLOW_WEBHOOK_SECRET", "").strip()
 SKILLFLOW_API_BASE_URL = "https://payments.skillflow.store"
@@ -283,6 +282,9 @@ PAYGATE_USER_AGENT = (
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 REDIS_LOCATION = os.getenv("REDIS_LOCATION", "redis://redis:6379/1")
+REDIS_CACHE_LOCATION = os.getenv("REDIS_CACHE_LOCATION", "redis://redis:6379/4")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_LOCATION)
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/3")
 
 DEFAULT_THEME = "dark"
 REPORTED_TIMES_THRESHOLD = 5
@@ -337,11 +339,18 @@ ALLOW_VIDEO_TRIMMER = False
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_CACHE_LOCATION,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+    },
+    "legacy_sessions": {
+        "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_LOCATION,
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },
-    }
+    },
 }
 
 CELERY_BEAT_SCHEDULE = {
@@ -377,6 +386,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60.0,
         "options": {"queue": "short_tasks"},
     },
+    "reconcile_remote_encodings": {
+        "task": "reconcile_remote_encodings",
+        "schedule": 60.0,
+        "options": {"queue": "short_tasks"},
+    },
     "premium_recover_creator_emails": {
         "task": "premium.tasks.recover_creator_email_outbox",
         "schedule": 60.0,
@@ -389,6 +403,7 @@ CELERY_BEAT_SCHEDULE = {
     "ledger_expire_stale_deposit_sessions": {
         "task": "ledger_expire_stale_deposit_sessions",
         "schedule": crontab(hour=1, minute=45),
+        "options": {"queue": "short_tasks"},
     },
     "maintenance_sync_categories_ws": {
         "task": "maintenance_sync_categories_ws",
@@ -397,10 +412,6 @@ CELERY_BEAT_SCHEDULE = {
     "maintenance_sync_celebrities_ws": {
         "task": "maintenance_sync_celebrities_ws",
         "schedule": crontab(hour=1, minute=30),
-    },
-    "maintenance_recover_orphan_deposit_addresses": {
-        "task": "maintenance_recover_orphan_deposit_addresses",
-        "schedule": crontab(hour=2, minute=0),
     },
     "maintenance_backup_database": {
         "task": "maintenance_backup_database",
@@ -453,8 +464,7 @@ SUPPORT_EMAIL_LIST = ["support@celebfakes.ru"]
 
 MEDIA_URL = "https://medias.celebfakes.ru/mediafiles/"
 
-BROKER_URL = REDIS_LOCATION
-CELERY_RESULT_BACKEND = BROKER_URL
+BROKER_URL = CELERY_BROKER_URL
 
 MP4HLS_COMMAND = "/home/mediacms.io/bento4/bin/mp4hls"
 MP4DASH_COMMAND = "/home/mediacms.io/bento4/bin/mp4dash"
@@ -466,6 +476,8 @@ REMOTE_ENCODING_PUBLIC_BASE_URL = "https://medias.celebfakes.ru/mediafiles"
 REMOTE_ENCODING_OUTPUT_PREFIX = "hls"
 REMOTE_ENCODING_HLS_SEGMENT_SECONDS = 4
 REMOTE_ENCODING_UPLOAD_CONCURRENCY = 8
+REMOTE_ENCODING_RECONCILE_BATCH_SIZE = 50
+REMOTE_ENCODING_RUNPOD_STATUS_TIMEOUT_SECONDS = 15
 REMOTE_ENCODING_SUBMIT_DELAY_SECONDS = 1 * 60
 REMOTE_ENCODING_STORJ_WAIT_RETRY_SECONDS = 60
 REMOTE_ENCODING_STORJ_WAIT_MAX_RETRIES = 15

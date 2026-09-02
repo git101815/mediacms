@@ -18,7 +18,7 @@ server {
 #    }
 
     location /static {
-        alias /home/mediacms.io/mediacms/static ;
+        alias /home/mediacms.io/mediacms/static_collected ;
     }
 
     location /media/original {
@@ -59,7 +59,7 @@ server {
     error_log  /var/log/nginx/mediacms.io.error.log  warn;
 
     location /static {
-        alias /home/mediacms.io/mediacms/static ;
+        alias /home/mediacms.io/mediacms/static_collected ;
     }
 
     location /media/original {

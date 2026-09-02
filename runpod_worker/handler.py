@@ -1544,6 +1544,23 @@ def callback(callback_url, payload):
         return response.read().decode("utf-8")
 
 
+def callback_best_effort(callback_url, payload):
+    """Attempt the callback without throwing away a completed RunPod result.
+
+    callback() signs the payload before opening the URL, so even when MediaCMS
+    is temporarily unreachable the handler can return the same signed payload
+    through RunPod's /status endpoint for later reconciliation.
+    """
+    try:
+        return callback(callback_url, payload)
+    except Exception as exc:
+        print(
+            f"CALLBACK DEFERRED: url={callback_url} error={exc}",
+            flush=True,
+        )
+        return None
+
+
 def build_fail_payload(
     job,
     exc,
@@ -1885,7 +1902,7 @@ def handler(event):
                 "outputs": outputs,
             }
 
-            callback(job["callback_url"], payload)
+            callback_best_effort(job["callback_url"], payload)
             return payload
 
         except Exception as exc:
@@ -1903,7 +1920,7 @@ def handler(event):
                     )
                 ),
             )
-            callback(job["callback_url"], payload)
+            callback_best_effort(job["callback_url"], payload)
             return payload
 
 def preflight_gpu():

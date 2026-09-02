@@ -1,4 +1,10 @@
-name: mediacms-prod
+name: ${COMPOSE_PROJECT_NAME:-mediacms-prod}
+
+x-bounded-logging: &bounded_logging
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "5"
 
 x-mediacms-app: &mediacms_app
   image: mediacms-local:prod
@@ -6,12 +12,17 @@ x-mediacms-app: &mediacms_app
   build:
     context: .
     dockerfile: ./Dockerfile
+  logging: *bounded_logging
 
 x-mediacms-db-env: &mediacms_db_env
   POSTGRES_HOST: db
   POSTGRES_USER: mediacms
   POSTGRES_DB: mediacms
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  REDIS_LOCATION: ${REDIS_LOCATION:-redis://redis:6379/1}
+  REDIS_CACHE_LOCATION: ${REDIS_CACHE_LOCATION:-redis://redis:6379/4}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/3}
 
 services:
   migrations:
@@ -19,7 +30,10 @@ services:
     mem_limit: 3g
     mem_reservation: 512m
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       ENABLE_UWSGI: "no"
@@ -45,7 +59,7 @@ services:
       DFX_WALLET_POOL_JSON: ${DFX_WALLET_POOL_JSON}
 
     command: "./deploy/docker/prestart.sh"
-    restart: on-failure
+    restart: "no"
     depends_on:
       redis:
         condition: service_healthy
@@ -53,13 +67,19 @@ services:
         condition: service_healthy
 
   web:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    stop_grace_period: 90s
     <<: *mediacms_app
     mem_limit: 4g
     mem_reservation: 2g
     deploy:
-      replicas: 1
+      replicas: 2
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       ENABLE_CELERY_BEAT: "no"
@@ -123,6 +143,10 @@ services:
       start_period: 20s
 
   dfx_signer_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    logging: *bounded_logging
+    stop_grace_period: 30s
     build:
       context: .
       dockerfile: ./sweeper_service/Dockerfile
@@ -162,6 +186,10 @@ services:
     restart: unless-stopped
 
   deposit_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    logging: *bounded_logging
+    stop_grace_period: 2m
     build:
       context: .
       dockerfile: ./deposit_service/Dockerfile
@@ -227,6 +255,10 @@ services:
     restart: unless-stopped
 
   sweeper_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    logging: *bounded_logging
+    stop_grace_period: 15m
     build:
       context: .
       dockerfile: ./sweeper_service/Dockerfile
@@ -247,6 +279,18 @@ services:
       SWEEPER_SERVICE_CONFIG_PATH: /app/config/sweeper-service.json
       SWEEPER_SERVICE_POLL_INTERVAL_SECONDS: 30
       SWEEPER_SERVICE_CLAIM_BATCH_SIZE: 20
+      SWEEPER_ORPHAN_RECOVERY_ENABLED: "${SWEEPER_ORPHAN_RECOVERY_ENABLED:-1}"
+      SWEEPER_ORPHAN_RECOVERY_INTERVAL_SECONDS: "${SWEEPER_ORPHAN_RECOVERY_INTERVAL_SECONDS:-86400}"
+      SWEEPER_ORPHAN_RECOVERY_ERROR_RETRY_SECONDS: "${SWEEPER_ORPHAN_RECOVERY_ERROR_RETRY_SECONDS:-300}"
+      SWEEPER_ORPHAN_RECOVERY_BATCH_SIZE: "${SWEEPER_ORPHAN_RECOVERY_BATCH_SIZE:-20}"
+      SWEEPER_ORPHAN_RECOVERY_OLDER_THAN_HOURS: "${SWEEPER_ORPHAN_RECOVERY_OLDER_THAN_HOURS:-72}"
+      SWEEPER_ORPHAN_RECOVERY_LEASE_SECONDS: "${SWEEPER_ORPHAN_RECOVERY_LEASE_SECONDS:-7200}"
+      SWEEPER_ORPHAN_RECOVERY_MIN_TOKEN_VALUE_USD: "${SWEEPER_ORPHAN_RECOVERY_MIN_TOKEN_VALUE_USD:-5}"
+      SWEEPER_ORPHAN_RECOVERY_MIN_NATIVE_VALUE_USD: "${SWEEPER_ORPHAN_RECOVERY_MIN_NATIVE_VALUE_USD:-2}"
+      SWEEPER_ORPHAN_RECOVERY_PROFIT_MULTIPLIER: "${SWEEPER_ORPHAN_RECOVERY_PROFIT_MULTIPLIER:-2}"
+      RUNTIME_PRICES_BASE_URL: ${RUNTIME_PRICES_BASE_URL}
+      RUNTIME_PRICES_SHARED_SECRET: ${RUNTIME_PRICES_SHARED_SECRET}
+
 
       ETHEREUM_RPC_URL: ${ETHEREUM_RPC_URL}
       ARBITRUM_RPC_URL: ${ARBITRUM_RPC_URL}
@@ -304,11 +348,17 @@ services:
     restart: unless-stopped
 
   celery_beat:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    stop_grace_period: 30s
     <<: *mediacms_app
     mem_limit: 512m
     mem_reservation: 128m
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       ENABLE_UWSGI: "no"
@@ -316,6 +366,7 @@ services:
       ENABLE_CELERY_SHORT: "no"
       ENABLE_CELERY_LONG: "no"
       ENABLE_MIGRATIONS: "no"
+      CELERY_LOG_LEVEL: ${CELERY_LOG_LEVEL:-WARNING}
 
       AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME:-mediafiles}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
@@ -337,19 +388,28 @@ services:
     restart: unless-stopped
 
   celery_worker:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
+    stop_grace_period: 2h10m
     <<: *mediacms_app
     mem_limit: 14g
     mem_reservation: 6g
     deploy:
       replicas: 1
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ${MEDIACMS_STATIC_DIR:-./static_collected}:/home/mediacms.io/mediacms/static_collected:ro
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       ENABLE_UWSGI: "no"
       ENABLE_NGINX: "no"
       ENABLE_CELERY_BEAT: "no"
       ENABLE_MIGRATIONS: "no"
+      CELERY_LOG_LEVEL: ${CELERY_LOG_LEVEL:-WARNING}
+      SECRET_KEY: ${SECRET_KEY}
+      LEDGER_INTERNAL_DEPOSIT_SERVICE_USERNAME: deposit-service
 
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
@@ -390,6 +450,8 @@ services:
     restart: unless-stopped
 
   db:
+    logging: *bounded_logging
+    stop_grace_period: 60s
     image: postgres:17.2-alpine
     mem_limit: 4g
     mem_reservation: 1g
@@ -408,10 +470,15 @@ services:
       retries: 5
 
   redis:
+    logging: *bounded_logging
+    stop_grace_period: 60s
     image: redis:alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     mem_limit: 512m
     mem_reservation: 128m
     restart: always
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -419,6 +486,8 @@ services:
       retries: 3
 
   cloudflared:
+    logging: *bounded_logging
+    stop_grace_period: 30s
     image: cloudflare/cloudflared:latest
     mem_limit: 256m
     mem_reservation: 64m
@@ -429,6 +498,10 @@ services:
     depends_on:
       web:
         condition: service_healthy
+
+volumes:
+  redis_data:
+    name: ${REDIS_VOLUME_NAME:-mediacms-prod-redis-data}
 
 secrets:
   sweeper_evm_mnemonic:

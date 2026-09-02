@@ -1,5 +1,6 @@
 import logging
 import os
+import signal
 import time
 
 from .client import MediaCMSInternalClient
@@ -126,8 +127,17 @@ def provision_deposit_addresses_once(*, client, options, batch_size: int) -> dic
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    stop_requested = False
 
-    while True:
+    def _request_stop(signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+        logging.info("deposit_service action=shutdown-requested signal=%s", signum)
+
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
+
+    while not stop_requested:
         client = None
         try:
             config = load_config()
@@ -171,7 +181,16 @@ def main():
             if client is not None:
                 client.close()
 
-        time.sleep(30)
+        if stop_requested:
+            break
+        # Event-like sleep without an extra dependency: SIGTERM interrupts the
+        # process and the one-second slices bound shutdown latency.
+        for _ in range(30):
+            if stop_requested:
+                break
+            time.sleep(1)
+
+    logging.info("deposit_service action=shutdown-complete")
 
 
 if __name__ == "__main__":

@@ -28,9 +28,16 @@ else
     usermod -a -G $GROUP www-data
 fi
 
-# We should do this only for folders that have a different owner, since it is an expensive operation
-# Also ignoring .git folder to fix this issue https://github.com/mediacms-io/mediacms/issues/934
-find /home/mediacms.io/mediacms ! \( -path "*.git*" \) -exec chown www-data:$TARGET_GID {} +
+# Application code and release static assets are image/read-only inputs.
+# Never recursively chown the repository: web/Celery mount the release static
+# snapshot read-only and a global chown would fail the container under `set -e`.
+# Only runtime data directories need write ownership for www-data.
+APP_ROOT=/home/mediacms.io/mediacms
+for path in "$APP_ROOT/logs" "$APP_ROOT/media_files" "$APP_ROOT/backup"; do
+    if [ -e "$path" ]; then
+        chown -R www-data:"$TARGET_GID" "$path"
+    fi
+done
 
 chmod +x /home/mediacms.io/mediacms/deploy/docker/start.sh /home/mediacms.io/mediacms/deploy/docker/prestart.sh
 
