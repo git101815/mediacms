@@ -60,11 +60,21 @@ configure_rolling_update() {
   LOCK_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.lock"
 }
 
+git_repo() { git -c "safe.directory=$ROLLING_ROOT" "$@"; }
 compose() { "${COMPOSE[@]}" "$@"; }
 compose_crypto() { "${COMPOSE[@]}" --profile crypto-workers "$@"; }
 service_exists() { compose --profile crypto-workers config --services | grep -Fxq "$1"; }
 service_container_ids() { compose ps -q "$1" 2>/dev/null || true; }
 service_container_ids_all() { compose ps -a -q "$1" 2>/dev/null || true; }
+service_is_running() { [[ -n "$(service_container_ids "$1" | head -n1)" ]]; }
+stop_service_if_running() {
+  local service="$1"
+  if service_is_running "$service"; then compose stop "$service" >/dev/null; fi
+}
+stop_crypto_service_if_running() {
+  local service="$1"
+  if service_is_running "$service"; then compose_crypto stop "$service" >/dev/null; fi
+}
 
 die() {
   echo "rolling-update[$ENVIRONMENT_NAME]: $*" >&2
@@ -97,10 +107,10 @@ require_environment() {
   docker compose version >/dev/null || die "Docker Compose v2 is required"
   compose config >/dev/null
 
-  if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
-    die "tracked working-tree changes are present; commit/stash them before a rolling update"
+  if [[ -n "$(git_repo status --porcelain --untracked-files=all)" ]]; then
+    die "working-tree changes or untracked files are present; commit/stash/remove them before a rolling update"
   fi
-  CURRENT_SHA="$(git rev-parse HEAD)"
+  CURRENT_SHA="$(git_repo rev-parse HEAD)"
   export MEDIACMS_RELEASE_SHA="$CURRENT_SHA"
 }
 
@@ -190,6 +200,15 @@ app_preflight() {
   docker exec -i -w /home/mediacms.io/mediacms "$web_id" python manage.py prod_preflight
 }
 
+verify_runtime_dependencies() {
+  if service_exists dfx_signer_service; then
+    wait_healthy dfx_signer_service 60 1 || die "dfx_signer_service is not healthy"
+  fi
+  if [[ "$ENVIRONMENT_NAME" == "production" ]] && service_exists cloudflared; then
+    wait_healthy cloudflared 60 1 || die "cloudflared ingress is not healthy"
+  fi
+}
+
 legacy_preflight() {
   local count
   count="$(healthy_service_count web)"
@@ -243,8 +262,8 @@ load_release_delta() {
   BASE_SHA=""
   if [[ -f "$STATE_FILE" ]]; then
     BASE_SHA="$(tr -d '[:space:]' < "$STATE_FILE")"
-    git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || die "release state contains unknown commit $BASE_SHA"
-    git merge-base --is-ancestor "$BASE_SHA" "$CURRENT_SHA" || \
+    git_repo cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || die "release state contains unknown commit $BASE_SHA"
+    git_repo merge-base --is-ancestor "$BASE_SHA" "$CURRENT_SHA" || \
       die "deployed release $BASE_SHA is not an ancestor of $CURRENT_SHA; rolling rollback/branch switch is refused"
   fi
 
@@ -255,9 +274,9 @@ load_release_delta() {
 
   if [[ -z "$BASE_SHA" ]]; then
     echo "rolling-update[$ENVIRONMENT_NAME]: no release state yet; using conservative first-run plan"
-    mapfile -t CHANGED_FILES < <(git ls-files)
+    mapfile -t CHANGED_FILES < <(git_repo ls-files)
   else
-    mapfile -t CHANGED_FILES < <(git diff --name-only "$BASE_SHA" "$CURRENT_SHA")
+    mapfile -t CHANGED_FILES < <(git_repo diff --name-only "$BASE_SHA" "$CURRENT_SHA")
   fi
 }
 
@@ -471,16 +490,16 @@ drain_celery_legacy() {
   # Django/Celery inspection process inside them before migrations. Stop Beat,
   # then rely on Celery's warm TERM shutdown to finish active work; queued work
   # remains durable in Redis for the new worker.
-  service_exists celery_beat && compose stop celery_beat >/dev/null || true
+  if service_exists celery_beat; then stop_service_if_running celery_beat || return 1; fi
   if [[ -n "$(service_container_ids celery_worker | head -n1)" ]]; then
-    compose stop celery_worker >/dev/null
+    stop_service_if_running celery_worker || return 1
   fi
   CELERY_DRAINED=1
   progress_set celery_drained 1
 }
 
 drain_celery_fresh() {
-  service_exists celery_beat && compose stop celery_beat >/dev/null || true
+  if service_exists celery_beat; then stop_service_if_running celery_beat || return 1; fi
   local deadline=$((SECONDS + DRAIN_TIMEOUT_SECONDS)) count
   while (( SECONDS < deadline )); do
     if ! count="$(celery_work_count)"; then
@@ -488,7 +507,7 @@ drain_celery_fresh() {
       return 1
     fi
     if (( count == 0 )); then
-      compose stop celery_worker >/dev/null || true
+      stop_service_if_running celery_worker || return 1
       CELERY_DRAINED=1
       progress_set celery_drained 1
       return 0
@@ -505,7 +524,7 @@ ensure_celery_drained() {
   remembered="$(progress_get celery_drained 0)"
   worker_id="$(service_container_ids celery_worker | head -n1)"
   if [[ "$remembered" == 1 && -z "$worker_id" ]]; then
-    service_exists celery_beat && compose stop celery_beat >/dev/null || true
+    if service_exists celery_beat; then stop_service_if_running celery_beat || return 1; fi
     CELERY_DRAINED=1
     echo "rolling-update[$ENVIRONMENT_NAME]: resuming with Celery already drained from a previous attempt"
     return 0
@@ -552,16 +571,12 @@ stop_crypto_for_update() {
   capture_crypto_initial_state
 
   if signer_update_needed; then
-    [[ -n "$(service_container_ids deposit_service)" ]] && compose_crypto stop deposit_service >/dev/null || true
-    [[ -n "$(service_container_ids sweeper_service)" ]] && compose_crypto stop sweeper_service >/dev/null || true
+    stop_crypto_service_if_running deposit_service || return 1
+    stop_crypto_service_if_running sweeper_service || return 1
     return 0
   fi
-  if deposit_update_needed && [[ -n "$(service_container_ids deposit_service)" ]]; then
-    compose_crypto stop deposit_service >/dev/null
-  fi
-  if sweeper_update_needed && [[ -n "$(service_container_ids sweeper_service)" ]]; then
-    compose_crypto stop sweeper_service >/dev/null
-  fi
+  if deposit_update_needed; then stop_crypto_service_if_running deposit_service || return 1; fi
+  if sweeper_update_needed; then stop_crypto_service_if_running sweeper_service || return 1; fi
 }
 
 remove_nonrunning_service_containers() {
@@ -762,6 +777,7 @@ rolling_update_main() {
   acquire_update_lock
   detect_legacy_bootstrap
   if (( LEGACY_BOOTSTRAP )); then legacy_preflight; else app_preflight; fi
+  verify_runtime_dependencies
 
   if (( REQUIRE_PERSISTENT_REDIS )) && ! redis_is_persistent; then
     cat >&2 <<EOF_REDIS
@@ -817,6 +833,7 @@ EOF_REDIS
   if crypto_update_needed; then restart_crypto_after_update; fi
 
   app_preflight
+  verify_runtime_dependencies
   record_release
 
   trap - EXIT

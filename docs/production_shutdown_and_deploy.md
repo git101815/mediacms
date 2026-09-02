@@ -36,3 +36,11 @@ The first transition from the historical live-checkout bind mounts is detected a
 
 Changes to PostgreSQL, Redis, cloudflared, shared top-level Compose configuration, or unsupported Compose services are refused by the rolling updater. Crypto service Compose changes are classified per service. `runpod_worker/` is intentionally outside the Docker-stack updater and does not participate in its deployment state.
 
+
+### Bootstrap failure recovery and reproducible images
+
+The one-time Redis persistence migration is itself resumable. Before it stops any publisher it records the target SHA, the legacy-bind-mount flag, and the initially running Celery/crypto/ingress subset in `.deploy-state/production.redis-migration.inprogress`. Each durability/restart phase is advanced atomically. If a later healthcheck fails after Redis is already persistent, rerunning the same confirmed migration resumes the application/ingress restart instead of exiting merely because the Redis volume now exists. Required service stops are fail-closed. A completed migration removes the in-progress state only after the final application preflight and runtime health checks succeed.
+
+A full `prod_shutdown.sh` now requires Redis persistence first. If the historical root bind mounts are still present, shutdown uses the same legacy-safe warm-stop rule and does not launch fresh Django/Celery inspection code inside post-pull legacy containers before they are retired.
+
+Rolling/bootstrap Git commands explicitly mark the repository root as a Git `safe.directory`, so the operational scripts remain usable when Docker commands require `sudo` while the checkout is owned by the deployment user. Deploys also require a clean tracked and untracked working tree. `.dockerignore` excludes local env files, `cms/local_settings.py`, `.deploy-state/`, PID/runtime state, media/log/database data, and other local-only inputs so the image labelled with a release SHA cannot silently contain those host files.

@@ -28,7 +28,7 @@ def _bash(script, *, env=None):
     if env:
         full_env.update(env)
     return subprocess.run(
-        ["bash", "-lc", script],
+        ["bash", "-c", script],
         cwd=ROOT,
         env=full_env,
         check=False,
@@ -279,8 +279,8 @@ def test_rolling_update_has_per_environment_nonblocking_lock():
 def test_legacy_bootstrap_drain_does_not_launch_new_django_code_inside_legacy_container():
     common = _read("deploy/scripts/rolling_update_common.sh")
     legacy = common.split("drain_celery_legacy()", 1)[1].split("drain_celery_fresh()", 1)[0]
-    assert "compose stop celery_beat" in legacy
-    assert "compose stop celery_worker" in legacy
+    assert "stop_service_if_running celery_beat" in legacy
+    assert "stop_service_if_running celery_worker" in legacy
     assert "celery_work_count" not in legacy
     assert "docker exec" not in legacy
     assert "queued work" in legacy
@@ -363,3 +363,51 @@ def test_application_migrations_never_converge_db_or_redis_dependencies():
     assert "compose run --rm --no-deps migrations" in run_migrations
     assert "compose run --rm migrations" not in run_migrations
 
+
+
+
+def test_rolling_git_is_sudo_safe_and_build_requires_clean_untracked_tree():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    classifier = _read("deploy/scripts/classify_compose_changes.py")
+    assert 'git_repo() { git -c "safe.directory=$ROLLING_ROOT" "$@"; }' in common
+    assert "git_repo status --porcelain --untracked-files=all" in common
+    assert "working-tree changes or untracked files are present" in common
+    assert '"-c", f"safe.directory={repo_root}"' in classifier
+
+
+def test_rolling_critical_celery_and_crypto_stops_are_fail_closed():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    legacy = common.split("drain_celery_legacy()", 1)[1].split("drain_celery_fresh()", 1)[0]
+    fresh = common.split("drain_celery_fresh()", 1)[1].split("ensure_celery_drained()", 1)[0]
+    crypto = common.split("stop_crypto_for_update()", 1)[1].split("remove_nonrunning_service_containers()", 1)[0]
+    assert "stop_service_if_running celery_worker" in fresh
+    assert "compose stop celery_worker >/dev/null || true" not in fresh
+    assert "compose stop celery_beat >/dev/null || true" not in legacy
+    assert "stop_crypto_service_if_running deposit_service" in crypto
+    assert "stop_crypto_service_if_running sweeper_service" in crypto
+
+
+def test_rolling_requires_signer_and_production_ingress_health_before_marking_release():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    assert "verify_runtime_dependencies()" in common
+    verify = common.split("verify_runtime_dependencies()", 1)[1].split("legacy_preflight()", 1)[0]
+    assert "wait_healthy dfx_signer_service 60 1" in verify
+    assert '[[ "$ENVIRONMENT_NAME" == "production" ]]' in verify
+    assert "wait_healthy cloudflared 60 1" in verify
+    main = common.split("rolling_update_main()", 1)[1]
+    assert main.count("verify_runtime_dependencies") >= 2
+    assert main.rindex("verify_runtime_dependencies") < main.rindex("record_release")
+
+
+def test_docker_build_context_excludes_local_secrets_and_deploy_state():
+    dockerignore = _read(".dockerignore")
+    assert "```" not in dockerignore
+    for entry in (
+        ".env.*",
+        "**/.env.*",
+        "cms/local_settings.py",
+        ".deploy-state/",
+        "pids/",
+        "deposit_service/data/state.json",
+    ):
+        assert entry in dockerignore

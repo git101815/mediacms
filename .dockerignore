@@ -1,4 +1,3 @@
-```dockerignore
 node_modules
 npm-debug.log
 
@@ -20,11 +19,21 @@ htmlcov/
 .vscode/
 .idea/
 
-# Local env/secrets must not enter the image
+# Local env/secrets/runtime configuration must never enter the image
 .env
+.env.*
 *.env
+*.env.*
+**/.env
+**/.env.*
+cms/local_settings.py
 mediacms-secrets/
 ../mediacms-secrets/
+
+# Deployment/runtime state
+.deploy-state/
+pids/
+deposit_service/data/state.json
 
 # Runtime media/data
 media_files/
@@ -59,4 +68,3 @@ frontend/node_modules/
 frontend/dist/
 frontend/build/
 static_collected/
-```

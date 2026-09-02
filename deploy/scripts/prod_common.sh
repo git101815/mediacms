@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PROD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$PROD_ROOT"
+
 PROJECT="${COMPOSE_PROJECT_NAME:-mediacms-prod}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose-cloudflare.yaml}"
 REDIS_VOLUME="${REDIS_VOLUME_NAME:-mediacms-prod-redis-data}"
@@ -19,11 +22,39 @@ export COMPOSE_PROJECT_NAME="$PROJECT"
 export REDIS_VOLUME_NAME="$REDIS_VOLUME"
 COMPOSE=(docker compose -p "$PROJECT" -f "$COMPOSE_FILE")
 
+git_repo() { git -c "safe.directory=$PROD_ROOT" "$@"; }
 compose() { "${COMPOSE[@]}" "$@"; }
 compose_crypto() { "${COMPOSE[@]}" --profile crypto-workers "$@"; }
 service_exists() { compose --profile crypto-workers config --services | grep -Fxq "$1"; }
 service_container_ids() { compose ps -q "$1" 2>/dev/null || true; }
 service_container_ids_all() { compose ps -a -q "$1" 2>/dev/null || true; }
+service_is_running() { [[ -n "$(service_container_ids "$1" | head -n1)" ]]; }
+stop_service_if_running() {
+  local service="$1"
+  if service_is_running "$service"; then
+    compose stop "$service" >/dev/null
+  fi
+}
+stop_crypto_service_if_running() {
+  local service="$1"
+  if service_is_running "$service"; then
+    compose_crypto stop "$service" >/dev/null
+  fi
+}
+container_has_repo_root_mount() {
+  local cid="$1"
+  docker inspect -f '{{range .Mounts}}{{if eq .Destination "/home/mediacms.io/mediacms"}}yes{{end}}{{end}}' "$cid" 2>/dev/null | grep -q yes
+}
+legacy_app_mounts_present() {
+  local service cid
+  for service in web celery_beat celery_worker; do
+    while IFS= read -r cid; do
+      [[ -n "$cid" ]] || continue
+      if container_has_repo_root_mount "$cid"; then return 0; fi
+    done < <(service_container_ids_all "$service")
+  done
+  return 1
+}
 
 wait_healthy() {
   local service="$1"
@@ -152,7 +183,7 @@ celery_work_count() {
 }
 
 drain_celery() {
-  service_exists celery_beat && compose stop celery_beat >/dev/null || true
+  if service_exists celery_beat; then stop_service_if_running celery_beat || return 1; fi
   local deadline=$((SECONDS + DRAIN_TIMEOUT_SECONDS)) count
 
   while (( SECONDS < deadline )); do
@@ -160,7 +191,7 @@ drain_celery() {
       return 1
     fi
     if (( count == 0 )); then
-      compose stop celery_worker >/dev/null || true
+      stop_service_if_running celery_worker || return 1
       return 0
     fi
     echo "Waiting for Celery drain: $count active/reserved/queued"

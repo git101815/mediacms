@@ -89,23 +89,23 @@ def test_celery_drain_checks_redis_queue_even_without_worker():
 def test_redis_migration_enables_live_aof_before_stopping_redis():
     migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
     enable = migration.index("CONFIG SET appendonly yes")
-    stop = migration.index("compose stop redis")
+    stop = migration.index("stop_service_if_running redis")
     assert enable < stop
     assert "aof_rewrite_in_progress" in migration
     assert "aof_rewrite_scheduled" in migration
     assert "aof_last_bgrewrite_status" in migration
-    assert "preserving copied Redis data" in migration
-    assert "compose_crypto stop deposit_service" in migration
-    assert "compose_crypto stop sweeper_service" in migration
+    assert "Copied Redis artifacts are preserved" in migration
+    assert "stop_crypto_service_if_running deposit_service" in migration
+    assert "stop_crypto_service_if_running sweeper_service" in migration
 
 
 
 
 def test_redis_migration_builds_target_images_before_quiescing_legacy_stack():
     migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
-    release = migration.index('export MEDIACMS_RELEASE_SHA="$(git rev-parse HEAD)"')
+    release = migration.index('export MEDIACMS_RELEASE_SHA="$(git_repo rev-parse HEAD)"')
     build_web = migration.index("compose build web")
-    legacy_stop = migration.index("service_exists celery_beat && compose stop celery_beat")
+    legacy_stop = migration.index("stop_service_if_running celery_beat")
     assert release < build_web < legacy_stop
     assert "compose_crypto build deposit_service" in migration
     assert "compose_crypto build dfx_signer_service" in migration
@@ -117,9 +117,10 @@ def test_redis_migration_recreates_image_isolated_services_with_verified_release
     migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
     assert "assert_release_label()" in migration
     assert "compose up -d --no-deps --force-recreate web" in migration
-    assert "compose up -d --no-deps --force-recreate celery_worker celery_beat" in migration
-    assert "compose_crypto up -d --no-deps --force-recreate deposit_service" in migration
-    assert "compose_crypto up -d --no-deps --force-recreate sweeper_service" in migration
+    assert "ensure_release_service celery_worker 120 0" in migration
+    assert "ensure_release_service celery_beat 120 0" in migration
+    assert "ensure_release_service deposit_service 120 1" in migration
+    assert "ensure_release_service sweeper_service 120 1" in migration
     assert "assert_release_label web" in migration
     assert "assert_release_label celery_worker" in migration
     assert "assert_release_label celery_beat" in migration
@@ -142,3 +143,64 @@ def test_crypto_worker_updates_are_ordered_around_signer_health():
     web_update = main.index("update_web\n")
     restart_worker = main.index("restart_crypto_after_update")
     assert stop_worker < signer_update < web_update < restart_worker
+
+
+
+def test_redis_migration_is_resumable_and_does_not_fast_exit_after_partial_persistence():
+    migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
+    assert "production.redis-migration.inprogress" in migration
+    assert "production.redis-migration.complete" in migration
+    assert "state_set phase" in migration
+    assert "Resuming Redis migration at phase" in migration
+    assert 'if redis_is_persistent && [[ ! -f "$STATE_FILE" ]]' in migration
+    assert "State was preserved in $STATE_FILE" in migration
+
+
+def test_redis_migration_cloudflared_restart_is_no_deps_verified_and_not_fail_open():
+    migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
+    assert "compose up -d --no-deps cloudflared" in migration
+    assert "wait_healthy cloudflared 60 1" in migration
+    assert "compose up -d cloudflared || true" not in migration
+    assert "compose stop cloudflared >/dev/null || true" not in migration
+
+
+def test_redis_migration_critical_stops_are_fail_closed():
+    migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
+    assert "stop_service_if_running web" in migration
+    assert "stop_service_if_running redis" in migration
+    assert "stop_service_if_running celery_worker" in migration
+    assert "stop_crypto_service_if_running deposit_service" in migration
+    assert "stop_crypto_service_if_running sweeper_service" in migration
+    assert "compose stop web >/dev/null || true" not in migration
+    assert "compose stop celery_worker >/dev/null || true" not in migration
+
+
+def test_prod_shutdown_critical_stops_are_fail_closed():
+    shutdown = _read("deploy/scripts/prod_shutdown.sh")
+    assert "stop_service_if_running cloudflared" in shutdown
+    assert "stop_service_if_running web" in shutdown
+    assert "stop_service_if_running redis" in shutdown
+    assert "stop_service_if_running db" in shutdown
+    assert "compose stop web || true" not in shutdown
+    assert "compose stop redis || true" not in shutdown
+    assert "compose stop db || true" not in shutdown
+
+
+def test_prod_common_git_helper_supports_sudo_owned_checkout():
+    common = _read("deploy/scripts/prod_common.sh")
+    migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
+    assert 'git_repo() { git -c "safe.directory=$PROD_ROOT" "$@"; }' in common
+    assert "git_repo status --porcelain --untracked-files=all" in migration
+    assert "git_repo rev-parse HEAD" in migration
+
+
+
+def test_full_shutdown_requires_persistent_redis_and_legacy_safe_path():
+    shutdown = _read("deploy/scripts/prod_shutdown.sh")
+    common = _read("deploy/scripts/prod_common.sh")
+    assert "if ! redis_is_persistent" in shutdown
+    assert "Run the one-time persistence migration first" in shutdown
+    assert "legacy_app_mounts_present" in shutdown
+    assert "Legacy bind-mounted application containers detected" in shutdown
+    assert "stop_service_if_running celery_worker" in shutdown
+    assert "container_has_repo_root_mount()" in common

@@ -21,8 +21,9 @@ TOP_RE = re.compile(r"^[A-Za-z0-9_.-]+:(?:\s|$)")
 
 
 def _git_show(ref: str, path: str) -> str:
+    repo_root = Path.cwd().resolve()
     proc = subprocess.run(
-        ["git", "show", f"{ref}:{path}"],
+        ["git", "-c", f"safe.directory={repo_root}", "show", f"{ref}:{path}"],
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
