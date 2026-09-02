@@ -64,6 +64,8 @@ services:
         condition: service_healthy
 
   web:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 90s
     <<: *mediacms_app
     mem_limit: 4g
@@ -138,6 +140,8 @@ services:
       start_period: 20s
 
   dfx_signer_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     logging: *bounded_logging
     stop_grace_period: 30s
     build:
@@ -179,6 +183,8 @@ services:
     restart: unless-stopped
 
   deposit_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     logging: *bounded_logging
     stop_grace_period: 2m
     build:
@@ -246,6 +252,8 @@ services:
     restart: unless-stopped
 
   sweeper_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     logging: *bounded_logging
     stop_grace_period: 15m
     build:
@@ -337,12 +345,17 @@ services:
     restart: unless-stopped
 
   celery_beat:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 30s
     <<: *mediacms_app
     mem_limit: 512m
     mem_reservation: 128m
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ./static:/home/mediacms.io/mediacms/static
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       ENABLE_UWSGI: "no"
@@ -372,6 +385,8 @@ services:
     restart: unless-stopped
 
   celery_worker:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 2h10m
     <<: *mediacms_app
     mem_limit: 14g

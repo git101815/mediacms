@@ -7,6 +7,7 @@ cd "$ROLLING_ROOT"
 DRAIN_TIMEOUT_SECONDS="${DRAIN_TIMEOUT_SECONDS:-7500}"
 FRONTEND_BUILD_PROJECT="${FRONTEND_BUILD_PROJECT:-mediacms-frontend-build}"
 ROLLING_STATE_DIR="${ROLLING_STATE_DIR:-$ROLLING_ROOT/.deploy-state}"
+RELEASE_LABEL="io.mediacms.release"
 
 PROJECT=""
 COMPOSE_FILE=""
@@ -20,15 +21,25 @@ ENVIRONMENT_NAME=""
 CURRENT_SHA=""
 BASE_SHA=""
 STATE_FILE=""
+INPROGRESS_FILE=""
+LOCK_FILE=""
+ROLLING_LOCK_FD=""
 CHANGED_FILES=()
 FRONTEND_CHANGED=0
 MAIN_IMAGE_CHANGED=0
+APP_CONFIG_CHANGED=0
 DEPOSIT_IMAGE_CHANGED=0
+DEPOSIT_CONFIG_CHANGED=0
 SWEEPER_IMAGE_CHANGED=0
-COMPOSE_CHANGED=0
-RUNPOD_CHANGED=0
+SWEEPER_CONFIG_CHANGED=0
+SIGNER_IMAGE_CHANGED=0
+SIGNER_CONFIG_CHANGED=0
+LEGACY_BOOTSTRAP=0
 CELERY_DRAINED=0
 FRONTEND_BUILT=0
+DEPOSIT_WAS_RUNNING=""
+SWEEPER_WAS_RUNNING=""
+SIGNER_WAS_RUNNING=""
 
 configure_rolling_update() {
   PROJECT="$1"
@@ -45,6 +56,8 @@ configure_rolling_update() {
   COMPOSE=(docker compose -p "$PROJECT" -f "$COMPOSE_FILE")
   FRONTEND_COMPOSE=(docker compose -p "$FRONTEND_BUILD_PROJECT" -f docker-compose-dev.yaml)
   STATE_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.release"
+  INPROGRESS_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.inprogress"
+  LOCK_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.lock"
 }
 
 compose() { "${COMPOSE[@]}" "$@"; }
@@ -58,11 +71,29 @@ die() {
   exit 2
 }
 
+container_state() { docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null || true; }
+container_health() { docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$1" 2>/dev/null || true; }
+container_release() { docker inspect -f "{{ index .Config.Labels \"$RELEASE_LABEL\" }}" "$1" 2>/dev/null || true; }
+
+container_is_healthy() {
+  local cid="$1" state health
+  state="$(container_state "$cid")"
+  health="$(container_health "$cid")"
+  [[ "$state" == running && ( "$health" == healthy || "$health" == none ) ]]
+}
+
+container_has_repo_root_mount() {
+  local cid="$1"
+  docker inspect -f '{{range .Mounts}}{{if eq .Destination "/home/mediacms.io/mediacms"}}yes{{end}}{{end}}' "$cid" 2>/dev/null | grep -q yes
+}
+
 require_environment() {
   [[ -f manage.py && -f "$COMPOSE_FILE" && -f docker-compose-dev.yaml ]] || \
     die "run from the MediaCMS repository root"
   command -v git >/dev/null || die "git is required"
   command -v docker >/dev/null || die "docker is required"
+  command -v python3 >/dev/null || die "python3 is required"
+  command -v flock >/dev/null || die "flock is required"
   docker compose version >/dev/null || die "Docker Compose v2 is required"
   compose config >/dev/null
 
@@ -70,6 +101,13 @@ require_environment() {
     die "tracked working-tree changes are present; commit/stash them before a rolling update"
   fi
   CURRENT_SHA="$(git rev-parse HEAD)"
+  export MEDIACMS_RELEASE_SHA="$CURRENT_SHA"
+}
+
+acquire_update_lock() {
+  mkdir -p "$ROLLING_STATE_DIR"
+  exec {ROLLING_LOCK_FD}>"$LOCK_FILE"
+  flock -n "$ROLLING_LOCK_FD" || die "another $ENVIRONMENT_NAME rolling update is already running"
 }
 
 wait_healthy() {
@@ -83,11 +121,9 @@ wait_healthy() {
   while (( SECONDS < deadline )); do
     mapfile -t ids < <(service_container_ids_all "$service")
     if (( ${#ids[@]} == expected )); then
-      local all_ok=1 cid state health
+      local all_ok=1 cid
       for cid in "${ids[@]}"; do
-        state="$(docker inspect -f '{{.State.Status}}' "$cid")"
-        health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid")"
-        if [[ "$state" != running || ( "$health" != healthy && "$health" != none ) ]]; then
+        if ! container_is_healthy "$cid"; then
           all_ok=0
           break
         fi
@@ -102,11 +138,77 @@ wait_healthy() {
   return 1
 }
 
+healthy_service_count() {
+  local service="$1" count=0 cid
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] || continue
+    if container_is_healthy "$cid"; then count=$((count + 1)); fi
+  done < <(service_container_ids "$service")
+  echo "$count"
+}
+
+current_release_healthy_ids() {
+  local service="$1" cid
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] || continue
+    if [[ "$(container_release "$cid")" == "$CURRENT_SHA" ]] && container_is_healthy "$cid"; then
+      echo "$cid"
+    fi
+  done < <(service_container_ids "$service")
+}
+
+current_release_healthy_count() {
+  local service="$1"
+  current_release_healthy_ids "$service" | grep -c . || true
+}
+
+wait_current_release_healthy_count() {
+  local service="$1" expected="$2" timeout="${3:-300}" deadline=$((SECONDS + timeout)) count
+  while (( SECONDS < deadline )); do
+    count="$(current_release_healthy_count "$service")"
+    if (( count >= expected )); then return 0; fi
+    sleep 2
+  done
+  echo "rolling-update[$ENVIRONMENT_NAME]: '$service' did not reach $expected healthy replica(s) for release $CURRENT_SHA" >&2
+  compose ps -a "$service" >&2 || true
+  return 1
+}
+
+find_healthy_web_id() {
+  local cid
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] || continue
+    if container_is_healthy "$cid"; then echo "$cid"; return 0; fi
+  done < <(service_container_ids web)
+  return 1
+}
+
 app_preflight() {
   local web_id
-  web_id="$(service_container_ids web | head -n1)"
-  [[ -n "$web_id" ]] || die "$ENVIRONMENT_NAME rolling update requires an already-running web service"
+  web_id="$(find_healthy_web_id || true)"
+  [[ -n "$web_id" ]] || die "$ENVIRONMENT_NAME rolling update requires an already-running healthy web service"
   docker exec -i -w /home/mediacms.io/mediacms "$web_id" python manage.py prod_preflight
+}
+
+legacy_preflight() {
+  local count
+  count="$(healthy_service_count web)"
+  (( count >= 1 )) || die "legacy bootstrap requires at least one healthy web container"
+  echo "rolling-update[$ENVIRONMENT_NAME]: legacy bind-mounted application containers detected; entering one-time bootstrap mode"
+}
+
+detect_legacy_bootstrap() {
+  LEGACY_BOOTSTRAP=0
+  local service cid
+  for service in web celery_beat celery_worker; do
+    while IFS= read -r cid; do
+      [[ -n "$cid" ]] || continue
+      if container_has_repo_root_mount "$cid"; then
+        LEGACY_BOOTSTRAP=1
+        return 0
+      fi
+    done < <(service_container_ids_all "$service")
+  done
 }
 
 redis_is_persistent() {
@@ -115,6 +217,26 @@ redis_is_persistent() {
   [[ -n "$cid" ]] || return 1
   source="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' "$cid")"
   [[ "$source" == "$REDIS_VOLUME" ]]
+}
+
+progress_get() {
+  local key="$1" default="${2:-}" line
+  [[ -f "$INPROGRESS_FILE" ]] || { printf '%s\n' "$default"; return 0; }
+  line="$(grep -E "^${key}=" "$INPROGRESS_FILE" | tail -n1 || true)"
+  [[ -n "$line" ]] && printf '%s\n' "${line#*=}" || printf '%s\n' "$default"
+}
+
+progress_set() {
+  local key="$1" value="$2" tmp
+  mkdir -p "$ROLLING_STATE_DIR"
+  tmp="${INPROGRESS_FILE}.tmp.$$"
+  if [[ -f "$INPROGRESS_FILE" ]]; then
+    grep -Ev "^${key}=" "$INPROGRESS_FILE" > "$tmp" || true
+  else
+    : > "$tmp"
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" "$INPROGRESS_FILE"
 }
 
 load_release_delta() {
@@ -162,6 +284,44 @@ main_image_inputs_changed() {
   return 1
 }
 
+classify_compose_delta() {
+  [[ -n "$BASE_SHA" ]] || return 0
+  changed_matches "^${COMPOSE_FILE//./\\.}$" || return 0
+
+  local part service
+  while IFS= read -r part; do
+    [[ -n "$part" ]] || continue
+    if [[ "$part" == top-level ]]; then
+      die "$COMPOSE_FILE changed outside individual service blocks; review as an infrastructure change instead of rolling it unattended"
+    fi
+    [[ "$part" == service:* ]] || die "unexpected compose classifier output: $part"
+    service="${part#service:}"
+    case "$service" in
+      web|celery_worker|celery_beat|migrations)
+        APP_CONFIG_CHANGED=1
+        ;;
+      deposit_service)
+        DEPOSIT_CONFIG_CHANGED=1
+        ;;
+      sweeper_service)
+        SWEEPER_CONFIG_CHANGED=1
+        ;;
+      dfx_signer_service)
+        SIGNER_CONFIG_CHANGED=1
+        ;;
+      db|redis)
+        die "$COMPOSE_FILE changes live $service; PostgreSQL/Redis are intentionally outside rolling application updates"
+        ;;
+      cloudflared)
+        die "$COMPOSE_FILE changes cloudflared; tunnel infrastructure is intentionally outside rolling application updates"
+        ;;
+      *)
+        die "$COMPOSE_FILE changes unsupported service '$service'; refusing to mark it deployed"
+        ;;
+    esac
+  done < <(python3 deploy/scripts/classify_compose_changes.py "$BASE_SHA" "$COMPOSE_FILE")
+}
+
 classify_release() {
   local first_run=0
   [[ -z "$BASE_SHA" ]] && first_run=1
@@ -169,34 +329,55 @@ classify_release() {
   if (( first_run )) || changed_matches '^frontend/'; then FRONTEND_CHANGED=1; fi
   if (( first_run )) || main_image_inputs_changed; then MAIN_IMAGE_CHANGED=1; fi
   if (( first_run )) || changed_matches '^deposit_service/(Dockerfile|requirements\.txt|app/)'; then DEPOSIT_IMAGE_CHANGED=1; fi
-  if (( first_run )) || changed_matches '^sweeper_service/(Dockerfile|requirements\.txt|app/)'; then SWEEPER_IMAGE_CHANGED=1; fi
-  if changed_matches "^${COMPOSE_FILE//./\\.}$"; then COMPOSE_CHANGED=1; fi
-  if changed_matches '^runpod_worker/'; then RUNPOD_CHANGED=1; fi
+  if changed_matches '^deposit_service/config/'; then DEPOSIT_CONFIG_CHANGED=1; fi
+  if (( first_run )) || changed_matches '^sweeper_service/(Dockerfile|requirements\.txt|app/)'; then
+    SWEEPER_IMAGE_CHANGED=1
+    SIGNER_IMAGE_CHANGED=1
+  fi
+  if changed_matches '^sweeper_service/config/'; then SWEEPER_CONFIG_CHANGED=1; fi
+  if (( first_run )); then
+    APP_CONFIG_CHANGED=1
+    DEPOSIT_CONFIG_CHANGED=1
+    SWEEPER_CONFIG_CHANGED=1
+    SIGNER_CONFIG_CHANGED=1
+  fi
+  if [[ "${CRYPTO_WORKERS:-0}" == 1 ]]; then
+    DEPOSIT_CONFIG_CHANGED=1
+    SWEEPER_CONFIG_CHANGED=1
+    SIGNER_CONFIG_CHANGED=1
+  fi
+
+  # runpod_worker is deliberately outside this Docker stack. It neither blocks
+  # nor participates in the rolling deployment state.
+  classify_compose_delta
 }
+
+app_update_needed() {
+  (( MAIN_IMAGE_CHANGED || APP_CONFIG_CHANGED || FRONTEND_CHANGED ))
+}
+
+deposit_update_needed() { (( DEPOSIT_IMAGE_CHANGED || DEPOSIT_CONFIG_CHANGED )); }
+sweeper_update_needed() { (( SWEEPER_IMAGE_CHANGED || SWEEPER_CONFIG_CHANGED )); }
+signer_update_needed() { (( SIGNER_IMAGE_CHANGED || SIGNER_CONFIG_CHANGED )); }
+crypto_update_needed() { deposit_update_needed || sweeper_update_needed || signer_update_needed; }
+stack_update_needed() { app_update_needed || crypto_update_needed; }
 
 print_plan() {
   echo "rolling-update[$ENVIRONMENT_NAME]: release ${BASE_SHA:-<unknown>} -> $CURRENT_SHA"
   echo "  changed tracked files: ${#CHANGED_FILES[@]}"
   echo "  frontend build:        $FRONTEND_CHANGED"
   echo "  main image rebuild:    $MAIN_IMAGE_CHANGED"
-  echo "  deposit rebuild:       $DEPOSIT_IMAGE_CHANGED"
-  echo "  sweeper/signer build:  $SWEEPER_IMAGE_CHANGED"
-  if (( COMPOSE_CHANGED )); then
-    echo "  NOTE: $COMPOSE_FILE changed. This updater intentionally never recreates PostgreSQL/Redis."
-  fi
-  if (( RUNPOD_CHANGED )); then
-    echo "  NOTE: runpod_worker changed; its external deployment is not performed by Docker Compose."
-  fi
+  echo "  app config recreate:   $APP_CONFIG_CHANGED"
+  echo "  deposit image/config:  $DEPOSIT_IMAGE_CHANGED/$DEPOSIT_CONFIG_CHANGED"
+  echo "  sweeper image/config:  $SWEEPER_IMAGE_CHANGED/$SWEEPER_CONFIG_CHANGED"
+  echo "  signer image/config:   $SIGNER_IMAGE_CHANGED/$SIGNER_CONFIG_CHANGED"
+  echo "  legacy bootstrap:      $LEGACY_BOOTSTRAP"
 }
 
 build_required_images() {
-  if (( MAIN_IMAGE_CHANGED )); then
-    compose build web
-  fi
-  if (( DEPOSIT_IMAGE_CHANGED )); then
-    compose_crypto build deposit_service
-  fi
-  if (( SWEEPER_IMAGE_CHANGED )); then
+  if (( MAIN_IMAGE_CHANGED )); then compose build web; fi
+  if (( DEPOSIT_IMAGE_CHANGED )); then compose_crypto build deposit_service; fi
+  if (( SWEEPER_IMAGE_CHANGED || SIGNER_IMAGE_CHANGED )); then
     compose_crypto build dfx_signer_service sweeper_service
   fi
 }
@@ -204,12 +385,10 @@ build_required_images() {
 check_pending_migrations() {
   local rc=0
   set +e
-  compose run --rm --no-deps web python deploy/scripts/check_rolling_migrations.py
+  compose run --rm --no-deps migrations python deploy/scripts/check_rolling_migrations.py
   rc=$?
   set -e
-  if (( rc == 0 )); then
-    return 0
-  fi
+  if (( rc == 0 )); then return 0; fi
   if (( rc == 3 )) && [[ "${ALLOW_REVIEWED_ROLLING_MIGRATIONS:-0}" == 1 ]]; then
     echo "rolling-update[$ENVIRONMENT_NAME]: proceeding with explicitly reviewed migration override" >&2
     return 0
@@ -227,14 +406,13 @@ build_frontend_dist() {
 
 publish_frontend_dist() {
   (( FRONTEND_BUILT )) || return 0
-  # Overlay instead of deleting static/: old hashed assets remain available
-  # while old and new web replicas overlap during the production rotation.
+  # Additive overlay: old hashed assets stay available throughout old/new overlap.
   cp -a frontend/dist/static/. static/
 }
 
 celery_queue_count() {
   local web_id
-  web_id="$(service_container_ids web | head -n1)"
+  web_id="$(find_healthy_web_id || true)"
   [[ -n "$web_id" ]] || return 1
   docker exec -i -w /home/mediacms.io/mediacms "$web_id" python - <<'__CELERY_QUEUE_COUNT_PY__'
 from django.conf import settings
@@ -252,7 +430,7 @@ celery_active_reserved_count() {
   local worker_id web_id
   worker_id="$(service_container_ids celery_worker | head -n1)"
   if [[ -z "$worker_id" ]]; then echo 0; return 0; fi
-  web_id="$(service_container_ids web | head -n1)"
+  web_id="$(find_healthy_web_id || true)"
   [[ -n "$web_id" ]] || return 1
   docker exec -i -w /home/mediacms.io/mediacms "$web_id" python - <<'__CELERY_ACTIVE_COUNT_PY__'
 from cms.celery import app
@@ -281,7 +459,20 @@ celery_work_count() {
   echo $((queued + active_reserved))
 }
 
-drain_celery() {
+drain_celery_legacy() {
+  # Legacy containers mount the just-updated checkout. Do not launch a fresh
+  # Django/Celery inspection process inside them before migrations. Stop Beat,
+  # then rely on Celery's warm TERM shutdown to finish active work; queued work
+  # remains durable in Redis for the new worker.
+  service_exists celery_beat && compose stop celery_beat >/dev/null || true
+  if [[ -n "$(service_container_ids celery_worker | head -n1)" ]]; then
+    compose stop celery_worker >/dev/null
+  fi
+  CELERY_DRAINED=1
+  progress_set celery_drained 1
+}
+
+drain_celery_fresh() {
   service_exists celery_beat && compose stop celery_beat >/dev/null || true
   local deadline=$((SECONDS + DRAIN_TIMEOUT_SECONDS)) count
   while (( SECONDS < deadline )); do
@@ -292,6 +483,7 @@ drain_celery() {
     if (( count == 0 )); then
       compose stop celery_worker >/dev/null || true
       CELERY_DRAINED=1
+      progress_set celery_drained 1
       return 0
     fi
     echo "rolling-update[$ENVIRONMENT_NAME]: waiting for Celery drain: $count active/reserved/queued"
@@ -301,82 +493,205 @@ drain_celery() {
   return 1
 }
 
+ensure_celery_drained() {
+  local remembered worker_id
+  remembered="$(progress_get celery_drained 0)"
+  worker_id="$(service_container_ids celery_worker | head -n1)"
+  if [[ "$remembered" == 1 && -z "$worker_id" ]]; then
+    service_exists celery_beat && compose stop celery_beat >/dev/null || true
+    CELERY_DRAINED=1
+    echo "rolling-update[$ENVIRONMENT_NAME]: resuming with Celery already drained from a previous attempt"
+    return 0
+  fi
+  if (( LEGACY_BOOTSTRAP )); then
+    drain_celery_legacy
+  else
+    drain_celery_fresh
+  fi
+}
+
 run_migrations() {
-  # check_rolling_migrations already proved the pending plan is additive or
-  # the operator explicitly reviewed it. The unique PostgreSQL instance stays live.
   compose run --rm migrations
 }
 
-stop_crypto_loops_if_needed() {
+capture_crypto_initial_state() {
+  if [[ -n "$DEPOSIT_WAS_RUNNING" ]]; then return 0; fi
+
+  local saved
+  saved="$(progress_get deposit_was_running '')"
+  if [[ -n "$saved" ]]; then
+    DEPOSIT_WAS_RUNNING="$saved"
+    SWEEPER_WAS_RUNNING="$(progress_get sweeper_was_running 0)"
+    SIGNER_WAS_RUNNING="$(progress_get signer_was_running 0)"
+    echo "rolling-update[$ENVIRONMENT_NAME]: restoring original crypto service state from unfinished update"
+    return 0
+  fi
+
   DEPOSIT_WAS_RUNNING=0
   SWEEPER_WAS_RUNNING=0
+  SIGNER_WAS_RUNNING=0
   [[ -n "$(service_container_ids deposit_service)" ]] && DEPOSIT_WAS_RUNNING=1
   [[ -n "$(service_container_ids sweeper_service)" ]] && SWEEPER_WAS_RUNNING=1
+  [[ -n "$(service_container_ids dfx_signer_service)" ]] && SIGNER_WAS_RUNNING=1
+  progress_set deposit_was_running "$DEPOSIT_WAS_RUNNING"
+  progress_set sweeper_was_running "$SWEEPER_WAS_RUNNING"
+  progress_set signer_was_running "$SIGNER_WAS_RUNNING"
+}
 
-  if (( DEPOSIT_IMAGE_CHANGED || SWEEPER_IMAGE_CHANGED )); then
-    if (( DEPOSIT_WAS_RUNNING )); then compose_crypto stop deposit_service >/dev/null; fi
-    if (( SWEEPER_WAS_RUNNING )); then compose_crypto stop sweeper_service >/dev/null; fi
+stop_crypto_for_update() {
+  crypto_update_needed || return 0
+  capture_crypto_initial_state
+
+  if signer_update_needed; then
+    [[ -n "$(service_container_ids deposit_service)" ]] && compose_crypto stop deposit_service >/dev/null || true
+    [[ -n "$(service_container_ids sweeper_service)" ]] && compose_crypto stop sweeper_service >/dev/null || true
+    return 0
+  fi
+  if deposit_update_needed && [[ -n "$(service_container_ids deposit_service)" ]]; then
+    compose_crypto stop deposit_service >/dev/null
+  fi
+  if sweeper_update_needed && [[ -n "$(service_container_ids sweeper_service)" ]]; then
+    compose_crypto stop sweeper_service >/dev/null
   fi
 }
 
-rolling_replace_unbound_service() {
-  local service="$1" timeout="$2"
-  mapfile -t old_ids < <(service_container_ids "$service")
-  if (( ${#old_ids[@]} == 0 )); then
-    compose up -d --no-deps "$service"
-    wait_healthy "$service" "$timeout" 1
-    return 0
-  fi
-  compose up -d --no-deps --no-recreate --scale "$service=2" "$service"
-  wait_healthy "$service" "$timeout" 2
-  local old_id
-  for old_id in "${old_ids[@]}"; do
-    [[ -n "$old_id" ]] || continue
-    docker stop --time 30 "$old_id" >/dev/null
-    docker rm "$old_id" >/dev/null
+remove_nonrunning_service_containers() {
+  local service="$1" cid state
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] || continue
+    state="$(container_state "$cid")"
+    if [[ "$state" != running ]]; then docker rm -f "$cid" >/dev/null 2>&1 || true; fi
+  done < <(service_container_ids_all "$service")
+}
+
+converge_unbound_service_release() {
+  local service="$1" timeout="$2" stop_time="$3"
+  local current total target cid release health count
+
+  remove_nonrunning_service_containers "$service"
+  current="$(current_release_healthy_count "$service")"
+  while (( current < 1 )); do
+    total="$(service_container_ids "$service" | grep -c . || true)"
+    target=$((total + 1))
+    compose up -d --no-deps --no-recreate --scale "$service=$target" "$service"
+    wait_current_release_healthy_count "$service" 1 "$timeout"
+    current="$(current_release_healthy_count "$service")"
   done
-  compose up -d --no-deps --no-recreate --scale "$service=1" "$service"
+
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] || continue
+    release="$(container_release "$cid")"
+    health="$(container_health "$cid")"
+    if [[ "$release" != "$CURRENT_SHA" || "$health" != healthy ]]; then
+      docker stop --time "$stop_time" "$cid" >/dev/null 2>&1 || true
+      docker rm -f "$cid" >/dev/null 2>&1 || true
+    fi
+  done < <(service_container_ids "$service")
+
+  mapfile -t current_ids < <(current_release_healthy_ids "$service")
+  if (( ${#current_ids[@]} > 1 )); then
+    for cid in "${current_ids[@]:1}"; do
+      docker stop --time "$stop_time" "$cid" >/dev/null 2>&1 || true
+      docker rm -f "$cid" >/dev/null 2>&1 || true
+    done
+  fi
   wait_healthy "$service" "$timeout" 1
+  [[ "$(container_release "$(service_container_ids "$service" | head -n1)")" == "$CURRENT_SHA" ]] || \
+    die "$service converged without the expected release label"
 }
 
 update_signer_if_needed() {
-  (( SWEEPER_IMAGE_CHANGED )) || return 0
-  rolling_replace_unbound_service dfx_signer_service 180
+  signer_update_needed || return 0
+  capture_crypto_initial_state
+  if (( SIGNER_WAS_RUNNING || DEPOSIT_WAS_RUNNING || SWEEPER_WAS_RUNNING )) || [[ "${CRYPTO_WORKERS:-0}" == 1 ]]; then
+    converge_unbound_service_release dfx_signer_service 180 30
+  fi
 }
 
-update_web_scaled() {
-  mapfile -t old_ids < <(service_container_ids web)
-  (( ${#old_ids[@]} == EXPECTED_WEB_REPLICAS )) || \
-    die "expected $EXPECTED_WEB_REPLICAS running web replicas before production rotation, found ${#old_ids[@]}"
+converge_web_scaled() {
+  remove_nonrunning_service_containers web
 
-  local temporary=$((EXPECTED_WEB_REPLICAS + 1))
-  compose up -d --no-deps --no-recreate --scale "web=$temporary" web
-  wait_healthy web 300 "$temporary"
+  local current total target cid release health temporary healthy_count retired
+  temporary=$((EXPECTED_WEB_REPLICAS + 1))
+  current="$(current_release_healthy_count web)"
 
-  local old_id
-  for old_id in "${old_ids[@]}"; do
-    [[ -n "$old_id" ]] || continue
-    docker stop --time 90 "$old_id" >/dev/null
-    docker rm "$old_id" >/dev/null
-    compose up -d --no-deps --no-recreate --scale "web=$temporary" web
-    wait_healthy web 300 "$temporary"
+  while (( current < EXPECTED_WEB_REPLICAS )); do
+    # Failed/unhealthy replicas do not protect availability and only consume a
+    # scale slot, so remove them before deciding whether another replica fits.
+    while IFS= read -r cid; do
+      [[ -n "$cid" ]] || continue
+      if ! container_is_healthy "$cid"; then
+        docker stop --time 15 "$cid" >/dev/null 2>&1 || true
+        docker rm -f "$cid" >/dev/null 2>&1 || true
+      fi
+    done < <(service_container_ids web)
+
+    total="$(service_container_ids web | grep -c . || true)"
+    (( total >= 1 )) || die "refusing to roll web with no running web container"
+
+    # Never exceed steady-state+1. When resuming from 2 old + 1 new, retire one
+    # old healthy replica first, then create the next current-release replica.
+    if (( total >= temporary )); then
+      healthy_count="$(healthy_service_count web)"
+      (( healthy_count > EXPECTED_WEB_REPLICAS )) || \
+        die "cannot free a web scale slot without dropping below healthy steady-state capacity"
+      retired=0
+      while IFS= read -r cid; do
+        [[ -n "$cid" ]] || continue
+        if [[ "$(container_release "$cid")" != "$CURRENT_SHA" ]] && container_is_healthy "$cid"; then
+          docker stop --time 90 "$cid" >/dev/null
+          docker rm -f "$cid" >/dev/null
+          retired=1
+          break
+        fi
+      done < <(service_container_ids web)
+      (( retired )) || die "web is at temporary capacity but has no old replica that can be safely retired"
+      total="$(service_container_ids web | grep -c . || true)"
+    fi
+
+    target=$((total + 1))
+    (( target <= temporary )) || die "internal web convergence error: target $target exceeds $temporary"
+    compose up -d --no-deps --no-recreate --scale "web=$target" web
+    wait_current_release_healthy_count web $((current + 1)) 300
+    current="$(current_release_healthy_count web)"
   done
 
-  compose up -d --no-deps --no-recreate --scale "web=$EXPECTED_WEB_REPLICAS" web
-  wait_healthy web 300 "$EXPECTED_WEB_REPLICAS"
-}
+  # Full target-release capacity exists. Old, unknown and unhealthy replicas can
+  # now be retired without affecting availability.
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] || continue
+    release="$(container_release "$cid")"
+    health="$(container_health "$cid")"
+    if [[ "$release" != "$CURRENT_SHA" || "$health" != healthy ]]; then
+      docker stop --time 90 "$cid" >/dev/null 2>&1 || true
+      docker rm -f "$cid" >/dev/null 2>&1 || true
+    fi
+  done < <(service_container_ids web)
 
+  mapfile -t current_ids < <(current_release_healthy_ids web)
+  if (( ${#current_ids[@]} > EXPECTED_WEB_REPLICAS )); then
+    for cid in "${current_ids[@]:EXPECTED_WEB_REPLICAS}"; do
+      docker stop --time 90 "$cid" >/dev/null 2>&1 || true
+      docker rm -f "$cid" >/dev/null 2>&1 || true
+    done
+  fi
+
+  wait_healthy web 300 "$EXPECTED_WEB_REPLICAS"
+  while IFS= read -r cid; do
+    [[ "$(container_release "$cid")" == "$CURRENT_SHA" ]] || die "web convergence left a non-current release replica"
+  done < <(service_container_ids web)
+}
 update_web_single() {
-  # Staging binds host :80, so two web containers cannot coexist without a
-  # proxy/port architecture change. DB/Redis remain online; only staging web
-  # is recreated and there is deliberately no DNS/maintenance manipulation.
   compose up -d --no-deps --force-recreate web
   wait_healthy web 300 1
+  local cid
+  cid="$(service_container_ids web | head -n1)"
+  [[ "$(container_release "$cid")" == "$CURRENT_SHA" ]] || die "staging web did not start with current release label"
 }
 
 update_web() {
   case "$WEB_UPDATE_MODE" in
-    scaled) update_web_scaled ;;
+    scaled) converge_web_scaled ;;
     single) update_web_single ;;
     *) die "unknown WEB_UPDATE_MODE=$WEB_UPDATE_MODE" ;;
   esac
@@ -387,34 +702,46 @@ restart_celery() {
   wait_healthy celery_worker 120 1
   wait_healthy celery_beat 120 1
   CELERY_DRAINED=0
+  progress_set celery_drained 0
 }
 
-restart_crypto_loops_if_needed() {
-  if (( DEPOSIT_IMAGE_CHANGED )); then
-    if (( DEPOSIT_WAS_RUNNING )) || [[ "${CRYPTO_WORKERS:-0}" == 1 ]]; then
+restart_crypto_after_update() {
+  crypto_update_needed || return 0
+  capture_crypto_initial_state
+
+  if (( DEPOSIT_WAS_RUNNING )) || [[ "${CRYPTO_WORKERS:-0}" == 1 ]]; then
+    if deposit_update_needed; then
       compose_crypto up -d --no-deps --force-recreate deposit_service
-      wait_healthy deposit_service 120 1
+    elif [[ -z "$(service_container_ids deposit_service)" ]]; then
+      compose_crypto start deposit_service >/dev/null || compose_crypto up -d --no-deps deposit_service
     fi
+    wait_healthy deposit_service 120 1
   fi
-  if (( SWEEPER_IMAGE_CHANGED )); then
-    if (( SWEEPER_WAS_RUNNING )) || [[ "${CRYPTO_WORKERS:-0}" == 1 ]]; then
+
+  if (( SWEEPER_WAS_RUNNING )) || [[ "${CRYPTO_WORKERS:-0}" == 1 ]]; then
+    if sweeper_update_needed; then
       compose_crypto up -d --no-deps --force-recreate sweeper_service
-      wait_healthy sweeper_service 120 1
+    elif [[ -z "$(service_container_ids sweeper_service)" ]]; then
+      compose_crypto start sweeper_service >/dev/null || compose_crypto up -d --no-deps sweeper_service
     fi
+    wait_healthy sweeper_service 120 1
   fi
 }
 
 record_release() {
   mkdir -p "$ROLLING_STATE_DIR"
-  printf '%s\n' "$CURRENT_SHA" > "$STATE_FILE"
+  local tmp="${STATE_FILE}.tmp.$$"
+  printf '%s\n' "$CURRENT_SHA" > "$tmp"
+  mv "$tmp" "$STATE_FILE"
+  rm -f "$INPROGRESS_FILE"
 }
 
 rolling_failure_notice() {
   local rc=$?
   if (( rc != 0 )); then
     echo "rolling-update[$ENVIRONMENT_NAME]: FAILED; release state was not advanced." >&2
-    if (( CELERY_DRAINED )); then
-      echo "rolling-update[$ENVIRONMENT_NAME]: Celery remains intentionally stopped (fail-closed). Fix the error and rerun the same command." >&2
+    if (( CELERY_DRAINED )) || [[ "$(progress_get celery_drained 0)" == 1 ]]; then
+      echo "rolling-update[$ENVIRONMENT_NAME]: Celery remains intentionally stopped. Rerun the same updater; it will resume without requiring empty queues." >&2
     fi
   fi
   return "$rc"
@@ -423,19 +750,22 @@ rolling_failure_notice() {
 rolling_update_main() {
   trap rolling_failure_notice EXIT
   require_environment
-  app_preflight
+  acquire_update_lock
+  detect_legacy_bootstrap
+  if (( LEGACY_BOOTSTRAP )); then legacy_preflight; else app_preflight; fi
 
   if (( REQUIRE_PERSISTENT_REDIS )) && ! redis_is_persistent; then
-    cat >&2 <<EOF
+    cat >&2 <<EOF_REDIS
 rolling-update[$ENVIRONMENT_NAME]: Redis is not mounted on '$REDIS_VOLUME'.
 Run the one-time persistence migration before the production rolling updater:
   CONFIRM_REDIS_MIGRATION=$PROJECT deploy/scripts/prod_migrate_redis_persistence.sh
-EOF
+EOF_REDIS
     exit 2
   fi
 
   load_release_delta
-  if [[ -n "$BASE_SHA" && "$BASE_SHA" == "$CURRENT_SHA" ]]; then
+  if [[ -n "$BASE_SHA" && "$BASE_SHA" == "$CURRENT_SHA" && "${CRYPTO_WORKERS:-0}" != 1 ]]; then
+    rm -f "$INPROGRESS_FILE"
     echo "rolling-update[$ENVIRONMENT_NAME]: $CURRENT_SHA is already recorded as deployed; health/preflight OK"
     trap - EXIT
     return 0
@@ -444,23 +774,42 @@ EOF
   classify_release
   print_plan
 
-  # Everything below this point is arranged so build/review failures happen
-  # before any live process is stopped.
-  build_required_images
-  check_pending_migrations
-  build_frontend_dist
+  if ! stack_update_needed; then
+    record_release
+    trap - EXIT
+    echo "rolling-update[$ENVIRONMENT_NAME]: no Docker-stack component changed; release marker advanced only"
+    return 0
+  fi
 
-  drain_celery
-  run_migrations
-  publish_frontend_dist
-  stop_crypto_loops_if_needed
-  update_signer_if_needed
-  update_web
-  restart_celery
-  restart_crypto_loops_if_needed
+  # Legacy containers still see the live checkout. Quiesce Celery first on this
+  # one-time transition; normal isolated releases keep all build/review work
+  # before the first live-process change.
+  if (( LEGACY_BOOTSTRAP )) && app_update_needed; then ensure_celery_drained; fi
+
+  build_required_images
+  if app_update_needed; then
+    check_pending_migrations
+    build_frontend_dist
+    if (( ! LEGACY_BOOTSTRAP )); then ensure_celery_drained; fi
+    run_migrations
+    publish_frontend_dist
+  fi
+
+  if crypto_update_needed; then
+    stop_crypto_for_update
+    update_signer_if_needed
+  fi
+
+  if app_update_needed; then
+    update_web
+    restart_celery
+  fi
+
+  if crypto_update_needed; then restart_crypto_after_update; fi
+
   app_preflight
   record_release
 
   trap - EXIT
-  echo "rolling-update[$ENVIRONMENT_NAME]: complete at $CURRENT_SHA; PostgreSQL and Redis were never recreated"
+  echo "rolling-update[$ENVIRONMENT_NAME]: complete at $CURRENT_SHA; PostgreSQL/Redis and DNS routing were untouched"
 }

@@ -53,6 +53,8 @@ services:
         condition: service_healthy
 
   web:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 90s
     <<: *mediacms_app
     deploy:
@@ -126,6 +128,8 @@ services:
       retries: 12
 
   deposit_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 2m
     profiles:
       - crypto-workers
@@ -190,6 +194,8 @@ services:
     restart: unless-stopped
 
   dfx_signer_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 30s
     expose:
       - "8080"
@@ -228,6 +234,8 @@ services:
     restart: unless-stopped
 
   sweeper_service:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 15m
     profiles:
       - crypto-workers
@@ -313,10 +321,15 @@ services:
     restart: unless-stopped
 
   celery_beat:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 30s
     <<: *mediacms_app
     volumes:
-      - ./:/home/mediacms.io/mediacms/
+      - ./static:/home/mediacms.io/mediacms/static
+      - ./media_files:/home/mediacms.io/mediacms/media_files
+      - ./logs:/home/mediacms.io/mediacms/logs
+      - ./backup:/home/mediacms.io/mediacms/backup
     environment:
       <<: *mediacms_db_env
       ENABLE_UWSGI: "no"
@@ -340,6 +353,8 @@ services:
     restart: unless-stopped
 
   celery_worker:
+    labels:
+      io.mediacms.release: "${MEDIACMS_RELEASE_SHA:-unmanaged}"
     stop_grace_period: 2h10m
     <<: *mediacms_app
     deploy:

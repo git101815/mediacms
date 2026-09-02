@@ -102,8 +102,8 @@ def test_redis_migration_enables_live_aof_before_stopping_redis():
 def test_crypto_worker_updates_are_ordered_around_signer_health():
     common = _read("deploy/scripts/rolling_update_common.sh")
     main = common.split("rolling_update_main()", 1)[1]
-    stop_worker = main.index("stop_crypto_loops_if_needed")
+    stop_worker = main.index("stop_crypto_for_update")
     signer_update = main.index("update_signer_if_needed")
     web_update = main.index("update_web\n")
-    restart_worker = main.index("restart_crypto_loops_if_needed")
+    restart_worker = main.index("restart_crypto_after_update")
     assert stop_worker < signer_update < web_update < restart_worker

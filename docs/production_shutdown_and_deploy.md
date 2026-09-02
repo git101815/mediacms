@@ -28,3 +28,11 @@ Before any live process is stopped, `check_rolling_migrations.py` inspects the a
 
 Production web updates temporarily add one healthy replica, retire the previously running replicas one by one, and return to two replicas. Staging binds host port 80 and therefore cannot run two web replicas on the same host with the current compose topology; its updater performs a targeted web recreate while leaving PostgreSQL, Redis, Celery state, and every DNS/maintenance control untouched.
 
+### Interrupted updates and legacy bootstrap
+
+The updater labels managed application containers with the target Git SHA and converges toward the requested release instead of assuming a pristine replica count. A rerun can therefore recover from mixed old/new web replicas or an interrupted signer rotation. `.deploy-state/<environment>.inprogress` remembers an intentional Celery drain and the original crypto-worker running subset so a failed attempt can be resumed without losing that operational state; the file is removed only after the final preflight and release marker update. A per-environment `flock` prevents concurrent rolling updates.
+
+The first transition from the historical live-checkout bind mounts is detected automatically. In that one-time bootstrap mode Celery Beat is stopped and the worker receives its normal warm shutdown before any new Django code is launched inside legacy containers; queued work remains durable in Redis. PostgreSQL, Redis and DNS routing remain untouched. Later releases run from image-isolated `web`, `celery_worker` and `celery_beat` containers and perform build/migration review before draining Celery.
+
+Changes to PostgreSQL, Redis, cloudflared, shared top-level Compose configuration, or unsupported Compose services are refused by the rolling updater. Crypto service Compose changes are classified per service. `runpod_worker/` is intentionally outside the Docker-stack updater and does not participate in its deployment state.
+
