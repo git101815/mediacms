@@ -783,16 +783,18 @@ def test_static_release_gc_preserves_live_states_and_recent_rollbacks(tmp_path):
     static_root.mkdir(parents=True)
 
     current = "a" * 40
-    prod = "b" * 40
+    prod_release = "b" * 40
+    prod_static = "3" * 40
     inprogress = "c" * 40
     recent_1 = "d" * 40
     recent_2 = "e" * 40
     old_1 = "1" * 40
     old_2 = "2" * 40
 
-    # Oldest -> newest. Protected snapshots survive regardless of age; two
-    # additional recent snapshots are retained as rollback candidates.
-    ordered = [old_1, prod, old_2, inprogress, recent_1, recent_2, current]
+    # production.release may advance on a crypto-only deployment while web keeps
+    # mounting an older application snapshot. That active static SHA must survive
+    # regardless of age; two additional recent snapshots stay as rollback copies.
+    ordered = [old_1, prod_static, old_2, inprogress, recent_1, recent_2, current]
     base = 1_700_000_000
     for offset, sha in enumerate(ordered):
         directory = static_root / sha
@@ -800,7 +802,9 @@ def test_static_release_gc_preserves_live_states_and_recent_rollbacks(tmp_path):
         os.utime(directory, (base + offset, base + offset))
 
     (state / "staging.release").write_text(current + "\n", encoding="utf-8")
-    (state / "production.release").write_text(prod + "\n", encoding="utf-8")
+    (state / "staging.static-release").write_text(current + "\n", encoding="utf-8")
+    (state / "production.release").write_text(prod_release + "\n", encoding="utf-8")
+    (state / "production.static-release").write_text(prod_static + "\n", encoding="utf-8")
     (state / "production.redis-migration.inprogress").write_text(
         f"target_sha={inprogress}\nphase=80\n", encoding="utf-8"
     )
@@ -824,7 +828,7 @@ def test_static_release_gc_preserves_live_states_and_recent_rollbacks(tmp_path):
     assert result.returncode == 0, result.stderr
 
     assert (static_root / current).is_dir()
-    assert (static_root / prod).is_dir()
+    assert (static_root / prod_static).is_dir()
     assert (static_root / inprogress).is_dir()
     assert (static_root / recent_1).is_dir()
     assert (static_root / recent_2).is_dir()
@@ -834,15 +838,71 @@ def test_static_release_gc_preserves_live_states_and_recent_rollbacks(tmp_path):
     assert protected_tmp.exists()
 
 
+def test_static_gc_skips_pruning_until_all_deployed_environments_have_static_state(tmp_path):
+    state = tmp_path / "state"
+    static_root = state / "static"
+    static_root.mkdir(parents=True)
+    active = "a" * 40
+    newer = "b" * 40
+    for offset, sha in enumerate((active, newer)):
+        directory = static_root / sha
+        directory.mkdir()
+        os.utime(directory, (1_700_000_000 + offset, 1_700_000_000 + offset))
+
+    (state / "production.release").write_text(newer + "\n", encoding="utf-8")
+    # Deliberately no production.static-release: this is the upgrade state from
+    # the old GC implementation and pruning must fail safe.
+    script = (
+        "source deploy/scripts/rolling_update_common.sh\n"
+        f"CURRENT_SHA={newer}\n"
+        "ENVIRONMENT_NAME=test\n"
+        "STATIC_RELEASE_KEEP_COUNT=0\n"
+        "cleanup_static_releases\n"
+    )
+    result = _bash(script, env={"ROLLING_STATE_DIR": str(state)})
+    assert result.returncode == 0, result.stderr
+    assert (static_root / active).is_dir()
+    assert "skipping static GC" in result.stderr
+
+
+def test_static_state_bootstraps_from_existing_web_snapshot_without_overwriting_it(tmp_path):
+    state = tmp_path / "state"
+    static_root = state / "static"
+    static_root.mkdir(parents=True)
+    active = "a" * 40
+    (static_root / active).mkdir()
+
+    script = (
+        "source deploy/scripts/rolling_update_common.sh\n"
+        f"ROLLING_STATE_DIR={str(state)!r}\n"
+        'STATIC_STATE_FILE="$ROLLING_STATE_DIR/production.static-release"\n'
+        "ENVIRONMENT_NAME=production\n"
+        "service_container_ids_all() { printf 'web1\nweb2\n'; }\n"
+        f"static_snapshot_sha_from_container() {{ printf '{active}\n'; }}\n"
+        "bootstrap_static_release_state_from_web\n"
+        'cat "$STATIC_STATE_FILE"\n'
+    )
+    result = _bash(script)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith(active)
+    assert (state / "production.static-release").read_text(encoding="utf-8").strip() == active
+
+
 def test_static_gc_runs_only_on_success_paths_after_release_state_or_noop_gate():
     common = _read("deploy/scripts/rolling_update_common.sh")
     main = common.split("rolling_update_main()", 1)[1]
     assert "cleanup_static_releases()" in common
     assert 'STATIC_RELEASE_KEEP_COUNT="${STATIC_RELEASE_KEEP_COUNT:-3}"' in common
     assert '"$ROLLING_STATE_DIR"/*.release' in common
+    assert '"$ROLLING_STATE_DIR"/*.static-release' in common
     assert '"$ROLLING_STATE_DIR"/*.inprogress' in common
     assert '"$ROLLING_STATE_DIR"/*.complete' in common
+    assert "static_release_state_coverage_complete" in common
+    assert "bootstrap_static_release_state_from_web" in main
+    assert "if app_update_needed; then\n    # Only an application rollout changes the snapshot mounted by web." in main
 
+    final_static_record = main.rindex("record_static_release")
     final_record = main.rindex("record_release")
+    assert final_static_record < final_record
     final_gc = main.rindex("cleanup_static_releases")
     assert final_record < final_gc

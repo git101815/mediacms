@@ -22,6 +22,7 @@ CURRENT_SHA=""
 BASE_SHA=""
 STATE_FILE=""
 INPROGRESS_FILE=""
+STATIC_STATE_FILE=""
 LOCK_FILE=""
 ROLLING_LOCK_FD=""
 CHANGED_FILES=()
@@ -65,6 +66,7 @@ configure_rolling_update() {
   FRONTEND_COMPOSE=(docker compose -p "$FRONTEND_BUILD_PROJECT" -f docker-compose-dev.yaml)
   STATE_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.release"
   INPROGRESS_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.inprogress"
+  STATIC_STATE_FILE="$ROLLING_STATE_DIR/${RELEASE_STATE_NAME}.static-release"
   if [[ "$ENVIRONMENT_NAME" == "production" ]]; then
     LOCK_FILE="$ROLLING_STATE_DIR/production.mutation.lock"
   else
@@ -928,6 +930,74 @@ static_release_sha_valid() {
   [[ "$1" =~ ^[0-9a-f]{40}$ ]]
 }
 
+write_static_release_state() {
+  local sha="$1" tmp
+  static_release_sha_valid "$sha" || die "refusing to record invalid static release SHA '$sha'"
+  mkdir -p "$ROLLING_STATE_DIR"
+  tmp="${STATIC_STATE_FILE}.tmp.$$"
+  printf '%s\n' "$sha" > "$tmp"
+  mv "$tmp" "$STATIC_STATE_FILE"
+}
+
+record_static_release() {
+  write_static_release_state "$CURRENT_SHA"
+}
+
+static_snapshot_sha_from_container() {
+  local cid="$1" source source_abs root_abs sha
+  source="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/home/mediacms.io/mediacms/static_collected"}}{{.Source}}{{end}}{{end}}' "$cid" 2>/dev/null || true)"
+  [[ -n "$source" && -d "$source" && -d "$ROLLING_STATE_DIR/static" ]] || return 1
+  source_abs="$(cd "$source" 2>/dev/null && pwd -P)" || return 1
+  root_abs="$(cd "$ROLLING_STATE_DIR/static" 2>/dev/null && pwd -P)" || return 1
+  [[ "${source_abs%/*}" == "$root_abs" ]] || return 1
+  sha="${source_abs##*/}"
+  static_release_sha_valid "$sha" || return 1
+  printf '%s\n' "$sha"
+}
+
+bootstrap_static_release_state_from_web() {
+  local cid sha observed=""
+  local -a ids=()
+  [[ -f "$STATIC_STATE_FILE" ]] && return 0
+
+  mapfile -t ids < <(service_container_ids_all web)
+  (( ${#ids[@]} > 0 )) || return 0
+
+  for cid in "${ids[@]}"; do
+    if ! sha="$(static_snapshot_sha_from_container "$cid")"; then
+      echo "rolling-update[$ENVIRONMENT_NAME]: WARNING cannot infer the active static snapshot from web container $cid; static GC will stay disabled until a successful application release records it" >&2
+      return 0
+    fi
+    if [[ -n "$observed" && "$observed" != "$sha" ]]; then
+      echo "rolling-update[$ENVIRONMENT_NAME]: WARNING web replicas mount different static snapshots; static GC will stay disabled until convergence" >&2
+      return 0
+    fi
+    observed="$sha"
+  done
+
+  [[ -n "$observed" ]] || return 0
+  write_static_release_state "$observed"
+  echo "rolling-update[$ENVIRONMENT_NAME]: initialized active static snapshot state at $observed"
+}
+
+static_release_state_coverage_complete() {
+  local release static_state sha
+  for release in "$ROLLING_STATE_DIR"/*.release; do
+    [[ -f "$release" ]] || continue
+    static_state="${release%.release}.static-release"
+    if [[ ! -f "$static_state" ]]; then
+      echo "rolling-update[$ENVIRONMENT_NAME]: WARNING ${static_state##*/} is missing; skipping static GC so an active snapshot from another environment cannot be pruned" >&2
+      return 1
+    fi
+    sha="$(tr -d '[:space:]' < "$static_state" 2>/dev/null || true)"
+    if ! static_release_sha_valid "$sha"; then
+      echo "rolling-update[$ENVIRONMENT_NAME]: WARNING ${static_state##*/} does not contain a valid SHA; skipping static GC" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
 cleanup_static_releases() {
   local root="$ROLLING_STATE_DIR/static" state sha target dir name kept=0
   [[ -d "$root" ]] || return 0
@@ -940,6 +1010,9 @@ cleanup_static_releases() {
     echo "rolling-update[$ENVIRONMENT_NAME]: WARNING invalid STATIC_TMP_MAX_AGE_MINUTES=$STATIC_TMP_MAX_AGE_MINUTES; skipping static GC" >&2
     return 0
   fi
+  if ! static_release_state_coverage_complete; then
+    return 0
+  fi
 
   # The state directory is shared by staging/production on a checkout. Never
   # prune another environment's current release, an interrupted target, or the
@@ -947,7 +1020,7 @@ cleanup_static_releases() {
   declare -A protected=()
   if static_release_sha_valid "$CURRENT_SHA"; then protected["$CURRENT_SHA"]=1; fi
 
-  for state in "$ROLLING_STATE_DIR"/*.release "$ROLLING_STATE_DIR"/*.complete "$ROLLING_STATE_DIR"/*.inprogress; do
+  for state in "$ROLLING_STATE_DIR"/*.release "$ROLLING_STATE_DIR"/*.static-release "$ROLLING_STATE_DIR"/*.complete "$ROLLING_STATE_DIR"/*.inprogress; do
     [[ -f "$state" ]] || continue
     target="$(grep -E '^target_sha=' "$state" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
     if static_release_sha_valid "$target"; then
@@ -1027,6 +1100,9 @@ rolling_update_main() {
   detect_legacy_bootstrap
   if (( LEGACY_BOOTSTRAP )); then legacy_preflight; else app_preflight; fi
   verify_runtime_dependencies
+  # Existing deployments predate the dedicated active-static marker. Infer it
+  # once from the steady-state web mounts before any GC can run.
+  bootstrap_static_release_state_from_web
 
   if (( REQUIRE_PERSISTENT_REDIS )) && ! redis_is_persistent; then
     cat >&2 <<EOF_REDIS
@@ -1108,6 +1184,11 @@ EOF_REDIS
   app_preflight
   verify_runtime_dependencies
   require_staging_ingress_healthy
+  if app_update_needed; then
+    # Only an application rollout changes the snapshot mounted by web. Crypto-,
+    # ingress-, docs-, and other marker-only releases must leave this untouched.
+    record_static_release
+  fi
   record_release
   cleanup_static_releases
 
