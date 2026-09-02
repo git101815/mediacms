@@ -38,6 +38,7 @@ services:
       ENABLE_CELERY_SHORT: "no"
       ENABLE_CELERY_LONG: "no"
       ENABLE_CELERY_BEAT: "no"
+      ENABLE_COLLECTSTATIC: "no"
       ADMIN_USER: "admin"
       ADMIN_EMAIL: "admin@localhost"
       ADMIN_PASSWORD: "admin"
