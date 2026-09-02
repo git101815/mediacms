@@ -71,12 +71,14 @@ def test_staging_updater_never_touches_dns_or_maintenance_switch():
         assert forbidden not in content
 
 
-def test_frontend_build_is_one_shot_reproducible_and_release_scoped():
+def test_frontend_build_is_image_verified_reproducible_and_release_scoped():
     common = _read("deploy/scripts/rolling_update_common.sh")
-    assert "run --rm --no-deps frontend" in common
-    assert "npm ci --no-audit --no-fund && npm run dist" in common
+    dockerfile = _read("frontend/Dockerfile.dev")
+    assert '"${FRONTEND_COMPOSE[@]}" build frontend' in common
+    assert "run --rm --no-deps frontend npm run dist" in common
+    assert "RUN npm ci --no-audit --no-fund" in dockerfile
+    assert "RUN test -x ./node_modules/.bin/mediacms-scripts && npm run dist" in dockerfile
     assert 'cp -a frontend/dist/static/. "$STATIC_RELEASE_DIR/"' in common
-    assert "rm -rf static" not in common
 
 
 def test_prod_app_and_migrations_are_image_isolated_with_release_static_snapshot():
@@ -464,17 +466,28 @@ def test_migrations_run_immutable_image_and_checker_changes_rebuild_it():
 
 def test_frontend_build_is_lockfile_reproducible():
     common = _read("deploy/scripts/rolling_update_common.sh")
+    dockerfile = _read("frontend/Dockerfile.dev")
     gitignore = _read(".gitignore")
     assert "frontend/package-lock.json" not in gitignore
-    assert "npm ci --no-audit --no-fund" in common
+    assert "RUN npm ci --no-audit --no-fund" in dockerfile
     assert "npm install && npm run dist" not in common
 
 
-def test_static_only_changes_trigger_application_rotation():
+def test_static_source_changes_trigger_image_rebuild_and_application_rotation():
     common = _read("deploy/scripts/rolling_update_common.sh")
     assert "STATIC_CHANGED=0" in common
-    assert "changed_matches '^static/'" in common
+    assert "changed_matches '^static_src/'" in common
     assert "MAIN_IMAGE_CHANGED || APP_CONFIG_CHANGED || FRONTEND_CHANGED || STATIC_CHANGED" in common
+
+
+def test_release_static_snapshot_starts_empty_and_is_filled_by_collectstatic():
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    redis_migration = _read("deploy/scripts/prod_migrate_redis_persistence.sh")
+    prepare = common.split("prepare_static_release()", 1)[1].split("finalize_static_release()", 1)[0]
+    assert "cp -a static/." not in prepare
+    assert "static_src/" in prepare
+    assert "cp -a static/." not in redis_migration
+    assert "static_src/" in redis_migration
 
 
 def test_celery_release_labels_are_verified_after_restart():
@@ -497,18 +510,13 @@ def test_signer_rotation_recreates_and_relabels_active_financial_loops():
     assert "assert_current_release_service sweeper_service 1" in restart
 
 
-def test_default_dev_compose_keeps_live_source_mounts_without_weakening_static_mounts():
+def test_default_dev_compose_keeps_live_backend_sources_and_generated_static_out_of_mount_contract():
     dev = _read("docker-compose-dev.yaml")
 
     for service in ("migrations", "web", "celery_worker", "celery_beat"):
-        assert "- ./:/home/mediacms.io/mediacms/" in _service_block(dev, service)
-
-    migrations = _service_block(dev, "migrations")
-    assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static" in migrations
-    assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" not in migrations
-
-    for service in ("web", "celery_worker", "celery_beat"):
-        assert "${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro" in _service_block(dev, service)
+        block = _service_block(dev, service)
+        assert "- ./:/home/mediacms.io/mediacms/" in block
+        assert "MEDIACMS_STATIC_DIR" not in block
 
     for service, source_mount in (
         ("deposit_service", "./deposit_service/app:/app/app"),
@@ -536,20 +544,22 @@ def test_dev_runtime_stop_grace_periods_match_production_contract():
         assert f"stop_grace_period: {duration}" in _service_block(dev, service)
 
 
-def test_dev_frontend_reuses_dependencies_but_ci_stays_lockfile_strict():
+def test_dev_frontend_dependencies_are_built_before_container_start():
     dev = _read("docker-compose-dev.yaml")
-    entrypoint = _read("frontend/dev-entrypoint.sh")
+    dockerfile = _read("frontend/Dockerfile.dev")
     ci = _read(".github/workflows/ci.yml")
 
     frontend = _service_block(dev, "frontend")
-    assert "command: bash ./dev-entrypoint.sh" in frontend
-    assert "frontend_node_modules:/home/mediacms.io/mediacms/frontend/node_modules" in frontend
-    assert "frontend_npm_cache:/root/.npm" in frontend
-    assert "npm ci --prefer-offline --no-audit --no-fund" in entrypoint
-    assert "package-lock.json" in entrypoint
-    assert "packages/scripts" in entrypoint
-    assert "packages/player" in entrypoint
-    assert "exec npm run start" in entrypoint
+    assert "context: ./frontend" in frontend
+    assert "dockerfile: Dockerfile.dev" in frontend
+    assert "command: npm run start" in frontend
+    assert "frontend:/home/mediacms.io/mediacms/frontend/" not in frontend
+    assert "/frontend/node_modules" not in frontend
+    for mounted in ("src", "config", "packages", "dist"):
+        assert f"frontend/{mounted}:/home/mediacms.io/mediacms/frontend/{mounted}" in frontend
+    assert "RUN npm ci --no-audit --no-fund" in dockerfile
+    assert "node_modules/.bin/mediacms-scripts" in dockerfile
+    assert not (ROOT / "frontend/dev-entrypoint.sh").exists()
     assert "run: npm ci --no-audit --no-fund" in ci
 
 def test_entrypoint_never_mutates_readonly_release_static_mount():
@@ -570,17 +580,30 @@ def test_entrypoint_chowns_only_runtime_writable_directories():
     assert "static" not in ownership
 
 
-def test_collectstatic_runs_in_dev_with_separate_source_and_destination():
+def test_collectstatic_has_distinct_versioned_source_and_generated_outputs():
     prestart = _read("deploy/docker/prestart.sh")
     dev = _read("docker-compose-dev.yaml")
+    settings_py = _read("cms/settings.py")
     dev_settings = _read("cms/dev_settings.py")
+    gitignore = _read(".gitignore")
+    dockerignore = _read(".dockerignore")
 
     assert 'echo "RUNNING COLLECTSTATIC"' in prestart
     assert "python manage.py collectstatic --noinput" in prestart
     assert "ENABLE_COLLECTSTATIC" not in prestart
     assert "ENABLE_COLLECTSTATIC" not in _service_block(dev, "migrations")
-    assert "STATICFILES_DIRS = (os.path.join(BASE_DIR, 'static'),)" in dev_settings
+    assert 'STATICFILES_DIRS = [os.path.join(BASE_DIR, "static_src")]' in settings_py
+    assert "STATICFILES_DIRS = (os.path.join(BASE_DIR, 'static_src'),)" in dev_settings
     assert "STATIC_ROOT = os.path.join(BASE_DIR, 'static_collected')" in dev_settings
+    assert "/static/" in gitignore
+    assert "/static/" in dockerignore
+
+    tracked_output = subprocess.run(
+        ["git", "ls-files", "--", "static"], cwd=ROOT, text=True, capture_output=True, check=True
+    ).stdout.splitlines()
+    assert not [rel for rel in tracked_output if (ROOT / rel).exists()]
+    assert (ROOT / "static_src/ads/ads.css").is_file()
+    assert not (ROOT / "static_src/vendor").exists()
 
     for compose_path in ("docker-compose-cloudflare.yaml", "docker-compose.yaml"):
         compose = _read(compose_path)
@@ -599,15 +622,15 @@ def test_celery_beat_schedule_lives_on_writable_runtime_volume():
     assert "--schedule=/home/mediacms.io/mediacms/logs/celerybeat-schedule" in beat
 
 
-def test_redundant_nested_static_tree_is_removed():
-    assert not (ROOT / "static/static").exists()
+def test_redundant_nested_static_tree_is_removed_from_canonical_source():
+    assert not (ROOT / "static_src/static").exists()
     for rel in (
-        "static/images/social-media-icons/reddit.svg",
-        "static/images/social-media-icons/telegram.svg",
-        "static/images/social-media-icons/vk.svg",
-        "static/images/social-media-icons/whatsapp.svg",
-        "static/images/social-media-icons/x.svg",
-        "static/images/wallet/cf-token.png",
+        "static_src/images/social-media-icons/reddit.svg",
+        "static_src/images/social-media-icons/telegram.svg",
+        "static_src/images/social-media-icons/vk.svg",
+        "static_src/images/social-media-icons/whatsapp.svg",
+        "static_src/images/social-media-icons/x.svg",
+        "static_src/images/wallet/cf-token.png",
     ):
         assert (ROOT / rel).is_file()
 

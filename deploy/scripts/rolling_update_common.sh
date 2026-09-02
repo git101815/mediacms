@@ -386,7 +386,7 @@ classify_release() {
   [[ -z "$BASE_SHA" ]] && first_run=1
 
   if (( first_run )) || changed_matches '^frontend/'; then FRONTEND_CHANGED=1; fi
-  if (( first_run )) || changed_matches '^static/'; then STATIC_CHANGED=1; fi
+  if (( first_run )) || changed_matches '^static_src/'; then STATIC_CHANGED=1; fi
   if (( first_run )) || main_image_inputs_changed; then MAIN_IMAGE_CHANGED=1; fi
   if (( first_run )) || changed_matches '^deposit_service/(Dockerfile|requirements\.txt|app/)'; then DEPOSIT_IMAGE_CHANGED=1; fi
   if changed_matches '^deposit_service/config/'; then DEPOSIT_CONFIG_CHANGED=1; fi
@@ -459,9 +459,10 @@ check_pending_migrations() {
 
 build_frontend_dist() {
   (( FRONTEND_CHANGED )) || return 0
-  echo "rolling-update[$ENVIRONMENT_NAME]: building frontend in an isolated one-shot dev container"
+  echo "rolling-update[$ENVIRONMENT_NAME]: building reproducible frontend image and dist"
   [[ -f frontend/package-lock.json ]] || die "frontend/package-lock.json is required for reproducible frontend builds"
-  "${FRONTEND_COMPOSE[@]}" run --rm --no-deps frontend bash -lc 'npm ci --no-audit --no-fund && npm run dist'
+  "${FRONTEND_COMPOSE[@]}" build frontend
+  "${FRONTEND_COMPOSE[@]}" run --rm --no-deps frontend npm run dist
   [[ -d frontend/dist/static ]] || die "frontend build completed without frontend/dist/static"
   FRONTEND_BUILT=1
 }
@@ -474,10 +475,13 @@ prepare_static_release() {
     return 0
   fi
 
+  # STATIC_RELEASE_DIR is generated output, never a copy of the mutable
+  # checkout. Django collectstatic fills this clean directory from static_src/
+  # and installed-app finders during the migrations phase.
   tmp="${STATIC_RELEASE_DIR}.tmp.$$"
   rm -rf "$tmp"
   mkdir -p "$tmp"
-  cp -a static/. "$tmp/"
+  mkdir -p "$(dirname "$STATIC_RELEASE_DIR")"
   rm -rf "$STATIC_RELEASE_DIR"
   mv "$tmp" "$STATIC_RELEASE_DIR"
   progress_set static_prepared 1

@@ -216,8 +216,8 @@ else
   set_phase 1
 fi
 
-# Build a release-owned static tree. Application containers never mount the
-# mutable checkout's ./static directly after this transition.
+# Prepare a clean release-owned collectstatic output tree. Static sources
+# live in static_src/ inside the target image; migrations populate this mount.
 if [[ ! -d "$REDIS_STATIC_DIR" ]]; then
   (( phase < 80 )) || {
     echo "Release static snapshot is missing after migrations were recorded complete; refusing unsafe reconstruction." >&2
@@ -226,7 +226,6 @@ if [[ ! -d "$REDIS_STATIC_DIR" ]]; then
   tmp_static="${REDIS_STATIC_DIR}.tmp.$$"
   rm -rf "$tmp_static"
   mkdir -p "$tmp_static"
-  cp -a static/. "$tmp_static/"
   mkdir -p "$(dirname "$REDIS_STATIC_DIR")"
   mv "$tmp_static" "$REDIS_STATIC_DIR"
 fi
@@ -361,8 +360,8 @@ if (( phase < 85 )); then
     echo "frontend/package-lock.json is required for reproducible bootstrap assets" >&2
     exit 2
   }
-  docker compose -p mediacms-frontend-build -f docker-compose-dev.yaml run --rm --no-deps frontend \
-    bash -lc 'npm ci --no-audit --no-fund && npm run dist'
+  docker compose -p mediacms-frontend-build -f docker-compose-dev.yaml build frontend
+  docker compose -p mediacms-frontend-build -f docker-compose-dev.yaml run --rm --no-deps frontend npm run dist
   [[ -d frontend/dist/static ]] || {
     echo "Frontend bootstrap build produced no frontend/dist/static" >&2
     exit 1

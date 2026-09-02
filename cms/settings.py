@@ -185,9 +185,12 @@ SECRET_KEY = "2dii4cog7k=5n37$fz)8dst)kg(s3&10)^qa*gv(kk+nv-z&cu"
 
 TEMP_DIRECTORY = "/tmp"  # Don't use a temp directory inside BASE_DIR!!!
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATIC_URL = "/static/"  # where js/css files are stored on the filesystem
-MEDIA_URL = "/media/"  # URL where static files are served from the server
-STATIC_ROOT = BASE_DIR + "/static/"
+STATIC_URL = "/static/"  # where js/css files are served
+MEDIA_URL = "/media/"  # URL where uploaded media files are served
+# Never scan STATIC_ROOT as a source. static_src/ is versioned input; static/
+# is generated collectstatic output (or a per-release bind mount in Docker).
+STATICFILES_DIRS = [os.path.join(BASE_DIR, "static_src")]
+STATIC_ROOT = os.path.join(BASE_DIR, "static")
 # where uploaded + encoded media are stored
 MEDIA_ROOT = BASE_DIR + "/media_files/"
 
@@ -827,13 +830,8 @@ if TESTING:
     HLS_DIR = os.path.join(MEDIA_ROOT, "hls")
     STATIC_ROOT = os.path.join(TESTING_ROOT, "static_collected")
 
-    # BASE_DIR/static is a canonical source directory in this fork (for
-    # example static/ads/ads.css). In production nginx serves it directly.
-    # During tests STATIC_ROOT is redirected to TESTING_ROOT, so expose the
-    # repository static directory to Django's FileSystemFinder explicitly.
-    STATICFILES_DIRS = [
-        os.path.join(BASE_DIR, "static"),
-    ]
+    # Keep tests on the same source/output split as production.
+    STATICFILES_DIRS = [os.path.join(BASE_DIR, "static_src")]
 
     TEMP_DIRECTORY = os.path.join(TESTING_ROOT, "tmp")
     DB_BACKUP_DIR = os.path.join(TESTING_ROOT, "backup")

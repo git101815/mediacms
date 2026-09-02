@@ -1,0 +1,18 @@
+FROM node:20
+
+WORKDIR /home/mediacms.io/mediacms/frontend
+
+# Keep npm-ci cache tied only to dependency metadata. Local file: packages are
+# links in package-lock.json, so their package metadata must exist before npm ci.
+COPY package.json package-lock.json ./
+COPY packages/scripts/package.json packages/scripts/cli.js ./packages/scripts/
+COPY packages/player/package.json ./packages/player/
+COPY packages/vjs-plugin/package.json ./packages/vjs-plugin/
+COPY packages/vjs-plugin-font-icons/package.json ./packages/vjs-plugin-font-icons/
+RUN npm ci --no-audit --no-fund
+
+# Source changes invalidate compilation, not dependency installation.
+COPY . .
+RUN test -x ./node_modules/.bin/mediacms-scripts && npm run dist
+
+CMD ["npm", "run", "start"]

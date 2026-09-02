@@ -25,7 +25,6 @@ services:
     <<: *mediacms_app
     volumes:
       - ./:/home/mediacms.io/mediacms/
-      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup
@@ -38,7 +37,6 @@ services:
       ENABLE_CELERY_SHORT: "no"
       ENABLE_CELERY_LONG: "no"
       ENABLE_CELERY_BEAT: "no"
-      ENABLE_COLLECTSTATIC: "no"
       ADMIN_USER: "admin"
       ADMIN_EMAIL: "admin@localhost"
       ADMIN_PASSWORD: "admin"
@@ -62,13 +60,20 @@ services:
         condition: service_healthy
 
   frontend:
-    image: node:20
-    volumes:
-      - ${PWD}/frontend:/home/mediacms.io/mediacms/frontend/
-      - frontend_node_modules:/home/mediacms.io/mediacms/frontend/node_modules
-      - frontend_npm_cache:/root/.npm
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
     working_dir: /home/mediacms.io/mediacms/frontend/
-    command: bash ./dev-entrypoint.sh
+    # Keep node_modules inside the built image. Bind only mutable sources so a
+    # source mount can never mask the installed mediacms-scripts binary.
+    volumes:
+      - ${PWD}/frontend/src:/home/mediacms.io/mediacms/frontend/src
+      - ${PWD}/frontend/config:/home/mediacms.io/mediacms/frontend/config
+      - ${PWD}/frontend/packages:/home/mediacms.io/mediacms/frontend/packages
+      - ${PWD}/frontend/dist:/home/mediacms.io/mediacms/frontend/dist
+      - ${PWD}/frontend/.babelrc:/home/mediacms.io/mediacms/frontend/.babelrc:ro
+      - ${PWD}/frontend/tsconfig.json:/home/mediacms.io/mediacms/frontend/tsconfig.json:ro
+    command: npm run start
     env_file:
       - ${PWD}/frontend/.env
     ports:
@@ -138,7 +143,6 @@ services:
       - "80:80"
     volumes:
       - ./:/home/mediacms.io/mediacms/
-      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup
@@ -362,7 +366,6 @@ services:
     <<: *mediacms_app
     volumes:
       - ./:/home/mediacms.io/mediacms/
-      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup
@@ -404,7 +407,6 @@ services:
       replicas: 1
     volumes:
       - ./:/home/mediacms.io/mediacms/
-      - ${MEDIACMS_STATIC_DIR:-./static}:/home/mediacms.io/mediacms/static:ro
       - ./media_files:/home/mediacms.io/mediacms/media_files
       - ./logs:/home/mediacms.io/mediacms/logs
       - ./backup:/home/mediacms.io/mediacms/backup
@@ -474,10 +476,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-
-volumes:
-  frontend_node_modules:
-  frontend_npm_cache:
 
 secrets:
   sweeper_evm_mnemonic:
