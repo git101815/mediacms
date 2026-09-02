@@ -23,10 +23,14 @@ if [ X"$ENABLE_MIGRATIONS" = X"yes" ]; then
         echo "Created admin user with password: $ADMIN_PASSWORD"
 
     fi
-    echo "RUNNING COLLECTSTATIC"
     python manage.py ensure_internal_service_actors
     python manage.py sync_internal_service_users
-    python manage.py collectstatic --noinput
+    if [ X"${ENABLE_COLLECTSTATIC:-yes}" = X"yes" ]; then
+        echo "RUNNING COLLECTSTATIC"
+        python manage.py collectstatic --noinput
+    else
+        echo "Skipping collectstatic (ENABLE_COLLECTSTATIC=${ENABLE_COLLECTSTATIC:-yes})"
+    fi
 
     # echo "Updating hostname ..."
     # TODO: Get the FRONTEND_HOST from cms/local_settings.py
