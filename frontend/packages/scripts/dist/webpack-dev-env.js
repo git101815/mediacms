@@ -432,6 +432,12 @@ function webpackAlias() {
     // modernizr$: path.resolve(__dirname, "../../.modernizrrc"),   // TODO: Enable this?
     };
 }
+function webpackStaticAssetName(file, srcDir) {
+    return path
+        .join(file.replace(srcDir, ''), '..', '[name].[ext]')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '');
+}
 function webpackRules(env, srcDir, postcssConfigFile) {
     return [{
             test: /\.(jsx|js)?$/,
@@ -485,35 +491,22 @@ function webpackRules(env, srcDir, postcssConfigFile) {
         {
             test: /\.(png|jpe?g|gif)(\?\S*)?$/,
             use: {
-                loader: 'url-loader',
+                loader: 'file-loader',
                 options: {
-                    limit: 1024,
-                    fallback: 'file-loader',
-                    name: function (file) {
-                        return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
-                    },
+                    name: function (file) { return webpackStaticAssetName(file, srcDir); },
+                    emitFile: false,
+                    publicPath: '/',
                 },
             },
-        },
-        {
-            test: /\.svg(\?v=\d+\.\d+\.\d+)?$/,
-            /*issuer: {
-                    test: /\.jsx?$/
-                },*/
-            use: ['babel-loader', '@svgr/webpack', 'url-loader']
-        },
-        {
-            test: /\.svg(\?v=\d+\.\d+\.\d+)?$/,
-            loader: 'url-loader'
         },
         {
             test: /\.(woff(2)?|ttf|eot|svg)(\?v=\d+\.\d+\.\d+)?$/,
             use: [{
                     loader: 'file-loader',
                     options: {
-                        name: function (file) {
-                            return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
-                        },
+                        name: function (file) { return webpackStaticAssetName(file, srcDir); },
+                        emitFile: false,
+                        publicPath: '/',
                     }
                 }]
         },

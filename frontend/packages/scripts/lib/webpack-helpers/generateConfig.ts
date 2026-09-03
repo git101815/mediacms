@@ -85,6 +85,13 @@ function webpackAlias() {
 	};
 }
 
+function webpackStaticAssetName(file: string, srcDir: string): string {
+	return path
+		.join(file.replace(srcDir, ''), '..', '[name].[ext]')
+		.replace(/\\/g, '/')
+		.replace(/^\/+/, '');
+}
+
 function webpackRules(env: string, srcDir: string, postcssConfigFile: string): any[] {
 
 	return [{
@@ -139,35 +146,22 @@ function webpackRules(env: string, srcDir: string, postcssConfigFile: string): a
 	{
 		test: /\.(png|jpe?g|gif)(\?\S*)?$/,
 		use: {
-			loader: 'url-loader',
+			loader: 'file-loader',
 			options: {
-				limit: 1024,
-				fallback: 'file-loader',
-				name: (file: string) => {
-					return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
-				},
+				name: (file: string) => webpackStaticAssetName(file, srcDir),
+				emitFile: false,
+				publicPath: '/',
 			},
 		},
-	},
-	{
-		test: /\.svg(\?v=\d+\.\d+\.\d+)?$/,
-		/*issuer: {
-				test: /\.jsx?$/
-			},*/
-		use: ['babel-loader', '@svgr/webpack', 'url-loader']
-	},
-	{
-		test: /\.svg(\?v=\d+\.\d+\.\d+)?$/,
-		loader: 'url-loader'
 	},
 	{
 		test: /\.(woff(2)?|ttf|eot|svg)(\?v=\d+\.\d+\.\d+)?$/,
 		use: [{
 			loader: 'file-loader',
 			options: {
-				name: (file: string) => {
-					return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
-				},
+				name: (file: string) => webpackStaticAssetName(file, srcDir),
+				emitFile: false,
+				publicPath: '/',
 			}
 		}]
 	},
