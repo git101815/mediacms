@@ -143,7 +143,8 @@ validate_durable_redis() {
 }
 
 write_atomic_sha() {
-  local destination="$1" tmp="${destination}.tmp.$$"
+  local destination="$1"
+  local tmp="${destination}.tmp.$$"
   mkdir -p "$(dirname "$destination")"
   printf '%s\n' "$CURRENT_SHA" > "$tmp"
   mv "$tmp" "$destination"

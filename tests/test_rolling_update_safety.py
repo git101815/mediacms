@@ -1009,3 +1009,15 @@ def test_frontend_copied_assets_have_single_physical_emitter():
         assert "webpackStaticAssetName" in config
         assert "url-loader" not in config
         assert "@svgr/webpack" not in config
+
+
+
+def test_prod_start_atomic_sha_is_safe_under_nounset():
+    start = _read("deploy/scripts/prod_start.sh")
+    helper = start.split("write_atomic_sha() {", 1)[1].split("\n}", 1)[0]
+
+    # Under `set -u`, a variable declared earlier in the same `local` command
+    # is not available while subsequent assignment RHS expressions are expanded.
+    assert 'local destination="$1" tmp="${destination}.tmp.$$"' not in helper
+    assert 'local destination="$1"' in helper
+    assert 'local tmp="${destination}.tmp.$$"' in helper
