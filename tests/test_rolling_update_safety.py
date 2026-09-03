@@ -77,8 +77,52 @@ def test_frontend_build_is_image_verified_reproducible_and_release_scoped():
     assert '"${FRONTEND_COMPOSE[@]}" build frontend' in common
     assert "run --rm --no-deps frontend npm run dist" in common
     assert "RUN npm ci --no-audit --no-fund" in dockerfile
-    assert "RUN test -x ./node_modules/.bin/mediacms-scripts && npm run dist" in dockerfile
+    assert "RUN test -x ./node_modules/.bin/mediacms-scripts" in dockerfile
+    assert "RUN test -x ./node_modules/.bin/mediacms-scripts && npm run dist" not in dockerfile
     assert 'cp -a frontend/dist/static/. "$STATIC_RELEASE_DIR/"' in common
+
+
+def test_frontend_build_has_physical_env_without_baking_it_into_image():
+    compose = _read("docker-compose-dev.yaml")
+    frontend = _service_block(compose, "frontend")
+    dockerfile = _read("frontend/Dockerfile.dev")
+    dockerignore = _read("frontend/.dockerignore")
+
+    assert "frontend/.env:/home/mediacms.io/mediacms/frontend/.env:ro" in frontend
+    assert "env_file:" in frontend
+    assert "${PWD}/frontend/.env" in frontend
+    assert ".env" in dockerignore.splitlines()
+    assert "COPY .env" not in dockerfile
+    assert "RUN npm run dist" not in dockerfile
+
+
+def test_frontend_webpack_env_is_fail_closed_and_never_undefined():
+    for rel in (
+        "frontend/packages/scripts/lib/webpack-helpers/generateConfig.ts",
+        "frontend/packages/scripts/dist/webpack-dev-env.js",
+    ):
+        config = _read(rel)
+        assert "path.resolve(process.cwd(), '.env')" in config
+        assert "if (dotenvResult.error)" in config
+        assert "MediaCMS frontend build requires" in config
+        assert "var frontendEnv = dotenvResult.parsed || {};" in config
+        assert 'JSON.stringify(frontendEnv)' in config
+        assert 'JSON.stringify(dotenv.parsed)' not in config
+
+
+def test_age_gate_static_source_is_versioned_and_not_gitignored():
+    template = _read("templates/age_verification.html")
+    ignore = _read(".gitignore")
+    gate = ROOT / "static/js/cdn-gate-hold.js"
+
+    assert 'src="/static/js/cdn-gate-hold.js"' in template
+    assert gate.is_file()
+    gate_text = gate.read_text(encoding="utf-8")
+    assert "window.mcGateHoldStart = start;" in gate_text
+    assert "window.mcGateRelease = release;" in gate_text
+    assert "!static/js/" in ignore
+    assert "static/js/*" in ignore
+    assert "!static/js/cdn-gate-hold.js" in ignore
 
 
 def test_every_application_release_rebuilds_frontend_for_fresh_static_snapshot():

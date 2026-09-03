@@ -11,8 +11,9 @@ COPY packages/vjs-plugin/package.json ./packages/vjs-plugin/
 COPY packages/vjs-plugin-font-icons/package.json ./packages/vjs-plugin-font-icons/
 RUN npm ci --no-audit --no-fund
 
-# Source changes invalidate compilation, not dependency installation.
+# Source changes invalidate dependency-independent image layers. Dist is
+# compiled only from a Compose container where frontend/.env is mounted.
 COPY . .
-RUN test -x ./node_modules/.bin/mediacms-scripts && npm run dist
+RUN test -x ./node_modules/.bin/mediacms-scripts
 
 CMD ["npm", "run", "start"]
