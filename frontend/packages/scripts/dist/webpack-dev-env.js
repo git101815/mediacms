@@ -432,6 +432,12 @@ function webpackAlias() {
     // modernizr$: path.resolve(__dirname, "../../.modernizrrc"),   // TODO: Enable this?
     };
 }
+function webpackStaticAssetName(file, srcDir) {
+    return path
+        .join(file.replace(srcDir, ''), '..', '[name].[ext]')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '');
+}
 function webpackRules(env, srcDir, postcssConfigFile) {
     return [{
             test: /\.(jsx|js)?$/,
@@ -488,9 +494,13 @@ function webpackRules(env, srcDir, postcssConfigFile) {
                 loader: 'url-loader',
                 options: {
                     limit: 1024,
-                    fallback: 'file-loader',
-                    name: function (file) {
-                        return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
+                    fallback: {
+                        loader: 'file-loader',
+                        options: {
+                            name: function (file) { return webpackStaticAssetName(file, srcDir); },
+                            emitFile: false,
+                            publicPath: '/',
+                        },
                     },
                 },
             },
@@ -511,9 +521,9 @@ function webpackRules(env, srcDir, postcssConfigFile) {
             use: [{
                     loader: 'file-loader',
                     options: {
-                        name: function (file) {
-                            return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
-                        },
+                        name: function (file) { return webpackStaticAssetName(file, srcDir); },
+                        emitFile: false,
+                        publicPath: '/',
                     }
                 }]
         },

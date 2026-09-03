@@ -85,6 +85,13 @@ function webpackAlias() {
 	};
 }
 
+function webpackStaticAssetName(file: string, srcDir: string): string {
+	return path
+		.join(file.replace(srcDir, ''), '..', '[name].[ext]')
+		.replace(/\\/g, '/')
+		.replace(/^\/+/, '');
+}
+
 function webpackRules(env: string, srcDir: string, postcssConfigFile: string): any[] {
 
 	return [{
@@ -142,9 +149,13 @@ function webpackRules(env: string, srcDir: string, postcssConfigFile: string): a
 			loader: 'url-loader',
 			options: {
 				limit: 1024,
-				fallback: 'file-loader',
-				name: (file: string) => {
-					return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
+				fallback: {
+					loader: 'file-loader',
+					options: {
+						name: (file: string) => webpackStaticAssetName(file, srcDir),
+						emitFile: false,
+						publicPath: '/',
+					},
 				},
 			},
 		},
@@ -165,9 +176,9 @@ function webpackRules(env: string, srcDir: string, postcssConfigFile: string): a
 		use: [{
 			loader: 'file-loader',
 			options: {
-				name: (file: string) => {
-					return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
-				},
+				name: (file: string) => webpackStaticAssetName(file, srcDir),
+				emitFile: false,
+				publicPath: '/',
 			}
 		}]
 	},

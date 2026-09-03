@@ -986,4 +986,22 @@ def test_frontend_build_contract_prevents_blank_bundle_and_nested_static():
         assert "var frontendEnv = dotenv.parsed || {};" in config or "var frontendEnv = dotenvResult.parsed || {};" in config
         assert 'JSON.stringify(frontendEnv)' in config
         assert 'JSON.stringify(dotenv.parsed)' not in config
-        assert config.count(".replace(/^\\/?static(?=\\/|$)/, '')") == 2
+        assert "webpackStaticAssetName" in config
+        assert config.count("emitFile: false") == 2
+        assert config.count("publicPath: '/'") == 2
+        assert "fallback: {" in config
+        assert ".replace(/^\\/?static(?=\\/|$)/, '')" not in config
+
+
+def test_frontend_copied_assets_have_single_physical_emitter():
+    source = _read("frontend/packages/scripts/lib/webpack-helpers/generateConfig.ts")
+    dist = _read("frontend/packages/scripts/dist/webpack-dev-env.js")
+
+    # CopyPlugin owns the physical static tree. Asset imports only
+    # return /static/... URLs and must never emit a second copy.
+    for config in (source, dist):
+        assert "src/static/images" in config
+        assert "src/static/lib" in config
+        assert config.count("emitFile: false") == 2
+        assert config.count("publicPath: '/'") == 2
+        assert "webpackStaticAssetName" in config
