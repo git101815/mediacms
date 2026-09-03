@@ -11,12 +11,7 @@ const ProgressBarPlugin = require('progress-bar-webpack-plugin');
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 const CopyPlugin = require("copy-webpack-plugin");
 
-var frontendEnvPath = path.resolve(process.cwd(), '.env');
-var dotenvResult = require('dotenv').config({ path: frontendEnvPath });
-if (dotenvResult.error) {
-	throw new Error('MediaCMS frontend build requires ' + frontendEnvPath + ': ' + dotenvResult.error.message);
-}
-var frontendEnv = dotenvResult.parsed || {};
+var dotenv = require('dotenv').config({ path: path.resolve(__dirname + '../../../../.env') });
 
 import MyHtmlBeautifyWebpackPlugin from '../webpack-plugins/MyHtmlBeautifyWebpackPlugin';
 
@@ -185,7 +180,7 @@ function webpackRules(env: string, srcDir: string, postcssConfigFile: string): a
 function webpackPlugins(env: string, srcDir: string, pages: ConfigPages, cssSrc: string) {
 
 	const ret = [
-		new DefinePlugin({ "process.env": JSON.stringify(frontendEnv) }),
+		new DefinePlugin({ "process.env": JSON.stringify(dotenv.parsed) }),
 		new NodePolyfillPlugin(),
 		new MyHtmlBeautifyWebpackPlugin(),
 	];
