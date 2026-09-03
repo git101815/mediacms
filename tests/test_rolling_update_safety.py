@@ -77,7 +77,8 @@ def test_frontend_build_is_image_verified_reproducible_and_release_scoped():
     assert '"${FRONTEND_COMPOSE[@]}" build frontend' in common
     assert "run --rm --no-deps frontend npm run dist" in common
     assert "RUN npm ci --no-audit --no-fund" in dockerfile
-    assert "RUN test -x ./node_modules/.bin/mediacms-scripts && npm run dist" in dockerfile
+    assert "RUN test -x ./node_modules/.bin/mediacms-scripts" in dockerfile
+    assert "RUN test -x ./node_modules/.bin/mediacms-scripts && npm run dist" not in dockerfile
     assert 'cp -a frontend/dist/static/. "$STATIC_RELEASE_DIR/"' in common
 
 
@@ -960,3 +961,29 @@ def test_cold_start_retarget_preserves_empty_redis_confirmation_state():
     # needed when the first failed cold start established a new empty Redis.
     assert 'rm -f "$INPROGRESS_FILE"' not in retarget
     assert "redis_empty_reset_confirmed" not in retarget
+
+
+
+def test_frontend_build_contract_prevents_blank_bundle_and_nested_static():
+    compose = _read("docker-compose-dev.yaml")
+    frontend = _service_block(compose, "frontend")
+    dockerfile = _read("frontend/Dockerfile.dev")
+    dockerignore = _read("frontend/.dockerignore")
+    common = _read("deploy/scripts/rolling_update_common.sh")
+
+    assert "frontend/.env:/home/mediacms.io/mediacms/frontend/.env:ro" in frontend
+    assert ".env" in dockerignore.splitlines()
+    assert "COPY .env" not in dockerfile
+    assert "&& npm run dist" not in dockerfile
+    assert "frontend/dist/static/static" in common
+
+    for config_path in (
+        "frontend/packages/scripts/lib/webpack-helpers/generateConfig.ts",
+        "frontend/packages/scripts/dist/webpack-dev-env.js",
+    ):
+        config = _read(config_path)
+        assert "if (dotenv.error)" in config or "if (dotenvResult.error)" in config
+        assert "var frontendEnv = dotenv.parsed || {};" in config or "var frontendEnv = dotenvResult.parsed || {};" in config
+        assert 'JSON.stringify(frontendEnv)' in config
+        assert 'JSON.stringify(dotenv.parsed)' not in config
+        assert config.count(".replace(/^\\/?static(?=\\/|$)/, '')") == 2

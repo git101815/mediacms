@@ -11,7 +11,12 @@ const ProgressBarPlugin = require('progress-bar-webpack-plugin');
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 const CopyPlugin = require("copy-webpack-plugin");
 
-var dotenv = require('dotenv').config({ path: path.resolve(__dirname + '../../../../.env') });
+var frontendEnvPath = path.resolve(__dirname + '../../../../.env');
+var dotenv = require('dotenv').config({ path: frontendEnvPath });
+if (dotenv.error) {
+	throw new Error('MediaCMS frontend build requires ' + frontendEnvPath + ': ' + dotenv.error.message);
+}
+var frontendEnv = dotenv.parsed || {};
 
 import MyHtmlBeautifyWebpackPlugin from '../webpack-plugins/MyHtmlBeautifyWebpackPlugin';
 
@@ -139,7 +144,7 @@ function webpackRules(env: string, srcDir: string, postcssConfigFile: string): a
 				limit: 1024,
 				fallback: 'file-loader',
 				name: (file: string) => {
-					return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/') + '/[name].[ext]';
+					return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
 				},
 			},
 		},
@@ -161,7 +166,7 @@ function webpackRules(env: string, srcDir: string, postcssConfigFile: string): a
 			loader: 'file-loader',
 			options: {
 				name: (file: string) => {
-					return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/') + '/[name].[ext]';
+					return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
 				},
 			}
 		}]
@@ -180,7 +185,7 @@ function webpackRules(env: string, srcDir: string, postcssConfigFile: string): a
 function webpackPlugins(env: string, srcDir: string, pages: ConfigPages, cssSrc: string) {
 
 	const ret = [
-		new DefinePlugin({ "process.env": JSON.stringify(dotenv.parsed) }),
+		new DefinePlugin({ "process.env": JSON.stringify(frontendEnv) }),
 		new NodePolyfillPlugin(),
 		new MyHtmlBeautifyWebpackPlugin(),
 	];

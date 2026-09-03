@@ -13,6 +13,6 @@ RUN npm ci --no-audit --no-fund
 
 # Source changes invalidate compilation, not dependency installation.
 COPY . .
-RUN test -x ./node_modules/.bin/mediacms-scripts && npm run dist
+RUN test -x ./node_modules/.bin/mediacms-scripts
 
 CMD ["npm", "run", "start"]

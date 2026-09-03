@@ -44,3 +44,7 @@ static/favicons/browserconfig.xml
 static/favicons/site.webmanifest
 static/lib/gfonts/LICENSE.txt
 .deploy-state/
+# Canonical age-gate source; keep the rest of legacy generated static/js ignored.
+!static/js/
+static/js/*
+!static/js/cdn-gate-hold.js

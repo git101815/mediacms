@@ -73,6 +73,7 @@ services:
       - ${PWD}/frontend/dist:/home/mediacms.io/mediacms/frontend/dist
       - ${PWD}/frontend/.babelrc:/home/mediacms.io/mediacms/frontend/.babelrc:ro
       - ${PWD}/frontend/tsconfig.json:/home/mediacms.io/mediacms/frontend/tsconfig.json:ro
+      - ${PWD}/frontend/.env:/home/mediacms.io/mediacms/frontend/.env:ro
     command: npm run start
     env_file:
       - ${PWD}/frontend/.env

@@ -547,6 +547,7 @@ build_frontend_dist() {
   "${FRONTEND_COMPOSE[@]}" build frontend
   "${FRONTEND_COMPOSE[@]}" run --rm --no-deps frontend npm run dist
   [[ -d frontend/dist/static ]] || die "frontend build completed without frontend/dist/static"
+  [[ ! -d frontend/dist/static/static ]] || die "frontend build produced invalid nested frontend/dist/static/static"
   FRONTEND_BUILT=1
 }
 

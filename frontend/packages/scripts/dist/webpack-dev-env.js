@@ -386,7 +386,12 @@ var MiniCssExtractPlugin = require('mini-css-extract-plugin');
 var ProgressBarPlugin = require('progress-bar-webpack-plugin');
 var CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 var CopyPlugin = require("copy-webpack-plugin");
-var dotenv = require('dotenv').config({ path: path.resolve(__dirname + '../../../../.env') });
+var frontendEnvPath = path.resolve(__dirname + '../../../../.env');
+var dotenv = require('dotenv').config({ path: frontendEnvPath });
+if (dotenv.error) {
+    throw new Error('MediaCMS frontend build requires ' + frontendEnvPath + ': ' + dotenv.error.message);
+}
+var frontendEnv = dotenv.parsed || {};
 function webpackEntry(env, srcDir, pages) {
     var ret = {};
     for (var p in pages) {
@@ -485,7 +490,7 @@ function webpackRules(env, srcDir, postcssConfigFile) {
                     limit: 1024,
                     fallback: 'file-loader',
                     name: function (file) {
-                        return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/') + '/[name].[ext]';
+                        return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
                     },
                 },
             },
@@ -507,7 +512,7 @@ function webpackRules(env, srcDir, postcssConfigFile) {
                     loader: 'file-loader',
                     options: {
                         name: function (file) {
-                            return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/') + '/[name].[ext]';
+                            return '.' + path.join(file.replace(srcDir, ''), '..').replace(/\\/g, '/').replace(/^\/?static(?=\/|$)/, '') + '/[name].[ext]';
                         },
                     }
                 }]
@@ -523,7 +528,7 @@ function webpackRules(env, srcDir, postcssConfigFile) {
 }
 function webpackPlugins(env, srcDir, pages, cssSrc) {
     var ret = [
-        new DefinePlugin({ "process.env": JSON.stringify(dotenv.parsed) }),
+        new DefinePlugin({ "process.env": JSON.stringify(frontendEnv) }),
         new NodePolyfillPlugin(),
         new MyHtmlBeautifyWebpackPlugin(),
     ];
