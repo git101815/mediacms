@@ -13,6 +13,7 @@ from . import (
     views,
 )
 from .feeds import IndexRSSFeed, SearchRSSFeed
+from ledger import p2p_views
 from ledger.dashboard import views as wallet_dashboard_views
 from users.views import ReferralSignupView
 
@@ -38,6 +39,9 @@ urlpatterns = [
         ReferralSignupView.as_view(),
         name="account_referral_signup",
     ),
+    path("wallet/p2p/<uuid:public_id>/", p2p_views.p2p_exchange, name="p2p_exchange"),
+    path("api/p2p/<uuid:public_id>/messages", p2p_views.p2p_exchange_messages, name="p2p_exchange_messages"),
+    path("api/p2p/<uuid:public_id>/messages/send", p2p_views.p2p_exchange_send_message, name="p2p_exchange_send_message"),
     re_path(r"^wallet/deposit-request$", views.wallet_deposit_request, name="wallet_deposit_request"),
     re_path(r"^wallet/withdrawal-request$", views.wallet_withdrawal_request, name="wallet_withdrawal_request"),
     re_path(r"^wallet/ad-free/purchase$", views.wallet_purchase_ad_free, name="wallet_purchase_ad_free"),

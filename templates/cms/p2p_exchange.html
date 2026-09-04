@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% load static %}
+{% block headtitle %}P2P Order {{ p2p_order_reference }} - {{ PORTAL_NAME }}{% endblock headtitle %}
+
+{% block innercontent %}
+<div
+  class="p2p-exchange"
+  data-p2p-exchange
+  data-messages-url="{% url 'p2p_exchange_messages' p2p_order.public_id %}"
+  data-send-url="{% url 'p2p_exchange_send_message' p2p_order.public_id %}"
+  data-can-send="{% if p2p_can_send %}true{% else %}false{% endif %}"
+>
+  <div class="p2p-exchange__shell">
+    <header class="p2p-exchange__header">
+      <button type="button" class="p2p-exchange__back" onclick="history.back()" aria-label="Back">
+        <i class="material-icons" aria-hidden="true">arrow_back</i>
+      </button>
+      <div class="p2p-exchange__header-copy">
+        <span class="p2p-exchange__eyebrow">P2P exchange</span>
+        <h1>Order #{{ p2p_order_reference }}</h1>
+      </div>
+      <span class="p2p-exchange__status p2p-exchange__status--{{ p2p_order.status }}">
+        {{ p2p_order.get_status_display }}
+      </span>
+    </header>
+
+    <div class="p2p-exchange__layout">
+      <aside class="p2p-exchange__summary">
+        <section class="p2p-exchange__card">
+          <div class="p2p-exchange__card-title">Trade</div>
+          <dl class="p2p-exchange__facts">
+            <div>
+              <dt>Platform value</dt>
+              <dd>${{ p2p_platform_amount_display }}</dd>
+            </div>
+            <div>
+              <dt>Payment method</dt>
+              <dd>{{ p2p_payment_method_display }}</dd>
+            </div>
+            <div>
+              <dt>Your role</dt>
+              <dd>{{ p2p_role|title }}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="p2p-exchange__card">
+          <div class="p2p-exchange__card-title">Counterparty</div>
+          <div class="p2p-exchange__counterparty">
+            <div class="p2p-exchange__avatar" aria-hidden="true">
+              {{ p2p_counterparty.username|default:"?"|slice:":1"|upper }}
+            </div>
+            <div>
+              <strong>{{ p2p_counterparty }}</strong>
+              <span>{% if p2p_role == 'buyer' %}P2P maker{% else %}Buyer{% endif %}</span>
+            </div>
+          </div>
+          {% if p2p_role == 'buyer' %}
+          <div class="p2p-exchange__maker-stats">
+            <span><strong>{{ p2p_maker_profile.completed_orders }}</strong> completed</span>
+            <span><strong>{% if p2p_maker_profile.rating %}{{ p2p_maker_profile.rating }}{% else %}—{% endif %}</strong> rating</span>
+            <span><strong>{% if p2p_maker_profile.avg_response_time_seconds %}{{ p2p_maker_profile.avg_response_time_seconds }}s{% else %}—{% endif %}</strong> avg response</span>
+          </div>
+          {% endif %}
+        </section>
+
+        <div class="p2p-exchange__notice">
+          <i class="material-icons" aria-hidden="true">verified_user</i>
+          <span>Keep payment instructions and confirmations in this conversation so the order history stays auditable.</span>
+        </div>
+      </aside>
+
+      <main class="p2p-chat" aria-label="P2P conversation">
+        <header class="p2p-chat__header">
+          <div>
+            <strong>Conversation</strong>
+            <span>with {{ p2p_counterparty }}</span>
+          </div>
+          <span class="p2p-chat__connection" data-p2p-connection-status>Connecting…</span>
+        </header>
+
+        <div class="p2p-chat__messages" data-p2p-messages aria-live="polite">
+          <div class="p2p-chat__empty" data-p2p-empty>
+            <i class="material-icons" aria-hidden="true">forum</i>
+            <strong>No messages yet</strong>
+            <span>{% if p2p_role == 'maker' %}Send the buyer your payment instructions when ready.{% else %}Wait for the maker's payment instructions or send a message.{% endif %}</span>
+          </div>
+        </div>
+
+        <form class="p2p-chat__composer" data-p2p-composer>
+          {% csrf_token %}
+          <textarea
+            rows="1"
+            maxlength="4000"
+            placeholder="Write a message…"
+            aria-label="Message"
+            data-p2p-message-input
+            {% if not p2p_can_send %}disabled{% endif %}
+          ></textarea>
+          <button type="submit" data-p2p-send {% if not p2p_can_send %}disabled{% endif %} aria-label="Send message">
+            <i class="material-icons" aria-hidden="true">send</i>
+          </button>
+        </form>
+        <div class="p2p-chat__readonly" data-p2p-readonly {% if p2p_can_send %}hidden{% endif %}>
+          This conversation is read-only because the order is {{ p2p_order.get_status_display|lower }}.
+        </div>
+      </main>
+    </div>
+  </div>
+</div>
+{% endblock innercontent %}
+
+{% block bottomimports %}
+{{ block.super }}
+<script src="{% static "js/p2p-exchange.js" %}"></script>
+{% endblock bottomimports %}

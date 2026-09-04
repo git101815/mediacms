@@ -1357,6 +1357,133 @@ class P2PMakerProfile(models.Model):
     def __str__(self):
         return f"P2P maker: {self.user}"
 
+
+class P2POrder(models.Model):
+    """Minimal P2P exchange room/order.
+
+    The order intentionally contains only data required to identify the two
+    participants, route the selected payment method and display the frozen
+    platform-value amount. Settlement/matching fields belong to later P2P
+    work, not to the chat transport.
+    """
+
+    STATUS_OPEN = "open"
+    STATUS_COMPLETED = "completed"
+    STATUS_CANCELED = "canceled"
+    STATUS_DISPUTED = "disputed"
+    STATUS_CHOICES = (
+        (STATUS_OPEN, "Open"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_CANCELED, "Canceled"),
+        (STATUS_DISPUTED, "Disputed"),
+    )
+
+    PAYMENT_METHOD_PAYPAL = "paypal"
+    PAYMENT_METHOD_REVOLUT = "revolut"
+    PAYMENT_METHOD_SEPA = "sepa"
+    PAYMENT_METHOD_WISE = "wise"
+    PAYMENT_METHOD_BANK_TRANSFER = "bank_transfer"
+    PAYMENT_METHOD_CHOICES = (
+        (PAYMENT_METHOD_PAYPAL, "PayPal"),
+        (PAYMENT_METHOD_REVOLUT, "Revolut"),
+        (PAYMENT_METHOD_SEPA, "SEPA"),
+        (PAYMENT_METHOD_WISE, "Wise"),
+        (PAYMENT_METHOD_BANK_TRANSFER, "Bank transfer"),
+    )
+
+    public_id = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        db_index=True,
+    )
+    buyer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="p2p_buyer_orders",
+    )
+    maker = models.ForeignKey(
+        P2PMakerProfile,
+        on_delete=models.PROTECT,
+        related_name="orders",
+    )
+    payment_method = models.CharField(
+        max_length=24,
+        choices=PAYMENT_METHOD_CHOICES,
+        db_index=True,
+    )
+    # Platform value uses the ledger canonical USD representation:
+    # 1 platform USD = 1_000_000 integer units.
+    platform_amount = models.PositiveBigIntegerField()
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_OPEN,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(
+                fields=["maker", "status", "created_at"],
+                name="p2p_order_maker_status_idx",
+            ),
+            models.Index(
+                fields=["buyer", "status", "created_at"],
+                name="p2p_order_buyer_status_idx",
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(platform_amount__gt=0),
+                name="p2p_order_platform_amount_gt_0",
+            ),
+        ]
+
+    @property
+    def chat_writable(self):
+        return self.status in {self.STATUS_OPEN, self.STATUS_DISPUTED}
+
+    def __str__(self):
+        return f"P2P order {self.public_id}"
+
+
+class P2PMessage(models.Model):
+    KIND_USER = "user"
+    KIND_SYSTEM = "system"
+    KIND_CHOICES = (
+        (KIND_USER, "User"),
+        (KIND_SYSTEM, "System"),
+    )
+
+    order = models.ForeignKey(
+        P2POrder,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="p2p_messages",
+        null=True,
+        blank=True,
+    )
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES, default=KIND_USER)
+    body = models.TextField(max_length=4000)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ("id",)
+        indexes = [
+            models.Index(fields=["order", "id"], name="p2p_message_order_id_idx"),
+        ]
+
+    def __str__(self):
+        return f"P2P message {self.id} on {self.order_id}"
+
 ORPHAN_DEPOSIT_RECOVERY_STATUS_PENDING_CHECK = "pending_check"
 ORPHAN_DEPOSIT_RECOVERY_STATUS_RETRYABLE_ERROR = "retryable_error"
 ORPHAN_DEPOSIT_RECOVERY_STATUS_EMPTY_FINAL = "empty_final"

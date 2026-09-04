@@ -121,6 +121,11 @@ const PAGES = {
       title: 'Wallet',
       renderer: "import './static/js/pages/wallet-buy-flow';\n",
     },
+  'p2p-exchange': {
+    id: 'p2p-exchange',
+    title: 'P2P exchange',
+    renderer: "import './static/js/pages/p2p-exchange';\n",
+  },
   media: {
     id: 'media',
     title: 'Media',

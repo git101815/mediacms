@@ -19,6 +19,8 @@ from .models import (
     InternalAPIRequestNonce,
     TokenPack,
     P2PMakerProfile,
+    P2POrder,
+    P2PMessage,
     TreasuryMetric,
 )
 from .dashboard.models import DailyRewardClaim, DailyRewardState, RewardChestGrant
@@ -789,6 +791,48 @@ class P2PMakerProfileAdmin(admin.ModelAdmin):
     @admin.display(description="Total volume", ordering="total_volume")
     def total_volume_display(self, obj):
         return _format_admin_human_amount(obj.total_volume)
+
+
+@admin.register(P2POrder)
+class P2POrderAdmin(admin.ModelAdmin):
+    list_display = (
+        "public_id",
+        "buyer",
+        "maker",
+        "payment_method",
+        "status",
+        "platform_amount_display",
+        "created_at",
+    )
+    list_filter = ("status", "payment_method")
+    search_fields = (
+        "public_id",
+        "buyer__username",
+        "buyer__email",
+        "maker__user__username",
+        "maker__user__email",
+    )
+    readonly_fields = ("public_id", "created_at", "updated_at")
+
+    @admin.display(description="Platform value", ordering="platform_amount")
+    def platform_amount_display(self, obj):
+        return _format_admin_human_amount(obj.platform_amount)
+
+
+@admin.register(P2PMessage)
+class P2PMessageAdmin(ReadOnlyAdmin):
+    list_display = ("id", "order", "kind", "sender", "short_body", "created_at")
+    list_filter = ("kind", "created_at")
+    search_fields = (
+        "body",
+        "sender__username",
+        "order__public_id",
+    )
+
+    @admin.display(description="Message")
+    def short_body(self, obj):
+        body = (obj.body or "").replace("\n", " ").strip()
+        return body if len(body) <= 90 else body[:87] + "..."
 
 def _sum_wallet_amount(qs, field_name: str) -> int:
     return int(qs.aggregate(total=Sum(field_name)).get("total") or 0)
