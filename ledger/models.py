@@ -1263,6 +1263,100 @@ class TokenPack(models.Model):
     def __str__(self):
         return f"{self.name} ({self.code})"
 
+
+class P2PMakerProfile(models.Model):
+    STATUS_ACTIVE = "active"
+    STATUS_PAUSED = "paused"
+    STATUS_SUSPENDED = "suspended"
+    STATUS_BANNED = "banned"
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_PAUSED, "Paused"),
+        (STATUS_SUSPENDED, "Suspended"),
+        (STATUS_BANNED, "Banned"),
+    )
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="p2p_maker_profile",
+    )
+
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_PAUSED,
+        db_index=True,
+    )
+    accepting_orders = models.BooleanField(default=False, db_index=True)
+
+    # One-hot payment-method compatibility. A maker is eligible for a P2P
+    # payment-method pool only when the corresponding flag is enabled.
+    paypal_enabled = models.BooleanField(default=False)
+    revolut_enabled = models.BooleanField(default=False)
+    sepa_enabled = models.BooleanField(default=False)
+    wise_enabled = models.BooleanField(default=False)
+    bank_transfer_enabled = models.BooleanField(default=False)
+
+    # Platform-value amounts use the ledger's canonical USD representation:
+    # integer units with 6 decimals (1 USD = 1_000_000 units).
+    min_order_amount = models.PositiveBigIntegerField(default=0)
+    max_order_amount = models.PositiveBigIntegerField(null=True, blank=True)
+    commission_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    max_concurrent_orders = models.PositiveSmallIntegerField(default=1)
+    last_assigned_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    # Denormalized maker statistics. P2P orders remain the eventual source of
+    # truth; these fields are maintained for fast pool/ranking/profile reads.
+    completed_orders = models.PositiveBigIntegerField(default=0)
+    canceled_orders = models.PositiveBigIntegerField(default=0)
+    disputed_orders = models.PositiveBigIntegerField(default=0)
+    avg_response_time_seconds = models.PositiveIntegerField(null=True, blank=True)
+    avg_completion_time_seconds = models.PositiveIntegerField(null=True, blank=True)
+    rating = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True)
+    rating_count = models.PositiveBigIntegerField(default=0)
+    total_volume = models.PositiveBigIntegerField(default=0)
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["status", "accepting_orders", "last_assigned_at"],
+                name="p2p_maker_pool_idx",
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(max_order_amount__isnull=True)
+                    | models.Q(max_order_amount__gte=models.F("min_order_amount"))
+                ),
+                name="p2p_maker_max_order_gte_min",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(commission_percent__gte=0)
+                & models.Q(commission_percent__lte=100),
+                name="p2p_maker_commission_pct_0_100",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(max_concurrent_orders__gt=0),
+                name="p2p_maker_concurrency_gt_0",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(rating__isnull=True)
+                    | (models.Q(rating__gte=0) & models.Q(rating__lte=5))
+                ),
+                name="p2p_maker_rating_0_5",
+            ),
+        ]
+
+    def __str__(self):
+        return f"P2P maker: {self.user}"
+
 ORPHAN_DEPOSIT_RECOVERY_STATUS_PENDING_CHECK = "pending_check"
 ORPHAN_DEPOSIT_RECOVERY_STATUS_RETRYABLE_ERROR = "retryable_error"
 ORPHAN_DEPOSIT_RECOVERY_STATUS_EMPTY_FINAL = "empty_final"

@@ -18,6 +18,7 @@ from .models import (
     DepositAddress,
     InternalAPIRequestNonce,
     TokenPack,
+    P2PMakerProfile,
     TreasuryMetric,
 )
 from .dashboard.models import DailyRewardClaim, DailyRewardState, RewardChestGrant
@@ -727,6 +728,67 @@ class TokenPackAdmin(admin.ModelAdmin):
     @admin.display(description="Gross stable amount", ordering="gross_stable_amount")
     def gross_stable_amount_display(self, obj):
         return _format_admin_human_amount(obj.gross_stable_amount)
+
+
+@admin.register(P2PMakerProfile)
+class P2PMakerProfileAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "status",
+        "accepting_orders",
+        "payment_methods",
+        "commission_percent",
+        "completed_orders",
+        "canceled_orders",
+        "disputed_orders",
+        "rating",
+        "rating_count",
+        "total_volume_display",
+        "last_assigned_at",
+    )
+    list_filter = (
+        "status",
+        "accepting_orders",
+        "paypal_enabled",
+        "revolut_enabled",
+        "sepa_enabled",
+        "wise_enabled",
+        "bank_transfer_enabled",
+    )
+    search_fields = ("user__username", "user__email")
+    readonly_fields = (
+        "last_assigned_at",
+        "completed_orders",
+        "canceled_orders",
+        "disputed_orders",
+        "avg_response_time_seconds",
+        "avg_completion_time_seconds",
+        "rating",
+        "rating_count",
+        "total_volume",
+        "created_at",
+        "updated_at",
+    )
+
+    @admin.display(description="Payment methods")
+    def payment_methods(self, obj):
+        methods = []
+        if obj.paypal_enabled:
+            methods.append("PayPal")
+        if obj.revolut_enabled:
+            methods.append("Revolut")
+        if obj.sepa_enabled:
+            methods.append("SEPA")
+        if obj.wise_enabled:
+            methods.append("Wise")
+        if obj.bank_transfer_enabled:
+            methods.append("Bank transfer")
+        return ", ".join(methods) or "—"
+
+    @admin.display(description="Total volume", ordering="total_volume")
+    def total_volume_display(self, obj):
+        return _format_admin_human_amount(obj.total_volume)
 
 def _sum_wallet_amount(qs, field_name: str) -> int:
     return int(qs.aggregate(total=Sum(field_name)).get("total") or 0)
