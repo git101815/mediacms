@@ -14,6 +14,7 @@ from .models import (
     LedgerOutbox,
     LedgerSaga,
     LedgerTransaction,
+    P2POrder,
     TokenWallet,
     WalletRequest,
 )
@@ -465,4 +466,21 @@ def deposit_sweep_failed(
                 else ""
             ),
         },
+    )
+
+
+# P2P WebSocket status broadcasts
+@receiver(post_save, sender=P2POrder)
+def broadcast_p2p_order_status(sender, instance, **kwargs):
+    from .p2p_realtime import publish_p2p_order_status
+
+    public_id = str(instance.public_id)
+    status = str(instance.status)
+    can_send = bool(instance.chat_writable)
+    transaction.on_commit(
+        lambda: publish_p2p_order_status(
+            public_id=public_id,
+            status=status,
+            can_send=can_send,
+        )
     )

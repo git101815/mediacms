@@ -19,6 +19,7 @@ x-mediacms-db-env: &mediacms_db_env
   POSTGRES_USER: mediacms
   POSTGRES_DB: mediacms
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  CHANNEL_REDIS_LOCATION: ${CHANNEL_REDIS_LOCATION:-redis://redis:6379/5}
 
 services:
   migrations:

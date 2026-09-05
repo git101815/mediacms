@@ -49,6 +49,8 @@ cp deploy/docker/supervisord/supervisord-debian.conf /etc/supervisor/conf.d/supe
 if [ X"$ENABLE_UWSGI" = X"yes" ] ; then
     echo "Enabling uwsgi app server"
     cp deploy/docker/supervisord/supervisord-uwsgi.conf /etc/supervisor/conf.d/supervisord-uwsgi.conf
+    echo "Enabling ASGI WebSocket server"
+    cp deploy/docker/supervisord/supervisord-asgi.conf /etc/supervisor/conf.d/supervisord-asgi.conf
 fi
 
 if [ X"$ENABLE_NGINX" = X"yes" ] ; then

@@ -297,6 +297,7 @@ AUTHENTICATION_BACKENDS = (
 
 INSTALLED_APPS = [
     "admin_customizations",
+    "daphne",
     "django.contrib.auth",
     "allauth",
     "allauth.account",
@@ -368,6 +369,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "cms.wsgi.application"
+ASGI_APPLICATION = "cms.asgi.application"
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -844,6 +846,33 @@ if TESTING:
 
     # No real email delivery from tests.
     EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+
+# P2P WebSocket channel layer
+# Production Compose provides a dedicated Redis DB. During tests, force the
+# channel layer onto the already-isolated test Redis DB even if the environment
+# contains a live CHANNEL_REDIS_LOCATION.
+CHANNEL_REDIS_LOCATION = os.getenv(
+    "CHANNEL_REDIS_LOCATION",
+    REDIS_LOCATION,
+)
+if TESTING:
+    CHANNEL_REDIS_LOCATION = REDIS_LOCATION
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [CHANNEL_REDIS_LOCATION],
+            "prefix": os.getenv(
+                "CHANNEL_REDIS_PREFIX",
+                "mediacms_asgi",
+            ),
+            "capacity": 1000,
+            "expiry": 60,
+            "group_expiry": 7200,
+        },
+    },
+}
 
 LEDGER_INTERNAL_API_MAX_SKEW_SECONDS = int(
     os.environ.get("LEDGER_INTERNAL_API_MAX_SKEW_SECONDS", "300")

@@ -21,6 +21,7 @@ x-mediacms-db-env: &mediacms_db_env
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
   REDIS_LOCATION: ${REDIS_LOCATION:-redis://redis:6379/1}
   REDIS_CACHE_LOCATION: ${REDIS_CACHE_LOCATION:-redis://redis:6379/4}
+  CHANNEL_REDIS_LOCATION: ${CHANNEL_REDIS_LOCATION:-redis://redis:6379/5}
   CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
   CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/3}
 
@@ -135,7 +136,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/')\" >/dev/null 2>&1 || exit 1",
+          "python -c \"import socket, urllib.request; urllib.request.urlopen('http://127.0.0.1:80/'); socket.create_connection(('127.0.0.1', 9001), 2).close()\" >/dev/null 2>&1 || exit 1",
         ]
       interval: 10s
       timeout: 5s

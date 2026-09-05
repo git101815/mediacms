@@ -6,8 +6,7 @@
 <div
   class="p2p-exchange"
   data-p2p-exchange
-  data-messages-url="{% url 'p2p_exchange_messages' p2p_order.public_id %}"
-  data-send-url="{% url 'p2p_exchange_send_message' p2p_order.public_id %}"
+  data-websocket-path="/ws/p2p/{{ p2p_order.public_id }}/"
   data-can-send="{% if p2p_can_send %}true{% else %}false{% endif %}"
 >
   <div class="p2p-exchange__shell">

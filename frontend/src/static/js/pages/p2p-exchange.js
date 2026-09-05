@@ -4,8 +4,7 @@
     return;
   }
 
-  const messagesUrl = root.getAttribute('data-messages-url') || '';
-  const sendUrl = root.getAttribute('data-send-url') || '';
+  const websocketPath = root.getAttribute('data-websocket-path') || '';
   const messagesNode = root.querySelector('[data-p2p-messages]');
   const emptyNode = root.querySelector('[data-p2p-empty]');
   const form = root.querySelector('[data-p2p-composer]');
@@ -13,14 +12,15 @@
   const sendButton = root.querySelector('[data-p2p-send]');
   const statusNode = root.querySelector('[data-p2p-order-status]');
   const readonlyNode = root.querySelector('[data-p2p-readonly]');
-  const csrfInput = form ? form.querySelector('input[name="csrfmiddlewaretoken"]') : null;
 
-  let afterId = 0;
-  let pollTimer = null;
-  let polling = false;
-  let stopped = false;
-  let consecutiveErrors = 0;
   const renderedIds = new Set();
+  let socket = null;
+  let reconnectTimer = null;
+  let reconnectAttempt = 0;
+  let stopping = false;
+  let orderCanSend = root.getAttribute('data-can-send') === 'true';
+  let socketReady = false;
+  let normalPlaceholder = input ? input.getAttribute('placeholder') || 'Write a message…' : '';
 
   function humanizeStatus(status) {
     switch (status) {
@@ -43,10 +43,30 @@
     statusNode.className = 'p2p-exchange__status p2p-exchange__status--' + status;
   }
 
+  function applyComposerState() {
+    const writable = orderCanSend && socketReady;
+    if (input) {
+      input.disabled = !writable;
+      if (!orderCanSend) {
+        input.placeholder = 'This conversation is read-only.';
+      } else if (!socketReady) {
+        input.placeholder = 'Reconnecting…';
+      } else {
+        input.placeholder = normalPlaceholder;
+      }
+    }
+    if (sendButton) sendButton.disabled = !writable;
+    if (readonlyNode) readonlyNode.hidden = orderCanSend;
+  }
+
   function setWritable(canSend) {
-    if (input) input.disabled = !canSend;
-    if (sendButton) sendButton.disabled = !canSend;
-    if (readonlyNode) readonlyNode.hidden = canSend;
+    orderCanSend = Boolean(canSend);
+    applyComposerState();
+  }
+
+  function setSocketReady(ready) {
+    socketReady = Boolean(ready);
+    applyComposerState();
   }
 
   function nearBottom() {
@@ -73,7 +93,6 @@
   function appendMessage(message, forceScroll) {
     if (!message || renderedIds.has(message.id) || !messagesNode) return;
     renderedIds.add(message.id);
-    afterId = Math.max(afterId, Number(message.id) || 0);
     if (emptyNode) emptyNode.hidden = true;
 
     const wasNearBottom = nearBottom();
@@ -114,73 +133,126 @@
     if (forceScroll || wasNearBottom) scrollToBottom(true);
   }
 
-  function schedulePoll(delay) {
-    window.clearTimeout(pollTimer);
-    if (stopped) return;
-    pollTimer = window.setTimeout(poll, delay);
+  function buildSocketUrl() {
+    if (!websocketPath) return '';
+    const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return scheme + '//' + window.location.host + websocketPath;
   }
 
-  async function poll() {
-    if (polling || stopped || !messagesUrl) return;
-    polling = true;
-    try {
-      const separator = messagesUrl.indexOf('?') === -1 ? '?' : '&';
-      const response = await fetch(messagesUrl + separator + 'after_id=' + encodeURIComponent(afterId), {
-        credentials: 'same-origin',
-        headers: { 'Accept': 'application/json' },
-      });
-      if (!response.ok) throw new Error('messages request failed');
-      const payload = await response.json();
+  function nextReconnectDelay() {
+    const base = Math.min(15000, 1000 * Math.pow(2, reconnectAttempt));
+    reconnectAttempt += 1;
+    return base;
+  }
+
+  function scheduleReconnect(immediate) {
+    window.clearTimeout(reconnectTimer);
+    if (stopping) return;
+    const delay = immediate ? 0 : nextReconnectDelay();
+    reconnectTimer = window.setTimeout(connect, delay);
+  }
+
+  function handlePayload(payload) {
+    if (!payload || typeof payload !== 'object') return;
+
+    if (payload.type === 'snapshot') {
       (payload.messages || []).forEach(function (message) {
-        appendMessage(message, afterId === 0);
+        appendMessage(message, false);
       });
-      setWritable(Boolean(payload.can_send));
       setStatus(payload.order_status);
-      consecutiveErrors = 0;
-    } catch (error) {
-      consecutiveErrors += 1;
-    } finally {
-      polling = false;
-      schedulePoll(document.hidden ? 6000 : 2000);
+      setWritable(Boolean(payload.can_send));
+      scrollToBottom(true);
+      return;
+    }
+
+    if (payload.type === 'message') {
+      appendMessage(payload.message, true);
+      return;
+    }
+
+    if (payload.type === 'status') {
+      setStatus(payload.order_status);
+      setWritable(Boolean(payload.can_send));
+      return;
+    }
+
+    if (payload.type === 'error') {
+      if (payload.code === 'read_only') {
+        setStatus(payload.order_status);
+        setWritable(false);
+      }
+      return;
     }
   }
 
+  function connect() {
+    if (stopping || !websocketPath) return;
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    setSocketReady(false);
+    const url = buildSocketUrl();
+    if (!url) return;
+
+    socket = new WebSocket(url);
+
+    socket.addEventListener('open', function () {
+      reconnectAttempt = 0;
+      setSocketReady(true);
+    });
+
+    socket.addEventListener('message', function (event) {
+      try {
+        handlePayload(JSON.parse(event.data));
+      } catch (error) {
+        // Ignore malformed server frames; reconnect semantics remain intact.
+      }
+    });
+
+    socket.addEventListener('close', function (event) {
+      setSocketReady(false);
+      socket = null;
+      if (stopping) return;
+      if (event.code === 4401 || event.code === 4404) {
+        return;
+      }
+      scheduleReconnect(false);
+    });
+
+    socket.addEventListener('error', function () {
+      // The close event owns reconnect scheduling.
+    });
+  }
+
+  function makeClientId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+  }
+
   if (form) {
-    form.addEventListener('submit', async function (event) {
+    form.addEventListener('submit', function (event) {
       event.preventDefault();
-      if (!input || input.disabled || !sendUrl) return;
+      if (!input || input.disabled || !orderCanSend) return;
       const message = input.value.trim();
       if (!message) return;
 
-      input.disabled = true;
-      if (sendButton) sendButton.disabled = true;
-      try {
-        const response = await fetch(sendUrl, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'X-CSRFToken': csrfInput ? csrfInput.value : '',
-          },
-          body: JSON.stringify({ message: message }),
-        });
-        const payload = await response.json();
-        if (!response.ok) {
-          if (response.status === 409) setWritable(false);
-          throw new Error(payload.detail || 'Unable to send message');
-        }
-        input.value = '';
-        input.style.height = '';
-        appendMessage(payload.message, true);
-        } catch (error) {
-      } finally {
-        if (!readonlyNode || readonlyNode.hidden) {
-          input.disabled = false;
-          if (sendButton) sendButton.disabled = false;
-          input.focus();
-        }
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        setSocketReady(false);
+        scheduleReconnect(true);
+        return;
       }
+
+      socket.send(JSON.stringify({
+        type: 'message.send',
+        message: message,
+        client_id: makeClientId(),
+      }));
+      input.value = '';
+      input.style.height = '';
+      input.focus();
     });
   }
 
@@ -199,14 +271,20 @@
   }
 
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden) schedulePoll(0);
-  });
-  window.addEventListener('beforeunload', function () {
-    stopped = true;
-    window.clearTimeout(pollTimer);
+    if (!document.hidden && (!socket || socket.readyState === WebSocket.CLOSED)) {
+      reconnectAttempt = 0;
+      scheduleReconnect(true);
+    }
   });
 
-  setWritable(root.getAttribute('data-can-send') === 'true');
+  window.addEventListener('beforeunload', function () {
+    stopping = true;
+    window.clearTimeout(reconnectTimer);
+    if (socket) socket.close(1000, 'page unload');
+  });
+
   setStatus(statusNode ? statusNode.getAttribute('data-status') : 'open');
-  poll();
+  setWritable(orderCanSend);
+  setSocketReady(false);
+  connect();
 })();
