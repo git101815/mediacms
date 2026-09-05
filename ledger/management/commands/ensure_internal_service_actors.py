@@ -20,6 +20,11 @@ class Command(BaseCommand):
                 "LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME",
                 "sweeper-service",
             )
+            p2p_username = getattr(
+                settings,
+                "P2P_INTERNAL_SERVICE_USERNAME",
+                "p2p-service",
+            )
 
             deposit_user = self._ensure_service_user(
                 username=deposit_username,
@@ -28,6 +33,10 @@ class Command(BaseCommand):
             sweeper_user = self._ensure_service_user(
                 username=sweeper_username,
                 email=f"{sweeper_username}@localhost",
+            )
+            p2p_user = self._ensure_service_user(
+                username=p2p_username,
+                email=f"{p2p_username}@localhost",
             )
 
             self._grant_permissions(
@@ -47,6 +56,13 @@ class Command(BaseCommand):
                 sweeper_user,
                 [
                     ("ledger", "can_manage_deposit_sweep_jobs"),
+                ],
+            )
+            self._grant_permissions(
+                p2p_user,
+                [
+                    ("ledger", "can_apply_raw_ledger_transaction"),
+                    ("ledger", "can_reverse_ledger_transaction"),
                 ],
             )
 

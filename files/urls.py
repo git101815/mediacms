@@ -13,7 +13,7 @@ from . import (
     views,
 )
 from .feeds import IndexRSSFeed, SearchRSSFeed
-from ledger import p2p_views
+from ledger import p2p_bot_views, p2p_views
 from ledger.dashboard import views as wallet_dashboard_views
 from users.views import ReferralSignupView
 
@@ -40,6 +40,11 @@ urlpatterns = [
         name="account_referral_signup",
     ),
     path("wallet/p2p/<uuid:public_id>/", p2p_views.p2p_exchange, name="p2p_exchange"),
+    path("wallet/p2p/<uuid:public_id>/find-agent", p2p_views.p2p_exchange_find_agent, name="p2p_exchange_find_agent"),
+    path("wallet/p2p/<uuid:public_id>/cancel", p2p_views.p2p_exchange_cancel, name="p2p_exchange_cancel"),
+    path("wallet/p2p/<uuid:public_id>/review", p2p_views.p2p_exchange_review, name="p2p_exchange_review"),
+    path("api/p2p/bots/telegram/webhook", p2p_bot_views.p2p_telegram_webhook, name="p2p_telegram_webhook"),
+    path("api/p2p/bots/discord/interactions", p2p_bot_views.p2p_discord_interactions, name="p2p_discord_interactions"),
     path("api/p2p/<uuid:public_id>/messages", p2p_views.p2p_exchange_messages, name="p2p_exchange_messages"),
     path("api/p2p/<uuid:public_id>/messages/send", p2p_views.p2p_exchange_send_message, name="p2p_exchange_send_message"),
     re_path(r"^wallet/deposit-request$", views.wallet_deposit_request, name="wallet_deposit_request"),

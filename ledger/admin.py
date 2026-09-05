@@ -20,10 +20,13 @@ from .models import (
     TokenPack,
     P2PMakerProfile,
     P2POrder,
+    P2PAgentAssignment,
     P2PMessage,
+    P2PReview,
     TreasuryMetric,
 )
 from .dashboard.models import DailyRewardClaim, DailyRewardState, RewardChestGrant
+from .p2p_services import enter_p2p_dispute, resolve_p2p_dispute
 from .services import (
     PLATFORM_TOKENS_PER_STABLECOIN,
     complete_wallet_withdrawal_request,
@@ -752,6 +755,7 @@ class P2PMakerProfileAdmin(admin.ModelAdmin):
     list_filter = (
         "status",
         "accepting_orders",
+        "card_enabled",
         "paypal_enabled",
         "revolut_enabled",
         "sepa_enabled",
@@ -776,6 +780,8 @@ class P2PMakerProfileAdmin(admin.ModelAdmin):
     @admin.display(description="Payment methods")
     def payment_methods(self, obj):
         methods = []
+        if obj.card_enabled:
+            methods.append("Card")
         if obj.paypal_enabled:
             methods.append("PayPal")
         if obj.revolut_enabled:
@@ -793,6 +799,7 @@ class P2PMakerProfileAdmin(admin.ModelAdmin):
         return _format_admin_human_amount(obj.total_volume)
 
 
+
 @admin.register(P2POrder)
 class P2POrderAdmin(admin.ModelAdmin):
     list_display = (
@@ -802,9 +809,10 @@ class P2POrderAdmin(admin.ModelAdmin):
         "payment_method",
         "status",
         "platform_amount_display",
+        "token_amount_display",
         "created_at",
     )
-    list_filter = ("status", "payment_method")
+    list_filter = ("status", "payment_method", "dispute_resolution")
     search_fields = (
         "public_id",
         "buyer__username",
@@ -812,11 +820,93 @@ class P2POrderAdmin(admin.ModelAdmin):
         "maker__user__username",
         "maker__user__email",
     )
-    readonly_fields = ("public_id", "created_at", "updated_at")
+    readonly_fields = (
+        "public_id",
+        "buyer",
+        "maker",
+        "token_pack",
+        "payment_method",
+        "token_amount",
+        "base_amount",
+        "commission_percent_snapshot",
+        "commission_amount",
+        "platform_amount",
+        "funding_txn",
+        "settlement_txn",
+        "status",
+        "funded_at",
+        "accepted_at",
+        "buyer_marked_paid_at",
+        "completed_at",
+        "trade_expires_at",
+        "disputed_at",
+        "dispute_resolution",
+        "resolved_at",
+        "resolved_by",
+        "created_at",
+        "updated_at",
+    )
+    actions = ("open_dispute", "resolve_for_customer", "resolve_for_agent")
 
-    @admin.display(description="Platform value", ordering="platform_amount")
+    @admin.display(description="Transaction value", ordering="platform_amount")
     def platform_amount_display(self, obj):
         return _format_admin_human_amount(obj.platform_amount)
+
+    @admin.display(description="Tokens", ordering="token_amount")
+    def token_amount_display(self, obj):
+        return _format_admin_human_amount(obj.token_amount)
+
+    @admin.action(description="Open dispute for selected active P2P orders")
+    def open_dispute(self, request, queryset):
+        changed = 0
+        for order in queryset:
+            try:
+                enter_p2p_dispute(order_id=order.id, reason="Opened by staff.")
+                changed += 1
+            except Exception as exc:
+                self.message_user(request, f"{order.public_id}: {exc}", level=messages.ERROR)
+        if changed:
+            self.message_user(request, f"Opened {changed} dispute(s).")
+
+    @admin.action(description="Resolve selected disputes for customer")
+    def resolve_for_customer(self, request, queryset):
+        self._resolve(request, queryset, "customer")
+
+    @admin.action(description="Resolve selected disputes for P2P agent")
+    def resolve_for_agent(self, request, queryset):
+        self._resolve(request, queryset, "agent")
+
+    def _resolve(self, request, queryset, winner):
+        changed = 0
+        for order in queryset:
+            try:
+                resolve_p2p_dispute(order_id=order.id, winner=winner, resolved_by=request.user)
+                changed += 1
+            except Exception as exc:
+                self.message_user(request, f"{order.public_id}: {exc}", level=messages.ERROR)
+        if changed:
+            self.message_user(request, f"Resolved {changed} dispute(s) for {winner}.")
+
+
+@admin.register(P2PAgentAssignment)
+class P2PAgentAssignmentAdmin(ReadOnlyAdmin):
+    list_display = ("id", "order", "maker", "status", "transaction_amount_display", "offered_at", "expires_at", "responded_at")
+    list_filter = ("status", "offered_at")
+    search_fields = ("order__public_id", "maker__user__username", "maker__user__email")
+
+    @admin.display(description="Transaction value", ordering="transaction_amount_snapshot")
+    def transaction_amount_display(self, obj):
+        return _format_admin_human_amount(obj.transaction_amount_snapshot)
+
+
+@admin.register(P2PReview)
+class P2PReviewAdmin(ReadOnlyAdmin):
+    list_display = ("id", "order", "reviewer", "reviewee", "score_display", "created_at")
+    search_fields = ("order__public_id", "reviewer__username", "reviewee__username")
+
+    @admin.display(description="Score")
+    def score_display(self, obj):
+        return f"{obj.score:.2f}"
 
 
 @admin.register(P2PMessage)

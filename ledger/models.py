@@ -10,6 +10,7 @@ USER_WALLET_TYPE = "user"
 SYSTEM_WALLET_TYPE = "system"
 SYSTEM_WALLET_ISSUANCE = "issuance"
 SYSTEM_WALLET_PLATFORM_FEES = "platform_fees"
+SYSTEM_WALLET_P2P_SETTLEMENT = "p2p_settlement"
 LEDGER_TXN_STATUS_PENDING = "pending"
 LEDGER_TXN_STATUS_POSTED = "posted"
 LEDGER_TXN_STATUS_REVERSED = "reversed"
@@ -142,11 +143,13 @@ class TokenWallet(models.Model):
 
     SYSTEM_ISSUANCE = SYSTEM_WALLET_ISSUANCE
     SYSTEM_PLATFORM_FEES = SYSTEM_WALLET_PLATFORM_FEES
+    SYSTEM_P2P_SETTLEMENT = SYSTEM_WALLET_P2P_SETTLEMENT
     SYSTEM_EXTERNAL_ASSET_CLEARING = SYSTEM_WALLET_EXTERNAL_ASSET_CLEARING
     SYSTEM_ORPHANS_RECOVERED = SYSTEM_WALLET_ORPHANS_RECOVERED
     SYSTEM_CHOICES = (
         (SYSTEM_ISSUANCE, "Issuance"),
         (SYSTEM_PLATFORM_FEES, "Platform fees"),
+        (SYSTEM_P2P_SETTLEMENT, "P2P settlement"),
         (SYSTEM_EXTERNAL_ASSET_CLEARING, "External asset clearing"),
         (SYSTEM_ORPHANS_RECOVERED, "Orphans recovered"),
     )
@@ -1264,6 +1267,7 @@ class TokenPack(models.Model):
         return f"{self.name} ({self.code})"
 
 
+
 class P2PMakerProfile(models.Model):
     STATUS_ACTIVE = "active"
     STATUS_PAUSED = "paused"
@@ -1290,16 +1294,22 @@ class P2PMakerProfile(models.Model):
     )
     accepting_orders = models.BooleanField(default=False, db_index=True)
 
-    # One-hot payment-method compatibility. A maker is eligible for a P2P
-    # payment-method pool only when the corresponding flag is enabled.
+    # These flags are only the initial checkout/matching preference. Once an
+    # agent has accepted and joined the private room, the actual fiat method is
+    # deliberately negotiated freely in chat and is not modeled by MediaCMS.
+    card_enabled = models.BooleanField(default=False)
     paypal_enabled = models.BooleanField(default=False)
     revolut_enabled = models.BooleanField(default=False)
     sepa_enabled = models.BooleanField(default=False)
     wise_enabled = models.BooleanField(default=False)
     bank_transfer_enabled = models.BooleanField(default=False)
 
-    # Platform-value amounts use the ledger's canonical USD representation:
-    # integer units with 6 decimals (1 USD = 1_000_000 units).
+    # External identities used by the notification bots. Accept/Decline is
+    # performed inside Telegram/Discord, never inside the MediaCMS chat room.
+    telegram_user_id = models.CharField(max_length=64, blank=True, default="")
+    discord_user_id = models.CharField(max_length=32, blank=True, default="")
+
+    # Canonical USD value: integer units with 6 decimals (1 USD = 1_000_000).
     min_order_amount = models.PositiveBigIntegerField(default=0)
     max_order_amount = models.PositiveBigIntegerField(null=True, blank=True)
     commission_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
@@ -1307,8 +1317,6 @@ class P2PMakerProfile(models.Model):
     max_concurrent_orders = models.PositiveSmallIntegerField(default=1)
     last_assigned_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
-    # Denormalized maker statistics. P2P orders remain the eventual source of
-    # truth; these fields are maintained for fast pool/ranking/profile reads.
     completed_orders = models.PositiveBigIntegerField(default=0)
     canceled_orders = models.PositiveBigIntegerField(default=0)
     disputed_orders = models.PositiveBigIntegerField(default=0)
@@ -1359,31 +1367,50 @@ class P2PMakerProfile(models.Model):
 
 
 class P2POrder(models.Model):
-    """Minimal P2P exchange room/order.
+    """P2P token purchase and its private conversation.
 
-    The order intentionally contains only data required to identify the two
-    participants, route the selected payment method and display the frozen
-    platform-value amount. Settlement/matching fields belong to later P2P
-    work, not to the chat transport.
+    ``platform_amount`` is intentionally the complete Transaction value shown
+    to the customer: base token value + the currently assigned P2P agent's
+    frozen commission. The external customer -> agent fiat transfer is never
+    represented in the MediaCMS ledger.
     """
 
+    # ``open`` is retained only for existing/demo rows created by the original
+    # chat patch. New production P2P orders are always created by the service
+    # layer in STATUS_WAITING_AGENT.
     STATUS_OPEN = "open"
+    STATUS_WAITING_AGENT = "waiting_agent"
+    STATUS_WAITING_NEW_AGENT = "waiting_new_agent"
+    STATUS_NO_AGENT_AVAILABLE = "no_agent_available"
+    STATUS_CHAT_OPEN = "chat_open"
+    STATUS_FIAT_SENT = "fiat_sent"
     STATUS_COMPLETED = "completed"
     STATUS_CANCELED = "canceled"
     STATUS_DISPUTED = "disputed"
     STATUS_CHOICES = (
-        (STATUS_OPEN, "Open"),
+        (STATUS_OPEN, "Open (legacy)"),
+        (STATUS_WAITING_AGENT, "Waiting for P2P agent"),
+        (STATUS_WAITING_NEW_AGENT, "Waiting for a new P2P agent"),
+        (STATUS_NO_AGENT_AVAILABLE, "No P2P agent available"),
+        (STATUS_CHAT_OPEN, "Exchange open"),
+        (STATUS_FIAT_SENT, "Money sent"),
         (STATUS_COMPLETED, "Completed"),
         (STATUS_CANCELED, "Canceled"),
         (STATUS_DISPUTED, "Disputed"),
     )
 
+    PAYMENT_METHOD_CARD = "card"
+    PAYMENT_METHOD_APPLE_PAY = "apple_pay"
+    PAYMENT_METHOD_GOOGLE_PAY = "google_pay"
     PAYMENT_METHOD_PAYPAL = "paypal"
     PAYMENT_METHOD_REVOLUT = "revolut"
     PAYMENT_METHOD_SEPA = "sepa"
     PAYMENT_METHOD_WISE = "wise"
     PAYMENT_METHOD_BANK_TRANSFER = "bank_transfer"
     PAYMENT_METHOD_CHOICES = (
+        (PAYMENT_METHOD_CARD, "Card"),
+        (PAYMENT_METHOD_APPLE_PAY, "Apple Pay"),
+        (PAYMENT_METHOD_GOOGLE_PAY, "Google Pay"),
         (PAYMENT_METHOD_PAYPAL, "PayPal"),
         (PAYMENT_METHOD_REVOLUT, "Revolut"),
         (PAYMENT_METHOD_SEPA, "SEPA"),
@@ -1391,12 +1418,16 @@ class P2POrder(models.Model):
         (PAYMENT_METHOD_BANK_TRANSFER, "Bank transfer"),
     )
 
-    public_id = models.UUIDField(
-        default=uuid.uuid4,
-        unique=True,
-        editable=False,
-        db_index=True,
+    DISPUTE_NONE = ""
+    DISPUTE_CUSTOMER_WINS = "customer_wins"
+    DISPUTE_AGENT_WINS = "agent_wins"
+    DISPUTE_RESOLUTION_CHOICES = (
+        (DISPUTE_NONE, "Unresolved"),
+        (DISPUTE_CUSTOMER_WINS, "Customer wins"),
+        (DISPUTE_AGENT_WINS, "P2P agent wins"),
     )
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True)
     buyer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -1406,35 +1437,71 @@ class P2POrder(models.Model):
         P2PMakerProfile,
         on_delete=models.PROTECT,
         related_name="orders",
+        null=True,
+        blank=True,
     )
-    payment_method = models.CharField(
-        max_length=24,
-        choices=PAYMENT_METHOD_CHOICES,
-        db_index=True,
+    token_pack = models.ForeignKey(
+        TokenPack,
+        on_delete=models.PROTECT,
+        related_name="p2p_orders",
+        null=True,
+        blank=True,
     )
-    # Platform value uses the ledger canonical USD representation:
-    # 1 platform USD = 1_000_000 integer units.
+    payment_method = models.CharField(max_length=24, choices=PAYMENT_METHOD_CHOICES, db_index=True)
+
+    # Frozen economics. Legacy rows may have zero in the new snapshot fields.
+    token_amount = models.PositiveBigIntegerField(default=0)
+    base_amount = models.PositiveBigIntegerField(default=0)
+    commission_percent_snapshot = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    commission_amount = models.PositiveBigIntegerField(default=0)
+    # Complete amount the customer must pay externally, fees included.
     platform_amount = models.PositiveBigIntegerField()
-    status = models.CharField(
-        max_length=16,
-        choices=STATUS_CHOICES,
-        default=STATUS_OPEN,
-        db_index=True,
+
+    funding_txn = models.ForeignKey(
+        "LedgerTransaction",
+        on_delete=models.PROTECT,
+        related_name="p2p_funding_orders",
+        null=True,
+        blank=True,
     )
+    settlement_txn = models.ForeignKey(
+        "LedgerTransaction",
+        on_delete=models.PROTECT,
+        related_name="p2p_settlement_orders",
+        null=True,
+        blank=True,
+    )
+
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
+    funded_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    accepted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    buyer_marked_paid_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    completed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    trade_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    disputed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    dispute_resolution = models.CharField(
+        max_length=20,
+        choices=DISPUTE_RESOLUTION_CHOICES,
+        blank=True,
+        default=DISPUTE_NONE,
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="p2p_disputes_resolved",
+        null=True,
+        blank=True,
+    )
+
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ("-created_at", "-id")
         indexes = [
-            models.Index(
-                fields=["maker", "status", "created_at"],
-                name="p2p_order_maker_status_idx",
-            ),
-            models.Index(
-                fields=["buyer", "status", "created_at"],
-                name="p2p_order_buyer_status_idx",
-            ),
+            models.Index(fields=["maker", "status", "created_at"], name="p2p_order_maker_status_idx"),
+            models.Index(fields=["buyer", "status", "created_at"], name="p2p_order_buyer_status_idx"),
         ]
         constraints = [
             models.CheckConstraint(
@@ -1444,11 +1511,66 @@ class P2POrder(models.Model):
         ]
 
     @property
+    def chat_started(self):
+        return self.status in {
+            self.STATUS_OPEN,
+            self.STATUS_CHAT_OPEN,
+            self.STATUS_FIAT_SENT,
+            self.STATUS_COMPLETED,
+            self.STATUS_DISPUTED,
+        } or (self.status == self.STATUS_CANCELED and self.accepted_at is not None)
+
+    @property
     def chat_writable(self):
-        return self.status in {self.STATUS_OPEN, self.STATUS_DISPUTED}
+        return self.status in {
+            self.STATUS_OPEN,
+            self.STATUS_CHAT_OPEN,
+            self.STATUS_FIAT_SENT,
+            self.STATUS_DISPUTED,
+        }
+
+    @property
+    def can_find_new_agent(self):
+        return self.status == self.STATUS_WAITING_NEW_AGENT
 
     def __str__(self):
         return f"P2P order {self.public_id}"
+
+
+class P2PAgentAssignment(models.Model):
+    STATUS_OFFERED = "offered"
+    STATUS_DECLINED = "declined"
+    STATUS_EXPIRED = "expired"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_CHOICES = (
+        (STATUS_OFFERED, "Offered"),
+        (STATUS_DECLINED, "Declined"),
+        (STATUS_EXPIRED, "Expired"),
+        (STATUS_ACCEPTED, "Accepted"),
+    )
+
+    order = models.ForeignKey(P2POrder, on_delete=models.CASCADE, related_name="assignments")
+    maker = models.ForeignKey(P2PMakerProfile, on_delete=models.PROTECT, related_name="assignments")
+    action_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OFFERED, db_index=True)
+    commission_percent_snapshot = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    commission_amount_snapshot = models.PositiveBigIntegerField(default=0)
+    transaction_amount_snapshot = models.PositiveBigIntegerField(default=0)
+    offered_at = models.DateTimeField(default=timezone.now, db_index=True)
+    expires_at = models.DateTimeField(db_index=True)
+    responded_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        ordering = ("offered_at", "id")
+        constraints = [
+            models.UniqueConstraint(fields=["order", "maker"], name="p2p_assignment_order_maker_unique"),
+        ]
+        indexes = [
+            models.Index(fields=["status", "expires_at"], name="p2p_assignment_expiry_idx"),
+        ]
+
+    def __str__(self):
+        return f"P2P assignment {self.id}: order={self.order_id} maker={self.maker_id} {self.status}"
 
 
 class P2PMessage(models.Model):
@@ -1459,11 +1581,7 @@ class P2PMessage(models.Model):
         (KIND_SYSTEM, "System"),
     )
 
-    order = models.ForeignKey(
-        P2POrder,
-        on_delete=models.CASCADE,
-        related_name="messages",
-    )
+    order = models.ForeignKey(P2POrder, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -1477,12 +1595,56 @@ class P2PMessage(models.Model):
 
     class Meta:
         ordering = ("id",)
-        indexes = [
-            models.Index(fields=["order", "id"], name="p2p_message_order_id_idx"),
-        ]
+        indexes = [models.Index(fields=["order", "id"], name="p2p_message_order_id_idx")]
 
     def __str__(self):
         return f"P2P message {self.id} on {self.order_id}"
+
+
+class P2PReview(models.Model):
+    order = models.ForeignKey(P2POrder, on_delete=models.CASCADE, related_name="reviews")
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="p2p_reviews_written",
+    )
+    reviewee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="p2p_reviews_received",
+    )
+
+    communication = models.PositiveSmallIntegerField()
+    responsiveness = models.PositiveSmallIntegerField()
+    reliability = models.PositiveSmallIntegerField()
+    payment_experience = models.PositiveSmallIntegerField()
+    cooperation = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        constraints = [
+            models.UniqueConstraint(fields=["order", "reviewer"], name="p2p_review_order_reviewer_unique"),
+            models.CheckConstraint(condition=~models.Q(reviewer=models.F("reviewee")), name="p2p_review_distinct_users"),
+            models.CheckConstraint(condition=models.Q(communication__gte=1) & models.Q(communication__lte=5), name="p2p_review_communication_1_5"),
+            models.CheckConstraint(condition=models.Q(responsiveness__gte=1) & models.Q(responsiveness__lte=5), name="p2p_review_responsiveness_1_5"),
+            models.CheckConstraint(condition=models.Q(reliability__gte=1) & models.Q(reliability__lte=5), name="p2p_review_reliability_1_5"),
+            models.CheckConstraint(condition=models.Q(payment_experience__gte=1) & models.Q(payment_experience__lte=5), name="p2p_review_payment_1_5"),
+            models.CheckConstraint(condition=models.Q(cooperation__gte=1) & models.Q(cooperation__lte=5), name="p2p_review_cooperation_1_5"),
+        ]
+
+    @property
+    def score(self):
+        return (
+            self.communication
+            + self.responsiveness
+            + self.reliability
+            + self.payment_experience
+            + self.cooperation
+        ) / 5
+
+    def __str__(self):
+        return f"P2P review {self.id} on {self.order_id}"
 
 ORPHAN_DEPOSIT_RECOVERY_STATUS_PENDING_CHECK = "pending_check"
 ORPHAN_DEPOSIT_RECOVERY_STATUS_RETRYABLE_ERROR = "retryable_error"

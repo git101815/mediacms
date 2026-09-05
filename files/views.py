@@ -133,6 +133,7 @@ from ledger.services import (
     _convert_platform_token_units_to_canonical_stable_units,
 )
 from ledger.dashboard import config as wallet_config
+from ledger.p2p_services import P2P_PROVIDER_KEY, create_p2p_order_for_checkout, get_p2p_checkout_options
 from ledger.dashboard.bonus_vault import build_bonus_vault_context
 from ledger.dashboard.daily_rewards import build_daily_rewards_context
 from ledger.dashboard.quests import (
@@ -606,9 +607,12 @@ def _wallet_checkout_method_keys(
     provider_key: str,
     provider_id: str,
     payment_method_type: str,
+    p2p_payment_method: str = "",
 ) -> tuple[str, ...]:
     if payment_method_type == "crypto":
         return ("crypto",)
+    if provider_key == P2P_PROVIDER_KEY and p2p_payment_method:
+        return (p2p_payment_method,)
     if provider_key == SKILLFLOW_PROVIDER_KEY:
         return ("card", "apple_pay", "google_pay")
     if provider_key == MALUM_PROVIDER_KEY:
@@ -635,6 +639,8 @@ def _wallet_checkout_provider_key(
 ) -> str:
     if payment_method_type == "crypto":
         return ""
+    if provider_key == P2P_PROVIDER_KEY:
+        return P2P_PROVIDER_KEY
     if provider_key == PAYGATE_PROVIDER_KEY and provider_id == "transak":
         return "transak"
     if provider_key == PAYGATE_PROVIDER_KEY:
@@ -667,7 +673,9 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
     provider_id = str(decorated.get("paygate_provider_id") or "").strip().lower()
     payment_method_type = str(decorated.get("payment_method_type") or "").strip().lower()
 
-    if provider_key == SKILLFLOW_PROVIDER_KEY:
+    if provider_key == P2P_PROVIDER_KEY:
+        group_key = "p2p"
+    elif provider_key == SKILLFLOW_PROVIDER_KEY:
         group_key = "skillflow_card"
     elif provider_key == BANXA_PROVIDER_KEY:
         group_key = "banxa_card"
@@ -688,8 +696,12 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
     group_icon = group.get("icon_label") or group.get("icon") or group_label
     group_icon_path = group.get("icon_path") or ""
     group_order = int(group.get("order") or 100)
-    price_bps = _get_wallet_payment_price_bps(group_key)
-    price_fixed_canonical = _get_wallet_payment_price_fixed_canonical(group_key)
+    if provider_key == P2P_PROVIDER_KEY:
+        price_bps = 0
+        price_fixed_canonical = 0
+    else:
+        price_bps = _get_wallet_payment_price_bps(group_key)
+        price_fixed_canonical = _get_wallet_payment_price_fixed_canonical(group_key)
     payment_currency = str(decorated.get("payment_currency") or "USD").strip().upper()
     payment_currency_usd_rate = str(
         decorated.get("payment_currency_usd_rate")
@@ -719,6 +731,7 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
         provider_key=provider_key,
         provider_id=provider_id,
         payment_method_type=payment_method_type,
+        p2p_payment_method=str(decorated.get("p2p_payment_method") or "").strip(),
     )
     checkout_provider_key = _wallet_checkout_provider_key(
         provider_key=provider_key,
@@ -782,6 +795,8 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
 
 def _build_wallet_deposit_options() -> list[dict]:
     options = []
+
+    options.extend(get_p2p_checkout_options())
 
     malum_option = get_malum_deposit_option()
     if malum_option is not None:
@@ -1508,6 +1523,17 @@ def wallet_deposit_request(request):
         token_pack = TokenPack.objects.filter(code=token_pack_code, is_active=True).first()
         if token_pack is None:
             raise DjangoValidationError("Invalid token pack.")
+
+        if (
+            selected_option.get("payment_method_type") == "provider"
+            and selected_option.get("provider_key") == P2P_PROVIDER_KEY
+        ):
+            order = create_p2p_order_for_checkout(
+                buyer=request.user,
+                token_pack=token_pack,
+                payment_method=selected_option.get("p2p_payment_method") or "",
+            )
+            return redirect("p2p_exchange", public_id=order.public_id)
 
         payment_price_bps = int(selected_option.get("payment_price_bps") or 0)
         payment_price_fixed_canonical = int(selected_option.get("payment_price_fixed_canonical") or 0)

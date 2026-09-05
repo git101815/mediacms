@@ -23,6 +23,13 @@ SERVICE_USER_SPECS = [
         ],
     },
     {
+        "setting": "P2P_INTERNAL_SERVICE_USERNAME",
+        "permissions": [
+            "ledger.can_apply_raw_ledger_transaction",
+            "ledger.can_reverse_ledger_transaction",
+        ],
+    },
+    {
         "setting": "LEDGER_INTERNAL_SWEEPER_SERVICE_USERNAME",
         "permissions": [
             "ledger.can_manage_deposit_sweep_jobs",

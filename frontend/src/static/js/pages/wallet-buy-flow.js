@@ -501,6 +501,9 @@
   }
 
   function getRoutePriceDisplay(option) {
+    if (option && option.paymentPriceMode === 'p2p_dynamic') {
+      return 'Agent-priced';
+    }
     const base = Number(buyState.packGrossCanonical || 0);
     const bps = Number((option && option.paymentPriceBps) || 0);
     const fixed = Number((option && option.paymentPriceFixedCanonical) || 0);

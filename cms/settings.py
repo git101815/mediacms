@@ -910,3 +910,13 @@ LEDGER_SWEEP_JOB_CLAIM_MAX_BATCH = int(
 if GLOBAL_LOGIN_REQUIRED:
     auth_index = MIDDLEWARE.index("django.contrib.auth.middleware.AuthenticationMiddleware")
     MIDDLEWARE.insert(auth_index + 1, "django.contrib.auth.middleware.LoginRequiredMiddleware")
+
+# P2P human-agent transaction flow.
+P2P_INTERNAL_SERVICE_USERNAME = os.environ.get("P2P_INTERNAL_SERVICE_USERNAME", "p2p-service").strip()
+P2P_AGENT_RESPONSE_TIMEOUT_SECONDS = int(os.environ.get("P2P_AGENT_RESPONSE_TIMEOUT_SECONDS", "300"))
+P2P_TRADE_TIMEOUT_SECONDS = int(os.environ.get("P2P_TRADE_TIMEOUT_SECONDS", "86400"))
+P2P_TELEGRAM_BOT_TOKEN = os.environ.get("P2P_TELEGRAM_BOT_TOKEN", "").strip()
+P2P_TELEGRAM_WEBHOOK_SECRET = os.environ.get("P2P_TELEGRAM_WEBHOOK_SECRET", "").strip()
+P2P_DISCORD_BOT_TOKEN = os.environ.get("P2P_DISCORD_BOT_TOKEN", "").strip()
+P2P_DISCORD_PUBLIC_KEY = os.environ.get("P2P_DISCORD_PUBLIC_KEY", "").strip()
+

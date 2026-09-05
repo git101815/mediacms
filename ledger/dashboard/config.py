@@ -172,6 +172,7 @@ WALLET_PAYMENT_GROUPS = {
     "mtpelerin_eur": {"label": "Bank transfer (Mt Pelerin · EUR)", "icon_label": "BANK", "icon_path": "images/wallet/bank.svg", "order": 50},
     "mtpelerin_usd": {"label": "Bank transfer (Mt Pelerin · USD)", "icon_label": "SWIFT", "icon_path": "images/wallet/bank.svg", "order": 51},
     "crypto": {"label": "Crypto", "icon_label": "Crypto", "icon_path": "images/wallet/crypto.svg", "order": 10},
+    "p2p": {"label": "P2P agent", "icon_label": "P2P", "icon_path": "images/wallet/card.svg", "order": 80},
 }
 
 # User-facing checkout taxonomy. WALLET_PAYMENT_GROUPS above remains the
@@ -233,6 +234,7 @@ WALLET_CHECKOUT_PROVIDERS = {
     "paygate": {"label": "Paygate", "order": 50},
     "dfx": {"label": "DFX", "order": 60},
     "mtpelerin": {"label": "Mt Pelerin", "order": 70},
+    "p2p": {"label": "P2P agent", "order": 80},
 }
 
 WALLET_CRYPTO_ASSET_GROUPS = {

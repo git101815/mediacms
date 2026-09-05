@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% load static %}
 {% block headtitle %}P2P Order {{ p2p_order_reference }} - {{ PORTAL_NAME }}{% endblock headtitle %}
@@ -8,12 +9,12 @@
   data-p2p-exchange
   data-websocket-path="/ws/p2p/{{ p2p_order.public_id }}/"
   data-can-send="{% if p2p_can_send %}true{% else %}false{% endif %}"
+  data-p2p-role="{{ p2p_role }}"
+  data-p2p-pretrade="{% if p2p_is_pretrade %}true{% else %}false{% endif %}"
 >
   <div class="p2p-exchange__shell">
     <header class="p2p-exchange__header">
-      <button type="button" class="p2p-exchange__back" onclick="history.back()" aria-label="Back">
-        <i class="material-icons" aria-hidden="true">arrow_back</i>
-      </button>
+      <button type="button" class="p2p-exchange__back" onclick="history.back()" aria-label="Back"><i class="material-icons" aria-hidden="true">arrow_back</i></button>
       <div class="p2p-exchange__header-copy">
         <span class="p2p-exchange__eyebrow">P2P exchange</span>
         <h1>Order #{{ p2p_order_reference }}</h1>
@@ -25,45 +26,40 @@
         <section class="p2p-exchange__card">
           <div class="p2p-exchange__card-title">Trade</div>
           <dl class="p2p-exchange__facts">
-            <div>
-              <dt>Transaction value</dt>
-              <dd>${{ p2p_platform_amount_display }}</dd>
-            </div>
-            <div>
-              <dt>Payment method</dt>
-              <dd>{{ p2p_payment_method_display }}</dd>
-            </div>
-            <div>
-              <dt>Your role</dt>
-              <dd>{{ p2p_role|title }}</dd>
-            </div>
+            <div><dt>Tokens</dt><dd>{{ p2p_token_amount_display }}</dd></div>
+            <div><dt>Transaction value</dt><dd>${{ p2p_platform_amount_display }}</dd></div>
+            <div><dt>Payment method</dt><dd>{{ p2p_payment_method_display }}</dd></div>
+            <div><dt>Your role</dt><dd>{% if p2p_role == 'agent' %}P2P agent{% else %}Customer{% endif %}</dd></div>
           </dl>
+          {% if p2p_order.base_amount %}
+          <div class="p2p-exchange__price-breakdown">
+            <span>Token value <strong>${{ p2p_base_amount_display }}</strong></span>
+            <span>P2P agent fee <strong>${{ p2p_commission_amount_display }}</strong></span>
+          </div>
+          {% endif %}
         </section>
 
+        {% if p2p_counterparty %}
         <section class="p2p-exchange__card">
-          <div class="p2p-exchange__card-title">Counterparty</div>
+          <div class="p2p-exchange__card-title">{% if p2p_is_pretrade %}Selected P2P agent{% else %}Counterparty{% endif %}</div>
           <div class="p2p-exchange__counterparty">
-            <div class="p2p-exchange__avatar" aria-hidden="true">
-              {{ p2p_counterparty.username|default:"?"|slice:":1"|upper }}
-            </div>
+            <div class="p2p-exchange__avatar" aria-hidden="true">{{ p2p_counterparty.username|default:"?"|slice:":1"|upper }}</div>
             <div>
               <strong>{{ p2p_counterparty.username }}</strong>
-              <span>{% if p2p_role == 'buyer' %}P2P maker{% else %}Buyer{% endif %}</span>
+              <span>{% if p2p_role == 'buyer' %}P2P agent{% else %}Customer{% endif %}</span>
             </div>
           </div>
-          {% if p2p_role == 'buyer' %}
+          {% if p2p_role == 'buyer' and p2p_maker_profile %}
           <div class="p2p-exchange__maker-stats">
             <span><strong>{{ p2p_maker_profile.completed_orders }}</strong> completed</span>
             <span>
-              <strong class="p2p-exchange__rating" aria-label="{% if p2p_rating_value %}Rated {{ p2p_rating_value }} out of 5{% else %}No rating yet{% endif %}">
+              <strong class="p2p-exchange__rating" aria-label="{% if p2p_rating_stars %}Rated {{ p2p_rating_value }} out of 5{% else %}No rating yet{% endif %}">
                 {% if p2p_rating_stars %}
                   {% for star in p2p_rating_stars %}
                     <i class="material-icons p2p-exchange__rating-star p2p-exchange__rating-star--{{ star }}" aria-hidden="true">{% if star == 'full' %}star{% elif star == 'half' %}star_half{% else %}star_outline{% endif %}</i>
                   {% endfor %}
                   <small>{{ p2p_rating_value }}/5</small>
-                {% else %}
-                  <span class="p2p-exchange__rating-empty">—</span>
-                {% endif %}
+                {% else %}<span class="p2p-exchange__rating-empty">—</span>{% endif %}
               </strong>
               rating
             </span>
@@ -71,51 +67,93 @@
           </div>
           {% endif %}
         </section>
-
-        <div class="p2p-exchange__notice">
-          <i class="material-icons" aria-hidden="true">verified_user</i>
-          <span>Keep payment instructions and confirmations in this conversation so the order history stays auditable.</span>
-        </div>
+        {% endif %}
       </aside>
 
+      {% if p2p_is_pretrade %}
+      <main class="p2p-pretrade" aria-label="P2P agent matching">
+        <header class="p2p-chat__header">
+          <div><strong>P2P agent matching</strong><span>Order #{{ p2p_order_reference }}</span></div>
+          <span class="p2p-exchange__status p2p-exchange__status--{{ p2p_order.status }}" data-p2p-order-status data-status="{{ p2p_order.status }}">{{ p2p_order.get_status_display }}</span>
+        </header>
+        <div class="p2p-pretrade__body">
+          {% if p2p_order.status == 'waiting_agent' %}
+            <i class="material-icons" aria-hidden="true">notifications_active</i>
+            <h2>Waiting for the P2P agent</h2>
+            <p>The selected agent has been notified in Telegram/Discord. The private conversation opens only after the agent accepts and funds the transaction.</p>
+          {% elif p2p_order.status == 'waiting_new_agent' %}
+            <i class="material-icons" aria-hidden="true">person_search</i>
+            <h2>The P2P agent did not take this transaction</h2>
+            <p>You can ask the pool for another agent. Agents already declined or expired are excluded from this order.</p>
+            <form method="post" action="{% url 'p2p_exchange_find_agent' p2p_order.public_id %}" class="p2p-pretrade__form">
+              {% csrf_token %}<button type="submit" class="p2p-pretrade__primary">Find a new P2P agent</button>
+            </form>
+          {% elif p2p_order.status == 'no_agent_available' %}
+            <i class="material-icons" aria-hidden="true">person_off</i>
+            <h2>No P2P agent is currently available for this payment method.</h2>
+            <p>Please cancel this order and try again later.</p>
+          {% elif p2p_order.status == 'canceled' %}
+            <i class="material-icons" aria-hidden="true">cancel</i>
+            <h2>Order canceled</h2>
+          {% endif %}
+
+          {% if p2p_can_cancel %}
+          <form method="post" action="{% url 'p2p_exchange_cancel' p2p_order.public_id %}" class="p2p-pretrade__form">
+            {% csrf_token %}<button type="submit" class="p2p-pretrade__secondary">Cancel order</button>
+          </form>
+          {% endif %}
+        </div>
+      </main>
+      {% else %}
       <main class="p2p-chat" aria-label="P2P conversation">
         <header class="p2p-chat__header">
-          <div>
-            <strong>Conversation</strong>
-            <span>with {{ p2p_counterparty.username }}</span>
-          </div>
-          <span class="p2p-exchange__status p2p-exchange__status--{{ p2p_order.status }}" data-p2p-order-status data-status="{{ p2p_order.status }}">
-            {{ p2p_order.get_status_display }}
-          </span>
+          <div><strong>Conversation</strong><span>with {{ p2p_counterparty.username }}</span></div>
+          <span class="p2p-exchange__status p2p-exchange__status--{{ p2p_order.status }}" data-p2p-order-status data-status="{{ p2p_order.status }}">{{ p2p_order.get_status_display }}</span>
         </header>
 
         <div class="p2p-chat__messages" data-p2p-messages aria-live="polite">
           <div class="p2p-chat__empty" data-p2p-empty>
             <i class="material-icons" aria-hidden="true">forum</i>
             <strong>No messages yet</strong>
-            <span>{% if p2p_role == 'maker' %}Send the buyer your payment instructions when ready.{% else %}Wait for the maker's payment instructions or send a message.{% endif %}</span>
+            <span>Use this private room to agree on and complete the external payment.</span>
           </div>
+        </div>
+
+        <div class="p2p-chat__locks" aria-live="polite">
+          <button type="button" data-p2p-fiat-sent {% if not p2p_role == 'buyer' or not p2p_order.status == 'chat_open' %}hidden{% endif %}>I have sent the money</button>
+          <button type="button" data-p2p-fiat-received {% if not p2p_role == 'agent' or not p2p_order.status == 'fiat_sent' %}hidden{% endif %}>I have received the money</button>
+          <span class="p2p-chat__action-error" data-p2p-action-error hidden></span>
         </div>
 
         <form class="p2p-chat__composer" data-p2p-composer>
           {% csrf_token %}
-          <textarea
-            rows="1"
-            maxlength="4000"
-            placeholder="Write a message…"
-            aria-label="Message"
-            data-p2p-message-input
-            {% if not p2p_can_send %}disabled{% endif %}
-          ></textarea>
-          <button type="submit" data-p2p-send {% if not p2p_can_send %}disabled{% endif %} aria-label="Send message">
-            <i class="material-icons" aria-hidden="true">send</i>
-          </button>
+          <textarea rows="1" maxlength="4000" placeholder="Write a message…" aria-label="Message" data-p2p-message-input {% if not p2p_can_send %}disabled{% endif %}></textarea>
+          <button type="submit" data-p2p-send {% if not p2p_can_send %}disabled{% endif %} aria-label="Send message"><i class="material-icons" aria-hidden="true">send</i></button>
         </form>
-        <div class="p2p-chat__readonly" data-p2p-readonly {% if p2p_can_send %}hidden{% endif %}>
-          This conversation is read-only because the order is {{ p2p_order.get_status_display|lower }}.
-        </div>
+        <div class="p2p-chat__readonly" data-p2p-readonly {% if p2p_can_send %}hidden{% endif %}>This conversation is read-only because the order is {{ p2p_order.get_status_display|lower }}.</div>
       </main>
+      {% endif %}
     </div>
+
+    {% if p2p_order.status == 'completed' %}
+    <section class="p2p-review">
+      <div class="p2p-exchange__card-title">Rate this transaction</div>
+      {% if p2p_existing_review %}
+        <p>Your review has been submitted.</p>
+      {% else %}
+        <p>Rate separate aspects of the exchange. The public rating remains the average.</p>
+        <form method="post" action="{% url 'p2p_exchange_review' p2p_order.public_id %}" class="p2p-review__form">
+          {% csrf_token %}
+          <label>Communication<select name="communication" required><option value="">—</option>{% for value in "12345" %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</select></label>
+          <label>Responsiveness<select name="responsiveness" required><option value="">—</option>{% for value in "12345" %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</select></label>
+          <label>Reliability<select name="reliability" required><option value="">—</option>{% for value in "12345" %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</select></label>
+          <label>Payment experience<select name="payment_experience" required><option value="">—</option>{% for value in "12345" %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</select></label>
+          <label>Cooperation<select name="cooperation" required><option value="">—</option>{% for value in "12345" %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</select></label>
+          <button type="submit">Submit review</button>
+        </form>
+      {% endif %}
+    </section>
+    {% endif %}
   </div>
 </div>
 {% endblock innercontent %}
