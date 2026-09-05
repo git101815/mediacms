@@ -11,7 +11,7 @@
   const form = root.querySelector('[data-p2p-composer]');
   const input = root.querySelector('[data-p2p-message-input]');
   const sendButton = root.querySelector('[data-p2p-send]');
-  const connectionNode = root.querySelector('[data-p2p-connection-status]');
+  const statusNode = root.querySelector('[data-p2p-order-status]');
   const readonlyNode = root.querySelector('[data-p2p-readonly]');
   const csrfInput = form ? form.querySelector('input[name="csrfmiddlewaretoken"]') : null;
 
@@ -22,10 +22,25 @@
   let consecutiveErrors = 0;
   const renderedIds = new Set();
 
-  function setConnection(text, tone) {
-    if (!connectionNode) return;
-    connectionNode.textContent = text;
-    connectionNode.setAttribute('data-tone', tone || 'neutral');
+  function humanizeStatus(status) {
+    switch (status) {
+      case 'completed':
+        return 'Completed';
+      case 'canceled':
+        return 'Canceled';
+      case 'disputed':
+        return 'Disputed';
+      case 'open':
+      default:
+        return 'Open';
+    }
+  }
+
+  function setStatus(status) {
+    if (!statusNode || !status) return;
+    statusNode.textContent = humanizeStatus(status);
+    statusNode.setAttribute('data-status', status);
+    statusNode.className = 'p2p-exchange__status p2p-exchange__status--' + status;
   }
 
   function setWritable(canSend) {
@@ -120,11 +135,10 @@
         appendMessage(message, afterId === 0);
       });
       setWritable(Boolean(payload.can_send));
+      setStatus(payload.order_status);
       consecutiveErrors = 0;
-      setConnection('Live updates', 'ok');
     } catch (error) {
       consecutiveErrors += 1;
-      setConnection(consecutiveErrors > 2 ? 'Connection problem' : 'Reconnecting…', 'warning');
     } finally {
       polling = false;
       schedulePoll(document.hidden ? 6000 : 2000);
@@ -159,9 +173,7 @@
         input.value = '';
         input.style.height = '';
         appendMessage(payload.message, true);
-        setConnection('Live updates', 'ok');
-      } catch (error) {
-        setConnection(error.message || 'Unable to send', 'warning');
+        } catch (error) {
       } finally {
         if (!readonlyNode || readonlyNode.hidden) {
           input.disabled = false;
@@ -195,5 +207,6 @@
   });
 
   setWritable(root.getAttribute('data-can-send') === 'true');
+  setStatus(statusNode ? statusNode.getAttribute('data-status') : 'open');
   poll();
 })();

@@ -116,6 +116,33 @@ $p2p-danger: #ff9a9a;
 .p2p-exchange__maker-stats { margin-top: 14px; display: grid; gap: 7px; }
 .p2p-exchange__maker-stats span { display: flex; justify-content: space-between; color: $p2p-muted; font-size: 13px; }
 .p2p-exchange__maker-stats strong { color: $p2p-text; }
+.p2p-exchange__rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.p2p-exchange__rating small {
+  margin-left: 6px;
+  color: $p2p-muted;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.p2p-exchange__rating-star {
+  font-size: 15px;
+  line-height: 1;
+  color: #ffbb00;
+}
+
+.p2p-exchange__rating-star--empty {
+  opacity: .35;
+}
+
+.p2p-exchange__rating-empty {
+  color: $p2p-text;
+}
+
 
 .p2p-exchange__notice {
   padding: 13px 14px;
@@ -138,9 +165,7 @@ $p2p-danger: #ff9a9a;
 }
 .p2p-chat__header > div { display: grid; gap: 1px; }
 .p2p-chat__header span { color: $p2p-muted; font-size: 12px; }
-.p2p-chat__connection { margin-left: auto; }
-.p2p-chat__connection[data-tone='ok'] { color: $p2p-success; }
-.p2p-chat__connection[data-tone='warning'] { color: $p2p-warning; }
+.p2p-chat__header .p2p-exchange__status { margin-left: auto; }
 
 .p2p-chat__messages {
   flex: 1 1 auto;

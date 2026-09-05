@@ -19,9 +19,6 @@
         <span class="p2p-exchange__eyebrow">P2P exchange</span>
         <h1>Order #{{ p2p_order_reference }}</h1>
       </div>
-      <span class="p2p-exchange__status p2p-exchange__status--{{ p2p_order.status }}">
-        {{ p2p_order.get_status_display }}
-      </span>
     </header>
 
     <div class="p2p-exchange__layout">
@@ -30,7 +27,7 @@
           <div class="p2p-exchange__card-title">Trade</div>
           <dl class="p2p-exchange__facts">
             <div>
-              <dt>Platform value</dt>
+              <dt>Transaction value</dt>
               <dd>${{ p2p_platform_amount_display }}</dd>
             </div>
             <div>
@@ -58,7 +55,19 @@
           {% if p2p_role == 'buyer' %}
           <div class="p2p-exchange__maker-stats">
             <span><strong>{{ p2p_maker_profile.completed_orders }}</strong> completed</span>
-            <span><strong>{% if p2p_maker_profile.rating %}{{ p2p_maker_profile.rating }}{% else %}—{% endif %}</strong> rating</span>
+            <span>
+              <strong class="p2p-exchange__rating" aria-label="{% if p2p_rating_value %}Rated {{ p2p_rating_value }} out of 5{% else %}No rating yet{% endif %}">
+                {% if p2p_rating_stars %}
+                  {% for star in p2p_rating_stars %}
+                    <i class="material-icons p2p-exchange__rating-star p2p-exchange__rating-star--{{ star }}" aria-hidden="true">{% if star == 'full' %}star{% elif star == 'half' %}star_half{% else %}star_outline{% endif %}</i>
+                  {% endfor %}
+                  <small>{{ p2p_rating_value }}/5</small>
+                {% else %}
+                  <span class="p2p-exchange__rating-empty">—</span>
+                {% endif %}
+              </strong>
+              rating
+            </span>
             <span><strong>{% if p2p_maker_profile.avg_response_time_seconds %}{{ p2p_maker_profile.avg_response_time_seconds }}s{% else %}—{% endif %}</strong> avg response</span>
           </div>
           {% endif %}
@@ -76,7 +85,9 @@
             <strong>Conversation</strong>
             <span>with {{ p2p_counterparty }}</span>
           </div>
-          <span class="p2p-chat__connection" data-p2p-connection-status>Connecting…</span>
+          <span class="p2p-exchange__status p2p-exchange__status--{{ p2p_order.status }}" data-p2p-order-status data-status="{{ p2p_order.status }}">
+            {{ p2p_order.get_status_display }}
+          </span>
         </header>
 
         <div class="p2p-chat__messages" data-p2p-messages aria-live="polite">

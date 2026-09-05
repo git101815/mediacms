@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
@@ -24,6 +24,35 @@ def _format_platform_value(value: int) -> str:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text or "0"
+
+
+def _rounded_rating(value) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    rating = Decimal(str(value))
+    if rating < 0:
+        rating = Decimal("0")
+    elif rating > 5:
+        rating = Decimal("5")
+    return (rating * 2).quantize(Decimal("1"), rounding=ROUND_HALF_UP) / 2
+
+
+def _rating_stars(value) -> list[str]:
+    rounded = _rounded_rating(value)
+    if rounded is None:
+        return []
+
+    stars: list[str] = []
+    remaining = rounded
+    for _ in range(5):
+        if remaining >= 1:
+            stars.append("full")
+        elif remaining >= Decimal("0.5"):
+            stars.append("half")
+        else:
+            stars.append("empty")
+        remaining -= 1
+    return stars
 
 
 def _order_for_user(*, public_id, user) -> P2POrder:
@@ -69,6 +98,8 @@ def p2p_exchange(request, public_id):
         "p2p_payment_method_display": order.get_payment_method_display(),
         "p2p_can_send": order.chat_writable,
         "p2p_maker_profile": order.maker,
+        "p2p_rating_value": _rounded_rating(order.maker.rating),
+        "p2p_rating_stars": _rating_stars(order.maker.rating),
     }
     return render(request, "cms/p2p_exchange.html", context)
 
