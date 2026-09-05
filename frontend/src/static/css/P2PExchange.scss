@@ -257,13 +257,686 @@ $p2p-danger: #ff9a9a;
 .p2p-chat__composer textarea:disabled { opacity: .48; cursor: not-allowed; }
 .p2p-chat__readonly { padding: 10px 14px; border-top: 1px solid $p2p-border; color: $p2p-muted; font-size: 12px; text-align: center; }
 
-@media (max-width: 760px) {
-  .p2p-exchange { padding: 0; }
-  .p2p-exchange__shell { min-height: 100vh; border-radius: 0; }
-  .p2p-exchange__layout { grid-template-columns: 1fr; padding: 10px; }
-  .p2p-exchange__summary { grid-template-columns: 1fr; }
-  .p2p-exchange__notice { display: none; }
-  .p2p-chat { min-height: 66vh; }
-  .p2p-chat__messages { max-height: none; }
-  .p2p-chat__bubble { max-width: 88%; }
+/* p2p-responsive-v2 */
+/*
+ * P2P exchange responsive layout
+ *
+ * The page has two independent scroll concerns: the document (summary + chat)
+ * and the conversation itself.  Keep the chat as a bounded flex column so the
+ * composer remains reachable while only the message history scrolls.
+ */
+
+.p2p-exchange,
+.p2p-exchange *,
+.p2p-exchange *::before,
+.p2p-exchange *::after {
+  box-sizing: border-box;
 }
+
+.p2p-exchange {
+  width: 100%;
+  min-width: 0;
+  min-height: 100dvh;
+  padding:
+    max(8px, env(safe-area-inset-top))
+    max(8px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom))
+    max(8px, env(safe-area-inset-left));
+}
+
+@supports not (height: 100dvh) {
+  .p2p-exchange {
+    min-height: 100vh;
+  }
+}
+
+.p2p-exchange__shell {
+  width: 100%;
+  max-width: 1440px;
+  min-width: 0;
+}
+
+.p2p-exchange__header,
+.p2p-exchange__layout,
+.p2p-exchange__summary,
+.p2p-exchange__card,
+.p2p-chat,
+.p2p-chat__header,
+.p2p-chat__messages,
+.p2p-chat__composer {
+  min-width: 0;
+}
+
+.p2p-exchange__header-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.p2p-exchange__header h1,
+.p2p-exchange__counterparty strong,
+.p2p-exchange__facts dd,
+.p2p-chat__header > div,
+.p2p-chat__header strong,
+.p2p-chat__header span {
+  overflow-wrap: anywhere;
+}
+
+.p2p-exchange__layout {
+  grid-template-columns: minmax(270px, 330px) minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.p2p-exchange__summary {
+  align-self: start;
+}
+
+.p2p-exchange__facts > div {
+  min-width: 0;
+  align-items: baseline;
+}
+
+.p2p-exchange__facts dt {
+  min-width: 0;
+}
+
+.p2p-exchange__facts dd {
+  max-width: 58%;
+}
+
+.p2p-exchange__counterparty > div:last-child {
+  flex: 1 1 auto;
+}
+
+.p2p-exchange__maker-stats span {
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.p2p-exchange__rating {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.p2p-chat {
+  height: clamp(560px, calc(100dvh - 112px), 900px);
+  min-height: 0;
+  max-height: none;
+}
+
+@supports not (height: 100dvh) {
+  .p2p-chat {
+    height: clamp(560px, calc(100vh - 112px), 900px);
+  }
+}
+
+.p2p-chat__header {
+  flex: 0 0 auto;
+}
+
+.p2p-chat__header > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.p2p-chat__header .p2p-exchange__status {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.p2p-chat__messages {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.p2p-chat__composer {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+}
+
+.p2p-chat__composer textarea {
+  min-width: 0;
+}
+
+.p2p-chat__empty[hidden],
+.p2p-chat__readonly[hidden] {
+  display: none !important;
+}
+
+/* Wide desktop: use the extra width instead of leaving a narrow summary. */
+@media (min-width: 1440px) {
+  .p2p-exchange__layout {
+    grid-template-columns: minmax(300px, 350px) minmax(0, 1fr);
+    gap: 18px;
+    padding: 18px;
+  }
+
+  .p2p-exchange__card {
+    padding: 18px;
+  }
+
+  .p2p-chat__messages {
+    padding: 22px;
+  }
+}
+
+/* Laptop / small desktop. */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .p2p-exchange__shell {
+    border-radius: 16px;
+  }
+
+  .p2p-exchange__layout {
+    grid-template-columns: minmax(250px, 285px) minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .p2p-exchange__summary {
+    gap: 10px;
+  }
+
+  .p2p-exchange__card {
+    padding: 14px;
+  }
+
+  .p2p-exchange__notice {
+    padding: 12px;
+  }
+
+  .p2p-chat {
+    height: clamp(540px, calc(100dvh - 102px), 820px);
+  }
+}
+
+/* Tablet portrait / narrow laptop: summary becomes a two-card row above chat. */
+@media (min-width: 680px) and (max-width: 1023px) and (min-height: 621px) {
+  .p2p-exchange {
+    padding: 8px;
+  }
+
+  .p2p-exchange__shell {
+    border-radius: 16px;
+  }
+
+  .p2p-exchange__header {
+    min-height: 60px;
+    padding: 0 14px;
+  }
+
+  .p2p-exchange__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .p2p-exchange__summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .p2p-exchange__notice {
+    grid-column: 1 / -1;
+  }
+
+  .p2p-exchange__card {
+    height: 100%;
+  }
+
+  .p2p-chat {
+    height: clamp(520px, 66dvh, 760px);
+  }
+
+  .p2p-chat__messages {
+    padding: 16px;
+  }
+}
+
+/* Large phones / small tablets. */
+@media (min-width: 520px) and (max-width: 679px) and (min-height: 621px) {
+  .p2p-exchange {
+    padding: 6px;
+  }
+
+  .p2p-exchange__shell {
+    border-radius: 14px;
+  }
+
+  .p2p-exchange__header {
+    min-height: 58px;
+    padding: 0 12px;
+  }
+
+  .p2p-exchange__header h1 {
+    font-size: 20px;
+  }
+
+  .p2p-exchange__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .p2p-exchange__summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .p2p-exchange__notice {
+    grid-column: 1 / -1;
+  }
+
+  .p2p-exchange__card {
+    padding: 13px;
+  }
+
+  .p2p-exchange__facts {
+    gap: 8px;
+  }
+
+  .p2p-chat {
+    height: clamp(500px, 68dvh, 720px);
+    border-radius: 14px;
+  }
+
+  .p2p-chat__bubble {
+    max-width: 84%;
+  }
+}
+
+/* Phones: full-width shell, stacked summary, touch-first controls. */
+@media (max-width: 519px) and (min-height: 521px) {
+  .p2p-exchange {
+    padding: 0;
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    background: $p2p-bg-surface;
+  }
+
+  .p2p-exchange__shell {
+    min-height: 100dvh;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  @supports not (height: 100dvh) {
+    .p2p-exchange__shell {
+      min-height: 100vh;
+    }
+  }
+
+  .p2p-exchange__header {
+    min-height: 56px;
+    padding: 0 10px;
+    gap: 8px;
+  }
+
+  .p2p-exchange__back {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+  }
+
+  .p2p-exchange__eyebrow {
+    font-size: 11px;
+  }
+
+  .p2p-exchange__header h1 {
+    font-size: 19px;
+  }
+
+  .p2p-exchange__layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+    padding: 9px;
+    padding-bottom: max(9px, env(safe-area-inset-bottom));
+  }
+
+  .p2p-exchange__summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+
+  .p2p-exchange__card,
+  .p2p-exchange__notice,
+  .p2p-chat {
+    border-radius: 12px;
+  }
+
+  .p2p-exchange__card {
+    padding: 13px;
+  }
+
+  .p2p-exchange__card-title {
+    margin-bottom: 10px;
+  }
+
+  .p2p-exchange__facts {
+    gap: 8px;
+  }
+
+  .p2p-exchange__facts > div {
+    gap: 10px;
+  }
+
+  .p2p-exchange__facts dd {
+    max-width: 62%;
+  }
+
+  .p2p-exchange__counterparty {
+    gap: 10px;
+  }
+
+  .p2p-exchange__avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  .p2p-exchange__maker-stats {
+    margin-top: 12px;
+    gap: 6px;
+  }
+
+  .p2p-exchange__rating-star {
+    font-size: 14px;
+  }
+
+  .p2p-exchange__rating small {
+    margin-left: 4px;
+  }
+
+  .p2p-exchange__notice {
+    padding: 11px 12px;
+  }
+
+  .p2p-chat {
+    height: clamp(460px, 72dvh, 680px);
+    min-height: 0;
+  }
+
+  .p2p-chat__header {
+    min-height: 52px;
+    padding: 0 12px;
+  }
+
+  .p2p-chat__header > div {
+    gap: 0;
+  }
+
+  .p2p-exchange__status {
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+
+  .p2p-chat__messages {
+    padding: 12px 10px;
+    gap: 8px;
+    scroll-padding-bottom: 72px;
+  }
+
+  .p2p-chat__bubble {
+    max-width: 90%;
+    padding: 8px 10px 9px;
+    border-radius: 14px;
+  }
+
+  .p2p-chat__message--system > span {
+    max-width: 94%;
+    border-radius: 12px;
+  }
+
+  .p2p-chat__composer {
+    position: sticky;
+    bottom: 0;
+    padding: 9px;
+    padding-bottom: max(9px, env(safe-area-inset-bottom));
+    gap: 8px;
+    background: #202125;
+  }
+
+  .p2p-chat__composer textarea {
+    min-height: 44px;
+    padding: 11px 12px;
+    border-radius: 13px;
+    /* Prevent Safari from zooming the page when the field receives focus. */
+    font-size: 16px;
+  }
+
+  .p2p-chat__composer button {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+  }
+
+  .p2p-chat__readonly {
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Very narrow phones. */
+@media (max-width: 379px) and (min-height: 521px) {
+  .p2p-exchange__header {
+    padding: 0 7px;
+  }
+
+  .p2p-exchange__back {
+    width: 40px;
+    height: 40px;
+    flex-basis: 40px;
+  }
+
+  .p2p-exchange__header h1 {
+    font-size: 17px;
+  }
+
+  .p2p-exchange__layout {
+    padding: 7px;
+    gap: 7px;
+  }
+
+  .p2p-exchange__summary {
+    gap: 7px;
+  }
+
+  .p2p-exchange__card {
+    padding: 11px;
+  }
+
+  .p2p-exchange__facts,
+  .p2p-exchange__maker-stats,
+  .p2p-exchange__notice {
+    font-size: 12px;
+  }
+
+  .p2p-exchange__facts dd {
+    max-width: 60%;
+  }
+
+  .p2p-exchange__rating-star {
+    font-size: 13px;
+  }
+
+  .p2p-exchange__rating small {
+    display: none;
+  }
+
+  .p2p-chat {
+    height: clamp(430px, 70dvh, 620px);
+  }
+
+  .p2p-chat__header {
+    min-height: 48px;
+    padding: 0 10px;
+  }
+
+  .p2p-chat__messages {
+    padding: 9px 7px;
+    gap: 7px;
+  }
+
+  .p2p-chat__bubble {
+    max-width: 94%;
+    padding: 8px 9px;
+  }
+
+  .p2p-chat__meta {
+    gap: 7px;
+    font-size: 10px;
+  }
+
+  .p2p-chat__body {
+    font-size: 13px;
+  }
+
+  .p2p-chat__composer {
+    padding-left: 7px;
+    padding-right: 7px;
+  }
+}
+
+/* Short landscape screens (phones and small tablets): return to a compact
+ * two-column layout so the chat is not pushed several screens below summary.
+ */
+@media (orientation: landscape) and (max-height: 620px) and (min-width: 620px) {
+  .p2p-exchange {
+    min-height: 100dvh;
+    padding: 4px;
+  }
+
+  .p2p-exchange__shell {
+    border-radius: 12px;
+  }
+
+  .p2p-exchange__header {
+    min-height: 50px;
+    padding: 0 10px;
+  }
+
+  .p2p-exchange__back {
+    width: 40px;
+    height: 40px;
+  }
+
+  .p2p-exchange__eyebrow {
+    font-size: 10px;
+  }
+
+  .p2p-exchange__header h1 {
+    font-size: 18px;
+  }
+
+  .p2p-exchange__layout {
+    grid-template-columns: minmax(205px, 235px) minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .p2p-exchange__summary {
+    max-height: calc(100dvh - 66px);
+    gap: 7px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .p2p-exchange__card {
+    padding: 10px;
+    border-radius: 11px;
+  }
+
+  .p2p-exchange__card-title {
+    margin-bottom: 7px;
+    font-size: 10px;
+  }
+
+  .p2p-exchange__facts {
+    gap: 5px;
+    font-size: 12px;
+  }
+
+  .p2p-exchange__counterparty {
+    gap: 8px;
+  }
+
+  .p2p-exchange__avatar {
+    width: 34px;
+    height: 34px;
+  }
+
+  .p2p-exchange__maker-stats {
+    margin-top: 8px;
+    gap: 4px;
+  }
+
+  .p2p-exchange__maker-stats span,
+  .p2p-exchange__notice {
+    font-size: 11px;
+  }
+
+  .p2p-exchange__rating-star {
+    font-size: 12px;
+  }
+
+  .p2p-exchange__rating small {
+    display: none;
+  }
+
+  .p2p-exchange__notice {
+    padding: 9px;
+  }
+
+  .p2p-chat {
+    height: calc(100dvh - 66px);
+    min-height: 330px;
+    border-radius: 11px;
+  }
+
+  .p2p-chat__header {
+    min-height: 46px;
+    padding: 0 11px;
+  }
+
+  .p2p-chat__messages {
+    padding: 9px 10px;
+    gap: 6px;
+  }
+
+  .p2p-chat__bubble {
+    max-width: 82%;
+    padding: 7px 9px;
+  }
+
+  .p2p-chat__composer {
+    padding: 7px 8px;
+    gap: 7px;
+  }
+
+  .p2p-chat__composer textarea {
+    min-height: 40px;
+    padding: 9px 11px;
+    font-size: 16px;
+  }
+
+  .p2p-chat__composer button {
+    width: 40px;
+    height: 40px;
+    flex-basis: 40px;
+  }
+}
+
+/* Touch devices: guarantee usable hit targets independently of viewport width. */
+@media (pointer: coarse) {
+  .p2p-exchange__back,
+  .p2p-chat__composer button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .p2p-chat__composer textarea {
+    font-size: 16px;
+  }
+}
+
