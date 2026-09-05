@@ -10,9 +10,9 @@ from ledger.models import P2PMakerProfile, P2PMessage, P2POrder
 class P2PExchangeTests(TestCase):
     def setUp(self):
         users = get_user_model()
-        self.buyer = users.objects.create_user(username="p2p-buyer", password="x")
-        self.maker_user = users.objects.create_user(username="p2p-maker", password="x")
-        self.outsider = users.objects.create_user(username="p2p-outsider", password="x")
+        self.buyer = users.objects.create_user(username="p2p_buyer", password="x")
+        self.maker_user = users.objects.create_user(username="p2p_maker", password="x")
+        self.outsider = users.objects.create_user(username="p2p_outsider", password="x")
         self.maker = P2PMakerProfile.objects.create(
             user=self.maker_user,
             status=P2PMakerProfile.STATUS_ACTIVE,
@@ -41,12 +41,12 @@ class P2PExchangeTests(TestCase):
         response = self.client.get(self._page_url())
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Order #")
-        self.assertContains(response, "p2p-maker")
+        self.assertContains(response, "p2p_maker")
 
         self.client.force_login(self.maker_user)
         response = self.client.get(self._page_url())
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "p2p-buyer")
+        self.assertContains(response, "p2p_buyer")
 
     def test_outsider_cannot_discover_exchange(self):
         self.client.force_login(self.outsider)
@@ -70,7 +70,7 @@ class P2PExchangeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(len(payload["messages"]), 1)
-        self.assertEqual(payload["messages"][0]["sender_name"], "p2p-maker")
+        self.assertEqual(payload["messages"][0]["sender_name"], "p2p_maker")
         self.assertFalse(payload["messages"][0]["is_mine"])
 
     def test_poll_after_id_only_returns_newer_messages(self):

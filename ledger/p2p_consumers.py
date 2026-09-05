@@ -23,7 +23,7 @@ def _serialize_message(message: P2PMessage, *, user_id: int) -> dict:
         "body": message.body,
         "created_at": message.created_at.isoformat(),
         "sender_id": getattr(sender, "id", None),
-        "sender_name": str(sender) if sender is not None else "System",
+        "sender_name": sender.username if sender is not None else "System",
         "is_mine": bool(sender is not None and sender.id == user_id),
     }
 
@@ -152,7 +152,7 @@ class P2PExchangeConsumer(AsyncJsonWebsocketConsumer):
             "body": body,
             "created_at": result["created_at"],
             "sender_id": user.id,
-            "sender_name": str(user),
+            "sender_name": user.username,
         }
         client_id = str(content.get("client_id") or "")[:64]
 

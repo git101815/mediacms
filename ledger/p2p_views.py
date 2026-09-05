@@ -76,7 +76,7 @@ def _serialize_message(message: P2PMessage, *, user_id: int) -> dict:
         "kind": message.kind,
         "body": message.body,
         "created_at": message.created_at.isoformat(),
-        "sender_name": str(sender) if sender is not None else "System",
+        "sender_name": sender.username if sender is not None else "System",
         "is_mine": bool(sender is not None and sender.id == user_id),
     }
 

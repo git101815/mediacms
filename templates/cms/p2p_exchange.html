@@ -47,7 +47,7 @@
               {{ p2p_counterparty.username|default:"?"|slice:":1"|upper }}
             </div>
             <div>
-              <strong>{{ p2p_counterparty }}</strong>
+              <strong>{{ p2p_counterparty.username }}</strong>
               <span>{% if p2p_role == 'buyer' %}P2P maker{% else %}Buyer{% endif %}</span>
             </div>
           </div>
@@ -82,7 +82,7 @@
         <header class="p2p-chat__header">
           <div>
             <strong>Conversation</strong>
-            <span>with {{ p2p_counterparty }}</span>
+            <span>with {{ p2p_counterparty.username }}</span>
           </div>
           <span class="p2p-exchange__status p2p-exchange__status--{{ p2p_order.status }}" data-p2p-order-status data-status="{{ p2p_order.status }}">
             {{ p2p_order.get_status_display }}

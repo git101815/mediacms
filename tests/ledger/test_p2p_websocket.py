@@ -90,6 +90,7 @@ class P2PWebSocketTests(TransactionTestCase):
         self.assertTrue(buyer_event["message"]["is_mine"])
         self.assertFalse(maker_event["message"]["is_mine"])
         self.assertEqual(maker_event["message"]["body"], "Hello maker")
+        self.assertEqual(maker_event["message"]["sender_name"], "p2p_ws_buyer")
 
         count = await sync_to_async(P2PMessage.objects.filter(order=self.order).count)()
         self.assertEqual(count, 2)
