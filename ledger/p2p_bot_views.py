@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hmac
 import json
-import os
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -15,18 +14,11 @@ from .p2p_services import respond_to_p2p_agent_offer
 
 
 def _configured_n8n_action_secret() -> str:
-    configured = str(getattr(settings, "P2P_N8N_ACTION_SECRET", "") or "").strip()
-    if configured:
-        return configured
-    return str(os.environ.get("NOTIFICATION_WEBHOOK_SECRET", "") or "").strip()
+    return str(getattr(settings, "P2P_N8N_ACTION_SECRET", "") or "").strip()
 
 
 def _supplied_n8n_action_secret(request) -> str:
-    return str(
-        request.headers.get("X-P2P-Action-Secret")
-        or request.headers.get("X-Notification-Secret")
-        or ""
-    ).strip()
+    return str(request.headers.get("X-P2P-Action-Secret") or "").strip()
 
 
 @csrf_exempt

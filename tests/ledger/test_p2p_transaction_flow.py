@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
 from ledger.models import (
@@ -14,10 +15,12 @@ from ledger.models import (
     TokenWallet,
 )
 from ledger.p2p_services import (
+    P2PNoAgentAvailable,
     create_p2p_order_for_checkout,
     find_new_p2p_agent,
     mark_p2p_fiat_received,
     mark_p2p_fiat_sent,
+    preview_p2p_checkout,
     respond_to_p2p_agent_offer,
 )
 
@@ -126,6 +129,42 @@ class P2PTransactionFlowTests(TestCase):
         settlement_wallet.refresh_from_db()
         self.assertEqual(customer_wallet.balance, order.token_amount)
         self.assertEqual(settlement_wallet.balance, 0)
+
+
+    def test_price_change_between_preview_and_submit_requires_reconfirmation(self):
+        preview = preview_p2p_checkout(
+            buyer=self.customer,
+            token_pack=self.pack,
+            payment_method=P2POrder.PAYMENT_METHOD_CARD,
+        )
+        self.assertEqual(preview["transaction_amount"], 52_000_000)
+
+        self.agent_a.accepting_orders = False
+        self.agent_a.save(update_fields=["accepting_orders", "updated_at"])
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "P2P transaction value changed. Please review the updated price.",
+        ):
+            create_p2p_order_for_checkout(
+                buyer=self.customer,
+                token_pack=self.pack,
+                payment_method=P2POrder.PAYMENT_METHOD_CARD,
+                expected_transaction_amount=preview["transaction_amount"],
+            )
+        self.assertEqual(P2POrder.objects.count(), 0)
+
+    def test_agents_without_notification_identity_are_not_selectable(self):
+        P2PMakerProfile.objects.update(
+            telegram_user_id="",
+            discord_user_id="",
+        )
+        with self.assertRaises(P2PNoAgentAvailable):
+            preview_p2p_checkout(
+                buyer=self.customer,
+                token_pack=self.pack,
+                payment_method=P2POrder.PAYMENT_METHOD_CARD,
+            )
 
     def test_offered_agent_cannot_access_chat_until_acceptance(self):
         order = create_p2p_order_for_checkout(

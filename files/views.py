@@ -1529,10 +1529,25 @@ def wallet_deposit_request(request):
             selected_option.get("payment_method_type") == "provider"
             and selected_option.get("provider_key") == P2P_PROVIDER_KEY
         ):
+            expected_amount_raw = (
+                request.POST.get("p2p_expected_transaction_amount") or ""
+            ).strip()
+            try:
+                expected_transaction_amount = int(expected_amount_raw)
+            except (TypeError, ValueError) as exc:
+                raise DjangoValidationError(
+                    "Please review the current P2P transaction value and try again."
+                ) from exc
+            if expected_transaction_amount <= 0:
+                raise DjangoValidationError(
+                    "Please review the current P2P transaction value and try again."
+                )
+
             order = create_p2p_order_for_checkout(
                 buyer=request.user,
                 token_pack=token_pack,
                 payment_method=selected_option.get("p2p_payment_method") or "",
+                expected_transaction_amount=expected_transaction_amount,
             )
             return redirect("p2p_exchange", public_id=order.public_id)
 

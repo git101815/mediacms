@@ -512,6 +512,18 @@
     return form ? (form.getAttribute('data-p2p-preview-url') || '') : '';
   }
 
+  function setP2PExpectedTransactionAmount(value) {
+    const form = getBuyForm();
+    const input = form
+      ? form.querySelector('[data-wallet-p2p-expected-transaction-amount]')
+      : null;
+    if (!input) {
+      return;
+    }
+    const amount = Number(value || 0);
+    input.value = Number.isFinite(amount) && amount > 0 ? String(Math.trunc(amount)) : '';
+  }
+
   function requestP2PPrice(option) {
     if (!option || option.paymentPriceMode !== 'p2p_dynamic') {
       return Promise.resolve({ available: true, display: '' });
@@ -1552,6 +1564,7 @@
                 renderStep3Choices();
                 return;
               }
+              setP2PExpectedTransactionAmount(result.transactionAmount);
               syncBuyFormTarget();
               form.submit();
             });
@@ -1624,7 +1637,28 @@
 
   const buyForm = getBuyForm();
   if (buyForm) {
-    buyForm.addEventListener('submit', function () {
+    buyForm.addEventListener('submit', function (event) {
+      const route = getRouteByKey(buyState.routeKey);
+      if (route && route.paymentPriceMode === 'p2p_dynamic') {
+        const cacheKey = getP2PPriceCacheKey(route);
+        const cached = p2pPriceCache.get(cacheKey);
+        if (!cached || !cached.available || !cached.transactionAmount) {
+          event.preventDefault();
+          requestP2PPrice(route).then(function (result) {
+            if (!result.available || !result.transactionAmount) {
+              renderStep4Choices();
+              return;
+            }
+            setP2PExpectedTransactionAmount(result.transactionAmount);
+            buyForm.requestSubmit();
+          });
+          return;
+        }
+        setP2PExpectedTransactionAmount(cached.transactionAmount);
+      } else {
+        setP2PExpectedTransactionAmount(0);
+      }
+
       syncBuyFormTarget();
       if (buyState.paymentOpenNewTab) {
         window.setTimeout(function () {

@@ -50,6 +50,10 @@ class P2PNoAgentAvailable(ValidationError):
     pass
 
 
+class P2PPriceChanged(ValidationError):
+    pass
+
+
 def _agent_response_timeout_seconds() -> int:
     return max(30, int(getattr(settings, "P2P_AGENT_RESPONSE_TIMEOUT_SECONDS", 300)))
 
@@ -102,6 +106,9 @@ def get_p2p_checkout_options() -> list[dict]:
     base_qs = P2PMakerProfile.objects.filter(
         status=P2PMakerProfile.STATUS_ACTIVE,
         accepting_orders=True,
+    ).exclude(
+        telegram_user_id="",
+        discord_user_id="",
     )
     labels = {
         P2POrder.PAYMENT_METHOD_CARD: "Card",
@@ -157,6 +164,7 @@ def _maker_candidates(*, buyer, payment_method: str, base_amount: int, excluded_
         .filter(Q(max_order_amount__isnull=True) | Q(max_order_amount__gte=int(base_amount)))
         .filter(_method_filter(payment_method))
         .exclude(user=buyer)
+        .exclude(telegram_user_id="", discord_user_id="")
         .exclude(pk__in=tuple(excluded_ids))
         .annotate(
             active_order_count=Count(
@@ -286,12 +294,11 @@ def _queue_assignment(assignment: P2PAgentAssignment) -> None:
 
     def _enqueue():
         try:
-            from .p2p_tasks import expire_p2p_agent_offer
-            from .tasks import notify_admin_event
+            from .p2p_tasks import expire_p2p_agent_offer, notify_p2p_agent_offer
 
-            # MediaCMS emits a generic event to n8n. n8n owns the Telegram /
+            # MediaCMS only emits the P2P offer event. n8n owns the Telegram /
             # Discord credentials and is responsible for the actual notification.
-            notify_admin_event.delay("p2p.agent_offer", payload, event_id)
+            notify_p2p_agent_offer.delay(payload, event_id)
             expire_p2p_agent_offer.apply_async(args=[assignment_id], countdown=timeout)
         except Exception:
             # The P2P order is already committed. A broker/n8n outage must not
@@ -321,7 +328,13 @@ def _queue_trade_timeout(order: P2POrder) -> None:
 
 
 @transaction.atomic
-def create_p2p_order_for_checkout(*, buyer, token_pack: TokenPack, payment_method: str) -> P2POrder:
+def create_p2p_order_for_checkout(
+    *,
+    buyer,
+    token_pack: TokenPack,
+    payment_method: str,
+    expected_transaction_amount: int | None = None,
+) -> P2POrder:
     method = str(payment_method or "").strip().lower()
     if method not in P2P_CHECKOUT_METHODS:
         raise ValidationError("Unsupported P2P payment method")
@@ -339,6 +352,18 @@ def create_p2p_order_for_checkout(*, buyer, token_pack: TokenPack, payment_metho
         base_amount=base_amount,
         maker=maker,
     )
+    if expected_transaction_amount is not None:
+        try:
+            expected_amount = int(expected_transaction_amount)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Invalid expected P2P transaction value") from exc
+        if expected_amount <= 0:
+            raise ValidationError("Invalid expected P2P transaction value")
+        if expected_amount != int(transaction_amount):
+            raise P2PPriceChanged(
+                "P2P transaction value changed. Please review the updated price."
+            )
+
     order = P2POrder.objects.create(
         buyer=buyer,
         maker=maker,
