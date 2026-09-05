@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count, F, Q
+from django.urls import reverse
 from django.utils import timezone
 
 from .models import (
@@ -146,12 +147,8 @@ def _active_order_statuses() -> tuple[str, ...]:
     )
 
 
-def _select_maker_locked(*, buyer, payment_method: str, base_amount: int, order: P2POrder | None = None):
-    excluded_ids = set()
-    if order is not None:
-        excluded_ids = set(order.assignments.values_list("maker_id", flat=True))
-
-    candidates = (
+def _maker_candidates(*, buyer, payment_method: str, base_amount: int, excluded_ids=()):
+    return (
         P2PMakerProfile.objects.filter(
             status=P2PMakerProfile.STATUS_ACTIVE,
             accepting_orders=True,
@@ -160,7 +157,7 @@ def _select_maker_locked(*, buyer, payment_method: str, base_amount: int, order:
         .filter(Q(max_order_amount__isnull=True) | Q(max_order_amount__gte=int(base_amount)))
         .filter(_method_filter(payment_method))
         .exclude(user=buyer)
-        .exclude(pk__in=excluded_ids)
+        .exclude(pk__in=tuple(excluded_ids))
         .annotate(
             active_order_count=Count(
                 "orders",
@@ -172,6 +169,18 @@ def _select_maker_locked(*, buyer, payment_method: str, base_amount: int, order:
         .order_by("active_order_count", F("last_assigned_at").asc(nulls_first=True), "id")
     )
 
+
+def _select_maker_locked(*, buyer, payment_method: str, base_amount: int, order: P2POrder | None = None):
+    excluded_ids = set()
+    if order is not None:
+        excluded_ids = set(order.assignments.values_list("maker_id", flat=True))
+
+    candidates = _maker_candidates(
+        buyer=buyer,
+        payment_method=payment_method,
+        base_amount=base_amount,
+        excluded_ids=excluded_ids,
+    )
     for maker_id in list(candidates.values_list("id", flat=True)):
         maker = P2PMakerProfile.objects.select_for_update().get(pk=maker_id)
         current_load = P2POrder.objects.filter(
@@ -181,6 +190,36 @@ def _select_maker_locked(*, buyer, payment_method: str, base_amount: int, order:
         if current_load < int(maker.max_concurrent_orders):
             return maker
     return None
+
+
+def preview_p2p_checkout(*, buyer, token_pack: TokenPack, payment_method: str) -> dict:
+    """Return the price for the first agent the pool would currently ask.
+
+    This is a read-only preview. It creates neither a P2POrder nor an assignment.
+    """
+    method = str(payment_method or "").strip().lower()
+    if method not in P2P_CHECKOUT_METHODS:
+        raise ValidationError("Unsupported P2P payment method")
+
+    base_amount = _convert_platform_token_units_to_canonical_stable_units(int(token_pack.token_amount))
+    maker = _maker_candidates(
+        buyer=buyer,
+        payment_method=method,
+        base_amount=base_amount,
+    ).first()
+    if maker is None:
+        raise P2PNoAgentAvailable(P2P_NO_AGENT_MESSAGE)
+
+    commission_percent, commission_amount, transaction_amount = _price_for_maker(
+        base_amount=base_amount,
+        maker=maker,
+    )
+    return {
+        "base_amount": int(base_amount),
+        "commission_percent": commission_percent,
+        "commission_amount": int(commission_amount),
+        "transaction_amount": int(transaction_amount),
+    }
 
 
 def _price_for_maker(*, base_amount: int, maker: P2PMakerProfile) -> tuple[Decimal, int, int]:
@@ -209,20 +248,55 @@ def _make_assignment(*, order: P2POrder, maker: P2PMakerProfile) -> P2PAgentAssi
     return assignment
 
 
+def _assignment_notification_payload(assignment: P2PAgentAssignment) -> dict:
+    order = assignment.order
+    maker = assignment.maker
+    return {
+        "assignment_id": int(assignment.id),
+        "action_token": assignment.action_token.hex,
+        "expires_at": assignment.expires_at.isoformat(),
+        "response_timeout_seconds": _agent_response_timeout_seconds(),
+        "response_path": reverse("p2p_n8n_agent_response"),
+        "order_path": reverse("p2p_exchange", kwargs={"public_id": order.public_id}),
+        "order": {
+            "id": int(order.id),
+            "public_id": str(order.public_id),
+            "token_amount": int(order.token_amount),
+            "base_amount": int(order.base_amount),
+            "transaction_amount": int(order.platform_amount),
+            "commission_percent": str(order.commission_percent_snapshot),
+            "commission_amount": int(order.commission_amount),
+            "payment_method": order.payment_method,
+            "payment_method_label": order.get_payment_method_display(),
+        },
+        "agent": {
+            "user_id": int(maker.user_id),
+            "username": maker.user.username,
+            "telegram_user_id": str(maker.telegram_user_id or ""),
+            "discord_user_id": str(maker.discord_user_id or ""),
+        },
+    }
+
+
 def _queue_assignment(assignment: P2PAgentAssignment) -> None:
     assignment_id = int(assignment.id)
     timeout = max(1, int((assignment.expires_at - timezone.now()).total_seconds()))
+    payload = _assignment_notification_payload(assignment)
+    event_id = f"p2p-agent-offer:{assignment.id}:{assignment.action_token.hex}"
 
     def _enqueue():
         try:
-            from .p2p_tasks import expire_p2p_agent_offer, notify_p2p_agent_offer
+            from .p2p_tasks import expire_p2p_agent_offer
+            from .tasks import notify_admin_event
 
-            notify_p2p_agent_offer.delay(assignment_id)
+            # MediaCMS emits a generic event to n8n. n8n owns the Telegram /
+            # Discord credentials and is responsible for the actual notification.
+            notify_admin_event.delay("p2p.agent_offer", payload, event_id)
             expire_p2p_agent_offer.apply_async(args=[assignment_id], countdown=timeout)
         except Exception:
-            # The P2P order is already committed. A broker outage must not make
-            # the checkout look rolled back or trigger a duplicate order retry.
-            logger.exception("Failed to enqueue P2P assignment %s notification/expiry", assignment_id)
+            # The P2P order is already committed. A broker/n8n outage must not
+            # make checkout look rolled back or trigger a duplicate order retry.
+            logger.exception("Failed to enqueue P2P assignment %s event/expiry", assignment_id)
 
     transaction.on_commit(_enqueue)
 
@@ -284,11 +358,7 @@ def create_p2p_order_for_checkout(*, buyer, token_pack: TokenPack, payment_metho
 
 @transaction.atomic
 def find_new_p2p_agent(*, order_id: int, buyer_id: int) -> P2POrder:
-    order = (
-        P2POrder.objects.select_for_update()
-        .select_related("buyer", "token_pack")
-        .get(pk=order_id)
-    )
+    order = P2POrder.objects.select_for_update().get(pk=order_id)
     if order.buyer_id != buyer_id:
         raise PermissionDenied("Only the customer can find another P2P agent")
     if order.status != P2POrder.STATUS_WAITING_NEW_AGENT:
@@ -572,11 +642,7 @@ def _record_normal_completion(*, order: P2POrder, completed_at) -> None:
 
 @transaction.atomic
 def mark_p2p_fiat_received(*, order_id: int, user_id: int) -> P2POrder:
-    order = (
-        P2POrder.objects.select_for_update()
-        .select_related("buyer", "maker__user", "settlement_txn")
-        .get(pk=order_id)
-    )
+    order = P2POrder.objects.select_for_update().get(pk=order_id)
     if order.maker_id is None or order.maker.user_id != user_id:
         raise PermissionDenied("Only the assigned P2P agent can confirm receipt")
     if order.status != P2POrder.STATUS_FIAT_SENT:
@@ -603,7 +669,7 @@ def mark_p2p_fiat_received(*, order_id: int, user_id: int) -> P2POrder:
 
 @transaction.atomic
 def enter_p2p_dispute(*, order_id: int, reason: str = "") -> P2POrder:
-    order = P2POrder.objects.select_for_update().select_related("maker").get(pk=order_id)
+    order = P2POrder.objects.select_for_update().get(pk=order_id)
     if order.status == P2POrder.STATUS_DISPUTED:
         return order
     if order.status not in {P2POrder.STATUS_CHAT_OPEN, P2POrder.STATUS_FIAT_SENT}:
@@ -657,11 +723,7 @@ def expire_p2p_trade_if_due(*, order_id: int) -> tuple[str, P2POrder | None, int
 def resolve_p2p_dispute(*, order_id: int, winner: str, resolved_by) -> P2POrder:
     if not getattr(resolved_by, "is_staff", False) and not getattr(resolved_by, "is_superuser", False):
         raise PermissionDenied("Staff access required")
-    order = (
-        P2POrder.objects.select_for_update()
-        .select_related("buyer", "maker__user", "funding_txn", "settlement_txn")
-        .get(pk=order_id)
-    )
+    order = P2POrder.objects.select_for_update().get(pk=order_id)
     if order.status != P2POrder.STATUS_DISPUTED:
         raise ValidationError("Only disputed P2P orders can be resolved")
     if not order.funding_txn_id:
@@ -727,7 +789,7 @@ def _normalize_review_value(value, label: str) -> int:
 
 @transaction.atomic
 def submit_p2p_review(*, order_id: int, reviewer_id: int, ratings: dict) -> P2PReview:
-    order = P2POrder.objects.select_for_update().select_related("maker__user").get(pk=order_id)
+    order = P2POrder.objects.select_for_update().get(pk=order_id)
     if order.status != P2POrder.STATUS_COMPLETED:
         raise ValidationError("Reviews are only available after a completed transaction")
     if order.maker_id is None:

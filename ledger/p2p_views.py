@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -12,8 +13,14 @@ from django.shortcuts import redirect, render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import P2PMessage, P2POrder, P2PReview
-from .p2p_services import cancel_p2p_order, find_new_p2p_agent, submit_p2p_review
+from .models import P2PMessage, P2POrder, P2PReview, TokenPack
+from .p2p_services import (
+    P2PNoAgentAvailable,
+    cancel_p2p_order,
+    find_new_p2p_agent,
+    preview_p2p_checkout,
+    submit_p2p_review,
+)
 
 
 PLATFORM_VALUE_SCALE = Decimal("1000000")
@@ -52,6 +59,48 @@ def _rating_stars(value) -> list[str]:
             stars.append("empty")
         remaining -= 1
     return stars
+
+
+def _agent_response_timeout_minutes_display() -> str:
+    seconds = max(30, int(getattr(settings, "P2P_AGENT_RESPONSE_TIMEOUT_SECONDS", 300)))
+    minutes = Decimal(seconds) / Decimal("60")
+    text = format(minutes.normalize(), "f")
+    return text or "0"
+
+
+@login_required
+@require_GET
+def p2p_checkout_preview(request):
+    token_pack_code = str(request.GET.get("token_pack_key") or "").strip()
+    option_key = str(request.GET.get("deposit_option_key") or "").strip()
+    if not token_pack_code or not option_key.startswith("p2p:"):
+        return JsonResponse({"detail": "Invalid P2P preview request."}, status=400)
+
+    payment_method = option_key.split(":", 1)[1].strip().lower()
+    token_pack = TokenPack.objects.filter(code=token_pack_code, is_active=True).first()
+    if token_pack is None:
+        return JsonResponse({"detail": "Invalid token pack."}, status=400)
+
+    try:
+        preview = preview_p2p_checkout(
+            buyer=request.user,
+            token_pack=token_pack,
+            payment_method=payment_method,
+        )
+    except P2PNoAgentAvailable:
+        return JsonResponse(
+            {"detail": "No P2P agent is currently available for this payment method."},
+            status=409,
+        )
+    except ValidationError as exc:
+        return JsonResponse({"detail": str(exc)}, status=400)
+
+    return JsonResponse(
+        {
+            "transaction_amount": int(preview["transaction_amount"]),
+            "transaction_value_display": "$" + _format_platform_value(preview["transaction_amount"]),
+        }
+    )
 
 
 def _order_for_user(*, public_id, user) -> P2POrder:
@@ -118,6 +167,7 @@ def p2p_exchange(request, public_id):
         "p2p_can_send": order.chat_writable,
         "p2p_chat_started": order.chat_started,
         "p2p_is_pretrade": not order.chat_started,
+        "p2p_agent_response_timeout_minutes": _agent_response_timeout_minutes_display(),
         "p2p_can_find_new_agent": is_buyer and order.status == P2POrder.STATUS_WAITING_NEW_AGENT,
         "p2p_can_cancel": is_buyer and order.status in {
             P2POrder.STATUS_WAITING_AGENT,

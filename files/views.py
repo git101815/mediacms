@@ -793,10 +793,11 @@ def _decorate_wallet_deposit_option(option: dict) -> dict:
 
     return decorated
 
-def _build_wallet_deposit_options() -> list[dict]:
+def _build_wallet_deposit_options(*, include_p2p: bool = False) -> list[dict]:
     options = []
 
-    options.extend(get_p2p_checkout_options())
+    if include_p2p:
+        options.extend(get_p2p_checkout_options())
 
     malum_option = get_malum_deposit_option()
     if malum_option is not None:
@@ -1515,7 +1516,7 @@ def wallet_deposit_request(request):
         if not token_pack_code:
             raise DjangoValidationError("Missing token pack.")
 
-        deposit_options = _build_wallet_deposit_options()
+        deposit_options = _build_wallet_deposit_options(include_p2p=True)
         selected_option = next((item for item in deposit_options if item["key"] == option_key), None)
         if selected_option is None:
             raise DjangoValidationError("Invalid deposit option.")
@@ -2378,7 +2379,7 @@ def wallet(request):
         tab=active_tab,
         status=active_status,
     )
-    deposit_options = _build_wallet_deposit_options()
+    deposit_options = _build_wallet_deposit_options(include_p2p=True)
     token_pack_rows = _build_wallet_token_pack_rows()
     withdrawal_options = _build_wallet_withdrawal_options()
 

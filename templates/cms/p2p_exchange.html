@@ -39,7 +39,7 @@
           {% endif %}
         </section>
 
-        {% if p2p_counterparty %}
+        {% if p2p_counterparty and not p2p_is_pretrade %}
         <section class="p2p-exchange__card">
           <div class="p2p-exchange__card-title">{% if p2p_is_pretrade %}Selected P2P agent{% else %}Counterparty{% endif %}</div>
           <div class="p2p-exchange__counterparty">
@@ -78,9 +78,7 @@
         </header>
         <div class="p2p-pretrade__body">
           {% if p2p_order.status == 'waiting_agent' %}
-            <i class="material-icons" aria-hidden="true">notifications_active</i>
-            <h2>Waiting for the P2P agent</h2>
-            <p>The selected agent has been notified in Telegram/Discord. The private conversation opens only after the agent accepts and funds the transaction.</p>
+            <p>An agent has been notified and will soon take your order, he has {{ p2p_agent_response_timeout_minutes }} minutes to answer</p>
           {% elif p2p_order.status == 'waiting_new_agent' %}
             <i class="material-icons" aria-hidden="true">person_search</i>
             <h2>The P2P agent did not take this transaction</h2>

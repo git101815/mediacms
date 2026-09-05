@@ -127,6 +127,9 @@
     routeKey: '',
   };
 
+  const p2pPriceCache = new Map();
+  const p2pPriceRequests = new Map();
+
   function getBuyForm() {
     return document.querySelector('[data-wallet-buy-form]');
   }
@@ -500,9 +503,96 @@
     setSelectedRoute(routes[0] ? routes[0].key : '');
   }
 
+  function getP2PPriceCacheKey(option) {
+    return String(buyState.packCode || '') + '|' + String((option && option.key) || '');
+  }
+
+  function getP2PPreviewUrl() {
+    const form = getBuyForm();
+    return form ? (form.getAttribute('data-p2p-preview-url') || '') : '';
+  }
+
+  function requestP2PPrice(option) {
+    if (!option || option.paymentPriceMode !== 'p2p_dynamic') {
+      return Promise.resolve({ available: true, display: '' });
+    }
+
+    const cacheKey = getP2PPriceCacheKey(option);
+    if (p2pPriceCache.has(cacheKey)) {
+      return Promise.resolve(p2pPriceCache.get(cacheKey));
+    }
+    if (p2pPriceRequests.has(cacheKey)) {
+      return p2pPriceRequests.get(cacheKey);
+    }
+
+    const previewUrl = getP2PPreviewUrl();
+    if (!previewUrl || !buyState.packCode || !option.key) {
+      return Promise.resolve({ available: false, display: 'Unavailable' });
+    }
+
+    const params = new URLSearchParams({
+      token_pack_key: buyState.packCode,
+      deposit_option_key: option.key,
+    });
+    const request = fetch(previewUrl + '?' + params.toString(), {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    })
+      .then(function (response) {
+        return response.json().catch(function () { return {}; }).then(function (body) {
+          if (!response.ok) {
+            return {
+              available: false,
+              display: 'Unavailable',
+              detail: body.detail || 'P2P pricing is unavailable.',
+            };
+          }
+          return {
+            available: true,
+            display: body.transaction_value_display || '',
+            transactionAmount: Number(body.transaction_amount || 0),
+          };
+        });
+      })
+      .catch(function () {
+        return {
+          available: false,
+          display: 'Unavailable',
+          detail: 'P2P pricing is unavailable.',
+        };
+      })
+      .then(function (result) {
+        p2pPriceCache.set(cacheKey, result);
+        return result;
+      })
+      .finally(function () {
+        p2pPriceRequests.delete(cacheKey);
+      });
+
+    p2pPriceRequests.set(cacheKey, request);
+    return request;
+  }
+
+  function refreshP2PPrice(option, rerender) {
+    if (!option || option.paymentPriceMode !== 'p2p_dynamic') {
+      return;
+    }
+    const cacheKey = getP2PPriceCacheKey(option);
+    if (p2pPriceCache.has(cacheKey) || p2pPriceRequests.has(cacheKey)) {
+      return;
+    }
+    const expectedPack = buyState.packCode;
+    requestP2PPrice(option).then(function () {
+      if (buyState.packCode === expectedPack) {
+        rerender();
+      }
+    });
+  }
+
   function getRoutePriceDisplay(option) {
     if (option && option.paymentPriceMode === 'p2p_dynamic') {
-      return 'Agent-priced';
+      const result = p2pPriceCache.get(getP2PPriceCacheKey(option));
+      return result ? result.display : '…';
     }
     const base = Number(buyState.packGrossCanonical || 0);
     const bps = Number((option && option.paymentPriceBps) || 0);
@@ -631,6 +721,9 @@
         '</span>' +
         (price ? '<span class="wallet-buy-flow__choice-price">' + escapeHtml(price) + '</span>' : '');
       container.appendChild(button);
+      if (!hasMultipleOptions && provider.routes[0].paymentPriceMode === 'p2p_dynamic') {
+        refreshP2PPrice(provider.routes[0], renderStep3Choices);
+      }
     });
   }
 
@@ -680,6 +773,9 @@
         '</span>' +
         (price ? '<span class="wallet-buy-flow__choice-price">' + escapeHtml(price) + '</span>' : '');
       container.appendChild(button);
+      if (item.paymentPriceMode === 'p2p_dynamic') {
+        refreshP2PPrice(item, renderStep4Choices);
+      }
     });
   }
 
@@ -1440,12 +1536,32 @@
         if (routes.length === 1) {
           setSelectedRoute(routes[0].key);
           const form = getBuyForm();
-          if (form) {
-            syncBuyFormTarget();
-            form.submit();
-            if (buyState.paymentOpenNewTab) {
-              closeModal('deposit');
-            }
+          if (!form) {
+            return;
+          }
+
+          if (routes[0].paymentPriceMode === 'p2p_dynamic') {
+            const expectedRoute = routes[0].key;
+            const expectedPack = buyState.packCode;
+            requestP2PPrice(routes[0]).then(function (result) {
+              if (
+                !result.available ||
+                buyState.routeKey !== expectedRoute ||
+                buyState.packCode !== expectedPack
+              ) {
+                renderStep3Choices();
+                return;
+              }
+              syncBuyFormTarget();
+              form.submit();
+            });
+            return;
+          }
+
+          syncBuyFormTarget();
+          form.submit();
+          if (buyState.paymentOpenNewTab) {
+            closeModal('deposit');
           }
           return;
         }
