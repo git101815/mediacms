@@ -45,6 +45,7 @@ STATIC_RELEASE_DIR=""
 STATIC_CHANGED=0
 STAGING_INGRESS_CHANGED=0
 STAGING_INGRESS_VALIDATED=0
+STAGING_TUNNEL_CHANGED=0
 # Keep a few completed snapshots for rollback in addition to every snapshot
 # protected by a release/in-progress state file.
 STATIC_RELEASE_KEEP_COUNT="${STATIC_RELEASE_KEEP_COUNT:-3}"
@@ -228,11 +229,18 @@ verify_runtime_dependencies() {
     if service_exists cloudflared; then
       wait_healthy cloudflared 60 1 || die "cloudflared ingress is not healthy"
     fi
-  elif (( signer_count > 0 )); then
-    # Staging may legitimately run without the optional crypto profile. If a
-    # signer is deployed, require at least one healthy replica, but do not make
-    # it a prerequisite for an otherwise web-only staging deployment.
-    (( $(healthy_service_count dfx_signer_service) >= 1 )) || die "deployed dfx_signer_service has no healthy replica"
+  else
+    if (( signer_count > 0 )); then
+      # Staging may legitimately run without the optional crypto profile. If a
+      # signer is deployed, require at least one healthy replica, but do not make
+      # it a prerequisite for an otherwise web-only staging deployment.
+      (( $(healthy_service_count dfx_signer_service) >= 1 )) || die "deployed dfx_signer_service has no healthy replica"
+    fi
+    # The first deployment of the tunnel is allowed to start later in the
+    # rollout. Once deployed, a broken connector blocks further mutations.
+    if service_exists cloudflared && service_is_running cloudflared; then
+      wait_healthy cloudflared 120 1 || die "staging Cloudflare tunnel is not ready"
+    fi
   fi
 
   # During the one-time topology migration staging_ingress is not running yet.
@@ -395,7 +403,14 @@ classify_compose_delta() {
         die "$COMPOSE_FILE changes live $service; PostgreSQL/Redis are intentionally outside rolling application updates"
         ;;
       cloudflared)
-        die "$COMPOSE_FILE changes cloudflared; tunnel infrastructure is intentionally outside rolling application updates"
+        if [[ "$ENVIRONMENT_NAME" == "staging" ]]; then
+          # Staging owns a dedicated named tunnel. Its container can be
+          # refreshed after the stable staging ingress is healthy; DNS and
+          # tunnel-token mutation remain operator-managed outside this script.
+          STAGING_TUNNEL_CHANGED=1
+        else
+          die "$COMPOSE_FILE changes cloudflared; tunnel infrastructure is intentionally outside rolling application updates"
+        fi
         ;;
       *)
         die "$COMPOSE_FILE changes unsupported service '$service'; refusing to mark it deployed"
@@ -414,6 +429,9 @@ classify_release() {
   if [[ "$ENVIRONMENT_NAME" == "staging" ]]; then
     if (( first_run )) || changed_matches '^deploy/docker/staging_ingress\.conf$'; then
       STAGING_INGRESS_CHANGED=1
+    fi
+    if (( first_run )) && service_exists cloudflared; then
+      STAGING_TUNNEL_CHANGED=1
     fi
   fi
   if (( first_run )) || changed_matches '^deposit_service/(Dockerfile|requirements\.txt|app/)'; then DEPOSIT_IMAGE_CHANGED=1; fi
@@ -453,8 +471,11 @@ deposit_update_needed() { (( DEPOSIT_IMAGE_CHANGED || DEPOSIT_CONFIG_CHANGED ));
 sweeper_update_needed() { (( SWEEPER_IMAGE_CHANGED || SWEEPER_CONFIG_CHANGED )); }
 signer_update_needed() { (( SIGNER_IMAGE_CHANGED || SIGNER_CONFIG_CHANGED )); }
 staging_ingress_update_needed() { (( STAGING_INGRESS_CHANGED )); }
+staging_tunnel_update_needed() { (( STAGING_TUNNEL_CHANGED )); }
 crypto_update_needed() { deposit_update_needed || sweeper_update_needed || signer_update_needed; }
-stack_update_needed() { app_update_needed || crypto_update_needed || staging_ingress_update_needed; }
+stack_update_needed() {
+  app_update_needed || crypto_update_needed || staging_ingress_update_needed || staging_tunnel_update_needed
+}
 
 print_plan() {
   local app_release=0
@@ -471,6 +492,7 @@ print_plan() {
   echo "  sweeper image/config:  $SWEEPER_IMAGE_CHANGED/$SWEEPER_CONFIG_CHANGED"
   echo "  signer image/config:   $SIGNER_IMAGE_CHANGED/$SIGNER_CONFIG_CHANGED"
   echo "  staging ingress:       $STAGING_INGRESS_CHANGED"
+  echo "  staging tunnel:        $STAGING_TUNNEL_CHANGED"
   echo "  legacy bootstrap:      $LEGACY_BOOTSTRAP"
 }
 
@@ -483,6 +505,9 @@ build_required_images() {
   if staging_ingress_update_needed; then
     # Pull before touching live application processes.
     compose pull staging_ingress
+  fi
+  if staging_tunnel_update_needed; then
+    compose pull cloudflared
   fi
 }
 
@@ -524,6 +549,39 @@ require_staging_ingress_healthy() {
   service_exists staging_ingress || die "staging compose is missing the stable staging_ingress service"
   service_is_running staging_ingress || die "staging ingress is not running"
   wait_healthy staging_ingress 90 1 || die "staging ingress is not serving the web application"
+}
+
+
+staging_tunnel_configured() {
+  [[ "$ENVIRONMENT_NAME" == "staging" ]] && service_exists cloudflared
+}
+
+ensure_staging_tunnel() {
+  [[ "$ENVIRONMENT_NAME" == "staging" ]] || return 0
+  staging_tunnel_configured || die "staging compose is missing the cloudflared service"
+
+  # Never expose a tunnel to a broken origin. staging_ingress performs the
+  # functional end-to-end check through the currently healthy web replica(s).
+  require_staging_ingress_healthy
+
+  if service_is_running cloudflared; then
+    if staging_tunnel_update_needed; then
+      echo "rolling-update[$ENVIRONMENT_NAME]: refreshing Cloudflare tunnel connector"
+      compose up -d --no-deps --force-recreate cloudflared
+    fi
+  else
+    echo "rolling-update[$ENVIRONMENT_NAME]: starting Cloudflare tunnel connector"
+    compose up -d --no-deps cloudflared
+  fi
+
+  wait_healthy cloudflared 120 1 || die "staging Cloudflare tunnel is not ready"
+}
+
+require_staging_tunnel_healthy() {
+  [[ "$ENVIRONMENT_NAME" == "staging" ]] || return 0
+  staging_tunnel_configured || die "staging compose is missing the cloudflared service"
+  service_is_running cloudflared || die "staging Cloudflare tunnel is not running"
+  wait_healthy cloudflared 120 1 || die "staging Cloudflare tunnel is not ready"
 }
 
 check_pending_migrations() {
@@ -1121,6 +1179,8 @@ EOF_REDIS
       prepare_staging_ingress
       ensure_staging_ingress
       require_staging_ingress_healthy
+      ensure_staging_tunnel
+      require_staging_tunnel_healthy
     fi
     cleanup_static_releases
     echo "rolling-update[$ENVIRONMENT_NAME]: $CURRENT_SHA is already recorded as deployed; health/preflight OK"
@@ -1137,6 +1197,8 @@ EOF_REDIS
       prepare_staging_ingress
       ensure_staging_ingress
       require_staging_ingress_healthy
+      ensure_staging_tunnel
+      require_staging_tunnel_healthy
     fi
     record_release
     cleanup_static_releases
@@ -1179,12 +1241,14 @@ EOF_REDIS
   # Staging ingress owns host :80 only after web convergence. On subsequent
   # releases it stays up while web performs the true 1 -> 2 -> health -> 1 roll.
   ensure_staging_ingress
+  ensure_staging_tunnel
 
   if crypto_update_needed; then restart_crypto_after_update; fi
 
   app_preflight
   verify_runtime_dependencies
   require_staging_ingress_healthy
+  require_staging_tunnel_healthy
   if app_update_needed; then
     # Only an application rollout changes the snapshot mounted by web. Crypto-,
     # ingress-, docs-, and other marker-only releases must leave this untouched.

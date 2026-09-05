@@ -42,6 +42,7 @@ def test_old_prod_deploy_name_is_gone_and_two_explicit_updaters_exist():
     assert not (ROOT / "deploy/scripts/prod_deploy.sh").exists()
     assert (ROOT / "deploy/scripts/prod_rolling_update.sh").exists()
     assert (ROOT / "deploy/scripts/staging_rolling_update.sh").exists()
+    assert (ROOT / "deploy/scripts/staging_start.sh").exists()
 
 
 def test_rolling_updaters_never_destroy_the_stack():
@@ -749,6 +750,45 @@ def test_staging_has_stable_functional_ingress_and_true_scaled_web_roll():
     assert main.index("prepare_staging_ingress") < main.index("update_web")
     assert main.index("update_web") < main.rindex("ensure_staging_ingress")
     assert main.rindex("require_staging_ingress_healthy") < main.rindex("record_release")
+
+
+
+
+def test_staging_cloudflared_is_healthchecked_and_lives_behind_stable_ingress():
+    compose = _read("docker-compose.yaml")
+    common = _read("deploy/scripts/rolling_update_common.sh")
+    start = _read("deploy/scripts/staging_start.sh")
+
+    tunnel = _service_block(compose, "cloudflared")
+    assert "cloudflare/cloudflared:latest" in tunnel
+    assert "STAGING_TUNNEL_TOKEN" in tunnel
+    assert "staging_ingress:" in tunnel
+    assert "condition: service_healthy" in tunnel
+    assert '"0.0.0.0:2000"' in tunnel
+    assert '"127.0.0.1:2000"' in tunnel
+    assert '"ready"' in tunnel
+
+    assert "STAGING_TUNNEL_CHANGED=0" in common
+    assert "ensure_staging_tunnel()" in common
+    assert "require_staging_tunnel_healthy()" in common
+
+    main = common.split("rolling_update_main()", 1)[1]
+    assert main.index("ensure_staging_ingress") < main.rindex("ensure_staging_tunnel")
+    assert main.rindex("require_staging_tunnel_healthy") < main.rindex("record_release")
+
+    assert 'service_exists cloudflared || die "staging compose is missing cloudflared"' in start
+    assert start.index("ensure_staging_ingress") < start.index("ensure_staging_tunnel")
+
+
+def test_staging_start_is_cold_start_only_and_preserves_failed_state():
+    start = _read("deploy/scripts/staging_start.sh")
+    assert '[[ "$PROJECT" == "mediacms-staging" ]]' in start
+    assert '[[ "$COMPOSE_FILE" == "docker-compose.yaml" ]]' in start
+    assert "staging web is already running; use deploy/scripts/staging_rolling_update.sh" in start
+    assert "progress_set staging_start 1" in start
+    assert "state is preserved in $INPROGRESS_FILE" in start
+    assert "compose down" not in start
+    assert "--remove-orphans" not in start
 
 
 def test_prestart_failed_migration_is_fail_closed_and_password_is_not_logged(tmp_path):

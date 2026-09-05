@@ -163,6 +163,41 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  cloudflared:
+    logging: *bounded_logging
+    stop_grace_period: 30s
+    image: cloudflare/cloudflared:latest
+    mem_limit: 256m
+    mem_reservation: 64m
+    command:
+      [
+        "tunnel",
+        "--no-autoupdate",
+        "--metrics",
+        "0.0.0.0:2000",
+        "run",
+        "--token",
+        "${STAGING_TUNNEL_TOKEN:?STAGING_TUNNEL_TOKEN is required}",
+      ]
+    restart: unless-stopped
+    depends_on:
+      staging_ingress:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "cloudflared",
+          "tunnel",
+          "--metrics",
+          "127.0.0.1:2000",
+          "ready",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   deposit_service:
     logging: *bounded_logging
     labels:
