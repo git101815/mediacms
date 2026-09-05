@@ -44,6 +44,7 @@ urlpatterns = [
     path("wallet/p2p/<uuid:public_id>/cancel", p2p_views.p2p_exchange_cancel, name="p2p_exchange_cancel"),
     path("wallet/p2p/<uuid:public_id>/review", p2p_views.p2p_exchange_review, name="p2p_exchange_review"),
     path("api/p2p/checkout-preview", p2p_views.p2p_checkout_preview, name="p2p_checkout_preview"),
+    path("api/p2p/n8n/telegram-auth", p2p_bot_views.p2p_n8n_telegram_auth, name="p2p_n8n_telegram_auth"),
     path("api/p2p/n8n/agent-response", p2p_bot_views.p2p_n8n_agent_response, name="p2p_n8n_agent_response"),
     path("api/p2p/<uuid:public_id>/messages", p2p_views.p2p_exchange_messages, name="p2p_exchange_messages"),
     path("api/p2p/<uuid:public_id>/messages/send", p2p_views.p2p_exchange_send_message, name="p2p_exchange_send_message"),

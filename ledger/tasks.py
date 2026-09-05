@@ -64,3 +64,7 @@ def notify_admin_event(self, event, payload, event_id=""):
     )
     response.raise_for_status()
     return True
+
+# Celery autodiscovers ledger.tasks. Import the dedicated P2P task module here
+# so its explicitly named tasks are registered by every worker process.
+from . import p2p_tasks as _p2p_tasks  # noqa: E402,F401

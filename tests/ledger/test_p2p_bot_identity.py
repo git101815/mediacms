@@ -3,6 +3,7 @@ import json
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.test import TestCase, override_settings
 
@@ -95,4 +96,126 @@ class P2PBotIdentityTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["state"], "declined")
+
+
+@override_settings(P2P_N8N_ACTION_SECRET="dedicated-p2p-secret")
+class P2PTelegramBotLoginTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        users = get_user_model()
+        self.agent_user = users.objects.create_user(
+            username="telegram_agent",
+            password="correct horse battery staple",
+        )
+        self.profile = P2PMakerProfile.objects.create(
+            user=self.agent_user,
+            status=P2PMakerProfile.STATUS_PAUSED,
+            accepting_orders=False,
+            card_enabled=True,
+            commission_percent=Decimal("1.00"),
+        )
+
+    def _post(self, payload):
+        return self.client.post(
+            "/api/p2p/n8n/telegram-auth",
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_X_P2P_ACTION_SECRET="dedicated-p2p-secret",
+        )
+
+    def test_start_username_password_binds_telegram_identity(self):
+        start = self._post(
+            {
+                "action": "start",
+                "telegram_user_id": "987654321",
+                "telegram_chat_id": "987654321",
+            }
+        )
+        self.assertEqual(start.status_code, 200)
+        self.assertEqual(start.json()["state"], "need_username")
+
+        username = self._post(
+            {
+                "action": "input",
+                "telegram_user_id": "987654321",
+                "telegram_chat_id": "987654321",
+                "text": "telegram_agent",
+            }
+        )
+        self.assertEqual(username.status_code, 200)
+        self.assertEqual(username.json()["state"], "need_password")
+
+        password = self._post(
+            {
+                "action": "input",
+                "telegram_user_id": "987654321",
+                "telegram_chat_id": "987654321",
+                "text": "correct horse battery staple",
+            }
+        )
+        self.assertEqual(password.status_code, 200)
+        self.assertTrue(password.json()["ok"])
+        self.assertEqual(password.json()["state"], "authenticated")
+        self.assertEqual(password.json()["message"], "Hello telegram_agent")
+        self.assertTrue(password.json()["sensitive_input"])
+
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.telegram_user_id, "987654321")
+
+    def test_wrong_password_is_not_bound(self):
+        self._post(
+            {
+                "action": "start",
+                "telegram_user_id": "111",
+                "telegram_chat_id": "111",
+            }
+        )
+        self._post(
+            {
+                "action": "input",
+                "telegram_user_id": "111",
+                "telegram_chat_id": "111",
+                "text": "telegram_agent",
+            }
+        )
+        response = self._post(
+            {
+                "action": "input",
+                "telegram_user_id": "111",
+                "telegram_chat_id": "111",
+                "text": "wrong-password",
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["state"], "invalid_credentials")
+        self.assertTrue(response.json()["sensitive_input"])
+
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.telegram_user_id, "")
+
+    def test_private_chat_identity_is_required(self):
+        response = self._post(
+            {
+                "action": "start",
+                "telegram_user_id": "123",
+                "telegram_chat_id": "-100123",
+            }
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_unrelated_notification_secret_is_not_accepted(self):
+        response = self.client.post(
+            "/api/p2p/n8n/telegram-auth",
+            data=json.dumps(
+                {
+                    "action": "start",
+                    "telegram_user_id": "123",
+                    "telegram_chat_id": "123",
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_NOTIFICATION_SECRET="dedicated-p2p-secret",
+        )
+        self.assertEqual(response.status_code, 403)
 
